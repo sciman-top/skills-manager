@@ -211,5 +211,14 @@ Describe 'Native agent bridge' {
         $griller = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
         $griller | Should -Match 'status=awaiting_user_answer'
         $griller | Should -Match 'never overrides this wait state'
+        $griller | Should -Match 'ExecutionAdmission'
+        $griller | Should -Match 'ExecutionPlan'
+        $griller | Should -Match 'admission_id'
+        $griller | Should -Match 'plan_id'
+        $griller | Should -Match 'admission_revalidation_required'
+        $griller | Should -Match 'human_decision_required'
+        $griller | Should -Match 'opaque/unreadable payload'
+        $griller | Should -Match 'parent is the only semantic scope owner'
+        $griller | Should -Match 'successor admission'
     }
 }

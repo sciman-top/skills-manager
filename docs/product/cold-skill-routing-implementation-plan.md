@@ -38,6 +38,7 @@
 | CSR-150 | CSR-140 已提交且当前授权 | CSR-R3 | filesystem_projected |
 | CSR-160 | CSR-150 + fresh Codex | CSR-R4 | host_specific_live_accepted |
 | CSR-170 | CSR-160 或可观测子集 | CSR-R5 | observed / platform_na |
+| CSR-180 | CSR-160 的真实 admission drift | execution-admission P0 | repo_verified；host adapter 另验 |
 
 不可声称的跳级关系：
 
@@ -280,6 +281,16 @@ Verifier 必须拒绝以下组合：
 - **Out of scope**：不从三样本推断触发率，不加词法 router，不反复调参直到“通过”。
 - **Stop / rollback**：需访问未授权帐户、不可回滚 external effect 或为了指标强行调用 router 时停；仅删除本 run ignored output。
 - **Truth boundary / class**：observed/platform_na；human-authorized observation。
+
+### CSR-180：design-griller execution admission P0
+
+- **Goal**：把 `router validation != execution authorization` 落到可重算的 read-only admission 与单题 plan seam，防止 raw selection、stale closure 或 parent 自动代答被当成多轮执行许可。
+- **Exact write set**：`src/Domain/ExecutionAdmission.ps1`；`build.ps1`；`overrides/resources/native-agent-bridge/design-griller.toml`；受影响 unit tests；本计划的本任务卡片。不得改 router 语义选择、provider/auth/config、runner 或宿主进程。
+- **Interface**：`New-ExecutionAdmission` 接收单一精确 validation、原始请求、admitted goal、只读 read set、authority basis 与 issued time，产生 content-addressed `admission_id`；`New-ExecutionPlan` 仅派生 `ask_one_question` 的 `plan_id`；`Test-ExecutionAdmissionRevalidation` 在 spawn 前复核 closure/read-set hash、catalog fingerprint、effective contract 与 plan/admission identity。
+- **Hard invariants**：仅 `multi_turn_user_decision / design-griller / parent / one_question_then_wait`；`requested_operation=read_only` 且 exact write set 为空；closure/read set 必须是 workspace 内精确文件及 SHA-256；unknown/external、多个根候选、hash/contract 漂移、raw selection/contract 或不具可归因用户来源的 follow-up 一律拒绝。
+- **Minimum verification**：valid admission/plan、write-set tamper、closure hash drift、contract mismatch 的 focused Pester；build 后核对 `skills.ps1` 无漂移；模板静态测试。
+- **Truth boundary / class**：`repo_verified`。模板文本与 repo-side revalidation 只能形成 `soft_guard_only`，直到 fresh host 能在 spawn 前实际调用该 seam、记录权威 effect observation，并由逐轮真实用户回答完成同 child interview。
+- **Stop / rollback**：任何需要让仓库接管 host session、解密 parent-child payload、伪造用户来源、修改 auth/provider 或扩展到 runner/controlled-write 时停止；回滚仅撤本卡片 source/template/test/doc 变更。
 
 ## 6. 验证、提交与报告
 

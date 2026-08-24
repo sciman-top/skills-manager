@@ -12,6 +12,7 @@ $Files = @(
     "Core.ps1",
     "Application/SkillSupply.ps1",
     "Domain/OperationPlan.ps1",
+    "Domain/ExecutionAdmission.ps1",
     "Domain/SkillCatalog.ps1",
     "Domain/Receipt.ps1",
     "Domain/RuleDocument.ps1",
