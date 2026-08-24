@@ -1,0 +1,1 @@
+{"type":"session_meta","payload":{"session_id":"other-parent","id":"/fixture/design-griller","parent_thread_id":"other-parent","source":{"subagent":{"thread_spawn":{"parent_thread_id":"other-parent","agent_role":"design-griller"}}},"agent_role":"design-griller"}}

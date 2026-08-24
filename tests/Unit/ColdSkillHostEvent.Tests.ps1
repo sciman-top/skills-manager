@@ -3,8 +3,12 @@ BeforeAll {
     $verifierPath = Join-Path $repoRoot 'scripts\quality\verify-cold-skill-host-events.ps1'
     $fixturesRoot = Join-Path $repoRoot 'tests\fixtures\cold-skill-routing\host-events'
 
-    function Invoke-HostEventVerifier([string]$Fixture, [string]$ScenarioId) {
-        $output = & pwsh -NoProfile -File $verifierPath -EventsPath (Join-Path $fixturesRoot $Fixture) -ScenarioId $ScenarioId 2>&1
+    function Invoke-HostEventVerifier([string]$Fixture, [string]$ScenarioId, [string]$ChildRolloutFixture = '') {
+        $arguments = @('-NoProfile', '-File', $verifierPath, '-EventsPath', (Join-Path $fixturesRoot $Fixture), '-ScenarioId', $ScenarioId)
+        if (-not [string]::IsNullOrWhiteSpace($ChildRolloutFixture)) {
+            $arguments += @('-ChildRolloutPath', (Join-Path $fixturesRoot $ChildRolloutFixture))
+        }
+        $output = & pwsh @arguments 2>&1
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = (@($output) -join "`n") }
     }
 }
@@ -29,6 +33,21 @@ Describe 'Cold skill raw host-event verifier' {
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'findings=0'
+    }
+
+    It 'uses an exactly-bound child rollout as the spawn authority for a raw exec stream' {
+        $result = Invoke-HostEventVerifier 'valid-s30-rollout-witness-host.jsonl' 'S30-live-derived' 'valid-s30-design-griller-child-rollout.jsonl'
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'findings=0'
+    }
+
+    It 'rejects a child rollout whose parent binding does not match the raw host stream' {
+        $result = Invoke-HostEventVerifier 'valid-s30-rollout-witness-host.jsonl' 'S30-live-derived' 'invalid-s30-wrong-parent-child-rollout.jsonl'
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'H008_ROLLOUT_CHILD_EVIDENCE_INVALID'
+        $result.Output | Should -Match 'H005_NATIVE_CHILD_SPAWN_MISSING'
     }
 
     It 'rejects unbacked child claims, repeated discovery, and forbidden discovery' {
