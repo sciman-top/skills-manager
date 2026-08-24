@@ -13,6 +13,7 @@ BeforeAll {
         Set-Content -LiteralPath $skillPath -Value 'grill-with-docs entrypoint' -Encoding UTF8
         Set-Content -LiteralPath $dependencyPath -Value 'grilling entrypoint' -Encoding UTF8
         Set-Content -LiteralPath $fixturePath -Value 'ExecutionAdmission proposal' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $RootPath 'skills.json') -Value '{}' -Encoding UTF8
 
         $contract = [pscustomobject][ordered]@{
             mode = 'multi_turn_user_decision'
@@ -64,6 +65,69 @@ Describe 'Execution admission' {
         @($admission.exact_write_set) | Should -Be @()
         $plan.action | Should -Be 'ask_one_question'
         $plan.adapter | Should -Be 'design-griller'
+    }
+
+    It 'locates the repository root from a generated-skill read-set entry before deriving a plan' {
+        $root = Join-Path $TestDrive 'plan-root'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $admission = New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+
+        @($admission.allowed_read_set)[0].path | Should -Match ([regex]::Escape((Join-Path $root 'agent')))
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Stop'
+            $plan = New-ExecutionPlan -Admission $admission
+            $plan.admission_id | Should -Be $admission.admission_id
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+    }
+
+    It 'allows a dot-sourcing caller to store an execution plan in a plan variable' {
+        $escapedRepoRoot = $repoRoot.Replace("'", "''")
+        $childScript = @'
+$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '__REPO_ROOT__'
+. '__REPO_ROOT__\skills.ps1'
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('execution-admission-caller-' + [guid]::NewGuid().ToString('N'))
+try {
+    $skillPath = Join-Path $fixtureRoot 'agent\grill-with-docs\SKILL.md'
+    $dependencyPath = Join-Path $fixtureRoot 'agent\grilling\SKILL.md'
+    $fixturePath = Join-Path $fixtureRoot 'reports\fixture-plan.md'
+    foreach ($path in @($skillPath, $dependencyPath, $fixturePath)) {
+        $parent = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    }
+    Set-Content -LiteralPath $skillPath -Value 'grill-with-docs entrypoint' -Encoding UTF8
+    Set-Content -LiteralPath $dependencyPath -Value 'grilling entrypoint' -Encoding UTF8
+    Set-Content -LiteralPath $fixturePath -Value 'ExecutionAdmission proposal' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $fixtureRoot 'skills.json') -Value '{}' -Encoding UTF8
+    $contract = [pscustomobject][ordered]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
+    $closure = @(
+        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grill-with-docs'; path = $skillPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'controlled_write'; entrypoint_hash_validated = $true; contained = $true; dependencies = @('grilling'); execution_contract = $contract },
+        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grilling'; path = $dependencyPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'read_only'; entrypoint_hash_validated = $true; contained = $true; dependencies = @(); execution_contract = $contract }
+    )
+    $validation = [pscustomobject][ordered]@{
+        load_validation = [pscustomobject]@{ pass = $true }
+        selected = @($closure[0])
+        validated_closure = $closure
+        execution_contract = $contract
+        routing_receipt = [pscustomobject]@{ receipt_id = 'crr-1111111111111111'; query_sha256 = ('a' * 64); catalog_fingerprint = ('b' * 64); truth_boundary = 'candidate_load_validated'; validated_candidates = 'grill-with-docs'; validated_closure = @('grill-with-docs', 'grilling'); execution_contract = $contract }
+    }
+    $admission = New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $validation -AllowedReadSet @($fixturePath, $skillPath, $dependencyPath) -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $fixtureRoot
+    $plan = New-ExecutionPlan -Admission $admission
+    $plan.plan_id
+}
+finally {
+    if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
+}
+'@
+        $childScript = $childScript.Replace('__REPO_ROOT__', $escapedRepoRoot)
+        $output = @(& pwsh -NoProfile -Command $childScript 2>&1)
+
+        $LASTEXITCODE | Should -Be 0
+        ($output -join "`n") | Should -Match 'plan-[a-f0-9]{64}'
     }
 
     It 'rejects mutation of an immutable read-only admission payload' {

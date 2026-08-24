@@ -5,7 +5,8 @@ param(
     [string]$Filter = "",
     [switch]$DryRun,
     [switch]$Locked,
-    [switch]$Plan,
+    [Alias('Plan')]
+    [switch]$RunPlan,
     [switch]$Upgrade,
     [string]$SkillProfile = "",
     [switch]$AllowUnverifiedHostProjection,
@@ -2462,46 +2463,85 @@ function Test-ExecutionAdmissionContract {
 }
 
 function Get-ExecutionPlanPayload($Plan) {
+    $schemaVersion = Get-ExecutionAdmissionProperty $Plan 'schema_version'
+    $kind = Get-ExecutionAdmissionProperty $Plan 'kind'
+    $admissionId = Get-ExecutionAdmissionProperty $Plan 'admission_id'
+    $adapter = Get-ExecutionAdmissionProperty $Plan 'adapter'
+    $action = Get-ExecutionAdmissionProperty $Plan 'action'
+    $effectiveContract = Get-ExecutionAdmissionProperty $Plan 'effective_execution_contract'
+    $allowedReadSet = @(Get-ExecutionAdmissionProperty $Plan 'allowed_read_set')
+    $minimumProof = Get-ExecutionAdmissionProperty $Plan 'minimum_proof'
+    $stopCondition = Get-ExecutionAdmissionProperty $Plan 'stop_condition'
+    $revalidationSnapshot = Get-ExecutionAdmissionProperty $Plan 'revalidation_snapshot'
     return [pscustomobject][ordered]@{
-        schema_version = Get-ExecutionAdmissionProperty $Plan 'schema_version'
-        kind = Get-ExecutionAdmissionProperty $Plan 'kind'
-        admission_id = Get-ExecutionAdmissionProperty $Plan 'admission_id'
-        adapter = Get-ExecutionAdmissionProperty $Plan 'adapter'
-        action = Get-ExecutionAdmissionProperty $Plan 'action'
-        effective_execution_contract = Get-ExecutionAdmissionProperty $Plan 'effective_execution_contract'
-        allowed_read_set = @(Get-ExecutionAdmissionProperty $Plan 'allowed_read_set')
-        minimum_proof = Get-ExecutionAdmissionProperty $Plan 'minimum_proof'
-        stop_condition = Get-ExecutionAdmissionProperty $Plan 'stop_condition'
-        revalidation_snapshot = Get-ExecutionAdmissionProperty $Plan 'revalidation_snapshot'
+        schema_version = $schemaVersion
+        kind = $kind
+        admission_id = $admissionId
+        adapter = $adapter
+        action = $action
+        effective_execution_contract = $effectiveContract
+        allowed_read_set = $allowedReadSet
+        minimum_proof = $minimumProof
+        stop_condition = $stopCondition
+        revalidation_snapshot = $revalidationSnapshot
     }
 }
 
 function New-ExecutionPlan {
     param([Parameter(Mandatory = $true)]$Admission)
 
-    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot ((Get-ExecutionAdmissionProperty $Admission 'allowed_read_set')[0].path | Split-Path -Parent | Split-Path -Parent | Split-Path -Parent)
+    $readSet = @(Get-ExecutionAdmissionProperty $Admission 'allowed_read_set')
+    if ($readSet.Count -eq 0) { throw 'execution_plan_read_set_missing' }
+
+    # The read set has already been containment-checked when the immutable
+    # admission was created. Locate the actual repository root instead of
+    # assuming a fixed number of parent directories from its first file.
+    $currentDirectory = Split-Path -Path ([string](Get-ExecutionAdmissionProperty $readSet[0] 'path')) -Parent
+    $repoRoot = ''
+    while (-not [string]::IsNullOrWhiteSpace($currentDirectory)) {
+        if (Test-Path -LiteralPath (Join-Path $currentDirectory 'skills.json') -PathType Leaf) {
+            $repoRoot = $currentDirectory
+            break
+        }
+        $parentDirectory = Split-Path -Path $currentDirectory -Parent
+        if ([string]::Equals($parentDirectory, $currentDirectory, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $currentDirectory = $parentDirectory
+    }
+    if ([string]::IsNullOrWhiteSpace($repoRoot)) { throw 'execution_plan_repo_root_unresolved' }
+
+    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot $repoRoot
     if (-not $admissionContract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($admissionContract.findings | ForEach-Object code) -join ','))) }
     $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
-    $plan = [pscustomobject][ordered]@{
+    $planAdmissionId = [string](Get-ExecutionAdmissionProperty $Admission 'admission_id')
+    $planContract = Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract'
+    $planReadSet = @(Get-ExecutionAdmissionProperty $Admission 'allowed_read_set')
+    $planMinimumProof = [string](Get-ExecutionAdmissionProperty $Admission 'minimum_proof')
+    $planStopCondition = [string](Get-ExecutionAdmissionProperty $Admission 'stop_condition')
+    $planRoutingReceiptId = [string](Get-ExecutionAdmissionProperty $snapshot 'routing_receipt_id')
+    $planCatalogFingerprint = [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint')
+    $planSelectedCandidate = [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate')
+    $planValidatedClosure = @(Get-ExecutionAdmissionProperty $snapshot 'validated_closure')
+    $planRevalidationSnapshot = [pscustomobject][ordered]@{
+        routing_receipt_id = $planRoutingReceiptId
+        catalog_fingerprint = $planCatalogFingerprint
+        selected_candidate = $planSelectedCandidate
+        validated_closure = $planValidatedClosure
+        effective_execution_contract = $planContract
+    }
+    $executionPlan = [pscustomobject][ordered]@{
         schema_version = $script:ExecutionAdmissionSchemaVersion
         kind = 'execution_plan'
-        admission_id = [string](Get-ExecutionAdmissionProperty $Admission 'admission_id')
+        admission_id = $planAdmissionId
         adapter = $script:ExecutionAdmissionNativeAgent
         action = 'ask_one_question'
-        effective_execution_contract = Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract'
-        allowed_read_set = @(Get-ExecutionAdmissionProperty $Admission 'allowed_read_set')
-        minimum_proof = [string](Get-ExecutionAdmissionProperty $Admission 'minimum_proof')
-        stop_condition = [string](Get-ExecutionAdmissionProperty $Admission 'stop_condition')
-        revalidation_snapshot = [pscustomobject][ordered]@{
-            routing_receipt_id = [string](Get-ExecutionAdmissionProperty $snapshot 'routing_receipt_id')
-            catalog_fingerprint = [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint')
-            selected_candidate = [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate')
-            validated_closure = @(Get-ExecutionAdmissionProperty $snapshot 'validated_closure')
-            effective_execution_contract = Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract'
-        }
+        effective_execution_contract = $planContract
+        allowed_read_set = $planReadSet
+        minimum_proof = $planMinimumProof
+        stop_condition = $planStopCondition
+        revalidation_snapshot = $planRevalidationSnapshot
     }
-    $plan | Add-Member -NotePropertyName plan_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'plan' (Get-ExecutionPlanPayload $plan))
-    return $plan
+    $executionPlan | Add-Member -NotePropertyName plan_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'plan' (Get-ExecutionPlanPayload $executionPlan))
+    return $executionPlan
 }
 
 function Test-ExecutionPlanContract {
@@ -2604,12 +2644,12 @@ function New-ExecutionAdmissionSuccessor {
     if ((Get-OperationSha256 $OriginalRequest) -ne [string](Get-ExecutionAdmissionProperty $PriorAdmission 'request_sha256')) { throw 'continuation_request_mismatch' }
 
     $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer
-    $plan = New-ExecutionPlan -Admission $successor
-    $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $plan -Validation $Validation -RepoRoot $RepoRoot
+    $successorPlan = New-ExecutionPlan -Admission $successor
+    $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $successorPlan -Validation $Validation -RepoRoot $RepoRoot
     if (-not $continuation.pass) { throw ('execution_admission_continuation_invalid: {0}' -f ((@($continuation.findings | ForEach-Object code) -join ','))) }
     return [pscustomobject][ordered]@{
         admission = $successor
-        plan = $plan
+        plan = $successorPlan
         enforcement = 'parent_side_soft_guard_only'
     }
 }
@@ -12621,10 +12661,10 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
 function 更新 {
     & {
         $cfg = LoadCfg
-        if ($Locked -and ($Plan -or $Upgrade)) {
+        if ($Locked -and ($RunPlan -or $Upgrade)) {
             throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
         }
-        if ($Plan) {
+        if ($RunPlan) {
             Preflight
             Show-UpdatePlan $cfg | Out-Null
             return
@@ -22783,7 +22823,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             }
             "同步MCP" {
                 $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
-                if ($Plan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
+                if ($RunPlan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
                 else { 同步MCP }
             }
             "mcp-install" {
@@ -22800,7 +22840,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             }
             "mcp-sync" {
                 $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
-                if ($Plan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
+                if ($RunPlan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
                 else { 同步MCP }
             }
             "MCP配置" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
@@ -22815,22 +22855,22 @@ if ($MyInvocation.InvocationName -ne '.') {
             "rule-estate-audit" { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "规则全域计划" { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-estate-plan" { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则全域应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-estate-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "规则全域应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "rule-estate-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则全域回滚" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-estate-rollback" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "全局规则检查" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "global-rules-check" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "全局规则计划" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "global-rules-plan" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "全局规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "global-rules-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "全局规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "global-rules-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "全局规则回滚" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "global-rules-rollback" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则计划" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
