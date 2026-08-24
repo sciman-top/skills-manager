@@ -1,4 +1,4 @@
-$script:ExecutionAdmissionSchemaVersion = 1
+$script:ExecutionAdmissionSchemaVersion = 2
 $script:ExecutionAdmissionMode = 'multi_turn_user_decision'
 $script:ExecutionAdmissionNativeAgent = 'design-griller'
 $script:ExecutionAdmissionConversationOwner = 'parent'
@@ -185,6 +185,7 @@ function Get-ExecutionAdmissionPayload($Admission) {
     return [pscustomobject][ordered]@{
         schema_version = Get-ExecutionAdmissionProperty $Admission 'schema_version'
         kind = Get-ExecutionAdmissionProperty $Admission 'kind'
+        attempt_id = Get-ExecutionAdmissionProperty $Admission 'attempt_id'
         request_sha256 = Get-ExecutionAdmissionProperty $Admission 'request_sha256'
         admitted_goal = Get-ExecutionAdmissionProperty $Admission 'admitted_goal'
         authority_basis = Get-ExecutionAdmissionProperty $Admission 'authority_basis'
@@ -222,6 +223,7 @@ function New-ExecutionAdmission {
     $admission = [pscustomobject][ordered]@{
         schema_version = $script:ExecutionAdmissionSchemaVersion
         kind = 'execution_admission'
+        attempt_id = ([guid]::NewGuid().ToString('N')).ToLowerInvariant()
         request_sha256 = Get-OperationSha256 $OriginalRequest
         admitted_goal = $AdmittedGoal.Trim()
         authority_basis = $AuthorityBasis.Trim()
@@ -249,11 +251,12 @@ function Test-ExecutionAdmissionContract {
 
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Admission) { return New-ExecutionAdmissionValidationResult @((New-ExecutionAdmissionFinding 'admission_missing' '$' 'Admission is required.')) }
-    if ((Get-ExecutionAdmissionProperty $Admission 'schema_version') -ne $script:ExecutionAdmissionSchemaVersion) { $findings.Add((New-ExecutionAdmissionFinding 'schema_version_invalid' '$.schema_version' 'Only execution admission schema version 1 is supported.')) | Out-Null }
+    if ((Get-ExecutionAdmissionProperty $Admission 'schema_version') -ne $script:ExecutionAdmissionSchemaVersion) { $findings.Add((New-ExecutionAdmissionFinding 'schema_version_invalid' '$.schema_version' ('Only execution admission schema version {0} is supported.' -f $script:ExecutionAdmissionSchemaVersion))) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $Admission 'kind') -ne 'execution_admission') { $findings.Add((New-ExecutionAdmissionFinding 'kind_invalid' '$.kind' 'Admission kind is invalid.')) | Out-Null }
-    foreach ($field in @('request_sha256', 'admitted_goal', 'authority_basis', 'issued_at', 'requested_operation', 'minimum_proof', 'stop_condition', 'admission_id')) {
+    foreach ($field in @('attempt_id', 'request_sha256', 'admitted_goal', 'authority_basis', 'issued_at', 'requested_operation', 'minimum_proof', 'stop_condition', 'admission_id')) {
         if ([string]::IsNullOrWhiteSpace([string](Get-ExecutionAdmissionProperty $Admission $field))) { $findings.Add((New-ExecutionAdmissionFinding 'required_field_missing' ('.{0}' -f $field) 'Required admission field is missing.')) | Out-Null }
     }
+    if ([string](Get-ExecutionAdmissionProperty $Admission 'attempt_id') -notmatch '^[a-f0-9]{32}$') { $findings.Add((New-ExecutionAdmissionFinding 'attempt_id_invalid' '$.attempt_id' 'Attempt identity must be a 32-character lowercase hex nonce.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $Admission 'request_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'request_hash_invalid' '$.request_sha256' 'Request hash must be SHA-256.')) | Out-Null }
     if (-not (Test-OperationRfc3339 (Get-ExecutionAdmissionProperty $Admission 'issued_at'))) { $findings.Add((New-ExecutionAdmissionFinding 'issued_at_invalid' '$.issued_at' 'Issued timestamp must be RFC3339.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $Admission 'requested_operation') -ne 'read_only') { $findings.Add((New-ExecutionAdmissionFinding 'requested_operation_invalid' '$.requested_operation' 'P0 only admits read_only.')) | Out-Null }
@@ -438,6 +441,7 @@ function Test-ExecutionAdmissionContinuation {
     $priorId = [string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')
     $successorId = [string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'admission_id')
     if ($priorId -eq $successorId) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_admission_reused' '$.admission_id' 'A continuation must receive a new admission identity.')) | Out-Null }
+    if ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'attempt_id') -eq [string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'attempt_id')) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_attempt_reused' '$.attempt_id' 'A continuation must receive a new attempt identity.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'prior_admission_id') -ne $priorId) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_prior_admission_mismatch' '$.prior_admission_id' 'Successor must bind the exact predecessor admission.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'attributable_user_answer_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'continuation_user_answer_missing' '$.attributable_user_answer_sha256' 'Successor must bind an attributable user answer hash.')) | Out-Null }
     foreach ($field in @('request_sha256', 'admitted_goal', 'authority_basis', 'requested_operation', 'minimum_proof', 'stop_condition')) {

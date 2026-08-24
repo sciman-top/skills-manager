@@ -59,7 +59,9 @@ Describe 'Execution admission' {
 
         (Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $root).pass | Should -BeTrue
         (Test-ExecutionPlanContract -Plan $plan -Admission $admission).pass | Should -BeTrue
+        $admission.schema_version | Should -Be 2
         $admission.admission_id | Should -Match '^adm-[a-f0-9]{64}$'
+        $admission.attempt_id | Should -Match '^[a-f0-9]{32}$'
         $plan.plan_id | Should -Match '^plan-[a-f0-9]{64}$'
         $admission.requested_operation | Should -Be 'read_only'
         @($admission.exact_write_set) | Should -Be @()
@@ -143,6 +145,28 @@ finally {
         @($result.findings | ForEach-Object code) | Should -Contain 'admission_id_mismatch'
     }
 
+    It 'issues a distinct attempt identity for identical execution scope' {
+        $root = Join-Path $TestDrive 'attempt-identity'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $parameters = @{
+            OriginalRequest = '请逐轮审问这份提案，不改文件。'
+            AdmittedGoal = '审问 ExecutionAdmission 提案的接口和不变量。'
+            Validation = $fixture.validation
+            AllowedReadSet = $fixture.allowed_read_set
+            AuthorityBasis = 'current_user_design_decision'
+            IssuedAt = '2026-08-24T08:00:00Z'
+            RepoRoot = $root
+        }
+
+        $first = New-ExecutionAdmission @parameters
+        $second = New-ExecutionAdmission @parameters
+
+        $first.attempt_id | Should -Match '^[a-f0-9]{32}$'
+        $second.attempt_id | Should -Match '^[a-f0-9]{32}$'
+        $second.attempt_id | Should -Not -Be $first.attempt_id
+        $second.admission_id | Should -Not -Be $first.admission_id
+    }
+
     It 'rejects a closure hash drift before the design-griller can be dispatched' {
         $root = Join-Path $TestDrive 'drift'
         $fixture = New-ExecutionAdmissionFixture $root
@@ -179,6 +203,8 @@ finally {
         $successor.enforcement | Should -Be 'parent_side_soft_guard_only'
         $successor.admission.prior_admission_id | Should -Be $admission.admission_id
         $successor.admission.attributable_user_answer_sha256 | Should -Match '^[a-f0-9]{64}$'
+        $successor.admission.attempt_id | Should -Match '^[a-f0-9]{32}$'
+        $successor.admission.attempt_id | Should -Not -Be $admission.attempt_id
         $successor.admission.admission_id | Should -Not -Be $admission.admission_id
         $successor.plan.admission_id | Should -Be $successor.admission.admission_id
     }

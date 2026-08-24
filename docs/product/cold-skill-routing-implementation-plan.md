@@ -297,8 +297,9 @@ Verifier 必须拒绝以下组合：
 - **Goal**：避免 parent 在后续 `followup_task` 中把前一轮 admission 或原始 router selection 直接复用为新一题的执行许可。每个真实用户回答必须由新的、不可变的 successor admission 和 plan 绑定。
 - **Exact write set**：`src/Domain/ExecutionAdmission.ps1`；`overrides/patches/grill-me/SKILL.md`；受影响 unit tests；本任务卡片。不得改 router 语义选择、host config、provider/auth、runner 或宿主进程。
 - **Interface**：`New-ExecutionAdmissionSuccessor` 接收 predecessor admission/plan、原始请求、可归因用户回答、当前 validation、issued time 与 repo root；它先复核 predecessor，再生成带 `prior_admission_id` 与回答 SHA-256 的新 admission/plan。`Test-ExecutionAdmissionContinuation` 复核请求、scope、read set、validation snapshot、时间顺序和 plan binding。
-- **Hard invariants**：successor 不能复用 admission identity；必须绑定精确 predecessor、非空用户回答哈希和更晚 issued time；不能改变 request、goal、authority basis、operation、proof、stop、read set 或 validated selection。回答原文不持久化，仅其 SHA-256 写入不可变 payload。
+- **Hard invariants**：schema version 已升级为 `2` 以区分带 attempt identity 的 admission；successor 不能复用 admission identity 或 `attempt_id`；每次 `New-ExecutionAdmission` 自动生成新的 32 位小写 hex attempt identity，并将其纳入 immutable canonical payload 与 `admission_id` 哈希。successor 必须绑定精确 predecessor、非空用户回答哈希和更晚 issued time；不能改变 request、goal、authority basis、operation、proof、stop、read set 或 validated selection。回答原文不持久化，仅其 SHA-256 写入不可变 payload。
 - **Truth boundary / class**：`repo_verified`；调用方遵守时为 `parent_side_soft_guard_only`。当前 Codex 没有可验证的 pre-followup hook，缺少该 host capability 时必须报告 `host_hard_gate=platform_na`，不得将文件投影或 prompt 文本外推为强制执行。
+- **Replay boundary**：`attempt_id` 防止相同内容的 admission 共享 identity，但一次性消费记录与宿主级 replay fail-closed 仍依赖未观测的 pre-followup/execute hook；当前只报告 `repo_verified` 与 `parent_side_soft_guard_only`，不声称 host-level single-use enforcement。
 - **Stop / rollback**：若需要拦截宿主 `followup_task`、读取/改写 host session、伪造用户来源或修改宿主配置即停；回滚仅撤本卡片列出的 source/template/test/doc 变更。
 
 ## 6. 验证、提交与报告
