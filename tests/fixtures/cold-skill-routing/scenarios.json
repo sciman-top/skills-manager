@@ -906,6 +906,40 @@
       "side_effect_ceiling": "read_only",
       "required_context": [],
       "verification_mode": "routing_only"
+    },
+    {
+      "id": "S38-live-derived",
+      "source_index": 38,
+      "source_kind": "derived_test_case",
+      "derived_from": "CSR-160 runner-leg dispatch form: four verbatim runs (receipt-S31-native-observation-sequence) proved the exec host never self-selects runner dispatch for a parent-style one_shot request even after reading the tightened handoff clause (d5c061bf); this registered wording expresses the user's explicit delegation intent so the admission-to-spawn-to-zero-write chain has a live oracle",
+      "variant": "explicit",
+      "request_verbatim": "请把 reports/cold-skill-eval/2026-08-24-cold-routing-acceptance/fixture-plan.md 的 ExecutionAdmission 提案评审交给 cold-capability-runner 子代理执行：一次完成、只读、不修改任何文件，完成后带回评审结论与实际写入清单。",
+      "route_class": "cold_candidate",
+      "cold_discovery": "required",
+      "allowed_candidate_names": [],
+      "expected_native_agent": "cold-capability-runner",
+      "forbidden_events": ["second_discovery", "writes", "unadmitted_writes", "multi_turn_summary_substitution"],
+      "execution_contract": "one_shot",
+      "side_effect_ceiling": "read_only",
+      "required_context": [],
+      "verification_mode": "routing_only"
+    },
+    {
+      "id": "S39-live-derived",
+      "source_index": 39,
+      "source_kind": "derived_test_case",
+      "derived_from": "CSR-160 multi-turn leg with a fully specified payload: S01-explicit's unstated target now correctly stops at parent_user_input (fec4064a clause), so this variant names a concrete fixture file, letting the interview proceed to the native design-griller first question and awaiting_user_answer; the same-child continuation to decision capsule still requires a real user",
+      "variant": "explicit",
+      "request_verbatim": "请用 $grill-with-docs，结合 reports/cold-skill-eval/2026-08-24-cold-routing-acceptance/fixture-plan.md 和相关官方资料逐轮审问；一次只问一个会改变决策的问题，不改文件。",
+      "route_class": "cold_candidate",
+      "cold_discovery": "required",
+      "allowed_candidate_names": ["grill-with-docs"],
+      "expected_native_agent": "design-griller",
+      "forbidden_events": ["second_discovery", "writes", "multi_turn_summary_substitution"],
+      "execution_contract": "multi_turn_user_decision",
+      "side_effect_ceiling": "read_only",
+      "required_context": [],
+      "verification_mode": "routing_only"
     }
   ]
 }
