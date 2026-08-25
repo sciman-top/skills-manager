@@ -2,26 +2,26 @@
 
 **产品契约**: 2.0  
 **状态语义**: 稳定设计合同；不记录运行时状态  
-**当前状态**: **frozen（应急工具，2026-08-25 决议，重启条件见 §0）**
+**当前状态**: **engineering-frozen（core 常态主发现路径，不再扩展演进；2026-08-25 决议，见 §0）**
 **适用范围**: 本仓受控 cold catalog、native-agent bridge 与 Codex host-specific 验收  
 **相关文档**: [PRD](skills-manager-vnext-prd.md)、[Architecture](skills-manager-vnext-architecture.md)、[实施计划](cold-skill-routing-implementation-plan.md)、[验收 Runbook](../runbooks/cold-skill-routing-acceptance.md)
 
 ## 0. 冻结决议（2026-08-25）
 
-**状态：frozen——保留为应急工具，不再演进。** 决策输入：宿主投影档位已决策落地（Codex/Claude 常态 `full-compatible`、ZCode 保持 `core`）；官方一手证据（2026-08-24 核查）确认"100+ 技能元数据预热"为宿主官方默认、模型即路由器，冷链的上下文成本动机不再成立；治理/供应链动机保留，但缺乏真实调用分布数据支持继续投入。
+**状态：engineering-frozen——core 常态的主发现路径，工程面不再扩展。** 决策输入：宿主投影档位最终决策为三宿主常态 `core`（`4ce3a4c7` 恢复，`full-compatible` 保留为显式 flag 能力面）；在该常态下，冷链是冷目录技能的主发现路径。工程冻结的理由：全链已完成验收（CSR-160/170 闭卷、UTF-8 编码断点修复 `4882ff8c`、17 场景矩阵与 fresh probe 通过），工具完备，无当前失败支持继续投入扩展。
 
 冻结含义：
 
 - 不再新增 CSR 场景卡、verifier 规则、合同字段或验收轮次；未完成的 CSR-R5 可选确认项不再构成本路线图义务。
-- router、native-agent bridge、ExecutionAdmission、测试、receipt 与既有验收证据原样保留，作为应急能力维护：ZCode `core` 面的冷目录发现、跨目录发现、闭包/契约校验与 fail-closed 边界。
-- 应急工具自身的缺陷修复仍受理（如 `4882ff8c` 的 router stdout 编码钉死）；修复不改变冻结状态，不扩展能力面。
+- router、native-agent bridge、ExecutionAdmission、测试、receipt 与既有验收证据原样保留，作为主发现路径维护：冷目录发现、跨目录发现、闭包/契约校验与 fail-closed 边界。
+- 路径自身的缺陷修复仍受理（如 `4882ff8c` 的 router stdout 编码钉死）；修复不改变冻结状态，不扩展能力面。
 - §4 的目录阈值看护条款随冻结中止，不再下沉 quality gate。
 
-重启条件（满足其一即可重开，重开须新的决策记录）：
+重开工程演进的条件（满足其一即可重开，重开须新的决策记录）：
 
-1. 连续 4 周真实会话中冷链应急调用 ≥5 次（router receipt 佐证）；
-2. 宿主官方机制变化使全量元数据预热不可用或明确劣化；
-3. 出现可量化的供应链/治理事件，且证明为全量预热无法拦截的形态。
+1. 主路径出现真实失效或缺口，且修复超出缺陷修复范畴（需要新能力面）；
+2. 宿主官方机制变化使 `core`+冷链组合不可用或明确劣化；
+3. 目录规模触及 §4 阈值（域 >30 / 单域常驻候选 >16 / 技能 >150），按原条款重开检索前置决策。
 
 ## 1. 目标与不变量
 
