@@ -45,7 +45,7 @@ MCP config mutation、host projection、live readiness 是三个不同状态。�
 数据流：
 
 ```text
-user profile + repo scan + installed inventory
+repo scan -> scan-derived target profile + installed inventory
   -> immutable snapshot.json + editable recommendations.json + machine receipt.json
   -> reviewed recommendations.json
   -> preflight + dry-run + input fingerprint

@@ -3,7 +3,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         action = "list"
         name = $null
         path = $null
-        profile = $null
         target = $null
         run_id = $null
         out = $null
@@ -27,12 +26,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         switch ($head) {
             "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
             "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
-            "需求设置" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "profile-set" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "需求查看" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "profile-show" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "需求结构化" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
-            "profile-structure" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
             "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
             "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
             "修改" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
@@ -47,9 +40,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
-            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
             "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "预检" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
@@ -85,22 +75,12 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
-            "--profile" {
-                Need ($i + 1 -lt $items.Count) "--profile 缺少值"
-                $result.profile = [string]$items[++$i]
-                continue
-            }
             "--out" {
                 Need ($i + 1 -lt $items.Count) "--out 缺少值"
                 $result.out = [string]$items[++$i]
                 if (Test-AuditPlaceholderToken $result.out) {
                     throw ("--out 路径包含未替换占位符：{0}`n{1}" -f $result.out, (Get-AuditRunIdHintText))
                 }
-                continue
-            }
-            "--query" {
-                Need ($i + 1 -lt $items.Count) "--query 缺少值"
-                $result.query = [string]$items[++$i]
                 continue
             }
             "--recommendations" {
@@ -180,16 +160,12 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "审查目标 子命令：" -ForegroundColor Cyan
     Write-Host "  .\skills.ps1 审查目标 帮助"
     Write-Host "  .\skills.ps1 审查目标 初始化"
-    Write-Host "  .\skills.ps1 审查目标 需求设置"
-    Write-Host "  .\skills.ps1 审查目标 需求查看"
-    Write-Host "  .\skills.ps1 审查目标 需求结构化 [--profile <file>]"
     Write-Host "  .\skills.ps1 审查目标 添加 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
     Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
-    Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
@@ -210,22 +186,6 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
                 Write-Host "audit-targets.json 已存在，未覆盖。" -ForegroundColor Yellow
             }
         }
-        "profile_set" {
-            $rawText = Read-HostSafe "请输入用户基本需求（长文本）"
-            Set-AuditUserProfileRawText $rawText
-            $defaultPath = Get-AuditStructuredProfileDefaultPath
-            $profilePath = Read-HostSafe ("结构化 profile 文件路径（回车使用默认：{0}；输入 0 跳过）" -f $defaultPath)
-            if ([string]$profilePath.Trim() -eq "0") {
-                Write-Host "已保存用户基本需求。结构化导入已跳过。" -ForegroundColor Green
-            }
-            else {
-                Invoke-AuditStructuredProfileFlow $profilePath
-            }
-        }
-        "profile_show" { Show-AuditUserProfile }
-        "profile_structure" {
-            Invoke-AuditStructuredProfileFlow $opts.profile
-        }
         "add" {
             Add-AuditTargetConfigEntry $opts.name $opts.path $opts.tags $opts.notes | Out-Null
             Write-Host ("已登记目标仓：{0}" -f (Normalize-Name $opts.name)) -ForegroundColor Green
@@ -243,7 +203,6 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
         "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
-        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" {
             if (-not $opts.apply) {

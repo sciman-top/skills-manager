@@ -2,18 +2,6 @@ function Get-AuditTargetsConfigPath {
     return (Join-Path $script:Root "audit-targets.json")
 }
 
-function Get-AuditStructuredProfileDefaultPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.structured.json")
-}
-
-function Get-AuditUserProfileSnapshotPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.json")
-}
-
-function Get-AuditUserProfileSummarySnapshotPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.json.summary")
-}
-
 function Get-AuditOuterAiPromptOverridePath {
     return (Join-Path $script:Root "overrides\audit-outer-ai-prompt.md")
 }
@@ -24,8 +12,8 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合用户画像、已安装技能/MCP、目标仓扫描、来源策略、决策关键词与 prompt contract；不得修改。
-2. 只编辑同目录 ``recommendations.json``：保持 schema v2，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有双理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合扫描派生的目标仓需求画像、已安装技能/MCP、来源策略、决策关键词与 prompt contract；不得修改。不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
+2. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
 3. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
 4. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
@@ -67,28 +55,6 @@ function Edit-AuditOuterAiPromptTemplate {
     Write-Host ("已打开提示词文件：{0}" -f $path) -ForegroundColor Green
 }
 
-function New-DefaultAuditUserProfile {
-    return [pscustomobject]@{
-        raw_text = ""
-        summary = ""
-        structured = [pscustomobject]@{
-            primary_work_types = @()
-            preferred_agents = @()
-            tech_stack = @()
-            common_tasks = @()
-            constraints = @()
-            avoidances = @()
-            decision_preferences = @()
-        }
-        last_structured_at = ""
-        structured_by = ""
-    }
-}
-
-function Get-AuditStructuredProfileFieldNames {
-    return @("primary_work_types", "preferred_agents", "tech_stack", "common_tasks", "constraints", "avoidances", "decision_preferences")
-}
-
 function Test-AuditObjectLike($value) {
     if ($null -eq $value) { return $false }
     return ($value -is [pscustomobject]) -or ($value -is [hashtable]) -or ($value -is [System.Collections.IDictionary])
@@ -123,64 +89,10 @@ function Convert-AuditStringArray($value) {
     return @($normalized)
 }
 
-function Normalize-AuditStructuredProfile($structuredInput) {
-    $normalized = [pscustomobject]@{}
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        $normalized | Add-Member -NotePropertyName $field -NotePropertyValue @() -Force
-    }
-    if (-not (Test-AuditObjectLike $structuredInput)) {
-        return $normalized
-    }
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        $rawValue = $null
-        if (Get-AuditObjectFieldValue $structuredInput $field ([ref]$rawValue)) {
-            $normalized.$field = @(Convert-AuditStringArray $rawValue)
-        }
-    }
-    return $normalized
-}
-
-function Ensure-AuditUserProfile($cfg) {
-    $changed = $false
-    if (-not $cfg.PSObject.Properties.Match("user_profile").Count -or $null -eq $cfg.user_profile) {
-        $cfg | Add-Member -NotePropertyName user_profile -NotePropertyValue (New-DefaultAuditUserProfile) -Force
-        $changed = $true
-    }
-
-    $profile = $cfg.user_profile
-    foreach ($name in @("raw_text", "summary", "last_structured_at", "structured_by")) {
-        if (-not $profile.PSObject.Properties.Match($name).Count) {
-            $profile | Add-Member -NotePropertyName $name -NotePropertyValue "" -Force
-            $changed = $true
-        }
-        elseif ($null -eq $profile.$name) {
-            $profile.$name = ""
-            $changed = $true
-        }
-        elseif (-not ($profile.$name -is [string])) {
-            $profile.$name = [string]$profile.$name
-            $changed = $true
-        }
-    }
-    if (-not $profile.PSObject.Properties.Match("structured").Count) {
-        $profile | Add-Member -NotePropertyName structured -NotePropertyValue (Normalize-AuditStructuredProfile $null) -Force
-        $changed = $true
-    }
-    $currentStructuredJson = ($profile.structured | ConvertTo-Json -Depth 20 -Compress)
-    $normalizedStructured = Normalize-AuditStructuredProfile $profile.structured
-    $normalizedStructuredJson = ($normalizedStructured | ConvertTo-Json -Depth 20 -Compress)
-    if ($currentStructuredJson -ne $normalizedStructuredJson) {
-        $profile.structured = $normalizedStructured
-        $changed = $true
-    }
-    return $changed
-}
-
 function New-DefaultAuditTargetsConfig {
     return [pscustomobject]@{
-        version = 2
+        version = 3
         path_base = "skills_manager_root"
-        user_profile = New-DefaultAuditUserProfile
         targets = @()
     }
 }
@@ -229,8 +141,8 @@ function Load-AuditTargetsConfig {
         $cfg | Add-Member -NotePropertyName version -NotePropertyValue 1
         $changed = $true
     }
-    if ([int]$cfg.version -eq 1) {
-        $cfg.version = 2
+    if ([int]$cfg.version -lt 3) {
+        $cfg.version = 3
         $changed = $true
     }
     if (-not $cfg.PSObject.Properties.Match("path_base").Count) {
@@ -241,11 +153,12 @@ function Load-AuditTargetsConfig {
         $cfg | Add-Member -NotePropertyName targets -NotePropertyValue @() -Force
         $changed = $true
     }
-    if (Ensure-AuditUserProfile $cfg) {
+    if ($cfg.PSObject.Properties.Match("user_profile").Count -gt 0) {
+        $cfg.PSObject.Properties.Remove("user_profile")
         $changed = $true
     }
 
-    Need ([int]$cfg.version -eq 2) "audit-targets.json version 仅支持 2"
+    Need ([int]$cfg.version -eq 3) "audit-targets.json version 仅支持 3"
     Need ([string]$cfg.path_base -eq "skills_manager_root") "audit-targets.json path_base 仅支持 skills_manager_root"
     if (-not (Assert-IsArray $cfg.targets)) { $cfg.targets = @($cfg.targets) }
     if ($changed) {
@@ -331,251 +244,6 @@ function Remove-AuditTargetConfigEntry([string]$name) {
     return $cfg
 }
 
-function Set-AuditUserProfileRawText([string]$rawText) {
-    Initialize-AuditTargetsConfig | Out-Null
-    $cfg = Load-AuditTargetsConfig
-    Need (-not [string]::IsNullOrWhiteSpace($rawText)) "用户基本需求不能为空"
-    $cfg.user_profile.raw_text = $rawText.Trim()
-    $cfg.user_profile.summary = ""
-    $cfg.user_profile.structured = (New-DefaultAuditUserProfile).structured
-    $cfg.user_profile.last_structured_at = ""
-    $cfg.user_profile.structured_by = ""
-    Save-AuditTargetsConfig $cfg
-}
-
-function Show-AuditUserProfile {
-    $cfg = Load-AuditTargetsConfig
-    Write-Host "=== 用户基本需求 ==="
-    Write-Host ([string]$cfg.user_profile.raw_text)
-    Write-Host ""
-    Write-Host ("summary: {0}" -f [string]$cfg.user_profile.summary)
-    Write-Host ("structured_by: {0}" -f [string]$cfg.user_profile.structured_by)
-}
-
-function New-AuditStructuredProfileDraft([string]$rawText) {
-    return [pscustomobject]@{
-        raw_text = $rawText
-        summary = ""
-        structured = (New-DefaultAuditUserProfile).structured
-        last_structured_at = ""
-        structured_by = "outer-ai"
-    }
-}
-
-function Get-AuditFallbackSummaryFromRawText([string]$rawText) {
-    $normalized = [regex]::Replace([string]$rawText, "\s+", " ").Trim()
-    if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
-    if ($normalized.Length -le 120) { return $normalized }
-    return ($normalized.Substring(0, 120) + "...")
-}
-
-function Get-AuditStructuredProfileRequiredNonEmptyFields {
-    return @("primary_work_types", "tech_stack", "common_tasks", "decision_preferences")
-}
-
-function Test-AuditTimestampString([string]$value) {
-    if ([string]::IsNullOrWhiteSpace([string]$value)) { return $false }
-    $parsed = [DateTimeOffset]::MinValue
-    return [DateTimeOffset]::TryParse([string]$value, [ref]$parsed)
-}
-
-function Convert-AuditTimestampToIso($value, [switch]$FallbackNow) {
-    if ($value -is [DateTimeOffset]) {
-        return ([DateTimeOffset]$value).ToString("o")
-    }
-    if ($value -is [DateTime]) {
-        return ([DateTimeOffset]$value).ToString("o")
-    }
-    if ($null -ne $value) {
-        $text = [string]$value
-        if (-not [string]::IsNullOrWhiteSpace($text)) {
-            $parsed = [DateTimeOffset]::MinValue
-            if ([DateTimeOffset]::TryParse($text, [ref]$parsed)) {
-                return $parsed.ToString("o")
-            }
-        }
-    }
-    if ($FallbackNow) {
-        return (Get-Date).ToString("o")
-    }
-    return ""
-}
-
-function Get-AuditStructuredFallbackValues([string]$field, [string]$rawText) {
-    $summary = Get-AuditFallbackSummaryFromRawText $rawText
-    $generic = if ([string]::IsNullOrWhiteSpace($summary)) { "general workflow" } else { $summary }
-    switch ($field) {
-        "primary_work_types" { return @("需求分析与交付") }
-        "tech_stack" {
-            if ([regex]::IsMatch($rawText, "(?i)\bwindows\b")) { return @("Windows") }
-            return @("Mixed stack")
-        }
-        "common_tasks" { return @($generic) }
-        "decision_preferences" { return @("evidence-first") }
-        default { return @() }
-    }
-}
-
-function Test-AuditStructuredProfileComplete($structuredInput) {
-    if (-not (Test-AuditObjectLike $structuredInput)) { return $false }
-    $normalized = Normalize-AuditStructuredProfile $structuredInput
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        if ($normalized.PSObject.Properties.Match($field).Count -eq 0) { return $false }
-        if (-not (Assert-IsArray $normalized.$field)) { return $false }
-    }
-    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        if (@($normalized.$required).Count -eq 0) { return $false }
-    }
-    return $true
-}
-
-function New-AuditPrecheckStructuredProfile($cfg) {
-    $rawText = [string]$cfg.user_profile.raw_text
-    $summary = [string]$cfg.user_profile.summary
-    if ([string]::IsNullOrWhiteSpace($summary)) {
-        $summary = Get-AuditFallbackSummaryFromRawText $rawText
-    }
-    $structured = Normalize-AuditStructuredProfile $cfg.user_profile.structured
-    foreach ($field in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        if (@($structured.$field).Count -eq 0) {
-            $structured.$field = @(Get-AuditStructuredFallbackValues $field $rawText)
-        }
-    }
-    return [pscustomobject]@{
-        raw_text = $rawText
-        summary = $summary
-        structured = $structured
-        last_structured_at = (Get-Date).ToString("o")
-        structured_by = "outer-ai"
-    }
-}
-
-function Write-AuditUserProfileSnapshot($cfg) {
-    $profile = Get-AuditUserProfileOutput $cfg
-    Write-AuditJsonFile (Get-AuditUserProfileSnapshotPath) $profile
-    Set-ContentUtf8 (Get-AuditUserProfileSummarySnapshotPath) ([string]$profile.summary)
-}
-
-function Ensure-AuditUserProfilePrecheck {
-    $profilePath = Get-AuditStructuredProfileDefaultPath
-    $maxAttempts = 2
-
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        $cfg = Load-AuditTargetsConfig
-        Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "缺少用户基本需求，请先运行：./skills.ps1 审查目标 需求设置"
-
-        $summaryMissing = [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)
-        $structuredIncomplete = -not (Test-AuditStructuredProfileComplete $cfg.user_profile.structured)
-        $timestampInvalid = -not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))
-        if (-not $summaryMissing -and -not $structuredIncomplete -and -not $timestampInvalid) {
-            Write-AuditUserProfileSnapshot $cfg
-            return $cfg
-        }
-
-        Write-AuditJsonFile $profilePath (New-AuditPrecheckStructuredProfile $cfg)
-        try {
-            Invoke-AuditStructuredProfileFlow $profilePath
-        }
-        catch {
-            if ($attempt -ge $maxAttempts) {
-                throw ("画像预检查失败：自动导入结构化需求失败（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"。错误：{1}" -f $profilePath, $_.Exception.Message)
-            }
-        }
-    }
-
-    throw ("画像预检查失败：summary/structured/last_structured_at 仍不完整（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"" -f $profilePath)
-}
-
-function Write-AuditStructuredProfileDraft([string]$profilePath, [string]$rawText) {
-    if ([string]::IsNullOrWhiteSpace($profilePath)) {
-        $profilePath = Get-AuditStructuredProfileDefaultPath
-    }
-    $resolved = Resolve-AuditTargetPath $profilePath
-    Write-AuditJsonFile $resolved (New-AuditStructuredProfileDraft $rawText)
-    return $resolved
-}
-
-function Import-AuditUserProfileStructured([string]$profilePath) {
-    if ([string]::IsNullOrWhiteSpace($profilePath)) {
-        $profilePath = Get-AuditStructuredProfileDefaultPath
-    }
-    $resolved = Resolve-AuditTargetPath $profilePath
-    Need (Test-Path -LiteralPath $resolved -PathType Leaf) ("找不到 profile 文件：{0}" -f $profilePath)
-
-    try {
-        $raw = Get-ContentUtf8 $resolved
-        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("profile 文件为空：{0}" -f $profilePath)
-        $imported = $raw | ConvertFrom-Json
-    }
-    catch {
-        throw ("profile 文件解析失败：{0}" -f $_.Exception.Message)
-    }
-    Need (Test-AuditObjectLike $imported) ("profile 文件根节点必须是对象：{0}" -f $profilePath)
-
-    Initialize-AuditTargetsConfig | Out-Null
-    $cfg = Load-AuditTargetsConfig
-
-    $importedRawText = $null
-    if (Get-AuditObjectFieldValue $imported "raw_text" ([ref]$importedRawText)) {
-        $text = [string]$importedRawText
-        if (-not [string]::IsNullOrWhiteSpace($text)) {
-            $cfg.user_profile.raw_text = $text.Trim()
-        }
-    }
-
-    $importedSummary = $null
-    if (Get-AuditObjectFieldValue $imported "summary" ([ref]$importedSummary)) {
-        $cfg.user_profile.summary = [string]$importedSummary
-    }
-
-    $importedStructured = $null
-    if (Get-AuditObjectFieldValue $imported "structured" ([ref]$importedStructured)) {
-        Need (Test-AuditObjectLike $importedStructured) ("profile.structured 必须是对象：{0}" -f $profilePath)
-        $cfg.user_profile.structured = Normalize-AuditStructuredProfile $importedStructured
-    }
-
-    $importedStructuredBy = $null
-    if (Get-AuditObjectFieldValue $imported "structured_by" ([ref]$importedStructuredBy)) {
-        $cfg.user_profile.structured_by = [string]$importedStructuredBy
-    }
-    else {
-        $cfg.user_profile.structured_by = "manual"
-    }
-
-    $importedStructuredAt = $null
-    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt)) {
-        $cfg.user_profile.last_structured_at = Convert-AuditTimestampToIso $importedStructuredAt -FallbackNow
-    }
-    else {
-        $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
-    }
-    if (-not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))) {
-        $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
-    }
-
-    Ensure-AuditUserProfile $cfg | Out-Null
-    Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "导入后用户基本需求为空，请在 profile.raw_text 填写非空文本或先执行“需求设置”"
-    Save-AuditTargetsConfig $cfg
-    Write-AuditUserProfileSnapshot $cfg
-}
-
-function Invoke-AuditStructuredProfileFlow([string]$profilePath = "") {
-    $cfg = Load-AuditTargetsConfig
-    $defaultPath = Get-AuditStructuredProfileDefaultPath
-    $chosen = if ([string]::IsNullOrWhiteSpace($profilePath)) { $defaultPath } else { $profilePath }
-    $resolved = Resolve-AuditTargetPath $chosen
-
-    if (Test-Path -LiteralPath $resolved -PathType Leaf) {
-        Import-AuditUserProfileStructured $chosen
-        Write-Host ("已导入结构化需求：{0}" -f $resolved) -ForegroundColor Green
-        return
-    }
-
-    $draft = Write-AuditStructuredProfileDraft $chosen ([string]$cfg.user_profile.raw_text)
-    Write-Host ("未找到结构化 profile，已生成默认草稿：{0}" -f $draft) -ForegroundColor Yellow
-    Write-Host "请让 AI 或手动填写该文件后，再运行：./skills.ps1 审查目标 需求结构化" -ForegroundColor Yellow
-}
-
 function Write-AuditTargetsList {
     $cfg = Load-AuditTargetsConfig
     $items = @($cfg.targets)
@@ -592,39 +260,12 @@ function Write-AuditTargetsList {
     }
 }
 
-function Assert-AuditUserProfileReady($cfg) {
-    Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "缺少用户基本需求，请先运行：./skills.ps1 审查目标 需求设置"
-    Need (Test-AuditObjectLike $cfg.user_profile.structured) "用户结构化需求格式异常，请先运行：./skills.ps1 审查目标 需求结构化"
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        Need ($cfg.user_profile.structured.PSObject.Properties.Match($field).Count -gt 0) ("用户结构化需求缺少字段：{0}" -f $field)
-        Need (Assert-IsArray $cfg.user_profile.structured.$field) ("用户结构化需求字段必须为数组：{0}" -f $field)
-    }
-    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        Need (@($cfg.user_profile.structured.$required).Count -gt 0) ("用户结构化需求字段不能为空：{0}" -f $required)
-    }
-    if ([string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)) {
-        Write-Host "提示：用户结构化 summary 为空，建议先完善结构化需求后再生成审查包。" -ForegroundColor Yellow
-    }
-    Need (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at)) "用户结构化时间戳缺失或无效，请先运行：./skills.ps1 审查目标 需求结构化"
-}
-
-function Get-AuditUserProfileOutput($cfg) {
-    return [pscustomobject]@{
-        schema_version = 1
-        raw_text = [string]$cfg.user_profile.raw_text
-        summary = [string]$cfg.user_profile.summary
-        structured = $cfg.user_profile.structured
-        last_structured_at = Convert-AuditTimestampToIso $cfg.user_profile.last_structured_at -FallbackNow
-        structured_by = [string]$cfg.user_profile.structured_by
-    }
-}
-
 function Get-AuditRunId {
     return (Get-Date -Format "yyyyMMdd-HHmmss-fff")
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260815.1"
+    return "audit-prompt-v20260825.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -1580,25 +1221,6 @@ function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
     return @($ordered)
 }
 
-function Get-AuditUserProfileKeywords($cfg) {
-    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) {
-        return @()
-    }
-    $profile = $cfg.user_profile
-    $sets = New-Object System.Collections.Generic.List[object]
-    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.raw_text) 80)) | Out-Null
-    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.summary) 80)) | Out-Null
-    if (Test-AuditObjectLike $profile.structured) {
-        foreach ($field in @("primary_work_types", "preferred_agents", "tech_stack", "common_tasks", "constraints", "avoidances", "decision_preferences")) {
-            $fieldValue = $null
-            if (Get-AuditObjectFieldValue $profile.structured $field ([ref]$fieldValue)) {
-                $sets.Add((Convert-AuditStringArray $fieldValue)) | Out-Null
-            }
-        }
-    }
-    return (Merge-AuditKeywordSets ($sets.ToArray()) 200)
-}
-
 function Get-AuditRepoScanKeywords($scan) {
     if ($null -eq $scan) { return @() }
     $sets = New-Object System.Collections.Generic.List[object]
@@ -1639,43 +1261,40 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function Get-AuditMissingPreferredAgents($cfg, $installedSkills) {
-    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) { return @() }
-    if (-not (Test-AuditObjectLike $cfg.user_profile.structured)) { return @() }
-    $preferred = @()
-    $raw = $null
-    if (Get-AuditObjectFieldValue $cfg.user_profile.structured "preferred_agents" ([ref]$raw)) {
-        $preferred = @(Convert-AuditStringArray $raw)
+function New-AuditTargetProfile($scans) {
+    Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
+    $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
+    $profile = [ordered]@{
+        schema_version = 1
+        derived_at = (Get-Date).ToString("o")
+        derivation = "target_scans_only"
+        target_names = @()
+        scanned_target_count = @($scans).Count
     }
-    if ($preferred.Count -eq 0) { return @() }
-    $installedTokens = New-Object System.Collections.Generic.List[string]
-    foreach ($item in @($installedSkills)) {
-        foreach ($token in @([string]$item.name, [string]$item.to, [string]$item.from, [string]$item.declared_name)) {
-            if ([string]::IsNullOrWhiteSpace($token)) { continue }
-            $installedTokens.Add($token.ToLowerInvariant()) | Out-Null
+    foreach ($field in $fields) { $profile[$field] = @() }
+    $values = @{}
+    foreach ($field in $fields) { $values[$field] = New-Object System.Collections.Generic.List[object] }
+    $targetNames = New-Object System.Collections.Generic.List[string]
+    foreach ($scan in @($scans)) {
+        $target = Get-CfgObjectProperty $scan "target"
+        $name = [string](Get-CfgObjectProperty $target "name")
+        if (-not [string]::IsNullOrWhiteSpace($name)) { Add-AuditUniqueValue $targetNames $name }
+        $detected = Get-CfgObjectProperty $scan "detected"
+        foreach ($field in $fields) {
+            $value = Get-CfgObjectProperty $detected $field
+            foreach ($item in @(Convert-AuditStringArray $value)) { $values[$field].Add($item) | Out-Null }
         }
+        foreach ($item in @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))) { $values["risks"].Add($item) | Out-Null }
     }
-    $missing = New-Object System.Collections.Generic.List[string]
-    foreach ($pref in @($preferred)) {
-        $needle = ([string]$pref).ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
-        $matched = $false
-        foreach ($token in @($installedTokens)) {
-            if ($token.Contains($needle) -or $needle.Contains($token)) {
-                $matched = $true
-                break
-            }
-        }
-        if (-not $matched) {
-            $missing.Add([string]$pref) | Out-Null
-        }
-    }
-    return @($missing)
+    $profile.target_names = @($targetNames)
+    foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
+    $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
+    $capability = @($profile.capabilities | Select-Object -First 6)
+    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    return [pscustomobject]$profile
 }
 
-function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcpServers, [string]$Mode = "target-repo") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    $userKeywords = @(Get-AuditUserProfileKeywords $cfg)
+function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $installedMcpServers) {
     $repoKeywordSets = @()
     foreach ($scan in @($scans)) {
         $targetValue = Get-CfgObjectProperty $scan "target"
@@ -1687,37 +1306,37 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
                 risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
             })
     }
-    $repoKeywords = @()
-    if (@($repoKeywordSets).Count -gt 0) {
-        $repoKeywords = @(Merge-AuditKeywordSets @($repoKeywordSets | ForEach-Object { $_.keywords }) 220)
-    }
+    $profileKeywords = @(Merge-AuditKeywordSets @(
+            (Convert-AuditStringArray $targetProfile.target_names),
+            (Convert-AuditStringArray $targetProfile.languages),
+            (Convert-AuditStringArray $targetProfile.package_managers),
+            (Convert-AuditStringArray $targetProfile.frameworks),
+            (Convert-AuditStringArray $targetProfile.build_commands),
+            (Convert-AuditStringArray $targetProfile.test_commands),
+            (Convert-AuditStringArray $targetProfile.capabilities),
+            (Convert-AuditStringArray $targetProfile.agent_rule_files),
+            (Convert-AuditStringArray $targetProfile.notable_files),
+            (Convert-AuditStringArray $targetProfile.risks)
+        ) 220)
     $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
-    $profileOnlyContext = @(Merge-AuditKeywordSets @($userKeywords, $installedKeywords) 180)
     return [pscustomobject]([ordered]@{
             schema_version = 1
             generated_at = (Get-Date).ToString("o")
-            mode = $normalizedMode
+            derivation = "target_scans_only"
             summary = [ordered]@{
-                user_keyword_count = @($userKeywords).Count
-                repo_keyword_count = @($repoKeywords).Count
+                target_profile_keyword_count = @($profileKeywords).Count
                 installed_state_keyword_count = @($installedKeywords).Count
                 installed_skill_count = @($installedSkills).Count
                 installed_mcp_server_count = @($installedMcpServers).Count
             }
             keywords = [ordered]@{
-                user_profile = @($userKeywords)
-                target_repo = @($repoKeywords)
+                target_profile = @($profileKeywords)
+                target_repo = @($profileKeywords)
                 installed_state = @($installedKeywords)
-                profile_only_context = @($profileOnlyContext)
             }
             targets = @($repoKeywordSets)
-            explicit_preferences = [ordered]@{
-                missing_preferred_agents = @(Get-AuditMissingPreferredAgents $cfg $installedSkills)
-            }
             decision_checklist = @(
-                "Each add/remove recommendation should keep keyword_trace.user_profile with keywords from decision-insights.keywords.user_profile.",
-                "In target-repo mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.target_repo.",
-                "In profile-only mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.profile_only_context.",
+                "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
             )
         })
@@ -1740,7 +1359,7 @@ function Read-AuditSnapshot([string]$recommendationDir) {
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("缺少 snapshot.json：{0}" -f $path)
     try { $snapshot = Get-ContentUtf8 $path | ConvertFrom-Json }
     catch { throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message) }
-    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 1) ("snapshot.json schema_version 无效：{0}" -f $path)
+    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 2) ("snapshot.json schema_version 无效：{0}" -f $path)
     return $snapshot
 }
 

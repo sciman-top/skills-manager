@@ -16161,18 +16161,6 @@ function Get-AuditTargetsConfigPath {
     return (Join-Path $script:Root "audit-targets.json")
 }
 
-function Get-AuditStructuredProfileDefaultPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.structured.json")
-}
-
-function Get-AuditUserProfileSnapshotPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.json")
-}
-
-function Get-AuditUserProfileSummarySnapshotPath {
-    return (Join-Path $script:Root "reports\skill-audit\user-profile.json.summary")
-}
-
 function Get-AuditOuterAiPromptOverridePath {
     return (Join-Path $script:Root "overrides\audit-outer-ai-prompt.md")
 }
@@ -16183,8 +16171,8 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合用户画像、已安装技能/MCP、目标仓扫描、来源策略、决策关键词与 prompt contract；不得修改。
-2. 只编辑同目录 ``recommendations.json``：保持 schema v2，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有双理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合扫描派生的目标仓需求画像、已安装技能/MCP、来源策略、决策关键词与 prompt contract；不得修改。不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
+2. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
 3. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
 4. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
@@ -16226,28 +16214,6 @@ function Edit-AuditOuterAiPromptTemplate {
     Write-Host ("已打开提示词文件：{0}" -f $path) -ForegroundColor Green
 }
 
-function New-DefaultAuditUserProfile {
-    return [pscustomobject]@{
-        raw_text = ""
-        summary = ""
-        structured = [pscustomobject]@{
-            primary_work_types = @()
-            preferred_agents = @()
-            tech_stack = @()
-            common_tasks = @()
-            constraints = @()
-            avoidances = @()
-            decision_preferences = @()
-        }
-        last_structured_at = ""
-        structured_by = ""
-    }
-}
-
-function Get-AuditStructuredProfileFieldNames {
-    return @("primary_work_types", "preferred_agents", "tech_stack", "common_tasks", "constraints", "avoidances", "decision_preferences")
-}
-
 function Test-AuditObjectLike($value) {
     if ($null -eq $value) { return $false }
     return ($value -is [pscustomobject]) -or ($value -is [hashtable]) -or ($value -is [System.Collections.IDictionary])
@@ -16282,64 +16248,10 @@ function Convert-AuditStringArray($value) {
     return @($normalized)
 }
 
-function Normalize-AuditStructuredProfile($structuredInput) {
-    $normalized = [pscustomobject]@{}
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        $normalized | Add-Member -NotePropertyName $field -NotePropertyValue @() -Force
-    }
-    if (-not (Test-AuditObjectLike $structuredInput)) {
-        return $normalized
-    }
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        $rawValue = $null
-        if (Get-AuditObjectFieldValue $structuredInput $field ([ref]$rawValue)) {
-            $normalized.$field = @(Convert-AuditStringArray $rawValue)
-        }
-    }
-    return $normalized
-}
-
-function Ensure-AuditUserProfile($cfg) {
-    $changed = $false
-    if (-not $cfg.PSObject.Properties.Match("user_profile").Count -or $null -eq $cfg.user_profile) {
-        $cfg | Add-Member -NotePropertyName user_profile -NotePropertyValue (New-DefaultAuditUserProfile) -Force
-        $changed = $true
-    }
-
-    $profile = $cfg.user_profile
-    foreach ($name in @("raw_text", "summary", "last_structured_at", "structured_by")) {
-        if (-not $profile.PSObject.Properties.Match($name).Count) {
-            $profile | Add-Member -NotePropertyName $name -NotePropertyValue "" -Force
-            $changed = $true
-        }
-        elseif ($null -eq $profile.$name) {
-            $profile.$name = ""
-            $changed = $true
-        }
-        elseif (-not ($profile.$name -is [string])) {
-            $profile.$name = [string]$profile.$name
-            $changed = $true
-        }
-    }
-    if (-not $profile.PSObject.Properties.Match("structured").Count) {
-        $profile | Add-Member -NotePropertyName structured -NotePropertyValue (Normalize-AuditStructuredProfile $null) -Force
-        $changed = $true
-    }
-    $currentStructuredJson = ($profile.structured | ConvertTo-Json -Depth 20 -Compress)
-    $normalizedStructured = Normalize-AuditStructuredProfile $profile.structured
-    $normalizedStructuredJson = ($normalizedStructured | ConvertTo-Json -Depth 20 -Compress)
-    if ($currentStructuredJson -ne $normalizedStructuredJson) {
-        $profile.structured = $normalizedStructured
-        $changed = $true
-    }
-    return $changed
-}
-
 function New-DefaultAuditTargetsConfig {
     return [pscustomobject]@{
-        version = 2
+        version = 3
         path_base = "skills_manager_root"
-        user_profile = New-DefaultAuditUserProfile
         targets = @()
     }
 }
@@ -16388,8 +16300,8 @@ function Load-AuditTargetsConfig {
         $cfg | Add-Member -NotePropertyName version -NotePropertyValue 1
         $changed = $true
     }
-    if ([int]$cfg.version -eq 1) {
-        $cfg.version = 2
+    if ([int]$cfg.version -lt 3) {
+        $cfg.version = 3
         $changed = $true
     }
     if (-not $cfg.PSObject.Properties.Match("path_base").Count) {
@@ -16400,11 +16312,12 @@ function Load-AuditTargetsConfig {
         $cfg | Add-Member -NotePropertyName targets -NotePropertyValue @() -Force
         $changed = $true
     }
-    if (Ensure-AuditUserProfile $cfg) {
+    if ($cfg.PSObject.Properties.Match("user_profile").Count -gt 0) {
+        $cfg.PSObject.Properties.Remove("user_profile")
         $changed = $true
     }
 
-    Need ([int]$cfg.version -eq 2) "audit-targets.json version 仅支持 2"
+    Need ([int]$cfg.version -eq 3) "audit-targets.json version 仅支持 3"
     Need ([string]$cfg.path_base -eq "skills_manager_root") "audit-targets.json path_base 仅支持 skills_manager_root"
     if (-not (Assert-IsArray $cfg.targets)) { $cfg.targets = @($cfg.targets) }
     if ($changed) {
@@ -16490,251 +16403,6 @@ function Remove-AuditTargetConfigEntry([string]$name) {
     return $cfg
 }
 
-function Set-AuditUserProfileRawText([string]$rawText) {
-    Initialize-AuditTargetsConfig | Out-Null
-    $cfg = Load-AuditTargetsConfig
-    Need (-not [string]::IsNullOrWhiteSpace($rawText)) "用户基本需求不能为空"
-    $cfg.user_profile.raw_text = $rawText.Trim()
-    $cfg.user_profile.summary = ""
-    $cfg.user_profile.structured = (New-DefaultAuditUserProfile).structured
-    $cfg.user_profile.last_structured_at = ""
-    $cfg.user_profile.structured_by = ""
-    Save-AuditTargetsConfig $cfg
-}
-
-function Show-AuditUserProfile {
-    $cfg = Load-AuditTargetsConfig
-    Write-Host "=== 用户基本需求 ==="
-    Write-Host ([string]$cfg.user_profile.raw_text)
-    Write-Host ""
-    Write-Host ("summary: {0}" -f [string]$cfg.user_profile.summary)
-    Write-Host ("structured_by: {0}" -f [string]$cfg.user_profile.structured_by)
-}
-
-function New-AuditStructuredProfileDraft([string]$rawText) {
-    return [pscustomobject]@{
-        raw_text = $rawText
-        summary = ""
-        structured = (New-DefaultAuditUserProfile).structured
-        last_structured_at = ""
-        structured_by = "outer-ai"
-    }
-}
-
-function Get-AuditFallbackSummaryFromRawText([string]$rawText) {
-    $normalized = [regex]::Replace([string]$rawText, "\s+", " ").Trim()
-    if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
-    if ($normalized.Length -le 120) { return $normalized }
-    return ($normalized.Substring(0, 120) + "...")
-}
-
-function Get-AuditStructuredProfileRequiredNonEmptyFields {
-    return @("primary_work_types", "tech_stack", "common_tasks", "decision_preferences")
-}
-
-function Test-AuditTimestampString([string]$value) {
-    if ([string]::IsNullOrWhiteSpace([string]$value)) { return $false }
-    $parsed = [DateTimeOffset]::MinValue
-    return [DateTimeOffset]::TryParse([string]$value, [ref]$parsed)
-}
-
-function Convert-AuditTimestampToIso($value, [switch]$FallbackNow) {
-    if ($value -is [DateTimeOffset]) {
-        return ([DateTimeOffset]$value).ToString("o")
-    }
-    if ($value -is [DateTime]) {
-        return ([DateTimeOffset]$value).ToString("o")
-    }
-    if ($null -ne $value) {
-        $text = [string]$value
-        if (-not [string]::IsNullOrWhiteSpace($text)) {
-            $parsed = [DateTimeOffset]::MinValue
-            if ([DateTimeOffset]::TryParse($text, [ref]$parsed)) {
-                return $parsed.ToString("o")
-            }
-        }
-    }
-    if ($FallbackNow) {
-        return (Get-Date).ToString("o")
-    }
-    return ""
-}
-
-function Get-AuditStructuredFallbackValues([string]$field, [string]$rawText) {
-    $summary = Get-AuditFallbackSummaryFromRawText $rawText
-    $generic = if ([string]::IsNullOrWhiteSpace($summary)) { "general workflow" } else { $summary }
-    switch ($field) {
-        "primary_work_types" { return @("需求分析与交付") }
-        "tech_stack" {
-            if ([regex]::IsMatch($rawText, "(?i)\bwindows\b")) { return @("Windows") }
-            return @("Mixed stack")
-        }
-        "common_tasks" { return @($generic) }
-        "decision_preferences" { return @("evidence-first") }
-        default { return @() }
-    }
-}
-
-function Test-AuditStructuredProfileComplete($structuredInput) {
-    if (-not (Test-AuditObjectLike $structuredInput)) { return $false }
-    $normalized = Normalize-AuditStructuredProfile $structuredInput
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        if ($normalized.PSObject.Properties.Match($field).Count -eq 0) { return $false }
-        if (-not (Assert-IsArray $normalized.$field)) { return $false }
-    }
-    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        if (@($normalized.$required).Count -eq 0) { return $false }
-    }
-    return $true
-}
-
-function New-AuditPrecheckStructuredProfile($cfg) {
-    $rawText = [string]$cfg.user_profile.raw_text
-    $summary = [string]$cfg.user_profile.summary
-    if ([string]::IsNullOrWhiteSpace($summary)) {
-        $summary = Get-AuditFallbackSummaryFromRawText $rawText
-    }
-    $structured = Normalize-AuditStructuredProfile $cfg.user_profile.structured
-    foreach ($field in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        if (@($structured.$field).Count -eq 0) {
-            $structured.$field = @(Get-AuditStructuredFallbackValues $field $rawText)
-        }
-    }
-    return [pscustomobject]@{
-        raw_text = $rawText
-        summary = $summary
-        structured = $structured
-        last_structured_at = (Get-Date).ToString("o")
-        structured_by = "outer-ai"
-    }
-}
-
-function Write-AuditUserProfileSnapshot($cfg) {
-    $profile = Get-AuditUserProfileOutput $cfg
-    Write-AuditJsonFile (Get-AuditUserProfileSnapshotPath) $profile
-    Set-ContentUtf8 (Get-AuditUserProfileSummarySnapshotPath) ([string]$profile.summary)
-}
-
-function Ensure-AuditUserProfilePrecheck {
-    $profilePath = Get-AuditStructuredProfileDefaultPath
-    $maxAttempts = 2
-
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        $cfg = Load-AuditTargetsConfig
-        Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "缺少用户基本需求，请先运行：./skills.ps1 审查目标 需求设置"
-
-        $summaryMissing = [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)
-        $structuredIncomplete = -not (Test-AuditStructuredProfileComplete $cfg.user_profile.structured)
-        $timestampInvalid = -not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))
-        if (-not $summaryMissing -and -not $structuredIncomplete -and -not $timestampInvalid) {
-            Write-AuditUserProfileSnapshot $cfg
-            return $cfg
-        }
-
-        Write-AuditJsonFile $profilePath (New-AuditPrecheckStructuredProfile $cfg)
-        try {
-            Invoke-AuditStructuredProfileFlow $profilePath
-        }
-        catch {
-            if ($attempt -ge $maxAttempts) {
-                throw ("画像预检查失败：自动导入结构化需求失败（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"。错误：{1}" -f $profilePath, $_.Exception.Message)
-            }
-        }
-    }
-
-    throw ("画像预检查失败：summary/structured/last_structured_at 仍不完整（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"" -f $profilePath)
-}
-
-function Write-AuditStructuredProfileDraft([string]$profilePath, [string]$rawText) {
-    if ([string]::IsNullOrWhiteSpace($profilePath)) {
-        $profilePath = Get-AuditStructuredProfileDefaultPath
-    }
-    $resolved = Resolve-AuditTargetPath $profilePath
-    Write-AuditJsonFile $resolved (New-AuditStructuredProfileDraft $rawText)
-    return $resolved
-}
-
-function Import-AuditUserProfileStructured([string]$profilePath) {
-    if ([string]::IsNullOrWhiteSpace($profilePath)) {
-        $profilePath = Get-AuditStructuredProfileDefaultPath
-    }
-    $resolved = Resolve-AuditTargetPath $profilePath
-    Need (Test-Path -LiteralPath $resolved -PathType Leaf) ("找不到 profile 文件：{0}" -f $profilePath)
-
-    try {
-        $raw = Get-ContentUtf8 $resolved
-        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("profile 文件为空：{0}" -f $profilePath)
-        $imported = $raw | ConvertFrom-Json
-    }
-    catch {
-        throw ("profile 文件解析失败：{0}" -f $_.Exception.Message)
-    }
-    Need (Test-AuditObjectLike $imported) ("profile 文件根节点必须是对象：{0}" -f $profilePath)
-
-    Initialize-AuditTargetsConfig | Out-Null
-    $cfg = Load-AuditTargetsConfig
-
-    $importedRawText = $null
-    if (Get-AuditObjectFieldValue $imported "raw_text" ([ref]$importedRawText)) {
-        $text = [string]$importedRawText
-        if (-not [string]::IsNullOrWhiteSpace($text)) {
-            $cfg.user_profile.raw_text = $text.Trim()
-        }
-    }
-
-    $importedSummary = $null
-    if (Get-AuditObjectFieldValue $imported "summary" ([ref]$importedSummary)) {
-        $cfg.user_profile.summary = [string]$importedSummary
-    }
-
-    $importedStructured = $null
-    if (Get-AuditObjectFieldValue $imported "structured" ([ref]$importedStructured)) {
-        Need (Test-AuditObjectLike $importedStructured) ("profile.structured 必须是对象：{0}" -f $profilePath)
-        $cfg.user_profile.structured = Normalize-AuditStructuredProfile $importedStructured
-    }
-
-    $importedStructuredBy = $null
-    if (Get-AuditObjectFieldValue $imported "structured_by" ([ref]$importedStructuredBy)) {
-        $cfg.user_profile.structured_by = [string]$importedStructuredBy
-    }
-    else {
-        $cfg.user_profile.structured_by = "manual"
-    }
-
-    $importedStructuredAt = $null
-    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt)) {
-        $cfg.user_profile.last_structured_at = Convert-AuditTimestampToIso $importedStructuredAt -FallbackNow
-    }
-    else {
-        $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
-    }
-    if (-not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))) {
-        $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
-    }
-
-    Ensure-AuditUserProfile $cfg | Out-Null
-    Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "导入后用户基本需求为空，请在 profile.raw_text 填写非空文本或先执行“需求设置”"
-    Save-AuditTargetsConfig $cfg
-    Write-AuditUserProfileSnapshot $cfg
-}
-
-function Invoke-AuditStructuredProfileFlow([string]$profilePath = "") {
-    $cfg = Load-AuditTargetsConfig
-    $defaultPath = Get-AuditStructuredProfileDefaultPath
-    $chosen = if ([string]::IsNullOrWhiteSpace($profilePath)) { $defaultPath } else { $profilePath }
-    $resolved = Resolve-AuditTargetPath $chosen
-
-    if (Test-Path -LiteralPath $resolved -PathType Leaf) {
-        Import-AuditUserProfileStructured $chosen
-        Write-Host ("已导入结构化需求：{0}" -f $resolved) -ForegroundColor Green
-        return
-    }
-
-    $draft = Write-AuditStructuredProfileDraft $chosen ([string]$cfg.user_profile.raw_text)
-    Write-Host ("未找到结构化 profile，已生成默认草稿：{0}" -f $draft) -ForegroundColor Yellow
-    Write-Host "请让 AI 或手动填写该文件后，再运行：./skills.ps1 审查目标 需求结构化" -ForegroundColor Yellow
-}
-
 function Write-AuditTargetsList {
     $cfg = Load-AuditTargetsConfig
     $items = @($cfg.targets)
@@ -16751,39 +16419,12 @@ function Write-AuditTargetsList {
     }
 }
 
-function Assert-AuditUserProfileReady($cfg) {
-    Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "缺少用户基本需求，请先运行：./skills.ps1 审查目标 需求设置"
-    Need (Test-AuditObjectLike $cfg.user_profile.structured) "用户结构化需求格式异常，请先运行：./skills.ps1 审查目标 需求结构化"
-    foreach ($field in Get-AuditStructuredProfileFieldNames) {
-        Need ($cfg.user_profile.structured.PSObject.Properties.Match($field).Count -gt 0) ("用户结构化需求缺少字段：{0}" -f $field)
-        Need (Assert-IsArray $cfg.user_profile.structured.$field) ("用户结构化需求字段必须为数组：{0}" -f $field)
-    }
-    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
-        Need (@($cfg.user_profile.structured.$required).Count -gt 0) ("用户结构化需求字段不能为空：{0}" -f $required)
-    }
-    if ([string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)) {
-        Write-Host "提示：用户结构化 summary 为空，建议先完善结构化需求后再生成审查包。" -ForegroundColor Yellow
-    }
-    Need (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at)) "用户结构化时间戳缺失或无效，请先运行：./skills.ps1 审查目标 需求结构化"
-}
-
-function Get-AuditUserProfileOutput($cfg) {
-    return [pscustomobject]@{
-        schema_version = 1
-        raw_text = [string]$cfg.user_profile.raw_text
-        summary = [string]$cfg.user_profile.summary
-        structured = $cfg.user_profile.structured
-        last_structured_at = Convert-AuditTimestampToIso $cfg.user_profile.last_structured_at -FallbackNow
-        structured_by = [string]$cfg.user_profile.structured_by
-    }
-}
-
 function Get-AuditRunId {
     return (Get-Date -Format "yyyyMMdd-HHmmss-fff")
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260815.1"
+    return "audit-prompt-v20260825.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -17739,25 +17380,6 @@ function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
     return @($ordered)
 }
 
-function Get-AuditUserProfileKeywords($cfg) {
-    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) {
-        return @()
-    }
-    $profile = $cfg.user_profile
-    $sets = New-Object System.Collections.Generic.List[object]
-    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.raw_text) 80)) | Out-Null
-    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.summary) 80)) | Out-Null
-    if (Test-AuditObjectLike $profile.structured) {
-        foreach ($field in @("primary_work_types", "preferred_agents", "tech_stack", "common_tasks", "constraints", "avoidances", "decision_preferences")) {
-            $fieldValue = $null
-            if (Get-AuditObjectFieldValue $profile.structured $field ([ref]$fieldValue)) {
-                $sets.Add((Convert-AuditStringArray $fieldValue)) | Out-Null
-            }
-        }
-    }
-    return (Merge-AuditKeywordSets ($sets.ToArray()) 200)
-}
-
 function Get-AuditRepoScanKeywords($scan) {
     if ($null -eq $scan) { return @() }
     $sets = New-Object System.Collections.Generic.List[object]
@@ -17798,43 +17420,40 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function Get-AuditMissingPreferredAgents($cfg, $installedSkills) {
-    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) { return @() }
-    if (-not (Test-AuditObjectLike $cfg.user_profile.structured)) { return @() }
-    $preferred = @()
-    $raw = $null
-    if (Get-AuditObjectFieldValue $cfg.user_profile.structured "preferred_agents" ([ref]$raw)) {
-        $preferred = @(Convert-AuditStringArray $raw)
+function New-AuditTargetProfile($scans) {
+    Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
+    $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
+    $profile = [ordered]@{
+        schema_version = 1
+        derived_at = (Get-Date).ToString("o")
+        derivation = "target_scans_only"
+        target_names = @()
+        scanned_target_count = @($scans).Count
     }
-    if ($preferred.Count -eq 0) { return @() }
-    $installedTokens = New-Object System.Collections.Generic.List[string]
-    foreach ($item in @($installedSkills)) {
-        foreach ($token in @([string]$item.name, [string]$item.to, [string]$item.from, [string]$item.declared_name)) {
-            if ([string]::IsNullOrWhiteSpace($token)) { continue }
-            $installedTokens.Add($token.ToLowerInvariant()) | Out-Null
+    foreach ($field in $fields) { $profile[$field] = @() }
+    $values = @{}
+    foreach ($field in $fields) { $values[$field] = New-Object System.Collections.Generic.List[object] }
+    $targetNames = New-Object System.Collections.Generic.List[string]
+    foreach ($scan in @($scans)) {
+        $target = Get-CfgObjectProperty $scan "target"
+        $name = [string](Get-CfgObjectProperty $target "name")
+        if (-not [string]::IsNullOrWhiteSpace($name)) { Add-AuditUniqueValue $targetNames $name }
+        $detected = Get-CfgObjectProperty $scan "detected"
+        foreach ($field in $fields) {
+            $value = Get-CfgObjectProperty $detected $field
+            foreach ($item in @(Convert-AuditStringArray $value)) { $values[$field].Add($item) | Out-Null }
         }
+        foreach ($item in @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))) { $values["risks"].Add($item) | Out-Null }
     }
-    $missing = New-Object System.Collections.Generic.List[string]
-    foreach ($pref in @($preferred)) {
-        $needle = ([string]$pref).ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
-        $matched = $false
-        foreach ($token in @($installedTokens)) {
-            if ($token.Contains($needle) -or $needle.Contains($token)) {
-                $matched = $true
-                break
-            }
-        }
-        if (-not $matched) {
-            $missing.Add([string]$pref) | Out-Null
-        }
-    }
-    return @($missing)
+    $profile.target_names = @($targetNames)
+    foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
+    $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
+    $capability = @($profile.capabilities | Select-Object -First 6)
+    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    return [pscustomobject]$profile
 }
 
-function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcpServers, [string]$Mode = "target-repo") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    $userKeywords = @(Get-AuditUserProfileKeywords $cfg)
+function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $installedMcpServers) {
     $repoKeywordSets = @()
     foreach ($scan in @($scans)) {
         $targetValue = Get-CfgObjectProperty $scan "target"
@@ -17846,37 +17465,37 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
                 risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
             })
     }
-    $repoKeywords = @()
-    if (@($repoKeywordSets).Count -gt 0) {
-        $repoKeywords = @(Merge-AuditKeywordSets @($repoKeywordSets | ForEach-Object { $_.keywords }) 220)
-    }
+    $profileKeywords = @(Merge-AuditKeywordSets @(
+            (Convert-AuditStringArray $targetProfile.target_names),
+            (Convert-AuditStringArray $targetProfile.languages),
+            (Convert-AuditStringArray $targetProfile.package_managers),
+            (Convert-AuditStringArray $targetProfile.frameworks),
+            (Convert-AuditStringArray $targetProfile.build_commands),
+            (Convert-AuditStringArray $targetProfile.test_commands),
+            (Convert-AuditStringArray $targetProfile.capabilities),
+            (Convert-AuditStringArray $targetProfile.agent_rule_files),
+            (Convert-AuditStringArray $targetProfile.notable_files),
+            (Convert-AuditStringArray $targetProfile.risks)
+        ) 220)
     $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
-    $profileOnlyContext = @(Merge-AuditKeywordSets @($userKeywords, $installedKeywords) 180)
     return [pscustomobject]([ordered]@{
             schema_version = 1
             generated_at = (Get-Date).ToString("o")
-            mode = $normalizedMode
+            derivation = "target_scans_only"
             summary = [ordered]@{
-                user_keyword_count = @($userKeywords).Count
-                repo_keyword_count = @($repoKeywords).Count
+                target_profile_keyword_count = @($profileKeywords).Count
                 installed_state_keyword_count = @($installedKeywords).Count
                 installed_skill_count = @($installedSkills).Count
                 installed_mcp_server_count = @($installedMcpServers).Count
             }
             keywords = [ordered]@{
-                user_profile = @($userKeywords)
-                target_repo = @($repoKeywords)
+                target_profile = @($profileKeywords)
+                target_repo = @($profileKeywords)
                 installed_state = @($installedKeywords)
-                profile_only_context = @($profileOnlyContext)
             }
             targets = @($repoKeywordSets)
-            explicit_preferences = [ordered]@{
-                missing_preferred_agents = @(Get-AuditMissingPreferredAgents $cfg $installedSkills)
-            }
             decision_checklist = @(
-                "Each add/remove recommendation should keep keyword_trace.user_profile with keywords from decision-insights.keywords.user_profile.",
-                "In target-repo mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.target_repo.",
-                "In profile-only mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.profile_only_context.",
+                "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
             )
         })
@@ -17899,7 +17518,7 @@ function Read-AuditSnapshot([string]$recommendationDir) {
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("缺少 snapshot.json：{0}" -f $path)
     try { $snapshot = Get-ContentUtf8 $path | ConvertFrom-Json }
     catch { throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message) }
-    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 1) ("snapshot.json schema_version 无效：{0}" -f $path)
+    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 2) ("snapshot.json schema_version 无效：{0}" -f $path)
     return $snapshot
 }
 
@@ -18049,7 +17668,7 @@ function Apply-AuditSourceStrategyOverride($strategy, [string]$mode) {
 
 function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
+    Need ($normalizedMode -eq "target-repo") ("审查来源模式必须为 target-repo：{0}" -f $Mode)
     $strategy = [pscustomobject]([ordered]@{
             schema_version = 1
             mode = $normalizedMode
@@ -18099,7 +17718,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             )
             scoring = [ordered]@{
                 authority = "Prefer first-party documentation and maintained source repositories."
-                fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
+                fit = "Match only the scan-derived target profile and concrete repository scan facts."
                 duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
                 maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
@@ -18112,7 +17731,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             decision_quality_policy = [ordered]@{
                 require_keyword_trace_for_changes = $false
                 require_keyword_trace_membership = $false
-                min_user_profile_keywords_per_change = 0
+                min_target_profile_keywords_per_change = 0
                 min_target_repo_keywords_per_change = 0
                 min_installed_state_keywords_per_change = 0
             }
@@ -18121,7 +17740,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
-                "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
+                "Every recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -18163,8 +17782,8 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
 
     switch ($label) {
         "snapshot.json" {
-            Need ([int]$data.schema_version -eq 1) ("snapshot schema_version 必须为 1：{0}" -f $path)
-            foreach ($field in @("run_id", "mode", "prompt_contract_version", "user_profile", "installed_state", "target_scans", "source_strategy", "decision_insights")) {
+            Need ([int]$data.schema_version -eq 2) ("snapshot schema_version 必须为 2：{0}" -f $path)
+            foreach ($field in @("run_id", "mode", "prompt_contract_version", "installed_state", "target_scans", "target_profile", "source_strategy", "decision_insights")) {
                 Need (Test-AuditJsonProperty $data $field) ("snapshot 缺少 {0}：{1}" -f $field, $path)
             }
             Need (Assert-IsArray $data.target_scans) ("snapshot.target_scans 必须为数组：{0}" -f $path)
@@ -18172,11 +17791,11 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
-            Need (Test-AuditStructuredProfileComplete $data.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
+            Need ([string]$data.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile 必须由 target_scans_only 派生：{0}" -f $path)
+            Need (@($data.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
         }
         "recommendations.json" {
-            Need ([int]$data.schema_version -eq 2) ("recommendations schema_version 必须为 2：{0}" -f $path)
+            Need ([int]$data.schema_version -eq 3) ("recommendations schema_version 必须为 3：{0}" -f $path)
             Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations 缺少 decision_basis：{0}" -f $path)
         }
         "receipt.json" {
@@ -18201,45 +17820,27 @@ function Assert-AuditBundleRequiredFiles([object[]]$files) {
 
 function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [string]$Mode = "target-repo", [string]$Query = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知 recommendations 模式：{0}" -f $Mode)
-    $isProfileOnly = ($normalizedMode -eq "profile-only")
-    $targetScanUsed = -not $isProfileOnly
-    $templateNotes = if ($isProfileOnly) {
-        @(
-            "Replace placeholder values wrapped in <> before using this file.",
-            "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-            "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
-        )
-    }
-    else {
-        @(
-            "Replace placeholder values wrapped in <> before using this file.",
-            "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-            "All install/remove decisions must cite both user-profile and target-repo reasons."
-        )
-    }
-    $basisSummary = if ($isProfileOnly) {
-        "<why these recommendations reflect the user profile, installed-skill inventory, and source strategy without target repo facts>"
-    }
-    else {
-        "<why these recommendations reflect both the user profile and the target repo facts>"
-    }
-    $targetReasonInstall = if ($isProfileOnly) { "<which installed-skill inventory or profile-only context justifies this skill>" } else { "<which detected target-repo facts justify this skill>" }
-    $targetReasonRemoval = if ($isProfileOnly) { "<why the installed-skill inventory or profile-only context no longer justifies this skill>" } else { "<why the target repo no longer justifies this skill>" }
-    $targetReasonDoNotInstall = if ($isProfileOnly) { "<why the profile-only context does not justify it>" } else { "<why the target repo does not justify it>" }
-    $targetKeywordHint = if ($isProfileOnly) { "<keyword from decision-insights.keywords.profile_only_context or target_repo>" } else { "<keyword from decision-insights.keywords.target_repo>" }
+    Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
+    $templateNotes = @(
+        "Replace placeholder values wrapped in <> before using this file.",
+        "Delete example entries that are not needed, but keep the schema shape unchanged.",
+        "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
+        "All install/remove decisions must cite scan-derived target-profile reasons only."
+    )
+    $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
+    $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
+    $targetReasonRemoval = "<why the scan-derived target profile no longer justifies this skill>"
+    $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
     return [pscustomobject]([ordered]@{
-        schema_version = 2
+        schema_version = 3
         run_id = $runId
         target = $targetName
         recommendation_mode = $normalizedMode
         discovery_query = [string]$Query
         template_notes = @($templateNotes)
         decision_basis = [ordered]@{
-            user_profile_used = $true
-            target_scan_used = $targetScanUsed
+            target_profile_used = $true
+            target_scan_used = $true
             source_strategy_used = $true
             summary = $basisSummary
         }
@@ -18247,8 +17848,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
-                reason_user_profile = "<why the user's long-term workflow benefits from this skill>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 install = [ordered]@{
                     repo = "<owner/repo-or-local-path>"
                     skill = "<relative-skill-path-or-.>"
@@ -18263,8 +17863,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         overlap_findings = @(
             [ordered]@{
                 name = "<existing-skill-or-skill-pair>"
-                reason_user_profile = "<why overlap matters for the user's workflow>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
                 source_preference = [ordered]@{
@@ -18286,8 +17885,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         removal_candidates = @(
             [ordered]@{
                 name = "<installed-skill-name>"
-                reason_user_profile = "<why the user profile no longer justifies this skill>"
-                reason_target_repo = $targetReasonRemoval
+                reason_target_profile = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{
@@ -18299,8 +17897,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
-                reason_user_profile = "<why the user profile does not justify it>"
-                reason_target_repo = $targetReasonDoNotInstall
+                reason_target_profile = $targetReasonDoNotInstall
                 sources = @("<source-url-1>")
                 note = "<why it should not be added now>"
             }
@@ -18308,8 +17905,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         mcp_new_servers = @(
             [ordered]@{
                 name = "<mcp-server-name>"
-                reason_user_profile = "<why the user's long-term workflow benefits from this MCP server>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 confidence = "medium"
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
@@ -18324,8 +17920,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         mcp_removal_candidates = @(
             [ordered]@{
                 name = "<installed-mcp-name>"
-                reason_user_profile = "<why the user profile no longer justifies this MCP server>"
-                reason_target_repo = $targetReasonRemoval
+                reason_target_profile = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{
@@ -19015,8 +18610,7 @@ function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
 }
 
 function Assert-AuditReasonPair($item, [string]$name) {
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_user_profile)) ("{0} 缺少 reason_user_profile：{1}" -f $name, [string]$item.name)
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_repo)) ("{0} 缺少 reason_target_repo：{1}" -f $name, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_profile)) ("{0} 缺少 reason_target_profile：{1}" -f $name, [string]$item.name)
     Normalize-AuditSources $item $name
 }
 
@@ -19183,7 +18777,7 @@ function Assert-AuditRecommendationItem($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
 }
 
 function Assert-AuditRemovalCandidate($item) {
@@ -19230,7 +18824,7 @@ function Assert-AuditMcpNewServer($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("MCP confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
 }
 
 function Assert-AuditMcpRemovalCandidate($item) {
@@ -19253,26 +18847,20 @@ function Load-AuditRecommendations([string]$path) {
         throw ("recommendations JSON 解析失败：{0}" -f $_.Exception.Message)
     }
 
-    Need ([int]$rec.schema_version -eq 2) "recommendations.schema_version 仅支持 2"
+    Need ([int]$rec.schema_version -eq 3) "recommendations.schema_version 仅支持 3"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.run_id)) "recommendations 缺少 run_id"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.target)) "recommendations 缺少 target"
     Need ($rec.PSObject.Properties.Match("decision_basis").Count -gt 0 -and $null -ne $rec.decision_basis) "recommendations 缺少 decision_basis"
-    Need (Test-AuditJsonProperty $rec.decision_basis "user_profile_used") "decision_basis 缺少 user_profile_used"
+    Need (Test-AuditJsonProperty $rec.decision_basis "target_profile_used") "decision_basis 缺少 target_profile_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "target_scan_used") "decision_basis 缺少 target_scan_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "source_strategy_used") "decision_basis 缺少 source_strategy_used"
     $recommendationMode = "target-repo"
     if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
         $recommendationMode = ([string]$rec.recommendation_mode).ToLowerInvariant()
     }
-    Need ($recommendationMode -eq "target-repo" -or $recommendationMode -eq "profile-only") ("recommendation_mode 仅支持 target-repo 或 profile-only：{0}" -f $recommendationMode)
-    Assert-AuditRequiredBooleanTrue $rec.decision_basis.user_profile_used "decision_basis.user_profile_used"
-    Need ($rec.decision_basis.target_scan_used -is [bool]) "decision_basis.target_scan_used 必须是布尔值"
-    if ($recommendationMode -eq "profile-only") {
-        Need (-not [bool]$rec.decision_basis.target_scan_used) "profile-only 模式下 decision_basis.target_scan_used 必须为 false"
-    }
-    else {
-        Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
-    }
+    Need ($recommendationMode -eq "target-repo") ("recommendation_mode 仅支持 target-repo：{0}" -f $recommendationMode)
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_profile_used "decision_basis.target_profile_used"
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.source_strategy_used "decision_basis.source_strategy_used"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.decision_basis.summary)) "decision_basis.summary 不能为空"
     Ensure-AuditArrayProperty $rec "new_skills"
@@ -19350,8 +18938,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
             tokens = @($tokens)
@@ -19371,9 +18958,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
-            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             matched_skill = $matched
             status = $status
@@ -19398,8 +18984,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
             server = $server
@@ -19418,9 +19003,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             installed_name = [string]$item.installed.name
-            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             matched_server = $matched
             status = $status
@@ -19499,8 +19083,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.items)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1}" -f $itemIndex, [string]$item.name)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -19514,8 +19097,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.removal_candidates)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $itemIndex, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -19530,8 +19112,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
             Write-Host ("{0}) {1} transport={2} status={3}" -f $itemIndex, [string]$item.name, $transport, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -19545,8 +19126,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.mcp_removal_candidates)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1} [name={2}] status={3}" -f $itemIndex, [string]$item.name, [string]$item.installed_name, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -19705,24 +19285,27 @@ function Write-AuditThreeFileBundle {
         $Config,
         [object[]]$Scans
     )
-    $installedState = New-AuditInstalledStateSnapshot $(if ($Mode -eq "profile-only") { "新技能发现" } else { "审查包生成时" })
+    Need ($Mode -eq "target-repo") "审查包只支持基于目标仓扫描的 target-repo 模式。"
+    Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
+    $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $decisionInsights = New-AuditDecisionInsights $Config $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers $Mode
-    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } elseif ($Mode -eq "profile-only") { "profile-only" } else { "*" }
+    $targetProfile = New-AuditTargetProfile $Scans
+    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
+    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } else { "*" }
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
     $receiptPath = Join-Path $ReportRoot "receipt.json"
     $snapshot = [pscustomobject]([ordered]@{
-        schema_version = 1
+        schema_version = 2
         snapshot_kind = "audit_input"
         run_id = $RunId
         mode = $Mode
         query = [string]$Query
         generated_at = (Get-Date).ToString("o")
         prompt_contract_version = Get-AuditPromptContractVersion
-        user_profile = Get-AuditUserProfileOutput $Config
         installed_state = $installedState
         target_scans = @($Scans)
+        target_profile = $targetProfile
         source_strategy = $sourceStrategy
         decision_insights = $decisionInsights
         write_contract = [pscustomobject]@{
@@ -19790,8 +19373,7 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
 
 function Invoke-AuditTargetsScan {
     param([string]$Target, [string]$OutDir, [switch]$Force)
-    $cfg = Ensure-AuditUserProfilePrecheck
-    Assert-AuditUserProfileReady $cfg
+    $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
@@ -19808,15 +19390,6 @@ function Invoke-AuditTargetsScan {
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
     })
     return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" "" $cfg $scans
-}
-
-function Invoke-AuditSkillDiscovery {
-    param([string]$Query, [string]$OutDir, [switch]$Force)
-    $cfg = Ensure-AuditUserProfilePrecheck
-    Assert-AuditUserProfileReady $cfg
-    $runId = Get-AuditRunId
-    $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
-    return Write-AuditThreeFileBundle $reportRoot $runId "profile-only" $Query $cfg @()
 }
 
 function Get-AuditPersistedChangeTotal($counts) {
@@ -19855,8 +19428,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             index = $itemIndex
             original_index = $itemIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -19875,8 +19447,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
                 vendor = [string]$item.vendor
                 from = [string]$item.from
             }
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -19891,8 +19462,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             index = $itemIndex
             original_index = $itemIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -19908,8 +19478,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             original_index = $itemIndex
             name = [string]$item.name
             installed_name = [string]$item.installed_name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -20011,7 +19580,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_user_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_target_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -20028,8 +19597,8 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         if ($q.PSObject.Properties.Match("require_keyword_trace_membership").Count -gt 0) {
             $policy.require_keyword_trace_membership = [bool]$q.require_keyword_trace_membership
         }
-        if ($q.PSObject.Properties.Match("min_user_profile_keywords_per_change").Count -gt 0) {
-            $policy.min_user_profile_keywords_per_change = [Math]::Max(0, [int]$q.min_user_profile_keywords_per_change)
+        if ($q.PSObject.Properties.Match("min_target_profile_keywords_per_change").Count -gt 0) {
+            $policy.min_target_profile_keywords_per_change = [Math]::Max(0, [int]$q.min_target_profile_keywords_per_change)
         }
         if ($q.PSObject.Properties.Match("min_target_repo_keywords_per_change").Count -gt 0) {
             $policy.min_target_repo_keywords_per_change = [Math]::Max(0, [int]$q.min_target_repo_keywords_per_change)
@@ -20040,7 +19609,7 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         $policy.enabled = (
             [bool]$policy.require_keyword_trace_for_changes -or
             [bool]$policy.require_keyword_trace_membership -or
-            [int]$policy.min_user_profile_keywords_per_change -gt 0 -or
+            [int]$policy.min_target_profile_keywords_per_change -gt 0 -or
             [int]$policy.min_target_repo_keywords_per_change -gt 0 -or
             [int]$policy.min_installed_state_keywords_per_change -gt 0
         )
@@ -20058,9 +19627,8 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
         path = $path
         mode = "target-repo"
         keywords = [ordered]@{
-            user_profile = @()
+            target_profile = @()
             target_repo = @()
-            profile_only_context = @()
             installed_state = @()
         }
     }
@@ -20072,7 +19640,7 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
             $result.mode = ([string]$data.mode).Trim().ToLowerInvariant()
         }
         if ($data.PSObject.Properties.Match("keywords").Count -gt 0 -and $null -ne $data.keywords) {
-            foreach ($field in @("user_profile", "target_repo", "profile_only_context", "installed_state")) {
+            foreach ($field in @("target_profile", "target_repo", "installed_state")) {
                 if ($data.keywords.PSObject.Properties.Match($field).Count -gt 0) {
                     $result.keywords[$field] = @(Normalize-AuditStringArray $data.keywords.$field)
                 }
@@ -20089,10 +19657,10 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     $coverage = [ordered]@{
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         items_with_complete_keyword_trace = 0
-        user_keyword_ref_count = 0
+        target_profile_keyword_ref_count = 0
         target_keyword_ref_count = 0
         installed_keyword_ref_count = 0
-        unique_user_keywords = @()
+        unique_target_profile_keywords = @()
         unique_target_keywords = @()
         unique_installed_keywords = @()
     }
@@ -20116,27 +19684,27 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
         $recommendationMode = ([string]$rec.recommendation_mode).Trim().ToLowerInvariant()
     }
-    $requiredUser = [int]$policy.min_user_profile_keywords_per_change
+    $requiredTargetProfile = [int]$policy.min_target_profile_keywords_per_change
     $requiredTarget = [int]$policy.min_target_repo_keywords_per_change
     $requiredInstalled = [int]$policy.min_installed_state_keywords_per_change
     if ([bool]$policy.require_keyword_trace_for_changes) {
-        if ($requiredUser -lt 1) { $requiredUser = 1 }
+        if ($requiredTargetProfile -lt 1) { $requiredTargetProfile = 1 }
         if ($requiredTarget -lt 1) { $requiredTarget = 1 }
         if ($requiredInstalled -lt 1) { $requiredInstalled = 1 }
     }
 
-    $userSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $targetProfileSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $targetSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $installedSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.user_profile)) { $null = $userSet.Add($token) }
-    $targetTokens = if ($recommendationMode -eq "profile-only") { @(Normalize-AuditStringArray $decisionInsights.keywords.profile_only_context) } else { @(Normalize-AuditStringArray $decisionInsights.keywords.target_repo) }
+    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.target_profile)) { $null = $targetProfileSet.Add($token) }
+    $targetTokens = @(Normalize-AuditStringArray $decisionInsights.keywords.target_repo)
     foreach ($token in @($targetTokens)) { $null = $targetSet.Add($token) }
     foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.installed_state)) { $null = $installedSet.Add($token) }
     if ([bool]$policy.require_keyword_trace_membership -and -not [bool]$decisionInsights.exists) {
         $issues.Add("insufficient_decision_quality：snapshot.json decision_insights 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
     }
 
-    $uniqueUser = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $uniqueTargetProfile = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $uniqueTarget = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $uniqueInstalled = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $collections = @(
@@ -20151,44 +19719,44 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
             if ($item.PSObject.Properties.Match("keyword_trace").Count -gt 0 -and $null -ne $item.keyword_trace -and (Test-AuditObjectLike $item.keyword_trace)) {
                 $trace = $item.keyword_trace
             }
-            $userRefs = @()
+            $targetProfileRefs = @()
             $targetRefs = @()
             $installedRefs = @()
             if ($null -ne $trace) {
-                if ($trace.PSObject.Properties.Match("user_profile").Count -gt 0) { $userRefs = @(Normalize-AuditStringArray $trace.user_profile) }
-                if ($trace.PSObject.Properties.Match("target_repo_or_context").Count -gt 0) { $targetRefs = @(Normalize-AuditStringArray $trace.target_repo_or_context) }
+                if ($trace.PSObject.Properties.Match("target_profile").Count -gt 0) { $targetProfileRefs = @(Normalize-AuditStringArray $trace.target_profile) }
+                if ($trace.PSObject.Properties.Match("target_repo").Count -gt 0) { $targetRefs = @(Normalize-AuditStringArray $trace.target_repo) }
                 if ($trace.PSObject.Properties.Match("installed_state").Count -gt 0) { $installedRefs = @(Normalize-AuditStringArray $trace.installed_state) }
             }
 
-            if (@($userRefs).Count -gt 0 -and @($targetRefs).Count -gt 0 -and @($installedRefs).Count -gt 0) {
+            if (@($targetProfileRefs).Count -gt 0 -and @($targetRefs).Count -gt 0 -and @($installedRefs).Count -gt 0) {
                 $coverage.items_with_complete_keyword_trace = [int]$coverage.items_with_complete_keyword_trace + 1
             }
-            $coverage.user_keyword_ref_count = [int]$coverage.user_keyword_ref_count + @($userRefs).Count
+            $coverage.target_profile_keyword_ref_count = [int]$coverage.target_profile_keyword_ref_count + @($targetProfileRefs).Count
             $coverage.target_keyword_ref_count = [int]$coverage.target_keyword_ref_count + @($targetRefs).Count
             $coverage.installed_keyword_ref_count = [int]$coverage.installed_keyword_ref_count + @($installedRefs).Count
 
-            foreach ($token in @($userRefs)) { $null = $uniqueUser.Add($token) }
+            foreach ($token in @($targetProfileRefs)) { $null = $uniqueTargetProfile.Add($token) }
             foreach ($token in @($targetRefs)) { $null = $uniqueTarget.Add($token) }
             foreach ($token in @($installedRefs)) { $null = $uniqueInstalled.Add($token) }
 
-            if ($requiredUser -gt 0 -and @($userRefs).Count -lt $requiredUser) {
-                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($userRefs).Count, $requiredUser)) | Out-Null
+            if ($requiredTargetProfile -gt 0 -and @($targetProfileRefs).Count -lt $requiredTargetProfile) {
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_profile 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetProfileRefs).Count, $requiredTargetProfile)) | Out-Null
             }
             if ($requiredTarget -gt 0 -and @($targetRefs).Count -lt $requiredTarget) {
-                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetRefs).Count, $requiredTarget)) | Out-Null
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetRefs).Count, $requiredTarget)) | Out-Null
             }
             if ($requiredInstalled -gt 0 -and @($installedRefs).Count -lt $requiredInstalled) {
                 $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.installed_state 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($installedRefs).Count, $requiredInstalled)) | Out-Null
             }
 
             if ([bool]$policy.require_keyword_trace_membership -and [bool]$decisionInsights.exists) {
-                $unknownUser = @($userRefs | Where-Object { -not $userSet.Contains([string]$_) })
-                if (@($unknownUser).Count -gt 0) {
-                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownUser | Select-Object -First 3) -join ", "))) | Out-Null
+                $unknownTargetProfile = @($targetProfileRefs | Where-Object { -not $targetProfileSet.Contains([string]$_) })
+                if (@($unknownTargetProfile).Count -gt 0) {
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_profile 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTargetProfile | Select-Object -First 3) -join ", "))) | Out-Null
                 }
                 $unknownTarget = @($targetRefs | Where-Object { -not $targetSet.Contains([string]$_) })
                 if (@($unknownTarget).Count -gt 0) {
-                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTarget | Select-Object -First 3) -join ", "))) | Out-Null
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTarget | Select-Object -First 3) -join ", "))) | Out-Null
                 }
                 $unknownInstalled = @($installedRefs | Where-Object { -not $installedSet.Contains([string]$_) })
                 if (@($unknownInstalled).Count -gt 0) {
@@ -20197,7 +19765,7 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
             }
         }
     }
-    $coverage.unique_user_keywords = @($uniqueUser | Sort-Object)
+    $coverage.unique_target_profile_keywords = @($uniqueTargetProfile | Sort-Object)
     $coverage.unique_target_keywords = @($uniqueTarget | Sort-Object)
     $coverage.unique_installed_keywords = @($uniqueInstalled | Sort-Object)
     return [pscustomobject]([ordered]@{
@@ -20297,14 +19865,14 @@ function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
     catch { return "" }
 }
 
-function Test-AuditUserProfilePreflight([string]$recommendationDir) {
+function Test-AuditTargetProfilePreflight([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
     $issues = New-Object System.Collections.Generic.List[string]
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
-        Need ($null -ne $snapshot.user_profile) ("snapshot.user_profile 缺失：{0}" -f $path)
-        Need (-not [string]::IsNullOrWhiteSpace([string]$snapshot.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
-        Need (Test-AuditStructuredProfileComplete $snapshot.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
+        Need ($null -ne $snapshot.target_profile) ("snapshot.target_profile 缺失：{0}" -f $path)
+        Need ([string]$snapshot.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile.derivation 必须为 target_scans_only：{0}" -f $path)
+        Need (@($snapshot.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
     }
     catch {
         $issues.Add([string]$_.Exception.Message) | Out-Null
@@ -20386,16 +19954,16 @@ function Invoke-AuditRecommendationsPreflight {
             coverage = [ordered]@{
                 total_change_items = 0
                 items_with_complete_keyword_trace = 0
-                user_keyword_ref_count = 0
+                target_profile_keyword_ref_count = 0
                 target_keyword_ref_count = 0
                 installed_keyword_ref_count = 0
-                unique_user_keywords = @()
+                unique_target_profile_keywords = @()
                 unique_target_keywords = @()
                 unique_installed_keywords = @()
             }
         }
     }
-    $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
+    $targetProfileCheck = Test-AuditTargetProfilePreflight $recommendationDir
     $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
     $targetLiveState = if ($null -ne $InitialWorkflowInputState -and $null -ne $InitialWorkflowInputState.target_repos) {
         $InitialWorkflowInputState.target_repos
@@ -20432,8 +20000,8 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($decisionQualityCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
     }
-    foreach ($issue in @($userProfileCheck.issues)) {
-        $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
+    foreach ($issue in @($targetProfileCheck.issues)) {
+        $issues.Add(("target_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
     foreach ($issue in @($removalDependencyCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
@@ -20447,7 +20015,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -20460,7 +20028,7 @@ function Invoke-AuditRecommendationsPreflight {
         decision_quality_policy = $decisionQualityPolicy
         decision_quality = $decisionQualityCheck.coverage
         decision_insights = $decisionInsights
-        user_profile_check = $userProfileCheck
+        target_profile_check = $targetProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
         snapshot_staleness = $snapshotStaleness
@@ -21089,8 +20657,7 @@ function ConvertTo-AuditWorkflowCategoryItems($items) {
         $result += [pscustomobject]([ordered]@{
             original_index = $originalIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             status = [string]$item.status
         })
@@ -21135,7 +20702,7 @@ function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
             "stale_snapshot",
             "insufficient_source_coverage",
             "insufficient_decision_quality",
-            "user_profile_invalid",
+            "target_profile_invalid",
             "workflow_input_changed",
             "live_state_changed",
             "dry_run_not_confirmed",
@@ -21314,7 +20881,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         action = "list"
         name = $null
         path = $null
-        profile = $null
         target = $null
         run_id = $null
         out = $null
@@ -21338,12 +20904,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         switch ($head) {
             "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
             "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
-            "需求设置" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "profile-set" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "需求查看" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "profile-show" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "需求结构化" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
-            "profile-structure" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
             "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
             "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
             "修改" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
@@ -21358,9 +20918,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
-            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
             "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "预检" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
@@ -21396,22 +20953,12 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
-            "--profile" {
-                Need ($i + 1 -lt $items.Count) "--profile 缺少值"
-                $result.profile = [string]$items[++$i]
-                continue
-            }
             "--out" {
                 Need ($i + 1 -lt $items.Count) "--out 缺少值"
                 $result.out = [string]$items[++$i]
                 if (Test-AuditPlaceholderToken $result.out) {
                     throw ("--out 路径包含未替换占位符：{0}`n{1}" -f $result.out, (Get-AuditRunIdHintText))
                 }
-                continue
-            }
-            "--query" {
-                Need ($i + 1 -lt $items.Count) "--query 缺少值"
-                $result.query = [string]$items[++$i]
                 continue
             }
             "--recommendations" {
@@ -21491,16 +21038,12 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "审查目标 子命令：" -ForegroundColor Cyan
     Write-Host "  .\skills.ps1 审查目标 帮助"
     Write-Host "  .\skills.ps1 审查目标 初始化"
-    Write-Host "  .\skills.ps1 审查目标 需求设置"
-    Write-Host "  .\skills.ps1 审查目标 需求查看"
-    Write-Host "  .\skills.ps1 审查目标 需求结构化 [--profile <file>]"
     Write-Host "  .\skills.ps1 审查目标 添加 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
     Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
-    Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
@@ -21521,22 +21064,6 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
                 Write-Host "audit-targets.json 已存在，未覆盖。" -ForegroundColor Yellow
             }
         }
-        "profile_set" {
-            $rawText = Read-HostSafe "请输入用户基本需求（长文本）"
-            Set-AuditUserProfileRawText $rawText
-            $defaultPath = Get-AuditStructuredProfileDefaultPath
-            $profilePath = Read-HostSafe ("结构化 profile 文件路径（回车使用默认：{0}；输入 0 跳过）" -f $defaultPath)
-            if ([string]$profilePath.Trim() -eq "0") {
-                Write-Host "已保存用户基本需求。结构化导入已跳过。" -ForegroundColor Green
-            }
-            else {
-                Invoke-AuditStructuredProfileFlow $profilePath
-            }
-        }
-        "profile_show" { Show-AuditUserProfile }
-        "profile_structure" {
-            Invoke-AuditStructuredProfileFlow $opts.profile
-        }
         "add" {
             Add-AuditTargetConfigEntry $opts.name $opts.path $opts.tags $opts.notes | Out-Null
             Write-Host ("已登记目标仓：{0}" -f (Normalize-Name $opts.name)) -ForegroundColor Green
@@ -21554,7 +21081,6 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
         "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
-        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" {
             if (-not $opts.apply) {
@@ -22510,11 +22036,11 @@ Skills 管理器（中文菜单）
   1) 接入来源：新增技能库，或用 add/npx 导入单个技能
   2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
   3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
-  4) 目标仓审查：查看需求 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
+  4) 目标仓审查：扫描目标仓 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
 
 菜单地图：
   - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
-  - 目标仓审查：需求、目标仓、审查包、预检、应用、状态
+  - 目标仓审查：目标仓扫描、审查包、预检、应用、状态
   - MCP 服务：新增 MCP、卸载 MCP、同步配置
   - 技能库管理：新增/删除技能库、生成锁文件、打开 skills.json
   - 更多：解除目标目录关联、清理 .bak 备份
@@ -22585,15 +22111,11 @@ MCP：
   默认不调用宿主 CLI；仅 --host-probe 读取公开 Codex JSON，结果脱敏且不证明宿主已加载。
 
 目标仓审查：
-  .\skills.ps1 审查目标 需求设置
-  .\skills.ps1 审查目标 需求查看
-  .\skills.ps1 审查目标 需求结构化 --profile <file>
   .\skills.ps1 审查目标 列表
   .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
   .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
-  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file>
@@ -22640,10 +22162,8 @@ MCP/门禁环境变量：
   - `安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍可使用。
 
 目标仓审查：
-  - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
-  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套三文件审查包和 preflight/dry-run/apply 流程。
+  - `扫描` 只从已登记目标仓的扫描事实派生需求画像；新增技能/MCP候选必须基于该画像完成 preflight/dry-run。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
-  - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
   - 每个 run 固定只有三个文件：不可编辑的 `snapshot.json`、唯一允许 AI 编辑的 `recommendations.json`、命令维护的 `receipt.json`；不得新增旁路报告或 markdown evidence。
   - 内置提示词只定义工作流，prompt contract version 已写入 `snapshot.json`；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`。
   - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 preflight/dry-run；不得修改 snapshot 或 receipt。
@@ -22655,7 +22175,7 @@ MCP/门禁环境变量：
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
   - `状态` 从最近一次 `receipt.json` 的 workflow/dry_run/apply section 显示 `mode/success/persisted/changed_counts`。
-  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
+  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并展示扫描画像依据。
   - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
@@ -22757,28 +22277,17 @@ function 审查高级菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 审查高级设置 ==="
-        Write-Host "1) 导入结构化需求"
-        Write-Host "2) 初始化审查配置"
-        Write-Host "3) 查看 AI 提示词"
-        Write-Host "4) 编辑 AI 提示词"
-        Write-Host "5) 直接执行建议（高级）"
+        Write-Host "1) 初始化审查配置"
+        Write-Host "2) 查看 AI 提示词"
+        Write-Host "3) 编辑 AI 提示词"
+        Write-Host "4) 直接执行建议（高级）"
         Write-Host "0) 返回"
         $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
-            "1" {
-                $defaultPath = Get-AuditStructuredProfileDefaultPath
-                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
-                if ([string]::IsNullOrWhiteSpace($profile)) {
-                    Invoke-AuditTargetsCommand @("profile-structure")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
-                }
-            }
-            "2" { Invoke-AuditTargetsCommand @("init") }
-            "3" { Show-AuditOuterAiPromptTemplate }
-            "4" { Edit-AuditOuterAiPromptTemplate }
-            "5" {
+            "1" { Invoke-AuditTargetsCommand @("init") }
+            "2" { Show-AuditOuterAiPromptTemplate }
+            "3" { Edit-AuditOuterAiPromptTemplate }
+            "4" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
             }
@@ -22792,24 +22301,19 @@ function 审查目标菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 目标仓审查 ==="
-        Write-Host "流程：需求 -> 审查包 -> 预检 -> 应用"
-        Write-Host "1) 查看需求"
-        Write-Host "2) 编辑需求"
-        Write-Host "3) 目标仓列表"
-        Write-Host "4) 生成审查包"
-        Write-Host "5) 预检建议"
-        Write-Host "6) 应用建议（先 dry-run）"
-        Write-Host "7) 查看最近状态"
-        Write-Host "8) 发现新技能"
-        Write-Host "9) 目标仓管理"
-        Write-Host "10) 高级设置"
+        Write-Host "流程：扫描目标仓 -> 审查包 -> 预检 -> 应用"
+        Write-Host "1) 目标仓列表"
+        Write-Host "2) 生成审查包"
+        Write-Host "3) 预检建议"
+        Write-Host "4) 应用建议（先 dry-run）"
+        Write-Host "5) 查看最近状态"
+        Write-Host "6) 目标仓管理"
+        Write-Host "7) 高级设置"
         Write-Host "0) 返回"
         $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
-            "1" { Invoke-AuditTargetsCommand @("profile-show") }
-            "2" { Invoke-AuditTargetsCommand @("profile-set") }
-            "3" { Invoke-AuditTargetsCommand @("list") }
-            "4" {
+            "1" { Invoke-AuditTargetsCommand @("list") }
+            "2" {
                 $cfg = Load-AuditTargetsConfig
                 $targets = @($cfg.targets)
                 if ($targets.Count -eq 0) {
@@ -22837,26 +22341,17 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
                 }
             }
-            "5" {
+            "3" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("preflight", "--recommendations", $path)
             }
-            "6" {
+            "4" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
             }
-            "7" { Invoke-AuditTargetsCommand @("status") }
-            "8" {
-                $query = Read-HostSafe "发现查询（可留空）"
-                if ([string]::IsNullOrWhiteSpace($query)) {
-                    Invoke-AuditTargetsCommand @("discover-skills")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("discover-skills", "--query", $query)
-                }
-            }
-            "9" { 目标仓管理菜单 }
-            "10" { 审查高级菜单 }
+            "5" { Invoke-AuditTargetsCommand @("status") }
+            "6" { 目标仓管理菜单 }
+            "7" { 审查高级菜单 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }

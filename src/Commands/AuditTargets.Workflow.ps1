@@ -42,8 +42,7 @@ function ConvertTo-AuditWorkflowCategoryItems($items) {
         $result += [pscustomobject]([ordered]@{
             original_index = $originalIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             status = [string]$item.status
         })
@@ -88,7 +87,7 @@ function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
             "stale_snapshot",
             "insufficient_source_coverage",
             "insufficient_decision_quality",
-            "user_profile_invalid",
+            "target_profile_invalid",
             "workflow_input_changed",
             "live_state_changed",
             "dry_run_not_confirmed",

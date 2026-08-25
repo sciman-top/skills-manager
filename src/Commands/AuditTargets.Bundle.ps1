@@ -37,24 +37,27 @@ function Write-AuditThreeFileBundle {
         $Config,
         [object[]]$Scans
     )
-    $installedState = New-AuditInstalledStateSnapshot $(if ($Mode -eq "profile-only") { "新技能发现" } else { "审查包生成时" })
+    Need ($Mode -eq "target-repo") "审查包只支持基于目标仓扫描的 target-repo 模式。"
+    Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
+    $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $decisionInsights = New-AuditDecisionInsights $Config $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers $Mode
-    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } elseif ($Mode -eq "profile-only") { "profile-only" } else { "*" }
+    $targetProfile = New-AuditTargetProfile $Scans
+    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
+    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } else { "*" }
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
     $receiptPath = Join-Path $ReportRoot "receipt.json"
     $snapshot = [pscustomobject]([ordered]@{
-        schema_version = 1
+        schema_version = 2
         snapshot_kind = "audit_input"
         run_id = $RunId
         mode = $Mode
         query = [string]$Query
         generated_at = (Get-Date).ToString("o")
         prompt_contract_version = Get-AuditPromptContractVersion
-        user_profile = Get-AuditUserProfileOutput $Config
         installed_state = $installedState
         target_scans = @($Scans)
+        target_profile = $targetProfile
         source_strategy = $sourceStrategy
         decision_insights = $decisionInsights
         write_contract = [pscustomobject]@{
@@ -122,8 +125,7 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
 
 function Invoke-AuditTargetsScan {
     param([string]$Target, [string]$OutDir, [switch]$Force)
-    $cfg = Ensure-AuditUserProfilePrecheck
-    Assert-AuditUserProfileReady $cfg
+    $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
@@ -140,13 +142,4 @@ function Invoke-AuditTargetsScan {
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
     })
     return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" "" $cfg $scans
-}
-
-function Invoke-AuditSkillDiscovery {
-    param([string]$Query, [string]$OutDir, [switch]$Force)
-    $cfg = Ensure-AuditUserProfilePrecheck
-    Assert-AuditUserProfileReady $cfg
-    $runId = Get-AuditRunId
-    $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
-    return Write-AuditThreeFileBundle $reportRoot $runId "profile-only" $Query $cfg @()
 }

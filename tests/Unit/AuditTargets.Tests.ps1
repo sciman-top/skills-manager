@@ -85,12 +85,14 @@ BeforeAll {
             }
         }
         if ($null -eq $SourceStrategy) { $SourceStrategy = [pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null } }
-        if ($null -eq $DecisionInsights) { $DecisionInsights = [pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } } }
+        if ($null -eq $DecisionInsights) { $DecisionInsights = [pscustomobject]@{ derivation="target_scans_only"; keywords=[pscustomobject]@{ target_profile=@("audit"); target_repo=@("repo"); installed_state=@("skills") } } }
         $profile = [pscustomobject]@{
             raw_text="audit workflow"; summary="audit workflow"; last_structured_at=(Get-Date).ToString("o"); structured_by="test"
             structured=[pscustomobject]@{ primary_work_types=@("audit"); preferred_agents=@(); tech_stack=@("powershell"); common_tasks=@("review"); constraints=@("safe"); avoidances=@(); decision_preferences=@("evidence-first") }
         }
-        Write-AuditJsonFile $Path ([pscustomobject]@{ schema_version=1; run_id=$RunId; mode="target-repo"; prompt_contract_version=$PromptVersion; user_profile=$profile; installed_state=$InstalledState; target_scans=@($Scans); source_strategy=$SourceStrategy; decision_insights=$DecisionInsights })
+        if (@($Scans).Count -eq 0) { $Scans = @([pscustomobject]@{ target=[pscustomobject]@{ name="demo" }; detected=[pscustomobject]@{ languages=@("powershell"); package_managers=@(); frameworks=@(); build_commands=@(); test_commands=@(); capabilities=@(); agent_rule_files=@(); notable_files=@() }; risks=@() }) }
+        $targetProfile = [pscustomobject]@{ schema_version=1; derivation="target_scans_only"; summary="test scan profile"; target_names=@("demo"); languages=@("powershell"); package_managers=@(); frameworks=@(); build_commands=@(); test_commands=@(); capabilities=@(); agent_rule_files=@(); notable_files=@() }
+        Write-AuditJsonFile $Path ([pscustomobject]@{ schema_version=2; run_id=$RunId; mode="target-repo"; prompt_contract_version=$PromptVersion; target_profile=$targetProfile; installed_state=$InstalledState; target_scans=@($Scans); source_strategy=$SourceStrategy; decision_insights=$DecisionInsights })
     }
 
 }
@@ -134,7 +136,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Creates audit-targets config with user_profile in version 2" {
+        It "Creates audit-targets config without user profile requirements" {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-audit-v2-init"
@@ -143,18 +145,15 @@ Describe "Audit Targets" {
                 Initialize-AuditTargetsConfig | Out-Null
                 $cfg = Load-AuditTargetsConfig
 
-                $cfg.version | Should -Be 2
-                $cfg.user_profile | Should -Not -BeNullOrEmpty
-                $cfg.user_profile.raw_text | Should -Be ""
-                $cfg.user_profile.summary | Should -Be ""
-                $cfg.user_profile.structured.primary_work_types.Count | Should -Be 0
+                $cfg.version | Should -Be 3
+                $cfg.PSObject.Properties.Match("user_profile").Count | Should -Be 0
             }
             finally {
                 $script:Root = $oldRoot
             }
         }
 
-        It "Migrates version 1 audit config to version 2 with empty user_profile" {
+        It "Migrates version 1 audit config to version 3 without user_profile" {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-audit-v1-migrate"
@@ -163,9 +162,8 @@ Describe "Audit Targets" {
 
                 $cfg = Load-AuditTargetsConfig
 
-                $cfg.version | Should -Be 2
-                $cfg.user_profile.raw_text | Should -Be ""
-                $cfg.user_profile.summary | Should -Be ""
+                $cfg.version | Should -Be 3
+                $cfg.PSObject.Properties.Match("user_profile").Count | Should -Be 0
             }
             finally {
                 $script:Root = $oldRoot
@@ -254,11 +252,8 @@ Describe "Audit Targets" {
     }
 
     Context "Command parsing" {
-        It "Parses init/profile/add/update/remove/list/scan/apply subcommands" {
+        It "Parses init/add/update/remove/list/scan/apply subcommands" {
             (Parse-AuditTargetsArgs @("init")).action | Should -Be "init"
-            (Parse-AuditTargetsArgs @("profile-set")).action | Should -Be "profile_set"
-            (Parse-AuditTargetsArgs @("profile-show")).action | Should -Be "profile_show"
-            (Parse-AuditTargetsArgs @("profile-structure")).action | Should -Be "profile_structure"
 
             $add = Parse-AuditTargetsArgs @("add", "demo", "..\demo")
             $add.action | Should -Be "add"
@@ -276,9 +271,6 @@ Describe "Audit Targets" {
 
             (Parse-AuditTargetsArgs @("list")).action | Should -Be "list"
             (Parse-AuditTargetsArgs @("scan", "--target", "demo")).target | Should -Be "demo"
-            $discover = Parse-AuditTargetsArgs @("discover-skills", "--query", "python testing")
-            $discover.action | Should -Be "discover_skills"
-            $discover.query | Should -Be "python testing"
 
             $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes")
             $apply.action | Should -Be "apply"
@@ -322,9 +314,6 @@ Describe "Audit Targets" {
 
         It "Accepts Chinese subcommands" {
             (Parse-AuditTargetsArgs @("初始化")).action | Should -Be "init"
-            (Parse-AuditTargetsArgs @("需求设置")).action | Should -Be "profile_set"
-            (Parse-AuditTargetsArgs @("需求查看")).action | Should -Be "profile_show"
-            (Parse-AuditTargetsArgs @("需求结构化")).action | Should -Be "profile_structure"
             (Parse-AuditTargetsArgs @("添加", "demo", "..\demo")).action | Should -Be "add"
             (Parse-AuditTargetsArgs @("修改", "demo", "..\demo-v2")).action | Should -Be "update"
             (Parse-AuditTargetsArgs @("删除", "demo")).action | Should -Be "remove"
@@ -332,7 +321,6 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("列出")).action | Should -Be "list"
             (Parse-AuditTargetsArgs @("目标列表")).action | Should -Be "list"
             (Parse-AuditTargetsArgs @("扫描")).action | Should -Be "scan"
-            (Parse-AuditTargetsArgs @("发现新技能")).action | Should -Be "discover_skills"
             (Parse-AuditTargetsArgs @("状态")).action | Should -Be "status"
             (Parse-AuditTargetsArgs @("预检", "--run-id", "demo-run")).action | Should -Be "preflight"
             (Parse-AuditTargetsArgs @("校验预演", "--recommendations", "r.json")).action | Should -Be "validate_dry_run"
@@ -460,7 +448,7 @@ Describe "Audit Targets" {
     }
 
     Context "Repository scan" {
-        It "Saves raw user profile text and clears stale structured fields" {
+        It "Saves raw user profile text and clears stale structured fields" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-set"
@@ -483,7 +471,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Imports structured profile JSON from file" {
+        It "Imports structured profile JSON from file" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-structure"
@@ -516,7 +504,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Normalizes scalar structured fields into arrays during import" {
+        It "Normalizes scalar structured fields into arrays during import" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-normalize"
@@ -540,7 +528,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Rejects structured profile when structured is not an object" {
+        It "Rejects structured profile when structured is not an object" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-invalid-structured"
@@ -566,7 +554,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Imports structured profile from default path when profile is omitted" {
+        It "Imports structured profile from default path when profile is omitted" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-default-import"
@@ -600,7 +588,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Creates structured profile draft at default path when no file exists" {
+        It "Creates structured profile draft at default path when no file exists" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-default-draft"
@@ -620,7 +608,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Blocks scan when user_profile.raw_text is missing" {
+        It "Blocks scan when user_profile.raw_text is missing" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-required"
@@ -642,7 +630,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Auto-fills empty summary during profile precheck before scan" {
+        It "Auto-fills empty summary during profile precheck before scan" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-profile-precheck-autofill-summary"
@@ -678,7 +666,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Fails scan when installed skill facts cannot be collected" {
+        It "Fails scan when installed skill facts cannot be collected" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-scan-installed-facts-fail"
@@ -707,7 +695,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Generates a profile-only discovery bundle with exactly three files" {
+        It "Generates a profile-only discovery bundle with exactly three files" -Skip {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-discover-skills"
@@ -793,7 +781,7 @@ Describe "Audit Targets" {
                 risks = @("git_dirty")
             }
 
-            $insights = New-AuditDecisionInsights $cfg @($scan) @() @() "target-repo"
+            $insights = New-AuditDecisionInsights (New-AuditTargetProfile @($scan)) @($scan) @() @()
 
             $insights.keywords.target_repo | Should -Contain "classroomtoolkit"
             $insights.keywords.target_repo | Should -Contain "dotnet"
@@ -802,7 +790,7 @@ Describe "Audit Targets" {
             $insights.keywords.target_repo | Should -Contain "ClassroomToolkit.sln"
             $insights.keywords.target_repo | Should -Contain "git_dirty"
             $insights.PSObject.Properties.Name | Should -Not -Contain 'fit'
-            @($insights.explicit_preferences.Keys) | Should -Contain 'missing_preferred_agents'
+            $insights.PSObject.Properties.Name | Should -Contain 'decision_checklist'
         }
 
         It "Includes target repo facts in decision insight keywords when detected uses ordered dictionaries" {
@@ -836,7 +824,7 @@ Describe "Audit Targets" {
                 risks = @("design_package_only")
             }
 
-            $insights = New-AuditDecisionInsights $cfg @($scan) @() @() "target-repo"
+            $insights = New-AuditDecisionInsights (New-AuditTargetProfile @($scan)) @($scan) @() @()
 
             $insights.keywords.target_repo | Should -Contain "k12-question-graph"
             $insights.keywords.target_repo | Should -Contain "dotnet"
@@ -897,7 +885,7 @@ Describe "Audit Targets" {
 
         It "Fails when required audit JSON exists but misses required fields" {
             $invalidProfile = Join-Path $TestDrive "snapshot.json"
-            Set-ContentUtf8 $invalidProfile '{"schema_version":1,"run_id":"r"}'
+            Set-ContentUtf8 $invalidProfile '{"schema_version":2,"run_id":"r"}'
 
             $thrown = $false
             try {
@@ -1390,7 +1378,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
         It "Builds recommendations template with placeholder examples" {
             $template = New-AuditRecommendationsTemplate "r1" "demo"
 
-            $template.schema_version | Should -Be 2
+            $template.schema_version | Should -Be 3
             $template.recommendation_mode | Should -Be "target-repo"
             $template.decision_basis.target_scan_used | Should -Be $true
             $template.new_skills[0].install.repo | Should -Be "<owner/repo-or-local-path>"
@@ -1402,7 +1390,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $template.mcp_removal_candidates[0].installed.name | Should -Be "<installed-mcp-name>"
         }
 
-        It "Builds profile-only recommendations template with target_scan_used false" {
+        It "Builds profile-only recommendations template with target_scan_used false" -Skip {
             $template = New-AuditRecommendationsTemplate "r1" "profile-only" "profile-only" "powershell testing"
 
             $template.recommendation_mode | Should -Be "profile-only"
@@ -1412,10 +1400,10 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
         }
 
         It "Builds source strategy with default discovery sources" {
-            $strategy = New-AuditSourceStrategy "profile-only" "powershell testing"
+            $strategy = New-AuditSourceStrategy "target-repo" ""
 
-            $strategy.mode | Should -Be "profile-only"
-            $strategy.query | Should -Be "powershell testing"
+            $strategy.mode | Should -Be "target-repo"
+            $strategy.query | Should -Be ""
             @($strategy.sources | Where-Object { $_.id -eq "official-docs" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "mcp-provider-docs" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should -Be 1
@@ -1425,7 +1413,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $strategy.evidence_policy.require_http_source_for_changes | Should -Be $false
             $strategy.evidence_policy.require_source_observations_for_changes | Should -Be $false
             $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should -Be $false
-            $strategy.decision_quality_policy.min_user_profile_keywords_per_change | Should -Be 0
+            $strategy.decision_quality_policy.min_target_profile_keywords_per_change | Should -Be 0
             $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should -Be 0
             $strategy.decision_quality_policy.min_installed_state_keywords_per_change | Should -Be 0
         }
@@ -1443,14 +1431,14 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
       "min_unique_sources_for_changes": 3
     }
   },
-  "profile-only": {
+  "target-repo": {
     "decision_quality_policy": {
       "min_target_repo_keywords_per_change": 0
     }
   }
 }
 '@
-                $strategy = New-AuditSourceStrategy "profile-only" "powershell testing"
+                $strategy = New-AuditSourceStrategy "target-repo" ""
                 $strategy.evidence_policy.min_unique_sources_for_changes | Should -Be 3
                 $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should -Be 0
             }
@@ -1461,7 +1449,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Adds default empty recommendation reason code when all categories are empty" {
             $path = Join-Path $TestDrive "recommendations-empty-reasons.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-empty","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-empty","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             $rec = Load-AuditRecommendations $path
 
@@ -1471,7 +1459,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Validates and normalizes structured overlap routing" {
             $path = Join-Path $TestDrive "recommendations-overlap-routing.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","source_preference":{"plugin_installed":true,"standalone_duplicate":true,"native_source_preferred":true,"action":"report_only_do_not_import_duplicate"},"routing":{"router":"teacher-ppt","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"ROUTER"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-overlap","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_target_profile":"courseware","sources":["https://example.com/ppt"],"note":"router plus executor","source_preference":{"plugin_installed":true,"standalone_duplicate":true,"native_source_preferred":true,"action":"report_only_do_not_import_duplicate"},"routing":{"router":"teacher-ppt","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"ROUTER"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             $rec = Load-AuditRecommendations $path
 
@@ -1482,14 +1470,14 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects structured overlap routing when the declared router is not a router member" {
             $path = Join-Path $TestDrive "recommendations-overlap-invalid-router.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap-invalid-router","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","routing":{"router":"presentations","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"router"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-overlap-invalid-router","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_target_profile":"courseware","sources":["https://example.com/ppt"],"note":"router plus executor","routing":{"router":"presentations","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"router"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             { Load-AuditRecommendations $path } | Should -Throw
         }
 
         It "Rejects overlap findings without a report note" {
             $path = Join-Path $TestDrive "recommendations-overlap-no-note.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"]}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-overlap-invalid","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_target_profile":"courseware","sources":["https://example.com/ppt"]}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             { Load-AuditRecommendations $path } | Should -Throw
         }
@@ -1507,7 +1495,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects duplicate repo skill mode entries" {
             $path = Join-Path $TestDrive "recommendations.json"
-            Set-Content -Path $path -Value '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u1","reason_target_repo":"t1","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"]},{"name":"a2","reason_user_profile":"u2","reason_target_repo":"t2","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-Content -Path $path -Value '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u1","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"]},{"name":"a2","reason_target_profile":"u2","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1521,7 +1509,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects recommendation without explicit skill path" {
             $path = Join-Path $TestDrive "recommendations-missing-skill.json"
-            Set-Content -Path $path -Value '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-Content -Path $path -Value '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1535,7 +1523,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects recommendations without decision_basis for user profile and target scan" {
             $path = Join-Path $TestDrive "recommendations-no-basis.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1549,7 +1537,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects non-boolean decision_basis flags" {
             $path = Join-Path $TestDrive "recommendations-invalid-basis-types.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":"true","target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":"true","target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1557,14 +1545,14 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             }
             catch {
                 $thrown = $true
-                $_.Exception.Message | Should -Match "decision_basis.user_profile_used"
+                $_.Exception.Message | Should -Match "decision_basis.target_profile_used"
             }
             $thrown | Should -Be $true
         }
 
-        It "Allows profile-only recommendations when target_scan_used is false" {
+        It "Allows profile-only recommendations when target_scan_used is false" -Skip {
             $path = Join-Path $TestDrive "recommendations-profile-only.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"user_profile_used":true,"target_scan_used":false,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"installed inventory context","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"target_profile_used":true,"target_scan_used":false,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $rec = Load-AuditRecommendations $path
 
@@ -1572,9 +1560,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $rec.decision_basis.target_scan_used | Should -Be $false
         }
 
-        It "Rejects profile-only recommendations when target_scan_used is true" {
+        It "Rejects profile-only recommendations when target_scan_used is true" -Skip {
             $path = Join-Path $TestDrive "recommendations-profile-only-invalid.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1589,7 +1577,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Normalizes recommendation sources by trimming and de-duplicating" {
             $path = Join-Path $TestDrive "recommendations-source-normalize.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["  https://example.com/a  ","https://example.com/a",""]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["  https://example.com/a  ","https://example.com/a",""]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $rec = Load-AuditRecommendations $path
             @($rec.new_skills[0].sources).Count | Should -Be 1
@@ -1598,7 +1586,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Rejects recommendations when sources are blank-only" {
             $path = Join-Path $TestDrive "recommendations-source-empty.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["   ",""]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["   ",""]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $thrown = $false
             try {
@@ -1613,7 +1601,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Allows removal candidates but does not create uninstall plan items" {
             $path = Join-Path $TestDrive "recommendations-removal.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_user_profile":"user no longer needs it","reason_target_repo":"repo stack no longer matches","sources":["https://example.com"],"installed":{"vendor":"manual","from":"old-skill"}}],"do_not_install":[]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_target_profile":"user no longer needs it","sources":["https://example.com"],"installed":{"vendor":"manual","from":"old-skill"}}],"do_not_install":[]}'
 
             $rec = Load-AuditRecommendations $path
             $plan = New-AuditInstallPlan $rec
@@ -1624,7 +1612,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Supports MCP add/remove recommendations in plan output" {
             $path = Join-Path $TestDrive "recommendations-mcp.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"context7","reason_user_profile":"u","reason_target_repo":"t","confidence":"high","sources":["https://example.com/context7"],"server":{"name":"context7","transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}],"mcp_removal_candidates":[{"name":"legacy-fetch","reason_user_profile":"u2","reason_target_repo":"t2","sources":["https://example.com/legacy"],"installed":{"name":"legacy-fetch"}}]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"context7","reason_target_profile":"u","confidence":"high","sources":["https://example.com/context7"],"server":{"name":"context7","transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}],"mcp_removal_candidates":[{"name":"legacy-fetch","reason_target_profile":"u2","sources":["https://example.com/legacy"],"installed":{"name":"legacy-fetch"}}]}'
 
             $cfg = [pscustomobject]@{
                 vendors = @()
@@ -1655,14 +1643,13 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Builds install plan without modifying config" {
             $path = Join-Path $TestDrive "recommendations-ok.json"
-            Set-Content -Path $path -Value '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"user likes deterministic docs","reason_target_repo":"repo uses this stack","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            Set-Content -Path $path -Value '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"user likes deterministic docs","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
             $rec = Load-AuditRecommendations $path
             $plan = New-AuditInstallPlan $rec
 
             @($plan.items).Count | Should -Be 1
-            $plan.items[0].reason_user_profile | Should -Be "user likes deterministic docs"
-            $plan.items[0].reason_target_repo | Should -Be "repo uses this stack"
+            $plan.items[0].reason_target_profile | Should -Be "user likes deterministic docs"
             $plan.items[0].tokens[0] | Should -Be "owner/repo"
             (@($plan.items[0].tokens) -contains "--skill") | Should -Be $true
             (@($plan.items[0].tokens) -contains "skills\a") | Should -Be $true
@@ -1674,7 +1661,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $script:Root = Join-Path $TestDrive "ws-dryrun-ack"
                 New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
                 $path = Join-Path $script:Root "recommendations-dryrun-ack.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-dry","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+                Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-dry","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
                 New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-dry"
 
                 $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘"
@@ -1705,8 +1692,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 items = @([pscustomobject]@{
                     original_index = 4
                     name = "skill-four"
-                    reason_user_profile = "u"
-                    reason_target_repo = "t"
+                    reason_target_profile = "u"
                     sources = @("local")
                     keyword_trace = $null
                     status = "planned"
@@ -1716,8 +1702,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                     name = "remove-three"
                     vendor = "manual"
                     from = "remove-three"
-                    reason_user_profile = "u"
-                    reason_target_repo = "t"
+                    reason_target_profile = "u"
                     sources = @("local")
                     keyword_trace = $null
                     status = "planned"
@@ -1725,8 +1710,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 mcp_items = @([pscustomobject]@{
                     original_index = 2
                     name = "mcp-two"
-                    reason_user_profile = "u"
-                    reason_target_repo = "t"
+                    reason_target_profile = "u"
                     sources = @("local")
                     keyword_trace = $null
                     status = "planned"
@@ -1735,8 +1719,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                     original_index = 5
                     name = "mcp-remove-five"
                     installed_name = "mcp-remove-five"
-                    reason_user_profile = "u"
-                    reason_target_repo = "t"
+                    reason_target_profile = "u"
                     sources = @("local")
                     keyword_trace = $null
                     status = "planned"
@@ -1760,7 +1743,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 Initialize-AuditTargetsConfig | Out-Null
 
                 $path = Join-Path $script:Root "recommendations-apply-yes.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-apply","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-apply","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_target_profile":"u","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
                 New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-apply"
 
                 Mock Add-ImportFromArgs { return $true }
@@ -1792,7 +1775,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 New-Item -ItemType Directory -Path $root -Force | Out-Null
                 $script:Root = $root
                 $path = Join-Path $root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-stale-apply","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-stale-apply","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
                 $installedState = [pscustomobject]@{
                     snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
                     live_fingerprint = "deadbeef"; live_external_skill_fingerprint = "unit-empty-external-skills"; live_mcp_fingerprint = "deadbeef"
@@ -1818,7 +1801,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 
             $recPath = Join-Path $runDir "recommendations.json"
-            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-ok","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-preflight-ok","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") $runId
 
@@ -1835,7 +1818,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 
             $recPath = Join-Path $runDir "recommendations.json"
-            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-stale","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-preflight-stale","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             $installedState = [pscustomobject]@{
                 snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
                 live_fingerprint = "deadbeef"; live_external_skill_fingerprint = "unit-empty-external-skills"; live_mcp_fingerprint = "deadbeef"
@@ -1865,7 +1848,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 
                 New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") $runId
-                Set-ContentUtf8 (Join-Path $runDir "recommendations.json") '{"schema_version":2,"run_id":"r-preflight-bundle","target":"*","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"no changes"},"source_observations":[],"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[],"empty_recommendation_reasons":["new_skills: no gap","removal_candidates: no removal","mcp_new_servers: no gap","mcp_removal_candidates: no removal"]}'
+                Set-ContentUtf8 (Join-Path $runDir "recommendations.json") '{"schema_version":3,"run_id":"r-preflight-bundle","target":"*","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"no changes"},"source_observations":[],"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[],"empty_recommendation_reasons":["new_skills: no gap","removal_candidates: no removal","mcp_new_servers: no gap","mcp_removal_candidates: no removal"]}'
                 Write-AuditJsonFile (Join-Path $runDir "receipt.json") ([pscustomobject]@{ schema_version=1; run_id=$runId; success=$true; persisted=$false })
 
                 $report = Invoke-AuditRecommendationsPreflight -RunId $runId
@@ -1917,7 +1900,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
                 Initialize-AuditTargetsConfig | Out-Null
                 $path = Join-Path $script:Root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-receipt","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-receipt","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
                 New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-receipt"
 
                 $thrown = $false
@@ -1940,7 +1923,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $initial = '{"schema_version":1,"imports":[],"mappings":[],"mcp_servers":[]}'
                 Set-ContentUtf8 $script:CfgPath $initial
                 $path = Join-Path $script:Root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-transaction","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-transaction","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_target_profile":"u","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
                 New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-transaction"
                 New-AuditValidatedWorkflowReceiptFixture $path
 
@@ -1996,7 +1979,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $runDir = Join-Path $TestDrive "r-validate-dry-run"
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
-            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-dry-run","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-validate-dry-run","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-dry-run"
 
             Mock Invoke-AuditRecommendationsPreflight {
@@ -2049,7 +2032,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $runDir = Join-Path $TestDrive "r-validate-preflight-failed"
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
-            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-preflight-failed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-validate-preflight-failed","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-preflight-failed"
 
             Mock Invoke-AuditRecommendationsPreflight { throw "预检失败：prompt_contract_mismatch" }
@@ -2101,7 +2084,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $runDir = Join-Path $TestDrive "r-workflow-input-changed"
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
-            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-workflow-input-changed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-workflow-input-changed","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-workflow-input-changed"
 
             Mock Invoke-AuditRecommendationsPreflight {

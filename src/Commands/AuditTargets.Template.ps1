@@ -108,7 +108,7 @@ function Apply-AuditSourceStrategyOverride($strategy, [string]$mode) {
 
 function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
+    Need ($normalizedMode -eq "target-repo") ("审查来源模式必须为 target-repo：{0}" -f $Mode)
     $strategy = [pscustomobject]([ordered]@{
             schema_version = 1
             mode = $normalizedMode
@@ -158,7 +158,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             )
             scoring = [ordered]@{
                 authority = "Prefer first-party documentation and maintained source repositories."
-                fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
+                fit = "Match only the scan-derived target profile and concrete repository scan facts."
                 duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
                 maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
@@ -171,7 +171,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             decision_quality_policy = [ordered]@{
                 require_keyword_trace_for_changes = $false
                 require_keyword_trace_membership = $false
-                min_user_profile_keywords_per_change = 0
+                min_target_profile_keywords_per_change = 0
                 min_target_repo_keywords_per_change = 0
                 min_installed_state_keywords_per_change = 0
             }
@@ -180,7 +180,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
-                "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
+                "Every recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -222,8 +222,8 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
 
     switch ($label) {
         "snapshot.json" {
-            Need ([int]$data.schema_version -eq 1) ("snapshot schema_version 必须为 1：{0}" -f $path)
-            foreach ($field in @("run_id", "mode", "prompt_contract_version", "user_profile", "installed_state", "target_scans", "source_strategy", "decision_insights")) {
+            Need ([int]$data.schema_version -eq 2) ("snapshot schema_version 必须为 2：{0}" -f $path)
+            foreach ($field in @("run_id", "mode", "prompt_contract_version", "installed_state", "target_scans", "target_profile", "source_strategy", "decision_insights")) {
                 Need (Test-AuditJsonProperty $data $field) ("snapshot 缺少 {0}：{1}" -f $field, $path)
             }
             Need (Assert-IsArray $data.target_scans) ("snapshot.target_scans 必须为数组：{0}" -f $path)
@@ -231,11 +231,11 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
-            Need (Test-AuditStructuredProfileComplete $data.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
+            Need ([string]$data.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile 必须由 target_scans_only 派生：{0}" -f $path)
+            Need (@($data.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
         }
         "recommendations.json" {
-            Need ([int]$data.schema_version -eq 2) ("recommendations schema_version 必须为 2：{0}" -f $path)
+            Need ([int]$data.schema_version -eq 3) ("recommendations schema_version 必须为 3：{0}" -f $path)
             Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations 缺少 decision_basis：{0}" -f $path)
         }
         "receipt.json" {
@@ -260,45 +260,27 @@ function Assert-AuditBundleRequiredFiles([object[]]$files) {
 
 function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [string]$Mode = "target-repo", [string]$Query = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知 recommendations 模式：{0}" -f $Mode)
-    $isProfileOnly = ($normalizedMode -eq "profile-only")
-    $targetScanUsed = -not $isProfileOnly
-    $templateNotes = if ($isProfileOnly) {
-        @(
-            "Replace placeholder values wrapped in <> before using this file.",
-            "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-            "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
-        )
-    }
-    else {
-        @(
-            "Replace placeholder values wrapped in <> before using this file.",
-            "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-            "All install/remove decisions must cite both user-profile and target-repo reasons."
-        )
-    }
-    $basisSummary = if ($isProfileOnly) {
-        "<why these recommendations reflect the user profile, installed-skill inventory, and source strategy without target repo facts>"
-    }
-    else {
-        "<why these recommendations reflect both the user profile and the target repo facts>"
-    }
-    $targetReasonInstall = if ($isProfileOnly) { "<which installed-skill inventory or profile-only context justifies this skill>" } else { "<which detected target-repo facts justify this skill>" }
-    $targetReasonRemoval = if ($isProfileOnly) { "<why the installed-skill inventory or profile-only context no longer justifies this skill>" } else { "<why the target repo no longer justifies this skill>" }
-    $targetReasonDoNotInstall = if ($isProfileOnly) { "<why the profile-only context does not justify it>" } else { "<why the target repo does not justify it>" }
-    $targetKeywordHint = if ($isProfileOnly) { "<keyword from decision-insights.keywords.profile_only_context or target_repo>" } else { "<keyword from decision-insights.keywords.target_repo>" }
+    Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
+    $templateNotes = @(
+        "Replace placeholder values wrapped in <> before using this file.",
+        "Delete example entries that are not needed, but keep the schema shape unchanged.",
+        "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
+        "All install/remove decisions must cite scan-derived target-profile reasons only."
+    )
+    $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
+    $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
+    $targetReasonRemoval = "<why the scan-derived target profile no longer justifies this skill>"
+    $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
     return [pscustomobject]([ordered]@{
-        schema_version = 2
+        schema_version = 3
         run_id = $runId
         target = $targetName
         recommendation_mode = $normalizedMode
         discovery_query = [string]$Query
         template_notes = @($templateNotes)
         decision_basis = [ordered]@{
-            user_profile_used = $true
-            target_scan_used = $targetScanUsed
+            target_profile_used = $true
+            target_scan_used = $true
             source_strategy_used = $true
             summary = $basisSummary
         }
@@ -306,8 +288,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
-                reason_user_profile = "<why the user's long-term workflow benefits from this skill>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 install = [ordered]@{
                     repo = "<owner/repo-or-local-path>"
                     skill = "<relative-skill-path-or-.>"
@@ -322,8 +303,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         overlap_findings = @(
             [ordered]@{
                 name = "<existing-skill-or-skill-pair>"
-                reason_user_profile = "<why overlap matters for the user's workflow>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
                 source_preference = [ordered]@{
@@ -345,8 +325,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         removal_candidates = @(
             [ordered]@{
                 name = "<installed-skill-name>"
-                reason_user_profile = "<why the user profile no longer justifies this skill>"
-                reason_target_repo = $targetReasonRemoval
+                reason_target_profile = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{
@@ -358,8 +337,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
-                reason_user_profile = "<why the user profile does not justify it>"
-                reason_target_repo = $targetReasonDoNotInstall
+                reason_target_profile = $targetReasonDoNotInstall
                 sources = @("<source-url-1>")
                 note = "<why it should not be added now>"
             }
@@ -367,8 +345,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         mcp_new_servers = @(
             [ordered]@{
                 name = "<mcp-server-name>"
-                reason_user_profile = "<why the user's long-term workflow benefits from this MCP server>"
-                reason_target_repo = $targetReasonInstall
+                reason_target_profile = $targetReasonInstall
                 confidence = "medium"
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
@@ -383,8 +360,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         mcp_removal_candidates = @(
             [ordered]@{
                 name = "<installed-mcp-name>"
-                reason_user_profile = "<why the user profile no longer justifies this MCP server>"
-                reason_target_repo = $targetReasonRemoval
+                reason_target_profile = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{

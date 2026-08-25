@@ -140,17 +140,14 @@ function Assert-MenuRouting {
 
         $auditBody = Get-FunctionBody $raw "审查目标菜单"
         @(
-            "流程：需求 -> 审查包 -> 预检 -> 应用"
-            "1) 查看需求"
-            "2) 编辑需求"
-            "3) 目标仓列表"
-            "4) 生成审查包"
-            "5) 预检建议"
-            "6) 应用建议（先 dry-run）"
-            "7) 查看最近状态"
-            "8) 发现新技能"
-            "9) 目标仓管理"
-            "10) 高级设置"
+            "流程：扫描目标仓 -> 审查包 -> 预检 -> 应用"
+            "1) 目标仓列表"
+            "2) 生成审查包"
+            "3) 预检建议"
+            "4) 应用建议（先 dry-run）"
+            "5) 查看最近状态"
+            "6) 目标仓管理"
+            "7) 高级设置"
             "0) 返回"
         ) | ForEach-Object {
             $auditBody | Should -Match ([regex]::Escape($_))
@@ -169,11 +166,10 @@ function Assert-MenuRouting {
 
         $advancedAuditBody = Get-FunctionBody $raw "审查高级菜单"
         @(
-            "1) 导入结构化需求"
-            "2) 初始化审查配置"
-            "3) 查看 AI 提示词"
-            "4) 编辑 AI 提示词"
-            "5) 直接执行建议（高级）"
+            "1) 初始化审查配置"
+            "2) 查看 AI 提示词"
+            "3) 编辑 AI 提示词"
+            "4) 直接执行建议（高级）"
             "0) 返回"
         ) | ForEach-Object {
             $advancedAuditBody | Should -Match ([regex]::Escape($_))

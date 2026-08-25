@@ -54,10 +54,7 @@ BeforeAll {
 
     function New-E2EAuditSnapshot([string]$Path, [string]$RunId) {
         $live = Get-AuditLiveInstalledState
-        $profile = [pscustomobject]@{
-            raw_text = "audit e2e"; summary = "audit e2e"; last_structured_at = (Get-Date).ToString("o"); structured_by = "test"
-            structured = [pscustomobject]@{ primary_work_types=@("audit"); preferred_agents=@(); tech_stack=@("powershell"); common_tasks=@("review"); constraints=@("safe"); avoidances=@(); decision_preferences=@("evidence-first") }
-        }
+        $targetProfile = [pscustomobject]@{ schema_version=1; derivation="target_scans_only"; summary="test scan profile"; target_names=@("demo"); languages=@("powershell"); package_managers=@(); frameworks=@(); build_commands=@(); test_commands=@(); capabilities=@(); agent_rule_files=@(); notable_files=@() }
         $installedState = [pscustomobject]@{
             snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
             live_fingerprint = [string]$live.fingerprint
@@ -66,9 +63,9 @@ BeforeAll {
             skills=@(); external_skills=@(); mcp_servers=@(); host_projection=$null
         }
         Write-AuditJsonFile $Path ([pscustomobject]@{
-            schema_version=1; run_id=$RunId; mode="target-repo"; prompt_contract_version=(Get-AuditPromptContractVersion)
-            user_profile=$profile; installed_state=$installedState; target_scans=@(); source_strategy=[pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null }
-            decision_insights=[pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } }
+            schema_version=2; run_id=$RunId; mode="target-repo"; prompt_contract_version=(Get-AuditPromptContractVersion)
+            target_profile=$targetProfile; installed_state=$installedState; target_scans=@([pscustomobject]@{ target=[pscustomobject]@{ name="demo" }; detected=[pscustomobject]@{ languages=@("powershell"); package_managers=@(); frameworks=@(); build_commands=@(); test_commands=@(); capabilities=@(); agent_rule_files=@(); notable_files=@() }; risks=@() }); source_strategy=[pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null }
+            decision_insights=[pscustomobject]@{ derivation="target_scans_only"; keywords=[pscustomobject]@{ target_profile=@("audit"); target_repo=@("repo"); installed_state=@("skills") } }
         })
     }
 
@@ -98,8 +95,6 @@ Describe "Skill Audit E2E" {
             }
             SaveCfg $cfg
             Initialize-AuditTargetsConfig | Out-Null
-            Set-AuditUserProfileRawText "I maintain repo governance workflows."
-
             $repo = Join-Path $root "demo-repo"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null
             Add-AuditTargetConfigEntry "demo" ".\demo-repo" | Out-Null
@@ -159,11 +154,11 @@ Describe "Skill Audit E2E" {
 
             $recommendationsPath = Join-Path $root "recommendations.json"
             $recommendations = [pscustomobject]@{
-                schema_version = 2
+                schema_version = 3
                 run_id = "r1"
                 target = "demo-target"
                 decision_basis = [pscustomobject]@{
-                    user_profile_used = $true
+                    target_profile_used = $true
                     target_scan_used = $true
                     source_strategy_used = $true
                     summary = "ok"
@@ -171,8 +166,7 @@ Describe "Skill Audit E2E" {
                 new_skills = @(
                     [pscustomobject]@{
                         name = "demo-skill"
-                        reason_user_profile = "User needs audit automation."
-                        reason_target_repo = "Target repo needs this workflow."
+                        reason_target_profile = "User needs audit automation."
                         install = [pscustomobject]@{
                             repo = $zip
                             skill = "."
@@ -184,8 +178,7 @@ Describe "Skill Audit E2E" {
                     },
                     [pscustomobject]@{
                         name = "demo-skill-2"
-                        reason_user_profile = "User needs a second workflow."
-                        reason_target_repo = "Target repo also needs this second workflow."
+                        reason_target_profile = "User needs a second workflow."
                         install = [pscustomobject]@{
                             repo = $zip2
                             skill = "."
@@ -200,8 +193,7 @@ Describe "Skill Audit E2E" {
                 removal_candidates = @(
                     [pscustomobject]@{
                         name = "old-skill"
-                        reason_user_profile = "User no longer needs it."
-                        reason_target_repo = "Target repo no longer matches it."
+                        reason_target_profile = "User no longer needs it."
                         sources = @("local-fixture")
                         installed = [pscustomobject]@{
                             vendor = "manual"
@@ -272,11 +264,11 @@ Describe "Skill Audit E2E" {
 
             $recommendationsPath = Join-Path $root "recommendations-mcp.json"
             $recommendations = [pscustomobject]@{
-                schema_version = 2
+                schema_version = 3
                 run_id = "r-mcp"
                 target = "demo-target"
                 decision_basis = [pscustomobject]@{
-                    user_profile_used = $true
+                    target_profile_used = $true
                     target_scan_used = $true
                     source_strategy_used = $true
                     summary = "ok"
@@ -288,8 +280,7 @@ Describe "Skill Audit E2E" {
                 mcp_new_servers = @(
                     [pscustomobject]@{
                         name = "context7"
-                        reason_user_profile = "User needs docs MCP."
-                        reason_target_repo = "Repo workflow needs quick docs lookup."
+                        reason_target_profile = "User needs docs MCP."
                         confidence = "high"
                         sources = @("local-fixture")
                         server = [pscustomobject]@{
@@ -303,8 +294,7 @@ Describe "Skill Audit E2E" {
                 mcp_removal_candidates = @(
                     [pscustomobject]@{
                         name = "legacy-fetch"
-                        reason_user_profile = "User no longer needs this MCP."
-                        reason_target_repo = "Repo no longer uses this MCP path."
+                        reason_target_profile = "User no longer needs this MCP."
                         sources = @("local-fixture")
                         installed = [pscustomobject]@{
                             name = "legacy-fetch"

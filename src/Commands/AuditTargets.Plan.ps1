@@ -66,8 +66,7 @@ function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
 }
 
 function Assert-AuditReasonPair($item, [string]$name) {
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_user_profile)) ("{0} 缺少 reason_user_profile：{1}" -f $name, [string]$item.name)
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_repo)) ("{0} 缺少 reason_target_repo：{1}" -f $name, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_profile)) ("{0} 缺少 reason_target_profile：{1}" -f $name, [string]$item.name)
     Normalize-AuditSources $item $name
 }
 
@@ -234,7 +233,7 @@ function Assert-AuditRecommendationItem($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
 }
 
 function Assert-AuditRemovalCandidate($item) {
@@ -281,7 +280,7 @@ function Assert-AuditMcpNewServer($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("MCP confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
 }
 
 function Assert-AuditMcpRemovalCandidate($item) {
@@ -304,26 +303,20 @@ function Load-AuditRecommendations([string]$path) {
         throw ("recommendations JSON 解析失败：{0}" -f $_.Exception.Message)
     }
 
-    Need ([int]$rec.schema_version -eq 2) "recommendations.schema_version 仅支持 2"
+    Need ([int]$rec.schema_version -eq 3) "recommendations.schema_version 仅支持 3"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.run_id)) "recommendations 缺少 run_id"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.target)) "recommendations 缺少 target"
     Need ($rec.PSObject.Properties.Match("decision_basis").Count -gt 0 -and $null -ne $rec.decision_basis) "recommendations 缺少 decision_basis"
-    Need (Test-AuditJsonProperty $rec.decision_basis "user_profile_used") "decision_basis 缺少 user_profile_used"
+    Need (Test-AuditJsonProperty $rec.decision_basis "target_profile_used") "decision_basis 缺少 target_profile_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "target_scan_used") "decision_basis 缺少 target_scan_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "source_strategy_used") "decision_basis 缺少 source_strategy_used"
     $recommendationMode = "target-repo"
     if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
         $recommendationMode = ([string]$rec.recommendation_mode).ToLowerInvariant()
     }
-    Need ($recommendationMode -eq "target-repo" -or $recommendationMode -eq "profile-only") ("recommendation_mode 仅支持 target-repo 或 profile-only：{0}" -f $recommendationMode)
-    Assert-AuditRequiredBooleanTrue $rec.decision_basis.user_profile_used "decision_basis.user_profile_used"
-    Need ($rec.decision_basis.target_scan_used -is [bool]) "decision_basis.target_scan_used 必须是布尔值"
-    if ($recommendationMode -eq "profile-only") {
-        Need (-not [bool]$rec.decision_basis.target_scan_used) "profile-only 模式下 decision_basis.target_scan_used 必须为 false"
-    }
-    else {
-        Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
-    }
+    Need ($recommendationMode -eq "target-repo") ("recommendation_mode 仅支持 target-repo：{0}" -f $recommendationMode)
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_profile_used "decision_basis.target_profile_used"
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.source_strategy_used "decision_basis.source_strategy_used"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.decision_basis.summary)) "decision_basis.summary 不能为空"
     Ensure-AuditArrayProperty $rec "new_skills"
@@ -401,8 +394,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
             tokens = @($tokens)
@@ -422,9 +414,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
-            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             matched_skill = $matched
             status = $status
@@ -449,8 +440,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
             server = $server
@@ -469,9 +459,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             original_index = $originalIndex
             name = [string]$item.name
             installed_name = [string]$item.installed.name
-            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             matched_server = $matched
             status = $status
@@ -550,8 +539,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.items)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1}" -f $itemIndex, [string]$item.name)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -565,8 +553,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.removal_candidates)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $itemIndex, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -581,8 +568,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
             Write-Host ("{0}) {1} transport={2} status={3}" -f $itemIndex, [string]$item.name, $transport, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }
@@ -596,8 +582,7 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         foreach ($item in @($plan.mcp_removal_candidates)) {
             $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             Write-Host ("{0}) {1} [name={2}] status={3}" -f $itemIndex, [string]$item.name, [string]$item.installed_name, [string]$item.status)
-            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
             $index++
         }
     }

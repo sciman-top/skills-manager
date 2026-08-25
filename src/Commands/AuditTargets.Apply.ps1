@@ -34,8 +34,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             index = $itemIndex
             original_index = $itemIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -54,8 +53,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
                 vendor = [string]$item.vendor
                 from = [string]$item.from
             }
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -70,8 +68,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             index = $itemIndex
             original_index = $itemIndex
             name = [string]$item.name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -87,8 +84,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             original_index = $itemIndex
             name = [string]$item.name
             installed_name = [string]$item.installed_name
-            reason_user_profile = [string]$item.reason_user_profile
-            reason_target_repo = [string]$item.reason_target_repo
+            reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
             status = [string]$item.status
@@ -190,7 +186,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_user_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_target_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -207,8 +203,8 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         if ($q.PSObject.Properties.Match("require_keyword_trace_membership").Count -gt 0) {
             $policy.require_keyword_trace_membership = [bool]$q.require_keyword_trace_membership
         }
-        if ($q.PSObject.Properties.Match("min_user_profile_keywords_per_change").Count -gt 0) {
-            $policy.min_user_profile_keywords_per_change = [Math]::Max(0, [int]$q.min_user_profile_keywords_per_change)
+        if ($q.PSObject.Properties.Match("min_target_profile_keywords_per_change").Count -gt 0) {
+            $policy.min_target_profile_keywords_per_change = [Math]::Max(0, [int]$q.min_target_profile_keywords_per_change)
         }
         if ($q.PSObject.Properties.Match("min_target_repo_keywords_per_change").Count -gt 0) {
             $policy.min_target_repo_keywords_per_change = [Math]::Max(0, [int]$q.min_target_repo_keywords_per_change)
@@ -219,7 +215,7 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         $policy.enabled = (
             [bool]$policy.require_keyword_trace_for_changes -or
             [bool]$policy.require_keyword_trace_membership -or
-            [int]$policy.min_user_profile_keywords_per_change -gt 0 -or
+            [int]$policy.min_target_profile_keywords_per_change -gt 0 -or
             [int]$policy.min_target_repo_keywords_per_change -gt 0 -or
             [int]$policy.min_installed_state_keywords_per_change -gt 0
         )
@@ -237,9 +233,8 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
         path = $path
         mode = "target-repo"
         keywords = [ordered]@{
-            user_profile = @()
+            target_profile = @()
             target_repo = @()
-            profile_only_context = @()
             installed_state = @()
         }
     }
@@ -251,7 +246,7 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
             $result.mode = ([string]$data.mode).Trim().ToLowerInvariant()
         }
         if ($data.PSObject.Properties.Match("keywords").Count -gt 0 -and $null -ne $data.keywords) {
-            foreach ($field in @("user_profile", "target_repo", "profile_only_context", "installed_state")) {
+            foreach ($field in @("target_profile", "target_repo", "installed_state")) {
                 if ($data.keywords.PSObject.Properties.Match($field).Count -gt 0) {
                     $result.keywords[$field] = @(Normalize-AuditStringArray $data.keywords.$field)
                 }
@@ -268,10 +263,10 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     $coverage = [ordered]@{
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         items_with_complete_keyword_trace = 0
-        user_keyword_ref_count = 0
+        target_profile_keyword_ref_count = 0
         target_keyword_ref_count = 0
         installed_keyword_ref_count = 0
-        unique_user_keywords = @()
+        unique_target_profile_keywords = @()
         unique_target_keywords = @()
         unique_installed_keywords = @()
     }
@@ -295,27 +290,27 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
         $recommendationMode = ([string]$rec.recommendation_mode).Trim().ToLowerInvariant()
     }
-    $requiredUser = [int]$policy.min_user_profile_keywords_per_change
+    $requiredTargetProfile = [int]$policy.min_target_profile_keywords_per_change
     $requiredTarget = [int]$policy.min_target_repo_keywords_per_change
     $requiredInstalled = [int]$policy.min_installed_state_keywords_per_change
     if ([bool]$policy.require_keyword_trace_for_changes) {
-        if ($requiredUser -lt 1) { $requiredUser = 1 }
+        if ($requiredTargetProfile -lt 1) { $requiredTargetProfile = 1 }
         if ($requiredTarget -lt 1) { $requiredTarget = 1 }
         if ($requiredInstalled -lt 1) { $requiredInstalled = 1 }
     }
 
-    $userSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $targetProfileSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $targetSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $installedSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.user_profile)) { $null = $userSet.Add($token) }
-    $targetTokens = if ($recommendationMode -eq "profile-only") { @(Normalize-AuditStringArray $decisionInsights.keywords.profile_only_context) } else { @(Normalize-AuditStringArray $decisionInsights.keywords.target_repo) }
+    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.target_profile)) { $null = $targetProfileSet.Add($token) }
+    $targetTokens = @(Normalize-AuditStringArray $decisionInsights.keywords.target_repo)
     foreach ($token in @($targetTokens)) { $null = $targetSet.Add($token) }
     foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.installed_state)) { $null = $installedSet.Add($token) }
     if ([bool]$policy.require_keyword_trace_membership -and -not [bool]$decisionInsights.exists) {
         $issues.Add("insufficient_decision_quality：snapshot.json decision_insights 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
     }
 
-    $uniqueUser = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $uniqueTargetProfile = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $uniqueTarget = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $uniqueInstalled = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $collections = @(
@@ -330,44 +325,44 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
             if ($item.PSObject.Properties.Match("keyword_trace").Count -gt 0 -and $null -ne $item.keyword_trace -and (Test-AuditObjectLike $item.keyword_trace)) {
                 $trace = $item.keyword_trace
             }
-            $userRefs = @()
+            $targetProfileRefs = @()
             $targetRefs = @()
             $installedRefs = @()
             if ($null -ne $trace) {
-                if ($trace.PSObject.Properties.Match("user_profile").Count -gt 0) { $userRefs = @(Normalize-AuditStringArray $trace.user_profile) }
-                if ($trace.PSObject.Properties.Match("target_repo_or_context").Count -gt 0) { $targetRefs = @(Normalize-AuditStringArray $trace.target_repo_or_context) }
+                if ($trace.PSObject.Properties.Match("target_profile").Count -gt 0) { $targetProfileRefs = @(Normalize-AuditStringArray $trace.target_profile) }
+                if ($trace.PSObject.Properties.Match("target_repo").Count -gt 0) { $targetRefs = @(Normalize-AuditStringArray $trace.target_repo) }
                 if ($trace.PSObject.Properties.Match("installed_state").Count -gt 0) { $installedRefs = @(Normalize-AuditStringArray $trace.installed_state) }
             }
 
-            if (@($userRefs).Count -gt 0 -and @($targetRefs).Count -gt 0 -and @($installedRefs).Count -gt 0) {
+            if (@($targetProfileRefs).Count -gt 0 -and @($targetRefs).Count -gt 0 -and @($installedRefs).Count -gt 0) {
                 $coverage.items_with_complete_keyword_trace = [int]$coverage.items_with_complete_keyword_trace + 1
             }
-            $coverage.user_keyword_ref_count = [int]$coverage.user_keyword_ref_count + @($userRefs).Count
+            $coverage.target_profile_keyword_ref_count = [int]$coverage.target_profile_keyword_ref_count + @($targetProfileRefs).Count
             $coverage.target_keyword_ref_count = [int]$coverage.target_keyword_ref_count + @($targetRefs).Count
             $coverage.installed_keyword_ref_count = [int]$coverage.installed_keyword_ref_count + @($installedRefs).Count
 
-            foreach ($token in @($userRefs)) { $null = $uniqueUser.Add($token) }
+            foreach ($token in @($targetProfileRefs)) { $null = $uniqueTargetProfile.Add($token) }
             foreach ($token in @($targetRefs)) { $null = $uniqueTarget.Add($token) }
             foreach ($token in @($installedRefs)) { $null = $uniqueInstalled.Add($token) }
 
-            if ($requiredUser -gt 0 -and @($userRefs).Count -lt $requiredUser) {
-                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($userRefs).Count, $requiredUser)) | Out-Null
+            if ($requiredTargetProfile -gt 0 -and @($targetProfileRefs).Count -lt $requiredTargetProfile) {
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_profile 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetProfileRefs).Count, $requiredTargetProfile)) | Out-Null
             }
             if ($requiredTarget -gt 0 -and @($targetRefs).Count -lt $requiredTarget) {
-                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetRefs).Count, $requiredTarget)) | Out-Null
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetRefs).Count, $requiredTarget)) | Out-Null
             }
             if ($requiredInstalled -gt 0 -and @($installedRefs).Count -lt $requiredInstalled) {
                 $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.installed_state 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($installedRefs).Count, $requiredInstalled)) | Out-Null
             }
 
             if ([bool]$policy.require_keyword_trace_membership -and [bool]$decisionInsights.exists) {
-                $unknownUser = @($userRefs | Where-Object { -not $userSet.Contains([string]$_) })
-                if (@($unknownUser).Count -gt 0) {
-                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownUser | Select-Object -First 3) -join ", "))) | Out-Null
+                $unknownTargetProfile = @($targetProfileRefs | Where-Object { -not $targetProfileSet.Contains([string]$_) })
+                if (@($unknownTargetProfile).Count -gt 0) {
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_profile 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTargetProfile | Select-Object -First 3) -join ", "))) | Out-Null
                 }
                 $unknownTarget = @($targetRefs | Where-Object { -not $targetSet.Contains([string]$_) })
                 if (@($unknownTarget).Count -gt 0) {
-                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTarget | Select-Object -First 3) -join ", "))) | Out-Null
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTarget | Select-Object -First 3) -join ", "))) | Out-Null
                 }
                 $unknownInstalled = @($installedRefs | Where-Object { -not $installedSet.Contains([string]$_) })
                 if (@($unknownInstalled).Count -gt 0) {
@@ -376,7 +371,7 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
             }
         }
     }
-    $coverage.unique_user_keywords = @($uniqueUser | Sort-Object)
+    $coverage.unique_target_profile_keywords = @($uniqueTargetProfile | Sort-Object)
     $coverage.unique_target_keywords = @($uniqueTarget | Sort-Object)
     $coverage.unique_installed_keywords = @($uniqueInstalled | Sort-Object)
     return [pscustomobject]([ordered]@{
@@ -476,14 +471,14 @@ function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
     catch { return "" }
 }
 
-function Test-AuditUserProfilePreflight([string]$recommendationDir) {
+function Test-AuditTargetProfilePreflight([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
     $issues = New-Object System.Collections.Generic.List[string]
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
-        Need ($null -ne $snapshot.user_profile) ("snapshot.user_profile 缺失：{0}" -f $path)
-        Need (-not [string]::IsNullOrWhiteSpace([string]$snapshot.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
-        Need (Test-AuditStructuredProfileComplete $snapshot.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
+        Need ($null -ne $snapshot.target_profile) ("snapshot.target_profile 缺失：{0}" -f $path)
+        Need ([string]$snapshot.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile.derivation 必须为 target_scans_only：{0}" -f $path)
+        Need (@($snapshot.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
     }
     catch {
         $issues.Add([string]$_.Exception.Message) | Out-Null
@@ -565,16 +560,16 @@ function Invoke-AuditRecommendationsPreflight {
             coverage = [ordered]@{
                 total_change_items = 0
                 items_with_complete_keyword_trace = 0
-                user_keyword_ref_count = 0
+                target_profile_keyword_ref_count = 0
                 target_keyword_ref_count = 0
                 installed_keyword_ref_count = 0
-                unique_user_keywords = @()
+                unique_target_profile_keywords = @()
                 unique_target_keywords = @()
                 unique_installed_keywords = @()
             }
         }
     }
-    $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
+    $targetProfileCheck = Test-AuditTargetProfilePreflight $recommendationDir
     $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
     $targetLiveState = if ($null -ne $InitialWorkflowInputState -and $null -ne $InitialWorkflowInputState.target_repos) {
         $InitialWorkflowInputState.target_repos
@@ -611,8 +606,8 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($decisionQualityCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
     }
-    foreach ($issue in @($userProfileCheck.issues)) {
-        $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
+    foreach ($issue in @($targetProfileCheck.issues)) {
+        $issues.Add(("target_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
     foreach ($issue in @($removalDependencyCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
@@ -626,7 +621,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -639,7 +634,7 @@ function Invoke-AuditRecommendationsPreflight {
         decision_quality_policy = $decisionQualityPolicy
         decision_quality = $decisionQualityCheck.coverage
         decision_insights = $decisionInsights
-        user_profile_check = $userProfileCheck
+        target_profile_check = $targetProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
         snapshot_staleness = $snapshotStaleness

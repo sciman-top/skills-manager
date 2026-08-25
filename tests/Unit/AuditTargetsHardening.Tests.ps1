@@ -22,7 +22,7 @@ BeforeAll {
     }
 
     function New-TestAuditRecommendation([string]$Path, [string]$RunId = "r-hardening") {
-        Set-ContentUtf8 $Path ('{"schema_version":2,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
+        Set-ContentUtf8 $Path ('{"schema_version":3,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
     }
 
     function New-TestHardeningAuditSnapshot {
@@ -43,31 +43,17 @@ BeforeAll {
             mcp_servers = @()
             host_projection = if ($live.PSObject.Properties.Match("host_projection").Count -gt 0) { $live.host_projection } else { $null }
         }
-        $profile = [pscustomobject]@{
-            raw_text = "audit hardening"
-            summary = "audit hardening"
-            last_structured_at = (Get-Date).ToString("o")
-            structured_by = "test"
-            structured = [pscustomobject]@{
-                primary_work_types = @("audit")
-                preferred_agents = @()
-                tech_stack = @("powershell")
-                common_tasks = @("review")
-                constraints = @("safe")
-                avoidances = @()
-                decision_preferences = @("evidence-first")
-            }
-        }
+        $targetProfile = [pscustomobject]@{ schema_version=1; derivation="target_scans_only"; summary="test scan profile"; target_names=@("demo"); languages=@("powershell"); package_managers=@(); frameworks=@(); build_commands=@(); test_commands=@(); capabilities=@(); agent_rule_files=@(); notable_files=@() }
         Write-AuditJsonFile $Path ([pscustomobject]@{
-            schema_version = 1
+            schema_version = 2
             run_id = $RunId
             mode = "target-repo"
             prompt_contract_version = Get-AuditPromptContractVersion
-            user_profile = $profile
+            target_profile = $targetProfile
             installed_state = $installedState
             target_scans = @($Scans)
             source_strategy = [pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null }
-            decision_insights = [pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } }
+            decision_insights = [pscustomobject]@{ derivation="target_scans_only"; keywords=[pscustomobject]@{ target_profile=@("audit"); target_repo=@("repo"); installed_state=@("skills") } }
         })
     }
 
@@ -89,7 +75,7 @@ Describe "Audit target hardening" {
             risks = @()
         }
 
-        $insights = New-AuditDecisionInsights $null @($scan) @() @() "target-repo"
+        $insights = New-AuditDecisionInsights (New-AuditTargetProfile @($scan)) @($scan) @() @()
 
         $insights.targets[0].target | Should -Be "ordered-target"
     }
@@ -195,7 +181,7 @@ Describe "Audit target hardening" {
         $runDir = Join-Path $TestDrive "invalid-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
-        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"routing","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"invalid","routing":{"router":"missing","selection_policy":"router first","members":[{"name":"actual","role":"router"},{"name":"executor","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-invalid","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"routing","reason_target_profile":"u","sources":["https://example.com"],"note":"invalid","routing":{"router":"missing","selection_policy":"router first","members":[{"name":"actual","role":"router"},{"name":"executor","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
         New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-invalid"
 
         $thrown = $false
@@ -217,7 +203,7 @@ Describe "Audit target hardening" {
 
     It "Allows host AI to own overlap selection without pretending it is a skill router" {
         $recPath = Join-Path $TestDrive "host-native-overlap.json"
-        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-host-native","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-host-native","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_target_profile":"u","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
         $rec = Load-AuditRecommendations $recPath
 
@@ -227,7 +213,7 @@ Describe "Audit target hardening" {
 
     It "Rejects a host-native fallback router that is not a declared router member" {
         $recPath = Join-Path $TestDrive "host-native-invalid-fallback.json"
-        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-host-native-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","fallback_router":"missing","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-host-native-invalid","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_target_profile":"u","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","fallback_router":"missing","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
         { Load-AuditRecommendations $recPath | Out-Null } | Should -Throw
     }
@@ -262,7 +248,7 @@ Describe "Audit target hardening" {
         $runDir = Join-Path $TestDrive "removal-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
-        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-removal-blocked","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"retired-skill","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"installed":{"vendor":"manual","from":"retired-skill"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-removal-blocked","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"retired-skill","reason_target_profile":"u","sources":["https://example.com"],"installed":{"vendor":"manual","from":"retired-skill"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
         New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-removal-blocked"
         Mock Test-AuditRemovalDependencyClosure {
             [pscustomobject]@{

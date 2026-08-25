@@ -151,11 +151,11 @@ Skills 管理器（中文菜单）
   1) 接入来源：新增技能库，或用 add/npx 导入单个技能
   2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
   3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
-  4) 目标仓审查：查看需求 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
+  4) 目标仓审查：扫描目标仓 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
 
 菜单地图：
   - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
-  - 目标仓审查：需求、目标仓、审查包、预检、应用、状态
+  - 目标仓审查：目标仓扫描、审查包、预检、应用、状态
   - MCP 服务：新增 MCP、卸载 MCP、同步配置
   - 技能库管理：新增/删除技能库、生成锁文件、打开 skills.json
   - 更多：解除目标目录关联、清理 .bak 备份
@@ -226,15 +226,11 @@ MCP：
   默认不调用宿主 CLI；仅 --host-probe 读取公开 Codex JSON，结果脱敏且不证明宿主已加载。
 
 目标仓审查：
-  .\skills.ps1 审查目标 需求设置
-  .\skills.ps1 审查目标 需求查看
-  .\skills.ps1 审查目标 需求结构化 --profile <file>
   .\skills.ps1 审查目标 列表
   .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
   .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
-  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file>
@@ -281,10 +277,8 @@ MCP/门禁环境变量：
   - `安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍可使用。
 
 目标仓审查：
-  - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
-  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套三文件审查包和 preflight/dry-run/apply 流程。
+  - `扫描` 只从已登记目标仓的扫描事实派生需求画像；新增技能/MCP候选必须基于该画像完成 preflight/dry-run。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
-  - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
   - 每个 run 固定只有三个文件：不可编辑的 `snapshot.json`、唯一允许 AI 编辑的 `recommendations.json`、命令维护的 `receipt.json`；不得新增旁路报告或 markdown evidence。
   - 内置提示词只定义工作流，prompt contract version 已写入 `snapshot.json`；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`。
   - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 preflight/dry-run；不得修改 snapshot 或 receipt。
@@ -296,7 +290,7 @@ MCP/门禁环境变量：
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
   - `状态` 从最近一次 `receipt.json` 的 workflow/dry_run/apply section 显示 `mode/success/persisted/changed_counts`。
-  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
+  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并展示扫描画像依据。
   - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
@@ -398,28 +392,17 @@ function 审查高级菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 审查高级设置 ==="
-        Write-Host "1) 导入结构化需求"
-        Write-Host "2) 初始化审查配置"
-        Write-Host "3) 查看 AI 提示词"
-        Write-Host "4) 编辑 AI 提示词"
-        Write-Host "5) 直接执行建议（高级）"
+        Write-Host "1) 初始化审查配置"
+        Write-Host "2) 查看 AI 提示词"
+        Write-Host "3) 编辑 AI 提示词"
+        Write-Host "4) 直接执行建议（高级）"
         Write-Host "0) 返回"
         $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
-            "1" {
-                $defaultPath = Get-AuditStructuredProfileDefaultPath
-                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
-                if ([string]::IsNullOrWhiteSpace($profile)) {
-                    Invoke-AuditTargetsCommand @("profile-structure")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
-                }
-            }
-            "2" { Invoke-AuditTargetsCommand @("init") }
-            "3" { Show-AuditOuterAiPromptTemplate }
-            "4" { Edit-AuditOuterAiPromptTemplate }
-            "5" {
+            "1" { Invoke-AuditTargetsCommand @("init") }
+            "2" { Show-AuditOuterAiPromptTemplate }
+            "3" { Edit-AuditOuterAiPromptTemplate }
+            "4" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
             }
@@ -433,24 +416,19 @@ function 审查目标菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 目标仓审查 ==="
-        Write-Host "流程：需求 -> 审查包 -> 预检 -> 应用"
-        Write-Host "1) 查看需求"
-        Write-Host "2) 编辑需求"
-        Write-Host "3) 目标仓列表"
-        Write-Host "4) 生成审查包"
-        Write-Host "5) 预检建议"
-        Write-Host "6) 应用建议（先 dry-run）"
-        Write-Host "7) 查看最近状态"
-        Write-Host "8) 发现新技能"
-        Write-Host "9) 目标仓管理"
-        Write-Host "10) 高级设置"
+        Write-Host "流程：扫描目标仓 -> 审查包 -> 预检 -> 应用"
+        Write-Host "1) 目标仓列表"
+        Write-Host "2) 生成审查包"
+        Write-Host "3) 预检建议"
+        Write-Host "4) 应用建议（先 dry-run）"
+        Write-Host "5) 查看最近状态"
+        Write-Host "6) 目标仓管理"
+        Write-Host "7) 高级设置"
         Write-Host "0) 返回"
         $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
-            "1" { Invoke-AuditTargetsCommand @("profile-show") }
-            "2" { Invoke-AuditTargetsCommand @("profile-set") }
-            "3" { Invoke-AuditTargetsCommand @("list") }
-            "4" {
+            "1" { Invoke-AuditTargetsCommand @("list") }
+            "2" {
                 $cfg = Load-AuditTargetsConfig
                 $targets = @($cfg.targets)
                 if ($targets.Count -eq 0) {
@@ -478,26 +456,17 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
                 }
             }
-            "5" {
+            "3" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("preflight", "--recommendations", $path)
             }
-            "6" {
+            "4" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
                 Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
             }
-            "7" { Invoke-AuditTargetsCommand @("status") }
-            "8" {
-                $query = Read-HostSafe "发现查询（可留空）"
-                if ([string]::IsNullOrWhiteSpace($query)) {
-                    Invoke-AuditTargetsCommand @("discover-skills")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("discover-skills", "--query", $query)
-                }
-            }
-            "9" { 目标仓管理菜单 }
-            "10" { 审查高级菜单 }
+            "5" { Invoke-AuditTargetsCommand @("status") }
+            "6" { 目标仓管理菜单 }
+            "7" { 审查高级菜单 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
