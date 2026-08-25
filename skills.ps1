@@ -18654,6 +18654,12 @@ function Get-AuditHostProjectionState($cfg) {
         $excluded = @($projection.managed_link_excludes | ForEach-Object { [string]$_ })
         $hasManagedLinkIncludes = $projection.PSObject.Properties.Match('managed_link_includes').Count -gt 0
         $included = if ($hasManagedLinkIncludes) { @($projection.managed_link_includes | ForEach-Object { [string]$_ }) } else { @() }
+        if ($projection.PSObject.Properties.Match('projection_profiles').Count -gt 0 -and $null -ne $projection.projection_profiles) {
+            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName 'codex'
+            $excluded = @($selection.excluded_names | ForEach-Object { [string]$_ })
+            $hasManagedLinkIncludes = -not [bool]$selection.include_all
+            $included = if ($hasManagedLinkIncludes) { @($selection.included_names | ForEach-Object { [string]$_ }) } else { @() }
+        }
         $expected = @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object {
                 $_.Name -ne '.system' -and
                 $_.Name -notin $excluded -and
@@ -18791,7 +18797,8 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
         $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
         if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
-            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or [int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)
+            # A pre-existing projection health issue is reportable state, not evidence that the audit input drifted.
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint)
         }
     }
     return [pscustomobject]([ordered]@{

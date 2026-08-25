@@ -311,6 +311,45 @@ Describe "Audit target hardening" {
         $state.stale_count | Should -Be 0
     }
 
+    It "Uses the active Codex profile instead of legacy link includes for projection health" {
+        $managedRoot = Join-Path $TestDrive "profiled-managed-root"
+        $userRoot = Join-Path $TestDrive "profiled-user-root"
+        foreach ($name in @("resident-skill", "grill-me")) {
+            $skillRoot = Join-Path $managedRoot $name
+            New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $skillRoot "SKILL.md") ("---`nname: {0}`ndescription: test`n---" -f $name)
+        }
+        New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+        foreach ($name in @("resident-skill", "grill-me")) {
+            New-Item -ItemType Junction -Path (Join-Path $userRoot $name) -Target (Join-Path $managedRoot $name) | Out-Null
+        }
+        $cfg = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{
+                managed_source_path = $managedRoot
+                user_skill_root = $userRoot
+                managed_link_includes = @("resident-skill")
+                managed_link_excludes = @()
+                projection_profiles = [pscustomobject]@{
+                    schema_version = 1
+                    default_profile = "core"
+                    profiles = [pscustomobject]@{
+                        core = [pscustomobject]@{ include = @("resident-skill", "grill-me"); exclude = @() }
+                    }
+                    hosts = [pscustomobject]@{
+                        codex = [pscustomobject]@{ default_profile = "core"; exclude = @() }
+                    }
+                }
+            }
+        }
+
+        $state = Get-AuditHostProjectionState $cfg
+
+        $state.status | Should -Be "available"
+        $state.managed_count | Should -Be 2
+        $state.broken_count | Should -Be 0
+        $state.stale_count | Should -Be 0
+    }
+
     It "Makes dry-run summaries self-contained and keeps category-specific empty reasons" {
         $plan = [pscustomobject]@{
             run_id = "r-summary"

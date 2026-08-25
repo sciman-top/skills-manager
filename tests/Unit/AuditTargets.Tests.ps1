@@ -1337,6 +1337,32 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should -Be $false
         }
 
+        It "Treats pre-existing host projection health as state, not snapshot drift" {
+            $hostAtSnapshot = [pscustomobject]@{ status = "available"; managed_count = 9; stale_count = 1; broken_count = 0; fingerprint = "host-current" }
+            $live = [pscustomobject]@{
+                fingerprint = "skills"
+                mcp_fingerprint = "mcp"
+                external_skill_fingerprint = "external"
+                host_projection = $hostAtSnapshot
+            }
+            $current = [pscustomobject]@{
+                fingerprint = "skills"
+                mcp_fingerprint = "mcp"
+                external_skill_fingerprint = "external"
+                host_projection = $hostAtSnapshot
+            }
+            $hostChanged = [pscustomobject]@{
+                fingerprint = "skills"
+                mcp_fingerprint = "mcp"
+                external_skill_fingerprint = "external"
+                host_projection = [pscustomobject]@{ status = "available"; managed_count = 9; stale_count = 1; broken_count = 0; fingerprint = "host-changed" }
+            }
+
+            (Get-AuditInstalledSnapshotStaleness $current $live).host_projection_stale | Should -Be $false
+            (Get-AuditInstalledSnapshotStaleness $current $live).is_stale | Should -Be $false
+            (Get-AuditInstalledSnapshotStaleness $current $hostChanged).host_projection_stale | Should -Be $true
+        }
+
         It "Rejects a missing snapshot instead of substituting live state" {
             $path = Join-Path $TestDrive "missing-snapshot.json"
 
