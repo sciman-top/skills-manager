@@ -54,14 +54,14 @@
       },
       "hosts": {
         "codex": {
-          "default_profile": "full-compatible",
+          "default_profile": "core",
           "exclude": [
             "skill-creator",
             "web-artifacts-builder"
           ]
         },
         "claude": {
-          "default_profile": "full-compatible",
+          "default_profile": "core",
           "exclude": []
         },
         "zcode": {
