@@ -61,14 +61,17 @@ function Write-AuditThreeFileBundle {
         source_strategy = $sourceStrategy
         decision_insights = $decisionInsights
         native_ai_review = [pscustomobject]([ordered]@{
-                schema_version = 1
+                schema_version = 2
                 decision_owner = "host_ai"
-                purpose = "Read-only semantic synthesis of scan evidence into recommendations; deterministic scanners remain the source of traceable facts."
+                purpose = "Read-only semantic synthesis that highlights the most supported user needs from scan evidence; deterministic scanners remain the source of traceable facts."
                 allowed_inputs = @("snapshot.json", "target_scans[].detected.*.evidence", "target_scans[].target.resolved_path referenced by evidence")
                 prohibited_inputs = @("user-profile.json", "unscanned personal directories", "host auth/provider/session state", "unverified marketplace claims")
                 required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
+                    "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
+                    "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                 )

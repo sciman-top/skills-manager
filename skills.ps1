@@ -16171,15 +16171,16 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``：用宿主 AI 做跨文件的只读语义综合，核对 ``target_profile.requirement_signals``、``artifact_capabilities`` 及其逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
-2. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码或测试证据优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装或卸载结论。
-3. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
-4. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
-5. 执行：
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从 ``target_profile.prioritized_needs.primary_needs`` 开始：用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
+2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
+3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装或卸载结论。
+4. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+5. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
+6. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-6. 预检通过后执行：
+7. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-7. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
+8. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -17815,6 +17816,145 @@ function Merge-AuditRequirementSignals($scans) {
     return @(ConvertTo-AuditRequirementSignalArray $accumulator)
 }
 
+function Get-AuditNeedEvidenceCoverage($entry) {
+    $kinds = @("source_code", "test", "dependency", "documentation")
+    $targetsByKind = @{}
+    $countByKind = @{}
+    foreach ($kind in $kinds) {
+        $targetsByKind[$kind] = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        $countByKind[$kind] = 0
+    }
+    foreach ($evidence in @(Convert-AuditObjectArray (Get-CfgObjectProperty $entry "evidence"))) {
+        $kind = [string](Get-CfgObjectProperty $evidence "kind")
+        if ($kind -notin $kinds) { continue }
+        $countByKind[$kind] = [int]$countByKind[$kind] + 1
+        $target = ([string](Get-CfgObjectProperty $evidence "target")).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($target)) { $targetsByKind[$kind].Add($target) | Out-Null }
+    }
+    $allTargets = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($kind in $kinds) { foreach ($target in $targetsByKind[$kind]) { $allTargets.Add($target) | Out-Null } }
+    return [pscustomobject]([ordered]@{
+            source_code_target_count = $targetsByKind["source_code"].Count
+            test_target_count = $targetsByKind["test"].Count
+            dependency_target_count = $targetsByKind["dependency"].Count
+            documentation_target_count = $targetsByKind["documentation"].Count
+            distinct_target_count = $allTargets.Count
+            source_code_evidence_count = [int]$countByKind["source_code"]
+            test_evidence_count = [int]$countByKind["test"]
+            dependency_evidence_count = [int]$countByKind["dependency"]
+            documentation_evidence_count = [int]$countByKind["documentation"]
+        })
+}
+
+function Get-AuditNeedRole([string]$Kind, [string]$Domain, [string]$Subject) {
+    if ($Kind -eq "artifact") { return "supporting_artifact" }
+    $key = ("{0}/{1}" -f $Domain.Trim().ToLowerInvariant(), $Subject.Trim().ToLowerInvariant())
+    if ($key -in @("workflow/document_processing", "workflow/ocr", "workflow/analytics", "ai/content_generation")) { return "product_workflow" }
+    if ($key -in @("interface/web_ui", "interface/desktop_ui", "integration/http_api", "data/persistence")) { return "delivery_surface" }
+    if ($key -in @("automation/browser_automation", "quality/automated_testing", "operations/backup_recovery")) { return "engineering_or_operations" }
+    return "unclassified"
+}
+
+function New-AuditPrioritizedNeed {
+    param(
+        $Entry,
+        [ValidateSet("requirement", "artifact")][string]$Kind
+    )
+    $domain = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "domain") } else { "artifact" }
+    $subject = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "subject") } else { [string](Get-CfgObjectProperty $Entry "artifact") }
+    $role = Get-AuditNeedRole $Kind $domain $subject
+    $coverage = Get-AuditNeedEvidenceCoverage $Entry
+    $score = 0
+    if ([int]$coverage.source_code_target_count -gt 0) {
+        $score += 45
+        $score += [Math]::Min(3, [Math]::Max(0, [int]$coverage.source_code_target_count - 1)) * 8
+    }
+    if ([int]$coverage.test_target_count -gt 0) { $score += 6 }
+    if ([int]$coverage.dependency_target_count -gt 0) { $score += 4 }
+    if ([int]$coverage.documentation_target_count -gt 0) { $score += 2 }
+    switch ($role) {
+        "product_workflow" { $score += 18 }
+        "supporting_artifact" { $score += 12 }
+        "delivery_surface" { $score += 4 }
+    }
+    if ([int]$coverage.source_code_target_count -eq 0) { $score = [Math]::Min($score, 35) }
+    $limitations = New-Object System.Collections.Generic.List[string]
+    if ([int]$coverage.source_code_target_count -eq 0) { $limitations.Add("no_implemented_source_evidence") | Out-Null }
+    if ([int]$coverage.source_code_target_count -lt 2) { $limitations.Add("single_target_or_unattributed_source_support") | Out-Null }
+    if ([int]$coverage.test_target_count -eq 0) { $limitations.Add("no_test_evidence") | Out-Null }
+    if ($role -in @("delivery_surface", "engineering_or_operations")) { $limitations.Add("technical_context_not_direct_product_intent") | Out-Null }
+    $band = "observation"
+    if ([int]$coverage.source_code_target_count -gt 0) {
+        if ($role -eq "product_workflow" -and $score -ge 63) { $band = "primary_candidate" }
+        elseif ($role -eq "supporting_artifact" -and [int]$coverage.source_code_target_count -ge 2 -and $score -ge 65) { $band = "primary_candidate" }
+        else { $band = "secondary" }
+    }
+    elseif ([int]$coverage.dependency_target_count -gt 0) {
+        $band = "secondary"
+    }
+    $label = if ($Kind -eq "artifact") { $subject } else { "{0}/{1}" -f $domain, $subject }
+    return [pscustomobject]([ordered]@{
+            key = $label
+            kind = $Kind
+            domain = $domain
+            subject = $subject
+            role = $role
+            priority_score = [int][Math]::Min(100, $score)
+            priority_band = $band
+            confidence = [string](Get-CfgObjectProperty $Entry "confidence")
+            evidence_status = [string](Get-CfgObjectProperty $Entry "evidence_status")
+            actions = @(Convert-AuditStringArray (Get-CfgObjectProperty $Entry "actions"))
+            targets = @(Convert-AuditStringArray (Get-CfgObjectProperty $Entry "targets"))
+            evidence_coverage = $coverage
+            limitations = @($limitations.ToArray())
+        })
+}
+
+function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
+    $requirements = @(
+        foreach ($signal in @(Convert-AuditObjectArray $RequirementSignals)) { New-AuditPrioritizedNeed $signal "requirement" }
+    )
+    $artifacts = @(
+        foreach ($artifact in @(Convert-AuditObjectArray $ArtifactCapabilities)) { New-AuditPrioritizedNeed $artifact "artifact" }
+    )
+    $primaryCandidates = @($requirements | Where-Object priority_band -eq "primary_candidate" | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
+    $primary = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in @($primaryCandidates | Select-Object -First 5)) {
+        $candidate.priority_band = "primary"
+        $primary.Add($candidate) | Out-Null
+    }
+    $secondary = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in @($requirements | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)) {
+        if (@($primary | Where-Object key -eq $candidate.key).Count -gt 0) { continue }
+        if ($candidate.priority_band -eq "primary_candidate") { $candidate.priority_band = "secondary" }
+        if ($candidate.priority_band -eq "secondary") { $secondary.Add($candidate) | Out-Null }
+    }
+    $observations = @($requirements | Where-Object priority_band -eq "observation" | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            ranking_method = "role_then_source_coverage_v1"
+            policy = @(
+                "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias.",
+                "Product workflows can become primary candidates; delivery, engineering, and operations signals remain context unless host AI verifies a core user journey.",
+                "Documentation-only evidence remains an observation and must not justify an install, removal, or MCP mutation."
+            )
+            primary_needs = @($primary.ToArray())
+            secondary_needs = @($secondary.ToArray())
+            supporting_artifacts = @($artifacts | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
+            observations = @($observations)
+        })
+}
+
+function Get-AuditPrioritizedNeedKeywords($prioritizedNeeds) {
+    if ($null -eq $prioritizedNeeds) { return @() }
+    $sets = New-Object System.Collections.Generic.List[object]
+    foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $prioritizedNeeds "primary_needs"))) {
+        $sets.Add(@([string](Get-CfgObjectProperty $need "domain"), [string](Get-CfgObjectProperty $need "subject"), [string](Get-CfgObjectProperty $need "key"))) | Out-Null
+        foreach ($action in @(Convert-AuditStringArray (Get-CfgObjectProperty $need "actions"))) { $sets.Add(@($action, ("{0}_{1}" -f [string](Get-CfgObjectProperty $need "subject"), $action))) | Out-Null }
+    }
+    return @(Merge-AuditKeywordSets @($sets.ToArray()) 80)
+}
+
 function Get-AuditArtifactCapabilityKeywords($capabilities) {
     $sets = New-Object System.Collections.Generic.List[object]
     foreach ($capability in @(Convert-AuditObjectArray $capabilities)) {
@@ -17889,7 +18029,7 @@ function New-AuditTargetProfile($scans) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
-        schema_version = 2
+        schema_version = 3
         derived_at = (Get-Date).ToString("o")
         derivation = "target_scans_only"
         target_names = @()
@@ -17914,10 +18054,14 @@ function New-AuditTargetProfile($scans) {
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
+    $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
-    $demand = @($profile.requirement_signals | ForEach-Object { "{0}/{1}" -f [string]$_.domain, [string]$_.subject } | Select-Object -First 8)
-    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')；需求信号：$($demand -join ', ')。"
+    $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
+    $secondaryCount = @($profile.prioritized_needs.secondary_needs).Count
+    $observationCount = @($profile.prioritized_needs.observations).Count
+    $primaryText = if ($primary.Count -gt 0) { $primary -join ', ' } else { "无达到主需求阈值的扫描信号" }
+    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
     return [pscustomobject]$profile
 }
 
@@ -17933,7 +18077,9 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
             })
     }
+    $primaryFocusKeywords = @(Get-AuditPrioritizedNeedKeywords (Get-CfgObjectProperty $targetProfile "prioritized_needs"))
     $profileKeywords = @(Merge-AuditKeywordSets @(
+            $primaryFocusKeywords,
             (Convert-AuditStringArray $targetProfile.target_names),
             (Convert-AuditStringArray $targetProfile.languages),
             (Convert-AuditStringArray $targetProfile.package_managers),
@@ -17954,17 +18100,22 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
             derivation = "target_scans_only"
             summary = [ordered]@{
                 target_profile_keyword_count = @($profileKeywords).Count
+                primary_need_count = @(Convert-AuditObjectArray (Get-CfgObjectProperty (Get-CfgObjectProperty $targetProfile "prioritized_needs") "primary_needs")).Count
+                secondary_need_count = @(Convert-AuditObjectArray (Get-CfgObjectProperty (Get-CfgObjectProperty $targetProfile "prioritized_needs") "secondary_needs")).Count
                 installed_state_keyword_count = @($installedKeywords).Count
                 installed_skill_count = @($installedSkills).Count
                 installed_mcp_server_count = @($installedMcpServers).Count
             }
             keywords = [ordered]@{
+                primary_target_profile = @($primaryFocusKeywords)
                 target_profile = @($profileKeywords)
                 target_repo = @($profileKeywords)
                 installed_state = @($installedKeywords)
             }
             targets = @($repoKeywordSets)
             decision_checklist = @(
+                "Start with target_profile.prioritized_needs.primary_needs; prevalence alone is not a user-priority claim.",
+                "A host-AI promotion from secondary/context to primary requires inspected source evidence of a core user journey and a recorded uncertainty boundary.",
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
             )
@@ -18261,10 +18412,15 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
+            Need ([int]$data.target_profile.schema_version -eq 3) ("snapshot.target_profile schema_version 必须为 3：{0}" -f $path)
             Need ([string]$data.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile 必须由 target_scans_only 派生：{0}" -f $path)
             Need (Assert-IsArray $data.target_profile.artifact_capabilities) ("snapshot.target_profile.artifact_capabilities 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.target_profile.requirement_signals) ("snapshot.target_profile.requirement_signals 必须为数组：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data.target_profile "prioritized_needs") ("snapshot.target_profile 缺少 prioritized_needs：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.prioritized_needs.primary_needs) ("snapshot.target_profile.prioritized_needs.primary_needs 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.prioritized_needs.secondary_needs) ("snapshot.target_profile.prioritized_needs.secondary_needs 必须为数组：{0}" -f $path)
             Need ([string]$data.native_ai_review.decision_owner -eq "host_ai") ("snapshot.native_ai_review.decision_owner 必须为 host_ai：{0}" -f $path)
+            Need ([int]$data.native_ai_review.schema_version -eq 2) ("snapshot.native_ai_review schema_version 必须为 2：{0}" -f $path)
             Need (@($data.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
         }
         "recommendations.json" {
@@ -19883,14 +20039,17 @@ function Write-AuditThreeFileBundle {
         source_strategy = $sourceStrategy
         decision_insights = $decisionInsights
         native_ai_review = [pscustomobject]([ordered]@{
-                schema_version = 1
+                schema_version = 2
                 decision_owner = "host_ai"
-                purpose = "Read-only semantic synthesis of scan evidence into recommendations; deterministic scanners remain the source of traceable facts."
+                purpose = "Read-only semantic synthesis that highlights the most supported user needs from scan evidence; deterministic scanners remain the source of traceable facts."
                 allowed_inputs = @("snapshot.json", "target_scans[].detected.*.evidence", "target_scans[].target.resolved_path referenced by evidence")
                 prohibited_inputs = @("user-profile.json", "unscanned personal directories", "host auth/provider/session state", "unverified marketplace claims")
                 required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
+                    "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
+                    "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                 )

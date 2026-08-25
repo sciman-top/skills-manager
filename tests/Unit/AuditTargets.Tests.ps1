@@ -1147,6 +1147,52 @@ public string CreatePresentation() => "courseware.pptx";
             (Get-AuditRepoScanKeywords $scan) | Should -Contain "interface_web_ui"
         }
 
+        It "Highlights source-backed product workflows without letting raw file volume promote technical context" {
+            $webEvidence = @(
+                1..40 | ForEach-Object { [pscustomobject]@{ kind = "source_code"; path = "src\\web-$_.ts"; signal = "interface:web_ui@L$_" } }
+            )
+            $workflowEvidence = @([pscustomobject]@{ kind = "source_code"; path = "src\\document-flow.cs"; signal = "workflow:document_processing@L12" })
+            $documentedOcr = @([pscustomobject]@{ kind = "documentation"; path = "README.md"; signal = "workflow:ocr@L4" })
+            $scanOne = [pscustomobject]@{
+                target = [pscustomobject]@{ name = "one" }
+                detected = [pscustomobject]@{
+                    languages = @(); package_managers = @(); frameworks = @(); build_commands = @(); test_commands = @(); capabilities = @(); agent_rule_files = @(); notable_files = @()
+                    artifact_capabilities = @()
+                    requirement_signals = @(
+                        [pscustomobject]@{ domain = "interface"; subject = "web_ui"; actions = @("deliver"); confidence = "high"; evidence_status = "implemented"; targets = @(); evidence = $webEvidence },
+                        [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; actions = @("process"); confidence = "high"; evidence_status = "implemented"; targets = @(); evidence = $workflowEvidence },
+                        [pscustomobject]@{ domain = "workflow"; subject = "ocr"; actions = @("recognize"); confidence = "low"; evidence_status = "documented"; targets = @(); evidence = $documentedOcr }
+                    )
+                }
+                risks = @()
+            }
+            $scanTwo = [pscustomobject]@{
+                target = [pscustomobject]@{ name = "two" }
+                detected = [pscustomobject]@{
+                    languages = @(); package_managers = @(); frameworks = @(); build_commands = @(); test_commands = @(); capabilities = @(); agent_rule_files = @(); notable_files = @()
+                    artifact_capabilities = @()
+                    requirement_signals = @(
+                        [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; actions = @("process"); confidence = "high"; evidence_status = "implemented"; targets = @(); evidence = $workflowEvidence },
+                        [pscustomobject]@{ domain = "workflow"; subject = "ocr"; actions = @("recognize"); confidence = "low"; evidence_status = "documented"; targets = @(); evidence = $documentedOcr }
+                    )
+                }
+                risks = @()
+            }
+
+            $profile = New-AuditTargetProfile @($scanOne, $scanTwo)
+            $priority = $profile.prioritized_needs
+            $primary = @($priority.primary_needs | Where-Object key -eq "workflow/document_processing")
+            $primary.Count | Should -Be 1
+            $primary[0].evidence_coverage.source_code_target_count | Should -Be 2
+            @($priority.primary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 0
+            @($priority.secondary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 1
+            @($priority.observations | Where-Object key -eq "workflow/ocr").Count | Should -Be 1
+
+            $insights = New-AuditDecisionInsights $profile @($scanOne, $scanTwo) @() @()
+            $insights.keywords.primary_target_profile | Should -Contain "document_processing"
+            $insights.keywords.primary_target_profile | Should -Not -Contain "web_ui"
+        }
+
         It "Anchors artifact evidence locally, excludes scanner metadata, and does not promote test-only coverage" {
             $separatedRepo = Join-Path $TestDrive "target-repo-separated-artifact-signals"
             New-Item -ItemType Directory -Path (Join-Path $separatedRepo "src") -Force | Out-Null

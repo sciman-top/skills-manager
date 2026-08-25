@@ -231,10 +231,15 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
+            Need ([int]$data.target_profile.schema_version -eq 3) ("snapshot.target_profile schema_version 必须为 3：{0}" -f $path)
             Need ([string]$data.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile 必须由 target_scans_only 派生：{0}" -f $path)
             Need (Assert-IsArray $data.target_profile.artifact_capabilities) ("snapshot.target_profile.artifact_capabilities 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.target_profile.requirement_signals) ("snapshot.target_profile.requirement_signals 必须为数组：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data.target_profile "prioritized_needs") ("snapshot.target_profile 缺少 prioritized_needs：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.prioritized_needs.primary_needs) ("snapshot.target_profile.prioritized_needs.primary_needs 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.prioritized_needs.secondary_needs) ("snapshot.target_profile.prioritized_needs.secondary_needs 必须为数组：{0}" -f $path)
             Need ([string]$data.native_ai_review.decision_owner -eq "host_ai") ("snapshot.native_ai_review.decision_owner 必须为 host_ai：{0}" -f $path)
+            Need ([int]$data.native_ai_review.schema_version -eq 2) ("snapshot.native_ai_review schema_version 必须为 2：{0}" -f $path)
             Need (@($data.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
         }
         "recommendations.json" {

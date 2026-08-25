@@ -108,7 +108,11 @@ Describe "Skill Audit E2E" {
 
             $snapshot.run_id | Should -Be $result.run_id
             @($snapshot.target_scans).Count | Should -Be 1
+            $snapshot.target_profile.schema_version | Should -Be 3
+            $snapshot.target_profile.prioritized_needs.ranking_method | Should -Be "role_then_source_coverage_v1"
+            $snapshot.target_profile.prioritized_needs.policy | Should -Contain "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias."
             $snapshot.native_ai_review.decision_owner | Should -Be "host_ai"
+            $snapshot.native_ai_review.schema_version | Should -Be 2
             $snapshot.native_ai_review.mutation_policy | Should -Match "recommendations.json only"
             $recommendations.run_id | Should -Be $result.run_id
             $receipt.scan.success | Should -Be $true
