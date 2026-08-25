@@ -522,6 +522,7 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                     side_effect = [string]$skill.side_effect
                     execution_contract = if ($catalogExecutionContracts.ContainsKey($name)) { $catalogExecutionContracts[$name] } else { New-HostAdmissionExecutionContract }
                     dependencies = @($catalogDependencies[$name])
+                    package_sha256 = $expectedPackage
                     entrypoint_hash_validated = $true
                     package_hash_validated = $true
                     contained = $true

@@ -217,7 +217,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 ### 6.3 单轮只读 runner 路径
 
 1. 在独立 fresh Codex session 运行 S03。
-2. admission 必须携带原始请求、完整 router validation、唯一 selected entry、validated closure、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop。
+2. parent 必须用确定性的 `ExecutionAdmission` helper 生成并重验证 schema-v2 `execution_admission` 与 `execution_plan`；两者绑定原始请求、完整 router validation、唯一 selected entry、validated closure、entrypoint/package hash、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop、同一 admission id 与 `run_once` action。raw router JSON 或手写 prose contract 不算 admission。
 3. 记录 cold-capability-runner child id、Terra/high、completed 事件、输入/输出 evidence reference。
 4. 最后用文件变更/工具 event 核对实际 write set 为空。任何写入、外部调用、第二候选或 contract mismatch 都是 fail。
 

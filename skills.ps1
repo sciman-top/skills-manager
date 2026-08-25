@@ -2172,10 +2172,29 @@ function Test-OperationPlanContract($Plan) {
 }
 
 $script:ExecutionAdmissionSchemaVersion = 2
-$script:ExecutionAdmissionMode = 'multi_turn_user_decision'
-$script:ExecutionAdmissionNativeAgent = 'design-griller'
-$script:ExecutionAdmissionConversationOwner = 'parent'
-$script:ExecutionAdmissionStopCondition = 'one_question_then_wait'
+$script:ExecutionAdmissionProfiles = [ordered]@{
+    multi_turn_user_decision = [pscustomobject][ordered]@{
+        mode = 'multi_turn_user_decision'
+        native_agent = 'design-griller'
+        conversation_owner = 'parent'
+        stop_condition = 'one_question_then_wait'
+        action = 'ask_one_question'
+        minimum_proof = 'one native design-griller question, then await one user answer'
+    }
+    one_shot = [pscustomobject][ordered]@{
+        mode = 'one_shot'
+        native_agent = 'cold-capability-runner'
+        conversation_owner = 'runner'
+        stop_condition = 'parent_contract'
+        action = 'run_once'
+        minimum_proof = 'one bounded cold-capability-runner execution, then return to the parent'
+    }
+}
+
+function Get-ExecutionAdmissionProfile([string]$Mode) {
+    if ([string]::IsNullOrWhiteSpace($Mode) -or -not $script:ExecutionAdmissionProfiles.Contains($Mode)) { return $null }
+    return $script:ExecutionAdmissionProfiles[$Mode]
+}
 
 function New-ExecutionAdmissionFinding([string]$Code, [string]$Path, [string]$Message) {
     return New-OperationFinding $Code 'error' $Path $Message
@@ -2243,12 +2262,28 @@ function Get-ExecutionAdmissionContractSnapshot($Contract) {
     }
 }
 
-function Test-ExecutionAdmissionMultiTurnContract($Contract) {
+function Test-ExecutionAdmissionContractShape($Contract, [string]$Mode) {
+    $profile = Get-ExecutionAdmissionProfile $Mode
+    if ($null -eq $profile) { return $false }
     $snapshot = Get-ExecutionAdmissionContractSnapshot $Contract
-    return $snapshot.mode -eq $script:ExecutionAdmissionMode -and
-        $snapshot.native_agent -eq $script:ExecutionAdmissionNativeAgent -and
-        $snapshot.conversation_owner -eq $script:ExecutionAdmissionConversationOwner -and
-        $snapshot.stop_condition -eq $script:ExecutionAdmissionStopCondition
+    return $snapshot.mode -eq $profile.mode -and
+        $snapshot.native_agent -eq $profile.native_agent -and
+        $snapshot.conversation_owner -eq $profile.conversation_owner -and
+        $snapshot.stop_condition -eq $profile.stop_condition
+}
+
+function Test-ExecutionAdmissionMultiTurnContract($Contract) {
+    return Test-ExecutionAdmissionContractShape $Contract 'multi_turn_user_decision'
+}
+
+function Test-ExecutionAdmissionOneShotContract($Contract) {
+    return Test-ExecutionAdmissionContractShape $Contract 'one_shot'
+}
+
+function Get-ExecutionAdmissionContractMode($Contract) {
+    $snapshot = Get-ExecutionAdmissionContractSnapshot $Contract
+    if ($script:ExecutionAdmissionProfiles.Contains($snapshot.mode) -and (Test-ExecutionAdmissionContractShape $snapshot $snapshot.mode)) { return $snapshot.mode }
+    return ''
 }
 
 function Get-ExecutionAdmissionFileSnapshot {
@@ -2280,6 +2315,21 @@ function Get-ExecutionAdmissionFileSnapshot {
     return @($result.ToArray() | Sort-Object path)
 }
 
+function Get-ExecutionAdmissionPackageHash([string]$SkillEntrypointPath) {
+    if ([string]::IsNullOrWhiteSpace($SkillEntrypointPath) -or -not (Test-Path -LiteralPath $SkillEntrypointPath -PathType Leaf)) { return '' }
+    $base = [IO.Path]::GetFullPath((Split-Path -Path $SkillEntrypointPath -Parent)).TrimEnd('\', '/')
+    $items = @(Get-ChildItem -LiteralPath $base -Recurse -Force -ErrorAction Stop)
+    if (@($items | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -gt 0) { return '' }
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($file in @($items | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($relative -eq 'catalog.json') { continue }
+        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
+    }
+    return Get-OperationSha256 ($parts.ToArray() -join "`n")
+}
+
 function Get-ExecutionAdmissionValidationSnapshot {
     param(
         [Parameter(Mandatory = $true)]$Validation,
@@ -2304,7 +2354,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
 
     $contract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $Validation 'execution_contract')
     $receiptContract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $receipt 'execution_contract')
-    if (-not (Test-ExecutionAdmissionMultiTurnContract $contract) -or (ConvertTo-ExecutionAdmissionCanonicalJson $contract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $receiptContract)) { throw 'execution_contract_invalid' }
+    if ([string]::IsNullOrWhiteSpace((Get-ExecutionAdmissionContractMode $contract)) -or (ConvertTo-ExecutionAdmissionCanonicalJson $contract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $receiptContract)) { throw 'execution_contract_invalid' }
 
     $closurePaths = New-Object System.Collections.Generic.List[string]
     $closureRows = New-Object System.Collections.Generic.List[object]
@@ -2315,8 +2365,9 @@ function Get-ExecutionAdmissionValidationSnapshot {
         $availability = [string](Get-ExecutionAdmissionProperty $member 'availability')
         $sideEffect = [string](Get-ExecutionAdmissionProperty $member 'side_effect')
         $loadSideEffect = [string](Get-ExecutionAdmissionProperty $member 'load_side_effect')
+        $packageHash = [string](Get-ExecutionAdmissionProperty $member 'package_sha256')
         if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($path) -or -not $closureNames.Add($name)) { throw 'validated_closure_identity_invalid' }
-        if ($availability -ne 'available' -or -not [bool](Get-ExecutionAdmissionProperty $member 'entrypoint_hash_validated') -or -not [bool](Get-ExecutionAdmissionProperty $member 'contained')) { throw 'validated_closure_unavailable' }
+        if ($availability -ne 'available' -or -not [bool](Get-ExecutionAdmissionProperty $member 'entrypoint_hash_validated') -or -not [bool](Get-ExecutionAdmissionProperty $member 'package_hash_validated') -or $packageHash -notmatch '^[a-f0-9]{64}$' -or -not [bool](Get-ExecutionAdmissionProperty $member 'contained')) { throw 'validated_closure_unavailable' }
         if ($sideEffect -in @('unknown', 'external_read') -or $loadSideEffect -ne 'read_only') { throw 'validated_closure_side_effect_invalid' }
         $closurePaths.Add($path) | Out-Null
         $closureRows.Add([pscustomobject][ordered]@{
@@ -2325,6 +2376,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
             availability = $availability
             load_side_effect = $loadSideEffect
             side_effect = $sideEffect
+            package_sha256 = $packageHash
             dependencies = @((Get-ExecutionAdmissionProperty $member 'dependencies') | ForEach-Object { [string]$_ } | Sort-Object)
         }) | Out-Null
     }
@@ -2336,6 +2388,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
             name = $_.name
             path = $_.path
             entrypoint_sha256 = $snapshotsByPath[[string]$_.path]
+            package_sha256 = $_.package_sha256
             availability = $_.availability
             load_side_effect = $_.load_side_effect
             side_effect = $_.side_effect
@@ -2392,6 +2445,8 @@ function New-ExecutionAdmission {
     if (-not [string]::IsNullOrWhiteSpace($PriorAdmissionId) -and $PriorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { throw 'prior_admission_id_invalid' }
 
     $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot
+    $profile = Get-ExecutionAdmissionProfile ([string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $validationSnapshot 'effective_execution_contract') 'mode'))
+    if ($null -eq $profile) { throw 'execution_contract_invalid' }
     $allowedReadSet = Get-ExecutionAdmissionFileSnapshot -Paths $AllowedReadSet -RepoRoot $RepoRoot -FieldName 'allowed_read_set'
     $admission = [pscustomobject][ordered]@{
         schema_version = $script:ExecutionAdmissionSchemaVersion
@@ -2404,8 +2459,8 @@ function New-ExecutionAdmission {
         requested_operation = 'read_only'
         exact_write_set = @()
         allowed_read_set = $allowedReadSet
-        minimum_proof = 'one native design-griller question, then await one user answer'
-        stop_condition = $script:ExecutionAdmissionStopCondition
+        minimum_proof = $profile.minimum_proof
+        stop_condition = $profile.stop_condition
         validation_snapshot = $validationSnapshot
         prior_admission_id = $PriorAdmissionId
         attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
@@ -2439,7 +2494,11 @@ function Test-ExecutionAdmissionContract {
         else { $findings.Add((New-ExecutionAdmissionFinding 'write_set_type_invalid' '$.exact_write_set' 'Write set must be an array.')) | Out-Null }
     }
     elseif (@($writeSet).Count -ne 0) { $findings.Add((New-ExecutionAdmissionFinding 'read_only_write_set_not_empty' '$.exact_write_set' 'Read-only admission must carry an empty write set.')) | Out-Null }
-    if ([string](Get-ExecutionAdmissionProperty $Admission 'stop_condition') -ne $script:ExecutionAdmissionStopCondition) { $findings.Add((New-ExecutionAdmissionFinding 'stop_condition_invalid' '$.stop_condition' 'P0 must stop after one question.')) | Out-Null }
+    $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
+    $mode = if ($null -eq $snapshot) { '' } else { [string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract') 'mode') }
+    $profile = Get-ExecutionAdmissionProfile $mode
+    if ($null -eq $profile) { $findings.Add((New-ExecutionAdmissionFinding 'execution_contract_invalid' '$.validation_snapshot.effective_execution_contract' 'Admission contract mode is not supported.')) | Out-Null }
+    elseif ([string](Get-ExecutionAdmissionProperty $Admission 'stop_condition') -ne $profile.stop_condition) { $findings.Add((New-ExecutionAdmissionFinding 'stop_condition_invalid' '$.stop_condition' ('Stop condition is invalid for {0}.' -f $mode))) | Out-Null }
     $priorAdmissionId = [string](Get-ExecutionAdmissionProperty $Admission 'prior_admission_id')
     if (-not [string]::IsNullOrWhiteSpace($priorAdmissionId) -and $priorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'prior_admission_id_invalid' '$.prior_admission_id' 'Prior admission id must be content-addressed.')) | Out-Null }
     $answerHash = [string](Get-ExecutionAdmissionProperty $Admission 'attributable_user_answer_sha256')
@@ -2453,12 +2512,11 @@ function Test-ExecutionAdmissionContract {
             if ([string](Get-ExecutionAdmissionProperty $entry 'path') -match '[*?\[\]]' -or [string](Get-ExecutionAdmissionProperty $entry 'sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'allowed_read_set_entry_invalid' '$.allowed_read_set' 'Read set entries need exact paths and SHA-256 hashes.')) | Out-Null; break }
         }
     }
-    $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
-    if ($null -eq $snapshot -or [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate') -eq '' -or [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint') -notmatch '^[a-f0-9]{64}$' -or -not (Test-ExecutionAdmissionMultiTurnContract (Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract'))) { $findings.Add((New-ExecutionAdmissionFinding 'validation_snapshot_invalid' '$.validation_snapshot' 'Validated selection snapshot is incomplete or has the wrong contract.')) | Out-Null }
+    if ($null -eq $snapshot -or [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate') -eq '' -or [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint') -notmatch '^[a-f0-9]{64}$' -or $null -eq $profile) { $findings.Add((New-ExecutionAdmissionFinding 'validation_snapshot_invalid' '$.validation_snapshot' 'Validated selection snapshot is incomplete or has the wrong contract.')) | Out-Null }
     $closure = if ($null -eq $snapshot) { @() } else { @(Get-ExecutionAdmissionProperty $snapshot 'validated_closure') }
     if ($closure.Count -eq 0) { $findings.Add((New-ExecutionAdmissionFinding 'validated_closure_invalid' '$.validation_snapshot.validated_closure' 'Validated closure is required.')) | Out-Null }
     foreach ($entry in @($closure)) {
-        if ([string](Get-ExecutionAdmissionProperty $entry 'entrypoint_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'closure_entry_hash_invalid' '$.validation_snapshot.validated_closure' 'Closure entries require SHA-256 snapshots.')) | Out-Null; break }
+        if ([string](Get-ExecutionAdmissionProperty $entry 'entrypoint_sha256') -notmatch '^[a-f0-9]{64}$' -or [string](Get-ExecutionAdmissionProperty $entry 'package_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'closure_entry_hash_invalid' '$.validation_snapshot.validated_closure' 'Closure entries require entrypoint and package SHA-256 snapshots.')) | Out-Null; break }
     }
     $expectedId = Get-ExecutionAdmissionDigest 'adm' (Get-ExecutionAdmissionPayload $Admission)
     if ([string](Get-ExecutionAdmissionProperty $Admission 'admission_id') -ne $expectedId) { $findings.Add((New-ExecutionAdmissionFinding 'admission_id_mismatch' '$.admission_id' 'Admission id does not match its canonical immutable payload.')) | Out-Null }
@@ -2524,6 +2582,9 @@ function New-ExecutionPlan {
     $planCatalogFingerprint = [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint')
     $planSelectedCandidate = [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate')
     $planValidatedClosure = @(Get-ExecutionAdmissionProperty $snapshot 'validated_closure')
+    $planMode = [string](Get-ExecutionAdmissionProperty $planContract 'mode')
+    $planProfile = Get-ExecutionAdmissionProfile $planMode
+    if ($null -eq $planProfile) { throw 'execution_contract_invalid' }
     $planRevalidationSnapshot = [pscustomobject][ordered]@{
         routing_receipt_id = $planRoutingReceiptId
         catalog_fingerprint = $planCatalogFingerprint
@@ -2535,8 +2596,8 @@ function New-ExecutionPlan {
         schema_version = $script:ExecutionAdmissionSchemaVersion
         kind = 'execution_plan'
         admission_id = $planAdmissionId
-        adapter = $script:ExecutionAdmissionNativeAgent
-        action = 'ask_one_question'
+        adapter = $planProfile.native_agent
+        action = $planProfile.action
         effective_execution_contract = $planContract
         allowed_read_set = $planReadSet
         minimum_proof = $planMinimumProof
@@ -2557,9 +2618,12 @@ function Test-ExecutionPlanContract {
     if ($null -eq $Plan) { return New-ExecutionAdmissionValidationResult @((New-ExecutionAdmissionFinding 'plan_missing' '$' 'Execution plan is required.')) }
     if ((Get-ExecutionAdmissionProperty $Plan 'schema_version') -ne $script:ExecutionAdmissionSchemaVersion -or [string](Get-ExecutionAdmissionProperty $Plan 'kind') -ne 'execution_plan') { $findings.Add((New-ExecutionAdmissionFinding 'plan_schema_invalid' '$' 'Execution plan schema is invalid.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $Plan 'admission_id') -ne [string](Get-ExecutionAdmissionProperty $Admission 'admission_id')) { $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_mismatch' '$.admission_id' 'Plan is not bound to its admission.')) | Out-Null }
-    if ([string](Get-ExecutionAdmissionProperty $Plan 'adapter') -ne $script:ExecutionAdmissionNativeAgent -or [string](Get-ExecutionAdmissionProperty $Plan 'action') -ne 'ask_one_question') { $findings.Add((New-ExecutionAdmissionFinding 'plan_dispatch_invalid' '$' 'P0 may dispatch only one design-griller question.')) | Out-Null }
-    if (-not (Test-ExecutionAdmissionMultiTurnContract (Get-ExecutionAdmissionProperty $Plan 'effective_execution_contract'))) { $findings.Add((New-ExecutionAdmissionFinding 'plan_contract_invalid' '$.effective_execution_contract' 'Plan contract is invalid.')) | Out-Null }
-    if ([string](Get-ExecutionAdmissionProperty $Plan 'stop_condition') -ne $script:ExecutionAdmissionStopCondition) { $findings.Add((New-ExecutionAdmissionFinding 'plan_stop_invalid' '$.stop_condition' 'Plan stop condition is invalid.')) | Out-Null }
+    $planContract = Get-ExecutionAdmissionProperty $Plan 'effective_execution_contract'
+    $planMode = [string](Get-ExecutionAdmissionProperty $planContract 'mode')
+    $planProfile = Get-ExecutionAdmissionProfile $planMode
+    if ($null -eq $planProfile -or [string](Get-ExecutionAdmissionProperty $Plan 'adapter') -ne $planProfile.native_agent -or [string](Get-ExecutionAdmissionProperty $Plan 'action') -ne $planProfile.action) { $findings.Add((New-ExecutionAdmissionFinding 'plan_dispatch_invalid' '$' 'Plan dispatch does not match its execution contract.')) | Out-Null }
+    if ($null -eq $planProfile -or -not (Test-ExecutionAdmissionContractShape $planContract $planMode)) { $findings.Add((New-ExecutionAdmissionFinding 'plan_contract_invalid' '$.effective_execution_contract' 'Plan contract is invalid.')) | Out-Null }
+    if ($null -eq $planProfile -or [string](Get-ExecutionAdmissionProperty $Plan 'stop_condition') -ne $planProfile.stop_condition) { $findings.Add((New-ExecutionAdmissionFinding 'plan_stop_invalid' '$.stop_condition' 'Plan stop condition is invalid.')) | Out-Null }
     $expectedId = Get-ExecutionAdmissionDigest 'plan' (Get-ExecutionPlanPayload $Plan)
     if ([string](Get-ExecutionAdmissionProperty $Plan 'plan_id') -ne $expectedId) { $findings.Add((New-ExecutionAdmissionFinding 'plan_id_mismatch' '$.plan_id' 'Plan id does not match its canonical payload.')) | Out-Null }
     return New-ExecutionAdmissionValidationResult $findings.ToArray()
@@ -2593,6 +2657,17 @@ function Test-ExecutionAdmissionRevalidation {
         $actualHash = ([string](Get-FileHash -LiteralPath ([string]$entry.path) -Algorithm SHA256).Hash).ToLowerInvariant()
         if ($actualHash -ne [string]$entry.sha256) { $findings.Add((New-ExecutionAdmissionFinding ([string]$entry.code) '$.snapshot' ('Snapshot file hash changed: {0}' -f $entry.path))) | Out-Null }
     }
+    $seenPackages = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @((Get-ExecutionAdmissionProperty $storedSnapshot 'validated_closure'))) {
+        $entryPath = [string](Get-ExecutionAdmissionProperty $entry 'path')
+        $packageRoot = [IO.Path]::GetFullPath((Split-Path -Path $entryPath -Parent))
+        if (-not $seenPackages.Add($packageRoot)) { continue }
+        $expectedPackage = [string](Get-ExecutionAdmissionProperty $entry 'package_sha256')
+        $actualPackage = Get-ExecutionAdmissionPackageHash $entryPath
+        if ($expectedPackage -notmatch '^[a-f0-9]{64}$' -or [string]::IsNullOrWhiteSpace($actualPackage) -or $actualPackage -cne $expectedPackage) {
+            $findings.Add((New-ExecutionAdmissionFinding 'package_hash_drift' '$.snapshot.validated_closure' ('Package hash changed: {0}' -f $packageRoot))) | Out-Null
+        }
+    }
     return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); disposition = $(if ($findings.Count -eq 0) { 'admit' } else { 'reject' }); findings = @($findings.ToArray()) }
 }
 
@@ -2607,6 +2682,9 @@ function Test-ExecutionAdmissionContinuation {
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
+    $priorSnapshot = Get-ExecutionAdmissionProperty $PriorAdmission 'validation_snapshot'
+    $priorContract = if ($null -eq $priorSnapshot) { $null } else { Get-ExecutionAdmissionProperty $priorSnapshot 'effective_execution_contract' }
+    if (-not (Test-ExecutionAdmissionMultiTurnContract $priorContract)) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_contract_invalid' '$.validation_snapshot.effective_execution_contract' 'Only a multi-turn design-griller admission may continue.')) | Out-Null }
     foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
     foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $SuccessorAdmission -Plan $SuccessorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
     if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
@@ -2643,6 +2721,8 @@ function New-ExecutionAdmissionSuccessor {
     )
 
     if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { throw 'attributable_user_answer_missing' }
+    $priorSnapshot = Get-ExecutionAdmissionProperty $PriorAdmission 'validation_snapshot'
+    if ($null -eq $priorSnapshot -or -not (Test-ExecutionAdmissionMultiTurnContract (Get-ExecutionAdmissionProperty $priorSnapshot 'effective_execution_contract'))) { throw 'continuation_contract_invalid' }
     $priorRevalidation = Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot
     if (-not $priorRevalidation.pass) { throw ('continuation_predecessor_not_revalidated: {0}' -f ((@($priorRevalidation.findings | ForEach-Object code) -join ','))) }
     if ((Get-OperationSha256 $OriginalRequest) -ne [string](Get-ExecutionAdmissionProperty $PriorAdmission 'request_sha256')) { throw 'continuation_request_mismatch' }

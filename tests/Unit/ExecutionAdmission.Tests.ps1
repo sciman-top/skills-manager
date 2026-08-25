@@ -22,8 +22,8 @@ BeforeAll {
             stop_condition = 'one_question_then_wait'
         }
         $closure = @(
-            [pscustomobject][ordered]@{ kind = 'skill'; name = 'grill-with-docs'; path = $skillPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'controlled_write'; entrypoint_hash_validated = $true; contained = $true; dependencies = @('grilling'); execution_contract = $contract },
-            [pscustomobject][ordered]@{ kind = 'skill'; name = 'grilling'; path = $dependencyPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'read_only'; entrypoint_hash_validated = $true; contained = $true; dependencies = @(); execution_contract = $contract }
+            [pscustomobject][ordered]@{ kind = 'skill'; name = 'grill-with-docs'; path = $skillPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'controlled_write'; package_sha256 = Get-NativeSkillProjectionPackageHash (Split-Path -Parent $skillPath); entrypoint_hash_validated = $true; package_hash_validated = $true; contained = $true; dependencies = @('grilling'); execution_contract = $contract },
+            [pscustomobject][ordered]@{ kind = 'skill'; name = 'grilling'; path = $dependencyPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'read_only'; package_sha256 = Get-NativeSkillProjectionPackageHash (Split-Path -Parent $dependencyPath); entrypoint_hash_validated = $true; package_hash_validated = $true; contained = $true; dependencies = @(); execution_contract = $contract }
         )
         return [pscustomobject][ordered]@{
             validation = [pscustomobject][ordered]@{
@@ -69,6 +69,48 @@ Describe 'Execution admission' {
         $plan.adapter | Should -Be 'design-griller'
     }
 
+    It 'creates a content-addressed one-shot admission and runner plan' {
+        $root = Join-Path $TestDrive 'one-shot'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $contract = [pscustomobject][ordered]@{
+            mode = 'one_shot'
+            native_agent = 'cold-capability-runner'
+            conversation_owner = 'runner'
+            stop_condition = 'parent_contract'
+        }
+        foreach ($member in @($fixture.validation.validated_closure)) { $member.execution_contract = $contract }
+        $fixture.validation.execution_contract = $contract
+        $fixture.validation.routing_receipt.execution_contract = $contract
+
+        $admission = New-ExecutionAdmission -OriginalRequest '请只读运行这个冷技能并返回结果，不改文件。' -AdmittedGoal '完成一次受限的冷技能只读运行。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_one_shot_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+
+        (Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $root).pass | Should -BeTrue
+        (Test-ExecutionPlanContract -Plan $plan -Admission $admission).pass | Should -BeTrue
+        $admission.minimum_proof | Should -Match 'cold-capability-runner'
+        $admission.stop_condition | Should -Be 'parent_contract'
+        $plan.adapter | Should -Be 'cold-capability-runner'
+        $plan.action | Should -Be 'run_once'
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest '请只读运行这个冷技能并返回结果，不改文件。' -AttributableUserAnswer '继续' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*continuation_contract_invalid*'
+    }
+
+    It 'rejects one-shot admission when a package-local resource drifts' {
+        $root = Join-Path $TestDrive 'one-shot-package-drift'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $contract = [pscustomobject][ordered]@{ mode = 'one_shot'; native_agent = 'cold-capability-runner'; conversation_owner = 'runner'; stop_condition = 'parent_contract' }
+        foreach ($member in @($fixture.validation.validated_closure)) { $member.execution_contract = $contract }
+        $fixture.validation.execution_contract = $contract
+        $fixture.validation.routing_receipt.execution_contract = $contract
+        $admission = New-ExecutionAdmission -OriginalRequest '请只读运行这个冷技能并返回结果，不改文件。' -AdmittedGoal '完成一次受限的冷技能只读运行。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_one_shot_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+        Add-Content -LiteralPath $fixture.skill_path -Value 'package drift' -Encoding UTF8
+
+        $result = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root
+
+        $result.pass | Should -BeFalse
+        @($result.findings | ForEach-Object code) | Should -Contain 'package_hash_drift'
+    }
+
     It 'locates the repository root from a generated-skill read-set entry before deriving a plan' {
         $root = Join-Path $TestDrive 'plan-root'
         $fixture = New-ExecutionAdmissionFixture $root
@@ -107,8 +149,8 @@ try {
     Set-Content -LiteralPath (Join-Path $fixtureRoot 'skills.json') -Value '{}' -Encoding UTF8
     $contract = [pscustomobject][ordered]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
     $closure = @(
-        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grill-with-docs'; path = $skillPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'controlled_write'; entrypoint_hash_validated = $true; contained = $true; dependencies = @('grilling'); execution_contract = $contract },
-        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grilling'; path = $dependencyPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'read_only'; entrypoint_hash_validated = $true; contained = $true; dependencies = @(); execution_contract = $contract }
+        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grill-with-docs'; path = $skillPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'controlled_write'; package_sha256 = Get-NativeSkillProjectionPackageHash (Split-Path -Parent $skillPath); entrypoint_hash_validated = $true; package_hash_validated = $true; contained = $true; dependencies = @('grilling'); execution_contract = $contract },
+        [pscustomobject][ordered]@{ kind = 'skill'; name = 'grilling'; path = $dependencyPath; availability = 'available'; load_side_effect = 'read_only'; side_effect = 'read_only'; package_sha256 = Get-NativeSkillProjectionPackageHash (Split-Path -Parent $dependencyPath); entrypoint_hash_validated = $true; package_hash_validated = $true; contained = $true; dependencies = @(); execution_contract = $contract }
     )
     $validation = [pscustomobject][ordered]@{
         load_validation = [pscustomobject]@{ pass = $true }

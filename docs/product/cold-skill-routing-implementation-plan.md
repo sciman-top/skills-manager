@@ -292,6 +292,15 @@ Verifier 必须拒绝以下组合：
 - **Truth boundary / class**：`repo_verified`。模板文本与 repo-side revalidation 只能形成 `soft_guard_only`，直到 fresh host 能在 spawn 前实际调用该 seam、记录权威 effect observation，并由逐轮真实用户回答完成同 child interview。
 - **Stop / rollback**：任何需要让仓库接管 host session、解密 parent-child payload、伪造用户来源、修改 auth/provider 或扩展到 runner/controlled-write 时停止；回滚仅撤本卡片 source/template/test/doc 变更。
 
+### CSR-181：one-shot cold-capability-runner execution admission
+
+- **Goal**：复用同一 admission/plan 深模块，把 `one_shot / cold-capability-runner / runner / parent_contract` 也纳入可重算的执行许可；消除 runner 只依赖 TOML prose 判断 admission 的缺口。
+- **Exact write set**：`src/Domain/ExecutionAdmission.ps1`；`overrides/resources/native-agent-bridge/cold-capability-runner.toml`；受影响 unit tests；本任务卡片。不得改 provider/auth/config、router 语义选择或宿主 orchestrator。
+- **Hard invariants**：one-shot admission 必须绑定 schema-v2 `execution_admission`、精确 validation snapshot、entrypoint/package hash、非空 hash read set、空 exact write set、minimum proof、`parent_contract` stop；plan 必须绑定同一 admission id、`run_once` action、`cold-capability-runner` adapter 与 revalidated closure。one-shot 不得创建 successor admission 或接受后续用户回答。
+- **Minimum verification**：valid one-shot admission/plan；missing/mismatched contract；package-local resource drift；write-set tamper；multi-turn successor misuse；build 后 generated seam 无漂移。
+- **Truth boundary / class**：`repo_verified`；fresh host 仍需记录真实 child id、解析 model/effort、完成事件与零写入，才能报告 `host_specific_live_accepted`。
+- **Stop / rollback**：若需要 host session hook、controlled-write admission 或 provider/auth 变更则停止；回滚仅撤本卡片 source/template/test/doc 变更。
+
 ### CSR-190：parent-side successor-admission continuation guard
 
 - **Goal**：避免 parent 在后续 `followup_task` 中把前一轮 admission 或原始 router selection 直接复用为新一题的执行许可。每个真实用户回答必须由新的、不可变的 successor admission 和 plan 绑定。

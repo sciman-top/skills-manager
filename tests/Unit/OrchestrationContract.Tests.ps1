@@ -16,6 +16,19 @@ Describe 'Host orchestration handoff contracts' {
         $template | Should -Match 'self-reported model, effort, or completion state'
     }
 
+    It 'keeps model selection as a task-shape hypothesis with parent-observed evidence' {
+        $template = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\resources\requesting-code-review\code-reviewer.md')
+
+        foreach ($profile in @('sol_xhigh_supervisor', 'sol_medium_worker', 'terra_xhigh_worker', 'terra_high_worker')) {
+            $template | Should -Match ([regex]::Escape($profile))
+        }
+        $template | Should -Match 'task shape'
+        $template | Should -Match 'paired representative cases'
+        $template | Should -Match 'non-OpenAI models'
+        $template | Should -Match 'token usage'
+        $template | Should -Match 'repair/retry count'
+    }
+
     It 'makes the high-value PowerPoint audit skill explicit and negatively scoped' {
         $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\custom-powerpoint-accessibility\agents\openai.yaml')
         $config = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json

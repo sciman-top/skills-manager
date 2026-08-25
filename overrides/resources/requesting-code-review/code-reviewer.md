@@ -57,6 +57,27 @@ Subagent (general-purpose):
 
     The child must not treat a self-reported model, effort, or completion state as authoritative; the parent records those fields from host session metadata and the final receipt.
 
+    ## Profile selection is an evidence-backed hypothesis
+
+    The parent chooses the starting profile from the subtask shape, not from
+    prompt adjectives alone:
+
+    - `sol_xhigh_supervisor`: high-risk architecture, cross-source adjudication,
+      or an irreversible design decision.
+    - `sol_medium_worker`: bounded implementation, local repair, or focused
+      affected-test work with a clear write set.
+    - `terra_xhigh_worker`: isolated but difficult implementation, debugging,
+      or independent review that benefits from deeper exploration.
+    - `terra_high_worker`: read-only retrieval, classification, evidence
+      collection, and routine preprocessing.
+
+    These are starting hypotheses, not a scheduler contract. The parent must
+    record the task shape, selected profile, actual model/effort from host
+    metadata, success, evidence completeness, latency, token usage, cost, and
+    repair/retry count. Compare paired representative cases before changing a
+    default. For non-OpenAI models, calibrate the model/effort pair separately;
+    do not transfer GPT-5.6 effort semantics by name.
+
     ## Read-Only Review
 
     Your review is read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch state in any way. Use tools like `git show`, `git diff`, and `git log` to inspect history. If you need a working copy of a different revision, check it out into a separate temporary directory (e.g. `git worktree add /tmp/review-[SHA] [SHA]`) — never move HEAD on this checkout.
