@@ -19675,6 +19675,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             tokens = @($tokens)
             status = "planned"
         })
@@ -19695,6 +19696,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             matched_skill = $matched
             status = $status
         })
@@ -19721,6 +19723,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             confidence = [string]$item.confidence
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             server = $server
             status = $status
         })
@@ -19740,6 +19743,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             matched_server = $matched
             status = $status
         })
