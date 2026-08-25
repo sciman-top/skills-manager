@@ -12,6 +12,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Cross-process consumers decode stdout as UTF-8. On a Windows console code
+# page (for example GBK on zh-CN hosts) the default console encoding corrupts
+# non-ASCII skill descriptions before the host can parse the JSON document.
+try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new() } catch { }
+
 function New-RouterFinding([string]$Code, [string]$Path, [string]$Message) {
     [pscustomobject][ordered]@{ code = $Code; path = $Path; message = $Message }
 }
