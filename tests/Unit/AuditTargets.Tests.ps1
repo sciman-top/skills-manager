@@ -1150,6 +1150,7 @@ public string CreatePresentation() => "courseware.pptx";
         It "Anchors artifact evidence locally, excludes scanner metadata, and does not promote test-only coverage" {
             $separatedRepo = Join-Path $TestDrive "target-repo-separated-artifact-signals"
             New-Item -ItemType Directory -Path (Join-Path $separatedRepo "src") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $separatedRepo "tests") -Force | Out-Null
             Set-ContentUtf8 (Join-Path $separatedRepo "src\separated.py") @"
 PDF_FORMAT = "pdf"
 status = "ready"
@@ -1157,11 +1158,23 @@ def render_report():
     return status
 "@
             Set-ContentUtf8 (Join-Path $separatedRepo "src\scanner-rules.ps1") '$rule = [pscustomobject]@{ artifact = "pdf"; domain = "workflow"; subject = "document_processing"; pattern = "pdf"; actions = @("render") }'
+            Set-ContentUtf8 (Join-Path $separatedRepo "src\scanner-implementation.ps1") @'
+function Add-AuditArtifactFactsFromText { }
+function Add-AuditRequirementFactsFromText { }
+if ($text -match "ocr") { }
+'@
+            Set-ContentUtf8 (Join-Path $separatedRepo "tests\scanner-fixture.ps1") @'
+New-AuditRepoScan "fixture" $repo "fixture"
+Set-ContentUtf8 $path "render_pdf(sample.pdf)"
+$scan.detected.artifact_capabilities | Out-Null
+'@
 
             $separatedScan = New-AuditRepoScan "separated" $separatedRepo "..\target-repo-separated-artifact-signals"
             (@($separatedScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })).Count | Should -Be 0
             $separatedEvidencePaths = @($separatedScan.detected.requirement_signals | ForEach-Object { @($_.evidence | ForEach-Object { [string]$_.path }) })
             $separatedEvidencePaths | Should -Not -Contain "src\scanner-rules.ps1"
+            $separatedEvidencePaths | Should -Not -Contain "src\scanner-implementation.ps1"
+            $separatedEvidencePaths | Should -Not -Contain "tests\scanner-fixture.ps1"
 
             $implementedRepo = Join-Path $TestDrive "target-repo-local-artifact-evidence"
             New-Item -ItemType Directory -Path (Join-Path $implementedRepo "src") -Force | Out-Null

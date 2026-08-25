@@ -17202,6 +17202,19 @@ function Get-AuditEvidenceLines([string]$Content) {
     return @($result.ToArray())
 }
 
+function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
+    $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
+        [regex]::IsMatch($Content, "(?i)function\s+Add-AuditRequirementFactsFromText\b")
+    if ($definesBothExtractors) { return $true }
+
+    # Fixture code for the scanner describes hypothetical target repositories.  It is
+    # evidence about the scanner, not a capability supplied by the scanned target.
+    return [regex]::IsMatch($Content, "(?i)\bNew-AuditRepoScan\b") -and
+        [regex]::IsMatch($Content, "(?i)\bSet-ContentUtf8\b") -and
+        [regex]::IsMatch($Content, "(?i)\b(?:artifact_capabilities|requirement_signals)\b")
+}
+
 function Add-AuditRequirementFactsFromText {
     param(
         $Accumulator,
@@ -17339,6 +17352,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
         try {
             $content = Get-ContentUtf8 $file.FullName
             if ($content.Length -gt 262144) { $content = $content.Substring(0, 262144) }
+            if (Test-AuditSelfReferentialAnalysisFile $content) { continue }
             $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
             $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } else { "source_code" }
             Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
