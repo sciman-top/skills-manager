@@ -44,8 +44,8 @@
 - 可见能力足够时直达可见能力；只有“能力不足 + 专门工作流确有净收益”才有一次 discovery 预算。完整原始请求随 discovery 传递，domain hint 最多两个。
 - discovery、候选校验、真实读取 SKILL.md、child 生命周期、外部结果接受是不同事件。任何低层证据都不得升格为更高层。
 - Router discovery 永远只读，且 `execution_authorization.status=not_granted`。校验许可读取闭包的入口文本，不等于执行许可。
-- `execution_contract` 是分流的权威：`one_shot`、`parent_user_input`、`multi_turn_user_decision`、缺失/冲突/unknown/external 必须有不同结果；不得以“给结论”降格多轮交互。
-- `controlled_write` 必须另有用户实施请求、exact write set、最低验证和 stop；`external_read`、`unknown`、冲突契约默认拒绝。
+- `execution_contract` 是分流的权威：根候选的 `one_shot`、`parent_user_input`、`multi_turn_user_decision`、缺失/unknown 必须有不同结果；依赖项是本次闭包的支持性读取，不得优先级合并成第二个 adapter。需要独立执行依赖时必须重新选择根候选并重新 admission；根契约缺失、非法或无法确定时 fail-closed，不得以“给结论”降格多轮交互。
+- `controlled_write` 必须另有用户实施请求、exact write set、最低验证和 stop；`external_read`、`unknown`、根契约冲突默认拒绝。
 - 任何子代理 template 仅可静态固定自己的 model 与 reasoning effort；不得通过 bridge 管理 provider、endpoint、auth、会话、共享 profile 或动态 model fallback。
 
 ## 2. 当前基线与已收口问题

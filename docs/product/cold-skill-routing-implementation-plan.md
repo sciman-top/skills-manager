@@ -26,7 +26,7 @@
 - 发现、精确校验、真实 SKILL.md 读取、native child 启动、child 完成和用户接受结果是不同事件。低层事件不能升格为高层验收。
 - router validation 只授权读取被验证的 closure，绝不等于执行、写入、外部调用、第二次 discovery 或动态 profile 切换。
 - custom-agent template 只允许静态固定自己的 model 和 model_reasoning_effort；不得管理 provider、base URL、auth、secret、session、global config 或 fallback。
-- 任何 controlled_write 都需要当前用户实施请求、exact write set、minimum proof、stop 和实际写入清单。unknown、external、冲突或缺失 contract 一律 fail-closed。
+- 任何 controlled_write 都需要当前用户实施请求、exact write set、minimum proof、stop 和实际写入清单。根候选的 unknown、external、冲突或缺失 contract 一律 fail-closed；依赖项 contract 只描述其被单独选为根时的 dispatch，不得改变当前根候选的 adapter。
 
 ## 2. 依赖图与真值边界
 

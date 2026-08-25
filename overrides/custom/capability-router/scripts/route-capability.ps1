@@ -213,15 +213,19 @@ function Resolve-ExecutionContract($Contract) {
     }
 }
 
-function Get-EffectiveExecutionContract([object[]]$Rows) {
-    if (@($Rows).Count -eq 0) { return New-HostAdmissionExecutionContract }
-    $contracts = @($Rows | ForEach-Object { $_.execution_contract })
-    if (@($contracts | Where-Object mode -eq 'host_admission_required').Count -gt 0) { return New-HostAdmissionExecutionContract }
-    $multiTurn = @($contracts | Where-Object mode -eq 'multi_turn_user_decision')
-    if ($multiTurn.Count -gt 0) { return $multiTurn[0] }
-    $parentInput = @($contracts | Where-Object mode -eq 'parent_user_input')
-    if ($parentInput.Count -gt 0) { return $parentInput[0] }
-    return @($contracts | Where-Object mode -eq 'one_shot')[0]
+function Get-EffectiveExecutionContract([object[]]$Rows, [string]$RootName) {
+    if (@($Rows).Count -eq 0 -or [string]::IsNullOrWhiteSpace($RootName)) { return New-HostAdmissionExecutionContract 'contract_conflict' }
+
+    # The selected root owns the top-level dispatch contract.  Dependency
+    # entries are read-only supporting inputs in this admission; their own
+    # contracts must never be priority-merged into (or silently replace) the
+    # root adapter.  A dependency that needs independent execution must be
+    # selected as a new root and admitted separately.
+    $rootRows = @($Rows | Where-Object { [string]$_.name -eq $RootName })
+    if ($rootRows.Count -ne 1 -or $null -eq $rootRows[0].execution_contract) {
+        return New-HostAdmissionExecutionContract 'contract_conflict'
+    }
+    return $rootRows[0].execution_contract
 }
 
 function Resolve-Catalog([string]$Explicit, [bool]$AllowAutoDiscovery) {
@@ -612,7 +616,7 @@ if ($rootSelectionPass) {
 if (-not $closurePass) { $validatedClosure.Clear() }
 $validatedClosureRows = @($validatedClosure.ToArray())
 $loadPass = $rootSelectionPass -and $closurePass
-$effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows } else { New-HostAdmissionExecutionContract }
+$effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows ([string]$selectedRows[0].name) } else { New-HostAdmissionExecutionContract }
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
 $authorizationReason = if ($discoveryScopeRequired) { 'domain_hint_required' }

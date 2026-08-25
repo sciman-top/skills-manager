@@ -187,6 +187,50 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
     }
 
+    It 'binds the effective dispatch contract to the selected root, not a supporting dependency' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $rootContract = [pscustomobject]@{
+            mode = 'multi_turn_user_decision'
+            native_agent = 'design-griller'
+            conversation_owner = 'parent'
+            stop_condition = 'one_question_then_wait'
+        }
+        $dependencyRoot = Join-Path $root 'one-shot-dependency'
+        New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
+        $dependencyPath = Join-Path $dependencyRoot 'SKILL.md'
+        Set-Content -LiteralPath $dependencyPath -Encoding UTF8 -Value "---`nname: one-shot-dependency`ndescription: Supporting read-only input.`n---"
+        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue $rootContract
+        $document.skills[0].dependencies = @('one-shot-dependency')
+        $document.skills += [pscustomobject][ordered]@{
+            name = 'one-shot-dependency'
+            description = 'Supporting read-only input.'
+            relative_path = '..\one-shot-dependency\SKILL.md'
+            entrypoint_sha256 = (Get-FileHash $dependencyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            domains = @('engineering')
+            load_side_effect = 'read_only'
+            side_effect = 'read_only'
+            dependencies = @()
+            routing_rules = @()
+            execution_contract = [pscustomobject]@{
+                mode = 'one_shot'
+                native_agent = 'cold-capability-runner'
+                conversation_owner = 'runner'
+                stop_condition = 'parent_contract'
+            }
+        }
+        $document.domains[0].skill_names += 'one-shot-dependency'
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'grill this proposal' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.load_validation.pass | Should -Be $true
+        @($result.validated_closure.name) | Should -Be @('codebase-design', 'one-shot-dependency')
+        $result.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+        $result.execution_contract.native_agent | Should -Be 'design-griller'
+        $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_interactive_bridge'
+    }
+
     It 'fails closed when a catalog execution contract is malformed' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
         $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{

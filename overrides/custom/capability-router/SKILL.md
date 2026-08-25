@@ -98,7 +98,13 @@ proof, and stop condition) and hand it to the child. The router's `not_granted`
 is permanent by design and is upgraded only by this parent-side admission,
 never by the router. When the host has no native spawn tool, fall back to
 parent-mediated execution and record it as parent-mediated - never as a runner
-execution. The child must not treat validation as execution authorization. The result and receipt also carry the effective `execution_contract` for the selected dependency closure. The host must preserve it: `one_shot` may use `cold-capability-runner`;
+execution. The child must not treat validation as execution authorization. The
+result and receipt carry the effective `execution_contract` of the **selected
+root**. A dependency entry is a supporting read-only input in that admission;
+its own contract is not priority-merged into the root and cannot silently
+select a second adapter. To execute a dependency independently, select it as
+a new root and create a separate admission. The host must preserve the root
+contract: `one_shot` may use `cold-capability-runner`;
 `parent_user_input` must stop for parent-mediated user input; and
 `multi_turn_user_decision` must use `design-griller`, relay exactly one
 question to the user, and wait for that answer before resuming the same child.
