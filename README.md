@@ -79,13 +79,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core`（8 个通用治理技能）；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core`；技能集合和数量以 `skills.json` 的 profile 为准（本次 fresh read 为 9 个通用治理技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
 | 宿主 | `core` | `full-compatible` 的宿主适配 |
 | --- | --- | --- |
-| ChatGPT/Codex | 8 个通用治理技能 | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
-| Claude | 8 个通用治理技能 | 全量受管技能 |
-| ZCode | 8 个通用治理技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
+| ChatGPT/Codex | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
+| Claude | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 全量受管技能 |
+| ZCode | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
 
 `full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
 
