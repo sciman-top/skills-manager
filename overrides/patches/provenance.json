@@ -9,7 +9,7 @@
       "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "license": "MIT",
-      "local_delta_reason": "Keep the explicit core entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation."
+      "local_delta_reason": "Keep the explicit core entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation; accept only provenance-bound human or explicitly authorized AI-delegate answers, never treating the latter as human acceptance."
     },
     {
       "name": "code-review-and-quality",
@@ -27,7 +27,7 @@
       "base_revision": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
       "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
       "license": "MIT",
-      "local_delta_reason": "Narrow implicit activation to explicit design grilling and preserve local domain-document and Codex invocation boundaries."
+      "local_delta_reason": "Narrow implicit activation to explicit design grilling, preserve local domain-document and Codex invocation boundaries, and carry explicit human/delegate answer provenance without upgrading delegate answers to human acceptance."
     },
     {
       "name": "grilling",
@@ -36,7 +36,7 @@
       "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "license": "MIT",
-      "local_delta_reason": "Use an explicit, one-question-at-a-time interview for Chinese-first design review; preserve agent-owned fact finding, user-owned decisions, and the no-action confirmation gate."
+      "local_delta_reason": "Use an explicit, one-question-at-a-time interview for Chinese-first design review; preserve agent-owned fact finding, user-owned decisions, provenance-bound authorized AI-delegate answers, and the no-action confirmation gate."
     },
     {
       "name": "find-skills",

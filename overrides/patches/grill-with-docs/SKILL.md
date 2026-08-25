@@ -19,6 +19,14 @@ user request, available evidence, and constraints. Continue only after it
 returns a non-empty child task or thread identifier; bind that same identifier
 to every later `wait` and follow-up call.
 
+Follow-up answers may be either attributable human verbatim input or an
+explicitly authorized `authorized_ai_delegate_answer`. The parent must preserve
+the attribution kind, authorization evidence, and answer SHA-256 in the
+successor admission. An AI delegate answer can advance the interview, but it is
+never a human answer, human acceptance, or `host_specific_live_accepted`
+evidence; unclassified parent summaries and automatic continuation remain
+invalid.
+
 If native spawn is unavailable, fails, or returns no identifier, stop with
 `native_bridge_unavailable`. Do not call a bare `wait`, simulate a child,
 continue the interview in the parent, or replace the interview with a one-shot

@@ -41,6 +41,12 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 - ZCode 或不暴露 native child lifecycle 的宿主：parent 可按 contract 代行交互，但 native_child 必须是 not_supported 或 not_observable；最高只能报告 parent-mediated observation。
 - 工具、catalog reader、测试 harness 或 assistant prose：只可当较低层证据，不能作为 native host evidence。
 
+### 1.3 多轮回答归因
+
+- 设计访谈接受两类明确归因的回答：`human_verbatim_answer`，或永久合同允许的 `authorized_ai_delegate_answer`。
+- `authorized_ai_delegate_answer` 必须由 parent 携带授权证据、归因类型和回答 SHA-256；它可以推进同一 child 的问题链或 capsule，但不得被称为真人输入、真人接受，也不得单独提升到 `host_specific_live_accepted`。
+- parent 摘要、自动“继续”、未分类代答或缺少 successor 绑定的回答仍按 `human_decision_required` fail closed。
+
 不得通过重启、kill、修改 Cockpit、provider、auth、plugin cache 或 ~/.codex/config.toml 来让验收“通过”。出现这些需求时记录 blocker，停止本 run。
 
 ## 2. 前置条件与输入冻结
@@ -204,8 +210,8 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 1. 新开 Codex fresh session。保存 session/host 的 redacted identity 与 start timestamp。
 2. 提交 S02 原始语句。记录 discovery 是否发生、被选 closure、design-griller child id、解析 model/effort、首问内容与 awaiting_user_answer。
 3. 校验首轮只包含一个会改变方案决策的问题；不得同时输出结论、第二问、文件修改或 child replacement。
-4. 用户给出真实答案。parent 只将答案转给同一个 child。
-5. 记录续轮 child id 与首轮完全一致，并在决策确实收敛时记录 decision capsule。
+4. 用户给出真人答案，或合同允许且有完整归因/授权证据的 `authorized_ai_delegate_answer`。parent 只将该答案转给同一个 child，并保留其归因类型与 SHA-256。
+5. 记录续轮 child id 与首轮完全一致，并在决策确实收敛时记录 decision capsule；AI 代答推进的 capsule 仍不得写成真人接受或 `host_specific_live_accepted`。
 6. receipt v2 中 skill_md_loading 只有在 host 能提供实际读入证据时才记 observed；child name/描述不是该证据。
 
 ### 6.3 单轮只读 runner 路径
