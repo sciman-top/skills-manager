@@ -221,7 +221,7 @@ Verifier 必须拒绝以下组合：
 - **Current evidence**：tests/Unit/CapabilityRouterCrossRepo.Tests.ps1 覆盖 router junction、environment junction、physical counterpart 缺失；CapabilityRouter.Tests.ps1 覆盖 contract。
 - **Dependencies**：CSR-110、CSR-120、CSR-130。
 - **Exact write set**：优先只改上述两个 router test 文件；仅发现真实 contract gap 时才改 router source，不为让新文档“通过”放宽路径规则。
-- **Test cases**：CatalogPath junction 正例；跨根 env-var junction 正例；counterpart missing 负例；stale hash、reparse escape、closure violation fail-closed；grill-with-docs 三成员 closure 不能进 runner；MaxCandidates 超限为 domain_hint_required + zero candidate。
+- **Test cases**：CatalogPath junction 正例；跨根 env-var junction 正例；counterpart missing 负例；entrypoint/package hash stale、reparse escape、closure violation fail-closed；grill-with-docs 三成员 closure 不能进 runner；MaxCandidates 超限为 domain_hint_required + zero candidate。
 - **Minimum verification**：
   - pwsh -NoProfile -File .\build.ps1
   - pwsh -NoProfile -File .\tests\run.ps1 -TestPath tests/Unit/NativeAgentBridge.Tests.ps1

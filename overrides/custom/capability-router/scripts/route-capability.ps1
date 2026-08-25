@@ -22,6 +22,23 @@ function Get-TextSha256([string]$Value) {
     finally { $sha.Dispose() }
 }
 
+function Get-SkillPackageSha256([string]$SkillDirectory) {
+    if ([string]::IsNullOrWhiteSpace($SkillDirectory) -or -not (Test-Path -LiteralPath $SkillDirectory -PathType Container)) { return '' }
+    $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
+    $items = @(Get-ChildItem -LiteralPath $base -Recurse -Force -ErrorAction Stop)
+    if (@($items | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -gt 0) { return '' }
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($file in @($items | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        # capability-router/catalog.json is a generated mirror of the catalog
+        # that contains this hash. Including it would create a hash cycle.
+        if ($relative -eq 'catalog.json') { continue }
+        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
+    }
+    return Get-TextSha256 ($parts.ToArray() -join "`n")
+}
+
 function Test-Within([string]$Path, [string]$Root) {
     $full = [IO.Path]::GetFullPath($Path)
     $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -357,6 +374,9 @@ if ($null -ne $catalog) {
             if ([string]$skill.entrypoint_sha256 -notmatch '^[0-9a-fA-F]{64}$') {
                 $catalogFindings.Add((New-RouterFinding 'entrypoint_hash_invalid' ($pathPrefix + '.entrypoint_sha256') 'Skill entrypoint hash must be SHA-256.')) | Out-Null
             }
+            if ([string]$skill.package_sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+                $catalogFindings.Add((New-RouterFinding 'package_hash_invalid' ($pathPrefix + '.package_sha256') 'Skill package hash must be SHA-256.')) | Out-Null
+            }
             if ([string]$skill.load_side_effect -ne 'read_only') {
                 $catalogFindings.Add((New-RouterFinding 'load_side_effect_invalid' ($pathPrefix + '.load_side_effect') 'Cold-loading a skill entrypoint must be declared read_only.')) | Out-Null
             }
@@ -485,6 +505,13 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                 $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'catalog_stale' }) | Out-Null
                 continue
             }
+            $expectedPackage = ([string]$skill.package_sha256).ToLowerInvariant()
+            $actualPackage = Get-SkillPackageSha256 (Split-Path -Path $path -Parent)
+            if ([string]::IsNullOrWhiteSpace($actualPackage) -or $actualPackage -cne $expectedPackage) {
+                $stale = $true
+                $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'package_stale' }) | Out-Null
+                continue
+            }
             $row = [pscustomobject][ordered]@{
                     kind = 'skill'
                     name = $name
@@ -496,6 +523,7 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                     execution_contract = if ($catalogExecutionContracts.ContainsKey($name)) { $catalogExecutionContracts[$name] } else { New-HostAdmissionExecutionContract }
                     dependencies = @($catalogDependencies[$name])
                     entrypoint_hash_validated = $true
+                    package_hash_validated = $true
                     contained = $true
                 }
             $availableRows.Add($row) | Out-Null

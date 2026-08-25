@@ -76,11 +76,11 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 | S03 | 请用 domain-modeling 只读审视 reports/cold-skill-eval/<run-id>/fixtures/order-model.md，不修改文件 | cold_candidate | one_shot + read-only admission 才可 runner；实际写集为空 |
 | S04 | 我要以逐轮审问方式打磨设计：每轮只问一个会改变方案走向的问题，结合已有项目与官方资料，不修改文件 | cold_candidate | 仅宿主判断可见技能不足时一次 decision discovery；不强绑唯一候选 |
 | S05 | 解释 route-capability.ps1 中 fingerprint 校验的作用 | ordinary_no_skill | router、child、side effect 均不得发生 |
-| S06 | 只列出 decision 域候选及其 closure、availability、entrypoint hash 和 execution_contract；不要加载、不要执行、不要改文件 | discovery_only | router 只读；execution authorization 仍 not_granted |
+| S06 | 只列出 decision 域候选及其 closure、availability、entrypoint/package hash 和 execution_contract；不要加载、不要执行、不要改文件 | discovery_only | router 只读；execution authorization 仍 not_granted |
 | S07 | 对受控写 cold skill 先只给 implementation plan：exact write set、minimum proof、rollback 与 stop；尚不修改文件 | write_plan_only | 无实际 write；计划不可被 runner 当 admission |
 | S08 | 只读核实官方一手资料是否可访问；若当前宿主无法读取，说明原因与替代验证 | target_bound | 网络/官方源不可用时 platform_na；不阻塞其余场景 |
 
-额外硬回归：在仓内 router、.agents junction router 和跨根 router 中，以 CatalogPath、SKILLS_MANAGER_CAPABILITY_CATALOG 和 env-var junction 运行合法/非法 catalog。物理 counterpart 缺失、hash 漂移、closure 越界和 reparse escape 必须 fail-closed。
+额外硬回归：在仓内 router、.agents junction router 和跨根 router 中，以 CatalogPath、SKILLS_MANAGER_CAPABILITY_CATALOG 和 env-var junction 运行合法/非法 catalog。物理 counterpart 缺失、entrypoint 或 package hash 漂移、closure 越界和 reparse escape 必须 fail-closed。
 
 ## 4. Receipt v2 格式
 

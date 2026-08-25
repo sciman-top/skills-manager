@@ -68,9 +68,10 @@ $result.execution_authorization
 ```
 
 Load validation checks catalog schema/fingerprint, catalog-root containment,
-entrypoint hashes, availability, and the selected skill's declared dependency
-closure. A passing `load_validation` authorizes reading only that validated
-closure. `execution_authorization.status` is always `not_granted`; the host
+the `SKILL.md` entrypoint hash, the package hash for package-local resources,
+availability, and the selected skill's declared dependency closure. A passing
+`load_validation` authorizes reading only that validated closure.
+`execution_authorization.status` is always `not_granted`; the host
 must separately review every closure member's declared workflow side effect and
 apply ordinary approval, sandbox, MCP, and external-write controls.
 

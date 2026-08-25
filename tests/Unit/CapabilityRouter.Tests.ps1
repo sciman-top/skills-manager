@@ -6,6 +6,35 @@ Describe 'Capability router fallback' {
             finally { $sha.Dispose() }
         }
 
+        function Get-TestPackageSha256([string]$SkillDirectory) {
+            $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
+            $parts = foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | Sort-Object FullName)) {
+                $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+                if ($relative -eq 'catalog.json') { continue }
+                '{0}|{1}' -f $relative, ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+            }
+            return Get-TestSha256 ($parts -join "`n")
+        }
+
+        function Set-TestCatalogPackageHashes($Document, [string]$CatalogPath) {
+            $catalogRoot = Split-Path -Parent $CatalogPath
+            foreach ($skill in @($Document.skills)) {
+                $relativePath = if ($skill -is [System.Collections.IDictionary]) { [string]$skill['relative_path'] } else { [string]$skill.relative_path }
+                if ([string]::IsNullOrWhiteSpace($relativePath)) { continue }
+                $entrypoint = [IO.Path]::GetFullPath((Join-Path $catalogRoot $relativePath))
+                $packageRoot = Split-Path -Parent $entrypoint
+                if (-not (Test-Path -LiteralPath $packageRoot -PathType Container)) { continue }
+                $hash = Get-TestPackageSha256 $packageRoot
+                if ($skill -is [System.Collections.IDictionary]) {
+                    $skill['package_sha256'] = $hash
+                }
+                elseif ($skill.PSObject.Properties.Match('package_sha256').Count -eq 0) {
+                    $skill | Add-Member -NotePropertyName package_sha256 -NotePropertyValue $hash
+                }
+                else { $skill.package_sha256 = $hash }
+            }
+        }
+
         function Set-TestCatalogFingerprint($Document) {
             $payload = [ordered]@{}
             foreach ($property in @($Document.PSObject.Properties)) {
@@ -19,6 +48,7 @@ Describe 'Capability router fallback' {
         }
 
         function Write-TestCatalog($Document, [string]$Path) {
+            Set-TestCatalogPackageHashes $Document $Path
             Set-TestCatalogFingerprint $Document
             $Document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8
         }
@@ -66,6 +96,7 @@ Describe 'Capability router fallback' {
         $result.selected[0].load_side_effect|Should -Be 'read_only'
         $result.selected[0].side_effect|Should -Be 'read_only'
         $result.selected[0].entrypoint_hash_validated|Should -Be $true
+        $result.selected[0].package_hash_validated|Should -Be $true
         @($result.retrieval.candidates.name) | Should -Be @('codebase-design')
         @($result.validated_closure.name) | Should -Be @('codebase-design')
         $result.execution_authorization.status|Should -Be 'not_granted'
@@ -198,6 +229,37 @@ Describe 'Capability router fallback' {
             $result.catalog.status | Should -Be 'invalid'
             $result.load_validation.pass | Should -Be $false
             @($result.catalog.findings.code) | Should -Contain 'entrypoint_hash_invalid'
+        }
+    }
+
+    It 'fails closed when a package-local resource drifts after entrypoint validation' {
+        $resourcePath = Join-Path (Split-Path -Parent $skillPath) 'CONTEXT-FORMAT.md'
+        Set-Content -LiteralPath $resourcePath -Encoding UTF8 -Value 'initial template'
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        Write-TestCatalog $document $catalog
+
+        Add-Content -LiteralPath $resourcePath -Encoding UTF8 -Value 'drift after catalog projection'
+        $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.catalog.status | Should -Be 'stale'
+        $result.load_validation.pass | Should -Be $false
+        @($result.excluded | Where-Object { $_.name -eq 'codebase-design' } | ForEach-Object reason) | Should -Contain 'package_stale'
+    }
+
+    It 'fails closed when a package hash is missing or malformed' {
+        foreach ($value in @($null, 'not-a-sha256')) {
+            $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($null -eq $value) { $document.skills[0].PSObject.Properties.Remove('package_sha256') }
+            elseif ($document.skills[0].PSObject.Properties.Match('package_sha256').Count -eq 0) { $document.skills[0] | Add-Member -NotePropertyName package_sha256 -NotePropertyValue $value }
+            else { $document.skills[0].package_sha256 = $value }
+            Set-TestCatalogFingerprint $document
+            $document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $catalog -Encoding UTF8
+
+            $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+            $result.catalog.status | Should -Be 'invalid'
+            $result.load_validation.pass | Should -Be $false
+            @($result.catalog.findings.code) | Should -Contain 'package_hash_invalid'
         }
     }
 

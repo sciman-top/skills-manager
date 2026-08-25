@@ -21638,6 +21638,10 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 description = [string]$meta.description
                 relative_path = $relativeFromCatalog
                 entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
+                # The router may read package-local templates and scripts after
+                # loading SKILL.md. Bind that entire package (except its generated
+                # catalog.json mirror) so a resource can never drift unnoticed.
+                package_sha256 = Get-NativeSkillProjectionPackageHash ([string]$item.dir)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
                 side_effect = if ($sideEffects.ContainsKey($name)) { [string]$sideEffects[$name] } else { 'unknown' }

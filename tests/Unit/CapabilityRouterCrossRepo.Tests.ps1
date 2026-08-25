@@ -7,7 +7,17 @@ function Get-TestSha256([string]$Value) {
         }
         finally { $sha.Dispose() }
     }
+function Get-TestPackageSha256([string]$SkillDirectory) {
+    $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
+    $parts = foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($relative -eq 'catalog.json') { continue }
+        '{0}|{1}' -f $relative, ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+    }
+    return Get-TestSha256 ($parts -join "`n")
 }
+
+    }
 
     BeforeEach {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -47,6 +57,7 @@ description: >-
                     description = 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
                     relative_path = '..\codebase-design\SKILL.md'
                     entrypoint_sha256 = (Get-FileHash -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Algorithm SHA256).Hash.ToLowerInvariant()
+                    package_sha256 = Get-TestPackageSha256 $targetRoot
                     domains = @('engineering')
                     load_side_effect = 'read_only'
                     side_effect = 'unknown'
