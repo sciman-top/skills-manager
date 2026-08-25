@@ -16989,7 +16989,7 @@ function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
     }
     $segments = New-Object System.Collections.Generic.List[string]
     foreach ($name in @(
-            '.git', '.runtime', '.worktrees', '.txn', '.agent-build', '.tmp',
+            '.git', '.runtime', '.worktrees', '.txn', '.agent-build', '.tmp', '.artifacts',
             '.cache', '.pytest_cache', '.next', '.nuxt', '.vite', '.turbo', '.gradle',
             'node_modules', 'vendor', 'imports', 'reports', 'artifacts', 'bin', 'obj',
             'dist', 'build', 'out', 'coverage', 'tmp', 'temp', 'target', '__pycache__',
@@ -17079,7 +17079,7 @@ function Add-AuditArtifactEvidence {
 
 function Get-AuditArtifactConfidence($entry) {
     $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
-    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "high" }
+    if (@($kinds | Where-Object { $_ -in @("source_code", "supporting_code") }).Count -gt 0) { return "high" }
     if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "medium" }
     if (@($kinds | Where-Object { $_ -eq "dependency" }).Count -gt 0) { return "medium" }
     return "low"
@@ -17087,7 +17087,7 @@ function Get-AuditArtifactConfidence($entry) {
 
 function Get-AuditArtifactEvidenceStatus($entry) {
     $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
-    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "implemented" }
+    if (@($kinds | Where-Object { $_ -in @("source_code", "supporting_code") }).Count -gt 0) { return "implemented" }
     if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "test_covered" }
     if (@($kinds | Where-Object { $_ -eq "dependency" }).Count -gt 0) { return "dependency_indicated" }
     return "documented"
@@ -17153,7 +17153,7 @@ function Add-AuditRequirementEvidence {
 
 function Get-AuditRequirementSignalConfidence($entry) {
     $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
-    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "high" }
+    if (@($kinds | Where-Object { $_ -in @("source_code", "supporting_code") }).Count -gt 0) { return "high" }
     if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "medium" }
     if (@($kinds | Where-Object { $_ -in @("dependency", "project_file") }).Count -gt 0) { return "medium" }
     return "low"
@@ -17161,7 +17161,7 @@ function Get-AuditRequirementSignalConfidence($entry) {
 
 function Get-AuditRequirementSignalStatus($entry) {
     $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
-    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "implemented" }
+    if (@($kinds | Where-Object { $_ -in @("source_code", "supporting_code") }).Count -gt 0) { return "implemented" }
     if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "test_covered" }
     if (@($kinds | Where-Object { $_ -in @("dependency", "project_file") }).Count -gt 0) { return "dependency_indicated" }
     return "documented"
@@ -17233,7 +17233,8 @@ function Add-AuditRequirementFactsFromText {
         [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; pattern = "(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])" },
         [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; pattern = "(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr" },
         [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; pattern = "(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计" },
-        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
+        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|create|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|create|produce)\w*" },
+        [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; pattern = "(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
         [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
         [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bmigration\b|\bwinpe\b" }
     )
@@ -17355,7 +17356,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
             if ($content.Length -gt 262144) { $content = $content.Substring(0, 262144) }
             if (Test-AuditSelfReferentialAnalysisFile $content) { continue }
             $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
-            $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } else { "source_code" }
+            $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } elseif ($relativePath -match '(?i)^(tools|scripts|build)(\\|$)') { "supporting_code" } else { "source_code" }
             Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
             Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath
         }
@@ -17817,7 +17818,7 @@ function Merge-AuditRequirementSignals($scans) {
 }
 
 function Get-AuditNeedEvidenceCoverage($entry) {
-    $kinds = @("source_code", "test", "dependency", "documentation")
+    $kinds = @("source_code", "supporting_code", "test", "dependency", "documentation")
     $targetsByKind = @{}
     $countByKind = @{}
     foreach ($kind in $kinds) {
@@ -17835,11 +17836,13 @@ function Get-AuditNeedEvidenceCoverage($entry) {
     foreach ($kind in $kinds) { foreach ($target in $targetsByKind[$kind]) { $allTargets.Add($target) | Out-Null } }
     return [pscustomobject]([ordered]@{
             source_code_target_count = $targetsByKind["source_code"].Count
+            supporting_code_target_count = $targetsByKind["supporting_code"].Count
             test_target_count = $targetsByKind["test"].Count
             dependency_target_count = $targetsByKind["dependency"].Count
             documentation_target_count = $targetsByKind["documentation"].Count
             distinct_target_count = $allTargets.Count
             source_code_evidence_count = [int]$countByKind["source_code"]
+            supporting_code_evidence_count = [int]$countByKind["supporting_code"]
             test_evidence_count = [int]$countByKind["test"]
             dependency_evidence_count = [int]$countByKind["dependency"]
             documentation_evidence_count = [int]$countByKind["documentation"]
@@ -17880,6 +17883,7 @@ function New-AuditPrioritizedNeed {
     if ([int]$coverage.source_code_target_count -eq 0) { $score = [Math]::Min($score, 35) }
     $limitations = New-Object System.Collections.Generic.List[string]
     if ([int]$coverage.source_code_target_count -eq 0) { $limitations.Add("no_implemented_source_evidence") | Out-Null }
+    if ([int]$coverage.supporting_code_target_count -gt 0) { $limitations.Add("supporting_code_not_direct_product_journey") | Out-Null }
     if ([int]$coverage.source_code_target_count -lt 2) { $limitations.Add("single_target_or_unattributed_source_support") | Out-Null }
     if ([int]$coverage.test_target_count -eq 0) { $limitations.Add("no_test_evidence") | Out-Null }
     if ($role -in @("delivery_surface", "engineering_or_operations")) { $limitations.Add("technical_context_not_direct_product_intent") | Out-Null }

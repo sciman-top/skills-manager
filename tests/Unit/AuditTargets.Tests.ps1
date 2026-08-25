@@ -1193,6 +1193,29 @@ public string CreatePresentation() => "courseware.pptx";
             $insights.keywords.primary_target_profile | Should -Not -Contain "web_ui"
         }
 
+        It "Separates direct AI content generation from model integration and supporting diagnostic code" {
+            $repo = Join-Path $TestDrive "target-repo-ai-intent-roles"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "tools") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo ".artifacts\release") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "src\poster.py") 'def generate_image_poster(topic): return create_image(topic)'
+            Set-ContentUtf8 (Join-Path $repo "tools\provider_diagnostic.py") 'provider = "OpenAI" # model provider diagnostic'
+            Set-ContentUtf8 (Join-Path $repo ".artifacts\release\generated.py") 'def generate_image_poster(topic): return create_image(topic)'
+
+            $scan = New-AuditRepoScan "ai-intent" $repo "..\target-repo-ai-intent-roles"
+            $profile = New-AuditTargetProfile @($scan)
+            $generation = @($profile.prioritized_needs.primary_needs | Where-Object key -eq "ai/content_generation")
+            $modelIntegration = @($profile.prioritized_needs.observations + $profile.prioritized_needs.secondary_needs | Where-Object key -eq "ai/model_integration")
+
+            $generation.Count | Should -Be 1
+            $generation[0].evidence_coverage.source_code_target_count | Should -Be 1
+            $modelIntegration.Count | Should -Be 1
+            $modelIntegration[0].evidence_coverage.source_code_target_count | Should -Be 0
+            $modelIntegration[0].evidence_coverage.supporting_code_target_count | Should -Be 1
+            $modelIntegration[0].limitations | Should -Contain "supporting_code_not_direct_product_journey"
+            @($scan.detected.requirement_signals | ForEach-Object { @($_.evidence | Where-Object { $_.path -match '\.artifacts\\' }) }).Count | Should -Be 0
+        }
+
         It "Anchors artifact evidence locally, excludes scanner metadata, and does not promote test-only coverage" {
             $separatedRepo = Join-Path $TestDrive "target-repo-separated-artifact-signals"
             New-Item -ItemType Directory -Path (Join-Path $separatedRepo "src") -Force | Out-Null
