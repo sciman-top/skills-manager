@@ -108,6 +108,8 @@ Describe "Skill Audit E2E" {
 
             $snapshot.run_id | Should -Be $result.run_id
             @($snapshot.target_scans).Count | Should -Be 1
+            $snapshot.native_ai_review.decision_owner | Should -Be "host_ai"
+            $snapshot.native_ai_review.mutation_policy | Should -Match "recommendations.json only"
             $recommendations.run_id | Should -Be $result.run_id
             $receipt.scan.success | Should -Be $true
             $receipt.persisted | Should -Be $false

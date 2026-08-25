@@ -223,7 +223,7 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
     switch ($label) {
         "snapshot.json" {
             Need ([int]$data.schema_version -eq 2) ("snapshot schema_version 必须为 2：{0}" -f $path)
-            foreach ($field in @("run_id", "mode", "prompt_contract_version", "installed_state", "target_scans", "target_profile", "source_strategy", "decision_insights")) {
+            foreach ($field in @("run_id", "mode", "prompt_contract_version", "installed_state", "target_scans", "target_profile", "source_strategy", "decision_insights", "native_ai_review")) {
                 Need (Test-AuditJsonProperty $data $field) ("snapshot 缺少 {0}：{1}" -f $field, $path)
             }
             Need (Assert-IsArray $data.target_scans) ("snapshot.target_scans 必须为数组：{0}" -f $path)
@@ -232,6 +232,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
             Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
             Need ([string]$data.target_profile.derivation -eq "target_scans_only") ("snapshot.target_profile 必须由 target_scans_only 派生：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.artifact_capabilities) ("snapshot.target_profile.artifact_capabilities 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.target_profile.requirement_signals) ("snapshot.target_profile.requirement_signals 必须为数组：{0}" -f $path)
+            Need ([string]$data.native_ai_review.decision_owner -eq "host_ai") ("snapshot.native_ai_review.decision_owner 必须为 host_ai：{0}" -f $path)
             Need (@($data.target_scans).Count -gt 0) ("snapshot.target_scans 不能为空：{0}" -f $path)
         }
         "recommendations.json" {

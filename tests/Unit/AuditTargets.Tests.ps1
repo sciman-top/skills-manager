@@ -996,6 +996,43 @@ jobs:
             (@($scan.detected.notable_files) | Where-Object { [string]$_ -match '(^|\\)\.(runtime|worktrees)(\\|$)' }).Count | Should -Be 0
         }
 
+        It "Excludes generated backups, build outputs, temporary runs, and configured managed skill output from requirement evidence" {
+            $repo = Join-Path $TestDrive "target-repo-generated-evidence-exclusions"
+            foreach ($relativePath in @(
+                    "src",
+                    ".txn\\backup",
+                    ".agent-build\\obj",
+                    ".tmp\\case",
+                    "artifacts\\verify",
+                    "vendor\\dependency",
+                    "agent\\managed"
+                )) {
+                New-Item -ItemType Directory -Path (Join-Path $repo $relativePath) -Force | Out-Null
+            }
+            Set-ContentUtf8 (Join-Path $repo "skills.json") '{"skill_projection":{"managed_source_path":"agent"}}'
+            Set-ContentUtf8 (Join-Path $repo "src\\real.py") 'def parse_pdf(path): return read_image(path)'
+            foreach ($relativePath in @(
+                    ".txn\\backup\\stale.py",
+                    ".agent-build\\obj\\generated.py",
+                    ".tmp\\case\\fixture.py",
+                    "artifacts\\verify\\output.py",
+                    "vendor\\dependency\\library.py",
+                    "agent\\managed\\skill.py"
+                )) {
+                Set-ContentUtf8 (Join-Path $repo $relativePath) 'def generate_presentation(): return "stale.pptx"'
+            }
+
+            $scan = New-AuditRepoScan "demo" $repo "..\\target-repo-generated-evidence-exclusions"
+
+            $pdf = @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })
+            $pptx = @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pptx" })
+            $pdf.Count | Should -Be 1
+            $pdf[0].evidence.path | Should -Contain "src\real.py"
+            $pptx.Count | Should -Be 0
+            $allEvidencePaths = @($scan.detected.artifact_capabilities | ForEach-Object { @($_.evidence | ForEach-Object { [string]$_.path }) })
+            (@($allEvidencePaths | Where-Object { $_ -match '(?i)(^|\\)(\.txn|\.agent-build|\.tmp|artifacts|vendor|agent)(\\|$)' })).Count | Should -Be 0
+        }
+
         It "Extracts documented stack facts from design-package repos before code exists" {
             $repo = Join-Path $TestDrive "target-repo-design-docs"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null
@@ -1061,6 +1098,92 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             (@($scan.detected.notable_files) -contains "README.md") | Should -Be $true
             (@($scan.detected.notable_files) -contains "docs\04_TechnologyStack.md") | Should -Be $true
             (@($scan.risks) -contains "design_package_only") | Should -Be $true
+        }
+
+        It "Builds evidence-backed multi-domain requirement signals instead of a format-only profile" {
+            $repo = Join-Path $TestDrive "target-repo-requirement-signals"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "tests") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "package.json") '{"dependencies":{"react":"1.0.0","pdf-lib":"1.0.0","pptxgenjs":"1.0.0","playwright":"1.0.0"}}'
+            Set-ContentUtf8 (Join-Path $repo "requirements.txt") 'rapidocr_onnxruntime==1.2.3'
+            Set-ContentUtf8 (Join-Path $repo "src\pipeline.py") @"
+def render_pdf(target):
+    return parse_pdf(target)
+
+def parse_pdf(target):
+    return read_image("page.png")
+
+def read_image(path):
+    return RapidOCR()(path)
+"@
+            Set-ContentUtf8 (Join-Path $repo "src\server.cs") @"
+app.MapGet("/health", () => "ok");
+public sealed class AppStore : DbContext { }
+public string CreatePresentation() => "courseware.pptx";
+"@
+            Set-ContentUtf8 (Join-Path $repo "tests\pipeline_test.py") 'def test_render_pdf(): assert render_pdf("sample.pdf")'
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-requirement-signals"
+            $profile = New-AuditTargetProfile @($scan)
+
+            $pdf = @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })
+            $pptx = @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pptx" })
+            $image = @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "image" })
+            $pdf.Count | Should -Be 1
+            $pdf[0].actions | Should -Contain "read"
+            $pdf[0].actions | Should -Contain "render"
+            $pdf[0].confidence | Should -Be "high"
+            $pptx.Count | Should -Be 1
+            $pptx[0].actions | Should -Contain "generate"
+            $image[0].actions | Should -Contain "ocr"
+            $image[0].evidence_status | Should -Be "implemented"
+            (@($scan.detected.requirement_signals | Where-Object { $_.domain -eq "interface" -and $_.subject -eq "web_ui" })).Count | Should -Be 1
+            (@($scan.detected.requirement_signals | Where-Object { $_.domain -eq "integration" -and $_.subject -eq "http_api" })).Count | Should -Be 1
+            (@($scan.detected.requirement_signals | Where-Object { $_.domain -eq "data" -and $_.subject -eq "persistence" })).Count | Should -Be 1
+            (@($scan.detected.requirement_signals | Where-Object { $_.domain -eq "automation" -and $_.subject -eq "browser_automation" })).Count | Should -Be 1
+            (@($profile.requirement_signals | Where-Object { $_.subject -eq "document_processing" })).Count | Should -Be 1
+            $profile.requirement_signals[0].targets | Should -Contain "demo"
+            (Get-AuditRepoScanKeywords $scan) | Should -Contain "pdf_render"
+            (Get-AuditRepoScanKeywords $scan) | Should -Contain "interface_web_ui"
+        }
+
+        It "Anchors artifact evidence locally, excludes scanner metadata, and does not promote test-only coverage" {
+            $separatedRepo = Join-Path $TestDrive "target-repo-separated-artifact-signals"
+            New-Item -ItemType Directory -Path (Join-Path $separatedRepo "src") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $separatedRepo "src\separated.py") @"
+PDF_FORMAT = "pdf"
+status = "ready"
+def render_report():
+    return status
+"@
+            Set-ContentUtf8 (Join-Path $separatedRepo "src\scanner-rules.ps1") '$rule = [pscustomobject]@{ artifact = "pdf"; domain = "workflow"; subject = "document_processing"; pattern = "pdf"; actions = @("render") }'
+
+            $separatedScan = New-AuditRepoScan "separated" $separatedRepo "..\target-repo-separated-artifact-signals"
+            (@($separatedScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })).Count | Should -Be 0
+            $separatedEvidencePaths = @($separatedScan.detected.requirement_signals | ForEach-Object { @($_.evidence | ForEach-Object { [string]$_.path }) })
+            $separatedEvidencePaths | Should -Not -Contain "src\scanner-rules.ps1"
+
+            $implementedRepo = Join-Path $TestDrive "target-repo-local-artifact-evidence"
+            New-Item -ItemType Directory -Path (Join-Path $implementedRepo "src") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $implementedRepo "src\pdf_pipeline.py") 'def render_pdf(path): return save_pdf(path)'
+
+            $implementedScan = New-AuditRepoScan "implemented" $implementedRepo "..\target-repo-local-artifact-evidence"
+            $implementedPdf = @($implementedScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })
+            $implementedPdf.Count | Should -Be 1
+            $implementedPdf[0].confidence | Should -Be "high"
+            $implementedPdf[0].evidence_status | Should -Be "implemented"
+            ($implementedPdf[0].evidence | ForEach-Object { [string]$_.signal }) | Should -Match "@L1$"
+
+            $testOnlyRepo = Join-Path $TestDrive "target-repo-test-only-artifact-evidence"
+            New-Item -ItemType Directory -Path (Join-Path $testOnlyRepo "tests") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $testOnlyRepo "tests\pdf_pipeline_test.py") 'def test_render_pdf(): return render_pdf("sample.pdf")'
+
+            $testOnlyScan = New-AuditRepoScan "test-only" $testOnlyRepo "..\target-repo-test-only-artifact-evidence"
+            $testOnlyPdf = @($testOnlyScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pdf" })
+            $testOnlyPdf.Count | Should -Be 1
+            $testOnlyPdf[0].confidence | Should -Be "medium"
+            $testOnlyPdf[0].evidence_status | Should -Be "test_covered"
+            ($testOnlyPdf[0].evidence | ForEach-Object { [string]$_.kind } | Select-Object -Unique) | Should -Be @("test")
         }
 
         It "Extracts java/ruby/php/container/monorepo signals from repo scan inputs" {

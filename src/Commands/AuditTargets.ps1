@@ -12,14 +12,15 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合扫描派生的目标仓需求画像、已安装技能/MCP、来源策略、决策关键词与 prompt contract；不得修改。不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
-2. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
-3. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
-4. 执行：
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``：用宿主 AI 做跨文件的只读语义综合，核对 ``target_profile.requirement_signals``、``artifact_capabilities`` 及其逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
+2. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码或测试证据优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装或卸载结论。
+3. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+4. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
+5. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-5. 预检通过后执行：
+6. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-6. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
+7. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -87,6 +88,18 @@ function Convert-AuditStringArray($value) {
         $normalized.Add($text.Trim()) | Out-Null
     }
     return @($normalized)
+}
+
+function Convert-AuditObjectArray($value) {
+    if ($null -eq $value) { return @() }
+    $items = New-Object System.Collections.Generic.List[object]
+    if (Assert-IsArray $value) {
+        foreach ($item in $value) { if ($null -ne $item) { $items.Add($item) | Out-Null } }
+    }
+    else {
+        $items.Add($value) | Out-Null
+    }
+    return @($items.ToArray())
 }
 
 function New-DefaultAuditTargetsConfig {
@@ -808,11 +821,47 @@ function Add-AuditMonorepoFacts([string]$resolvedPath, [System.Collections.Gener
     }
 }
 
+function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
+    $cacheKey = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')
+    if ($null -eq $script:AuditGeneratedPathSegmentsCache) { $script:AuditGeneratedPathSegmentsCache = @{} }
+    if ($script:AuditGeneratedPathSegmentsCache.ContainsKey($cacheKey)) {
+        return @($script:AuditGeneratedPathSegmentsCache[$cacheKey])
+    }
+    $segments = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @(
+            '.git', '.runtime', '.worktrees', '.txn', '.agent-build', '.tmp',
+            '.cache', '.pytest_cache', '.next', '.nuxt', '.vite', '.turbo', '.gradle',
+            'node_modules', 'vendor', 'imports', 'reports', 'artifacts', 'bin', 'obj',
+            'dist', 'build', 'out', 'coverage', 'tmp', 'temp', 'target', '__pycache__',
+            '.venv', 'venv', 'env'
+        )) {
+        Add-AuditUniqueValue $segments $name
+    }
+    $configPath = Join-Path $resolvedPath 'skills.json'
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        try {
+            $cfg = Get-ContentUtf8 $configPath | ConvertFrom-Json
+            $managedPath = [string](Get-CfgObjectProperty (Get-CfgObjectProperty $cfg 'skill_projection') 'managed_source_path')
+            if (-not [string]::IsNullOrWhiteSpace($managedPath)) {
+                $firstSegment = @($managedPath -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+                if ($firstSegment.Count -eq 1) { Add-AuditUniqueValue $segments ([string]$firstSegment[0]) }
+            }
+        }
+        catch {
+            # A malformed local config must not weaken the static generated-path exclusions.
+        }
+    }
+    $resolvedSegments = @($segments.ToArray())
+    $script:AuditGeneratedPathSegmentsCache[$cacheKey] = $resolvedSegments
+    return @($resolvedSegments)
+}
+
 function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidatePath) {
     $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $candidatePath
     $segments = @($relativePath -split '[\\/]')
+    $ignored = @(Get-AuditGeneratedPathSegments $resolvedPath)
     foreach ($segment in $segments) {
-        if ($segment -in @('.git', '.runtime', '.worktrees', 'node_modules')) { return $true }
+        if ($segment -in $ignored) { return $true }
     }
     return $false
 }
@@ -823,6 +872,323 @@ function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$l
             Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
             Select-Object -First $limit
     )
+}
+
+function New-AuditArtifactCapabilityAccumulator {
+    return @{}
+}
+
+function Add-AuditArtifactEvidence {
+    param(
+        $Accumulator,
+        [string]$Artifact,
+        [string]$Action,
+        [string]$Kind,
+        [string]$Path,
+        [string]$Signal,
+        [string]$Target = ""
+    )
+    if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Artifact) -or [string]::IsNullOrWhiteSpace($Action)) { return }
+    $artifactKey = $Artifact.Trim().ToLowerInvariant()
+    $actionKey = $Action.Trim().ToLowerInvariant()
+    if (-not $Accumulator.ContainsKey($artifactKey)) {
+        $Accumulator[$artifactKey] = [pscustomobject]@{
+            artifact = $artifactKey
+            actions = New-Object System.Collections.Generic.List[string]
+            evidence = New-Object System.Collections.Generic.List[object]
+            targets = New-Object System.Collections.Generic.List[string]
+        }
+    }
+    $entry = $Accumulator[$artifactKey]
+    Add-AuditUniqueValue $entry.actions $actionKey
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { Add-AuditUniqueValue $entry.targets $Target.Trim() }
+    $evidenceKey = "{0}|{1}|{2}|{3}" -f $Kind, $Path, $Signal, $Target
+    foreach ($existing in @($entry.evidence.ToArray())) {
+        $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
+        if ($existingKey -eq $evidenceKey) { return }
+    }
+    if ($entry.evidence.Count -ge 48) { return }
+    $evidence = [ordered]@{
+        kind = $Kind
+        path = $Path
+        signal = $Signal
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
+    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+}
+
+function Get-AuditArtifactConfidence($entry) {
+    $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
+    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "high" }
+    if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "medium" }
+    if (@($kinds | Where-Object { $_ -eq "dependency" }).Count -gt 0) { return "medium" }
+    return "low"
+}
+
+function Get-AuditArtifactEvidenceStatus($entry) {
+    $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
+    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "implemented" }
+    if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "test_covered" }
+    if (@($kinds | Where-Object { $_ -eq "dependency" }).Count -gt 0) { return "dependency_indicated" }
+    return "documented"
+}
+
+function ConvertTo-AuditArtifactCapabilityArray($Accumulator) {
+    if ($null -eq $Accumulator) { return @() }
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($Accumulator.Values | Sort-Object artifact)) {
+        $result.Add([pscustomobject]([ordered]@{
+                    artifact = [string]$entry.artifact
+                    actions = @($entry.actions | Sort-Object)
+                    confidence = Get-AuditArtifactConfidence $entry
+                    evidence_status = Get-AuditArtifactEvidenceStatus $entry
+                    targets = @($entry.targets | Sort-Object)
+                    evidence = @($entry.evidence.ToArray())
+                })) | Out-Null
+    }
+    return @($result.ToArray())
+}
+
+function New-AuditRequirementSignalAccumulator {
+    return @{}
+}
+
+function Add-AuditRequirementEvidence {
+    param(
+        $Accumulator,
+        [string]$Domain,
+        [string]$Subject,
+        [string]$Action,
+        [string]$Kind,
+        [string]$Path,
+        [string]$Signal,
+        [string]$Target = ""
+    )
+    if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Domain) -or [string]::IsNullOrWhiteSpace($Subject) -or [string]::IsNullOrWhiteSpace($Action)) { return }
+    $domainKey = $Domain.Trim().ToLowerInvariant()
+    $subjectKey = $Subject.Trim().ToLowerInvariant()
+    $key = "{0}|{1}" -f $domainKey, $subjectKey
+    if (-not $Accumulator.ContainsKey($key)) {
+        $Accumulator[$key] = [pscustomobject]@{
+            domain = $domainKey
+            subject = $subjectKey
+            actions = New-Object System.Collections.Generic.List[string]
+            evidence = New-Object System.Collections.Generic.List[object]
+            targets = New-Object System.Collections.Generic.List[string]
+        }
+    }
+    $entry = $Accumulator[$key]
+    Add-AuditUniqueValue $entry.actions $Action.Trim().ToLowerInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { Add-AuditUniqueValue $entry.targets $Target.Trim() }
+    $evidenceKey = "{0}|{1}|{2}|{3}" -f $Kind, $Path, $Signal, $Target
+    foreach ($existing in @($entry.evidence.ToArray())) {
+        $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
+        if ($existingKey -eq $evidenceKey) { return }
+    }
+    if ($entry.evidence.Count -ge 48) { return }
+    $evidence = [ordered]@{ kind = $Kind; path = $Path; signal = $Signal }
+    if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
+    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+}
+
+function Get-AuditRequirementSignalConfidence($entry) {
+    $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
+    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "high" }
+    if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "medium" }
+    if (@($kinds | Where-Object { $_ -in @("dependency", "project_file") }).Count -gt 0) { return "medium" }
+    return "low"
+}
+
+function Get-AuditRequirementSignalStatus($entry) {
+    $kinds = @($entry.evidence | ForEach-Object { [string]$_.kind })
+    if (@($kinds | Where-Object { $_ -eq "source_code" }).Count -gt 0) { return "implemented" }
+    if (@($kinds | Where-Object { $_ -eq "test" }).Count -gt 0) { return "test_covered" }
+    if (@($kinds | Where-Object { $_ -in @("dependency", "project_file") }).Count -gt 0) { return "dependency_indicated" }
+    return "documented"
+}
+
+function ConvertTo-AuditRequirementSignalArray($Accumulator) {
+    if ($null -eq $Accumulator) { return @() }
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($Accumulator.Values | Sort-Object domain, subject)) {
+        $result.Add([pscustomobject]([ordered]@{
+                    domain = [string]$entry.domain
+                    subject = [string]$entry.subject
+                    actions = @($entry.actions | Sort-Object)
+                    confidence = Get-AuditRequirementSignalConfidence $entry
+                    evidence_status = Get-AuditRequirementSignalStatus $entry
+                    targets = @($entry.targets | Sort-Object)
+                    evidence = @($entry.evidence.ToArray())
+                })) | Out-Null
+    }
+    return @($result.ToArray())
+}
+
+function Test-AuditRuleDefinitionLine([string]$Line) {
+    if ([string]::IsNullOrWhiteSpace($Line)) { return $false }
+    # Scanner metadata is not target behaviour.  Excluding these declarations keeps
+    # a repository from self-reporting the vocabulary used by the scanner itself.
+    return [regex]::IsMatch($Line, "(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
+}
+
+function Get-AuditEvidenceLines([string]$Content) {
+    $result = New-Object System.Collections.Generic.List[object]
+    if ([string]::IsNullOrWhiteSpace($Content)) { return @() }
+    $lines = @($Content -split "`r?`n")
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $text = [string]$lines[$index]
+        if ([string]::IsNullOrWhiteSpace($text) -or (Test-AuditRuleDefinitionLine $text)) { continue }
+        $result.Add([pscustomobject]@{ number = $index + 1; text = $text }) | Out-Null
+    }
+    return @($result.ToArray())
+}
+
+function Add-AuditRequirementFactsFromText {
+    param(
+        $Accumulator,
+        [string]$Content,
+        [string]$Kind,
+        [string]$RelativePath
+    )
+    if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
+    $signals = @(
+        [pscustomobject]@{ domain = "interface"; subject = "web_ui"; action = "deliver"; pattern = "(?i)\breact\b|\bvue\b|\bsvelte\b|\bnext(?:js)?\b|\bvite\b" },
+        [pscustomobject]@{ domain = "interface"; subject = "desktop_ui"; action = "deliver"; pattern = "(?i)usewpf|\bwpf\b|\bwinforms\b|\bavalonia\b|\bdesktop app\b" },
+        [pscustomobject]@{ domain = "integration"; subject = "http_api"; action = "serve"; pattern = "(?i)map(get|post|put|delete)|\bcontroller\b|fastapi|flask|express\s*\(|asp\.?net\s*(core)?\s*(api)?" },
+        [pscustomobject]@{ domain = "data"; subject = "persistence"; action = "store"; pattern = "(?i)entityframework|\bdbcontext\b|\bpostgres(?:ql)?\b|\bsqlite\b|\bmongodb\b|\bredis\b" },
+        [pscustomobject]@{ domain = "automation"; subject = "browser_automation"; action = "automate"; pattern = "(?i)playwright|puppeteer|selenium|browser[_ -]?automation" },
+        [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; pattern = "(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])" },
+        [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; pattern = "(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr" },
+        [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; pattern = "(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计" },
+        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
+        [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
+        [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bmigration\b|\bwinpe\b" }
+    )
+    foreach ($line in @(Get-AuditEvidenceLines $Content)) {
+        foreach ($signal in @($signals)) {
+            if ([regex]::IsMatch([string]$line.text, [string]$signal.pattern)) {
+                Add-AuditRequirementEvidence $Accumulator $signal.domain $signal.subject $signal.action $Kind $RelativePath ("{0}:{1}@L{2}" -f $signal.domain, $signal.subject, $line.number)
+            }
+        }
+    }
+}
+
+function Add-AuditArtifactFactsFromText {
+    param(
+        $Accumulator,
+        [string]$Content,
+        [string]$Kind,
+        [string]$RelativePath
+    )
+    if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
+    $artifacts = @(
+        [pscustomobject]@{ artifact = "pdf"; pattern = "(?i)(?:\.pdf\b|(?:^|[_\W])pdf(?:$|[_\W])|pdftotext|pdftoppm|pdfreader|pdfwriter|questpdf|pdfsharp|pdfpig|pypdf|pdfplumber|pymupdf|pdfjs)" },
+        [pscustomobject]@{ artifact = "docx"; pattern = "(?i)(?:\.docx\b|(?:^|[_\W])docx(?:$|[_\W])|wordprocessingdocument|openxml.*word|python-docx)" },
+        [pscustomobject]@{ artifact = "pptx"; pattern = "(?i)(?:\.pptx\b|(?:^|[_\W])pptx(?:$|[_\W])|powerpoint|presentationml|pptxgenjs|幻灯片|课件)" },
+        [pscustomobject]@{ artifact = "xlsx"; pattern = "(?i)(?:\.xlsx\b|(?:^|[_\W])xlsx(?:$|[_\W])|\bexcel\b|spreadsheetml|openpyxl|closedxml|epplus)" },
+        [pscustomobject]@{ artifact = "image"; pattern = "(?i)(?:\bimage\b|\bpng\b|\bjpe?g\b|\bsvg\b|\bwebp\b|\bbitmap\b|pillow|imagesharp|skia(?:sharp)?)" }
+    )
+    $actions = @(
+        [pscustomobject]@{ action = "read"; pattern = "(?i)\b(?:parse|extract|import|load|open|ingest)(?:[A-Z][\w]*|_[\w]+|s|ed|ing|er|all|async)?\b|\bread(?:_(?:[\w]+)|(?-i:[A-Z])[\w]*|s|ed|ing|er|all|async)?\b|adapter" },
+        [pscustomobject]@{ action = "generate"; pattern = "(?i)\b(export|generate|create|write|save|output|deliver|produce)\w*\b" },
+        [pscustomobject]@{ action = "render"; pattern = "(?i)\b(render|preview|rasteri[sz]e|thumbnail)\w*\b|pdftoppm" },
+        [pscustomobject]@{ action = "ocr"; pattern = "(?i)\bocr\b|tesseract|rapidocr|paddleocr|easyocr" },
+        [pscustomobject]@{ action = "edit"; pattern = "(?i)\b(edit|modify|transform|resize|crop|compose)\w*\b" }
+    )
+    $lines = @(Get-AuditEvidenceLines $Content)
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $current = $lines[$index]
+        $next = if ($index + 1 -lt $lines.Count -and [int]$lines[$index + 1].number -eq [int]$current.number + 1) { $lines[$index + 1] } else { $null }
+        foreach ($artifact in @($artifacts)) {
+            $artifactOnCurrentLine = [regex]::IsMatch([string]$current.text, [string]$artifact.pattern)
+            $artifactOnNextLine = $null -ne $next -and [regex]::IsMatch([string]$next.text, [string]$artifact.pattern)
+            if (-not $artifactOnCurrentLine -and -not $artifactOnNextLine) { continue }
+            foreach ($action in @($actions)) {
+                $actionOnCurrentLine = [regex]::IsMatch([string]$current.text, [string]$action.pattern)
+                $actionOnNextLine = $null -ne $next -and [regex]::IsMatch([string]$next.text, [string]$action.pattern)
+                $matched = ($artifactOnCurrentLine -and ($actionOnCurrentLine -or $actionOnNextLine)) -or ($actionOnCurrentLine -and $artifactOnNextLine)
+                if ($matched) {
+                    $location = if ($null -ne $next -and ($artifactOnNextLine -or $actionOnNextLine) -and -not ($artifactOnCurrentLine -and $actionOnCurrentLine)) { "L{0}-L{1}" -f $current.number, $next.number } else { "L{0}" -f $current.number }
+                    Add-AuditArtifactEvidence $Accumulator $artifact.artifact $action.action $Kind $RelativePath ("{0}:{1}@{2}" -f $artifact.artifact, $action.action, $location)
+                }
+            }
+        }
+    }
+}
+
+function Add-AuditArtifactFactsFromDependencyText {
+    param(
+        $Accumulator,
+        [string]$Content,
+        [string]$RelativePath
+    )
+    if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
+    $signals = @(
+        [pscustomobject]@{ artifact = "pdf"; actions = @("read"); pattern = "(?i)pdfpig|pdfplumber|\bpypdf\b|pymupdf|pdfjs-dist" },
+        [pscustomobject]@{ artifact = "pdf"; actions = @("generate", "edit"); pattern = "(?i)questpdf|itext(?:7)?|pdfsharp|pdf-lib|reportlab|weasyprint" },
+        [pscustomobject]@{ artifact = "pdf"; actions = @("render"); pattern = "(?i)pdf2image|poppler|pdftoppm" },
+        [pscustomobject]@{ artifact = "docx"; actions = @("read", "edit", "generate"); pattern = "(?i)documentformat\.openxml|openxml|python-docx|docxjs|\bdocx\b" },
+        [pscustomobject]@{ artifact = "pptx"; actions = @("read", "edit", "generate"); pattern = "(?i)documentformat\.openxml|openxml|python-pptx|pptxgenjs|\bpptx\b" },
+        [pscustomobject]@{ artifact = "xlsx"; actions = @("read", "edit", "generate"); pattern = "(?i)documentformat\.openxml|openxml|openpyxl|closedxml|epplus|exceldatareader|exceljs|\bnpoi\b" },
+        [pscustomobject]@{ artifact = "image"; actions = @("read", "edit", "render"); pattern = "(?i)pillow|imagesharp|skia(?:sharp)?|\bsharp\b|imagemagick" },
+        [pscustomobject]@{ artifact = "image"; actions = @("ocr"); pattern = "(?i)tesseract|rapidocr|paddleocr|easyocr" }
+    )
+    foreach ($signal in @($signals)) {
+        if (-not [regex]::IsMatch($Content, [string]$signal.pattern)) { continue }
+        foreach ($action in @($signal.actions)) {
+            Add-AuditArtifactEvidence $Accumulator $signal.artifact $action "dependency" $RelativePath ("dependency:{0}" -f $signal.artifact)
+        }
+    }
+}
+
+function Add-AuditArtifactManifestFacts([string]$resolvedPath, $Accumulator, $RequirementAccumulator = $null) {
+    $manifestFiles = New-Object System.Collections.Generic.List[object]
+    foreach ($relativePath in @("package.json", "pyproject.toml", "requirements.txt", "packages.props", "Directory.Packages.props")) {
+        $fullPath = Join-Path $resolvedPath $relativePath
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) { $manifestFiles.Add((Get-Item -LiteralPath $fullPath)) | Out-Null }
+    }
+    foreach ($file in @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 80) + @(Get-AuditRecursiveFiles $resolvedPath "requirements*.txt" 24)) {
+        if ($null -ne $file) { $manifestFiles.Add($file) | Out-Null }
+    }
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in @($manifestFiles.ToArray())) {
+        if ($null -eq $file -or -not $seen.Add([string]$file.FullName)) { continue }
+        if ($file.Length -gt 1048576) { continue }
+        try {
+            $content = Get-ContentUtf8 $file.FullName
+            $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
+            Add-AuditArtifactFactsFromDependencyText $Accumulator $content $relativePath
+            Add-AuditRequirementFactsFromText $RequirementAccumulator $content "dependency" $relativePath
+        }
+        catch {
+            continue
+        }
+    }
+}
+
+function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [System.Collections.Generic.List[string]]$risks, $RequirementAccumulator = $null) {
+    $sourceExtensions = @(".cs", ".fs", ".vb", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".ps1")
+    $allSourceFiles = @(
+        Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) -and $sourceExtensions -contains $_.Extension.ToLowerInvariant() } |
+            Sort-Object FullName
+    )
+    $limit = 600
+    if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
+    foreach ($file in @($allSourceFiles | Select-Object -First $limit)) {
+        if ($file.Length -gt 1048576) { continue }
+        try {
+            $content = Get-ContentUtf8 $file.FullName
+            if ($content.Length -gt 262144) { $content = $content.Substring(0, 262144) }
+            $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
+            $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } else { "source_code" }
+            Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
+            Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath
+        }
+        catch {
+            continue
+        }
+    }
 }
 
 function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
@@ -864,7 +1230,7 @@ function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic
     }
 }
 
-function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$capabilities, [System.Collections.Generic.List[string]]$notableFiles, [System.Collections.Generic.List[string]]$risks) {
+function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$capabilities, [System.Collections.Generic.List[string]]$notableFiles, [System.Collections.Generic.List[string]]$risks, $ArtifactCapabilities = $null, $RequirementSignals = $null) {
     $docCandidates = @(
         "README.md",
         "ALL_IN_ONE_EXECUTIVE_SPEC.md",
@@ -886,6 +1252,8 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
             $text = Get-ContentUtf8 $fullPath
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $contents.Add($text) | Out-Null
+                Add-AuditArtifactFactsFromText $ArtifactCapabilities $text "documentation" $relativePath
+                Add-AuditRequirementFactsFromText $RequirementSignals $text "documentation" $relativePath
                 if ($text -match "编码前设计包" -or $text -match "(?i)\bpre-implementation\b" -or $text -match "(?i)\bdesign package\b") {
                     $designRepoDetected = $true
                 }
@@ -1058,6 +1426,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     $buildCommands = New-Object System.Collections.Generic.List[string]
     $testCommands = New-Object System.Collections.Generic.List[string]
     $capabilities = New-Object System.Collections.Generic.List[string]
+    $artifactCapabilities = New-AuditArtifactCapabilityAccumulator
+    $requirementSignals = New-AuditRequirementSignalAccumulator
     $agentRuleFiles = New-Object System.Collections.Generic.List[string]
     $notableFiles = New-Object System.Collections.Generic.List[string]
 
@@ -1151,8 +1521,10 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
         Add-AuditPowerShellFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
         Add-AuditDocumentedCommandFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
-        Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
+        Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks $artifactCapabilities $requirementSignals
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
+        Add-AuditArtifactManifestFacts $resolvedPath $artifactCapabilities $requirementSignals
+        Add-AuditArtifactSourceFacts $resolvedPath $artifactCapabilities $risks $requirementSignals
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
         $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 1)
         if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) {
@@ -1177,6 +1549,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
             build_commands = @($buildCommands)
             test_commands = @($testCommands)
             capabilities = @($capabilities)
+            artifact_capabilities = @(ConvertTo-AuditArtifactCapabilityArray $artifactCapabilities)
+            requirement_signals = @(ConvertTo-AuditRequirementSignalArray $requirementSignals)
             agent_rule_files = @($agentRuleFiles)
             notable_files = @($notableFiles)
         }
@@ -1221,6 +1595,81 @@ function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
     return @($ordered)
 }
 
+function Merge-AuditArtifactCapabilities($scans) {
+    $accumulator = New-AuditArtifactCapabilityAccumulator
+    foreach ($scan in @($scans)) {
+        $target = Get-CfgObjectProperty $scan "target"
+        $targetName = [string](Get-CfgObjectProperty $target "name")
+        $detected = Get-CfgObjectProperty $scan "detected"
+        foreach ($capability in @(Convert-AuditObjectArray (Get-CfgObjectProperty $detected "artifact_capabilities"))) {
+            $artifact = [string](Get-CfgObjectProperty $capability "artifact")
+            foreach ($action in @(Convert-AuditStringArray (Get-CfgObjectProperty $capability "actions"))) {
+                $evidence = @(Convert-AuditObjectArray (Get-CfgObjectProperty $capability "evidence"))
+                if ($evidence.Count -eq 0) {
+                    Add-AuditArtifactEvidence $accumulator $artifact $action "documentation" "" "legacy_artifact_signal" $targetName
+                    continue
+                }
+                foreach ($item in $evidence) {
+                    Add-AuditArtifactEvidence $accumulator $artifact $action ([string](Get-CfgObjectProperty $item "kind")) ([string](Get-CfgObjectProperty $item "path")) ([string](Get-CfgObjectProperty $item "signal")) $targetName
+                }
+            }
+        }
+    }
+    return @(ConvertTo-AuditArtifactCapabilityArray $accumulator)
+}
+
+function Merge-AuditRequirementSignals($scans) {
+    $accumulator = New-AuditRequirementSignalAccumulator
+    foreach ($scan in @($scans)) {
+        $target = Get-CfgObjectProperty $scan "target"
+        $targetName = [string](Get-CfgObjectProperty $target "name")
+        $detected = Get-CfgObjectProperty $scan "detected"
+        foreach ($signal in @(Convert-AuditObjectArray (Get-CfgObjectProperty $detected "requirement_signals"))) {
+            $domain = [string](Get-CfgObjectProperty $signal "domain")
+            $subject = [string](Get-CfgObjectProperty $signal "subject")
+            foreach ($action in @(Convert-AuditStringArray (Get-CfgObjectProperty $signal "actions"))) {
+                $evidence = @(Convert-AuditObjectArray (Get-CfgObjectProperty $signal "evidence"))
+                if ($evidence.Count -eq 0) {
+                    Add-AuditRequirementEvidence $accumulator $domain $subject $action "documentation" "" "legacy_requirement_signal" $targetName
+                    continue
+                }
+                foreach ($item in $evidence) {
+                    Add-AuditRequirementEvidence $accumulator $domain $subject $action ([string](Get-CfgObjectProperty $item "kind")) ([string](Get-CfgObjectProperty $item "path")) ([string](Get-CfgObjectProperty $item "signal")) $targetName
+                }
+            }
+        }
+    }
+    return @(ConvertTo-AuditRequirementSignalArray $accumulator)
+}
+
+function Get-AuditArtifactCapabilityKeywords($capabilities) {
+    $sets = New-Object System.Collections.Generic.List[object]
+    foreach ($capability in @(Convert-AuditObjectArray $capabilities)) {
+        $artifact = [string](Get-CfgObjectProperty $capability "artifact")
+        if ([string]::IsNullOrWhiteSpace($artifact)) { continue }
+        $sets.Add(@($artifact)) | Out-Null
+        foreach ($action in @(Convert-AuditStringArray (Get-CfgObjectProperty $capability "actions"))) {
+            $sets.Add(@($action, ("{0}_{1}" -f $artifact, $action))) | Out-Null
+        }
+    }
+    return @(Merge-AuditKeywordSets @($sets.ToArray()) 80)
+}
+
+function Get-AuditRequirementSignalKeywords($signals) {
+    $sets = New-Object System.Collections.Generic.List[object]
+    foreach ($signal in @(Convert-AuditObjectArray $signals)) {
+        $domain = [string](Get-CfgObjectProperty $signal "domain")
+        $subject = [string](Get-CfgObjectProperty $signal "subject")
+        if (-not [string]::IsNullOrWhiteSpace($domain)) { $sets.Add(@($domain)) | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($subject)) { continue }
+        $sets.Add(@($subject, ("{0}_{1}" -f $domain, $subject))) | Out-Null
+        foreach ($action in @(Convert-AuditStringArray (Get-CfgObjectProperty $signal "actions"))) {
+            $sets.Add(@($action, ("{0}_{1}" -f $subject, $action))) | Out-Null
+        }
+    }
+    return @(Merge-AuditKeywordSets @($sets.ToArray()) 120)
+}
+
 function Get-AuditRepoScanKeywords($scan) {
     if ($null -eq $scan) { return @() }
     $sets = New-Object System.Collections.Generic.List[object]
@@ -1239,6 +1688,8 @@ function Get-AuditRepoScanKeywords($scan) {
                 $sets.Add((Convert-AuditStringArray $fieldValue)) | Out-Null
             }
         }
+        $sets.Add((Get-AuditArtifactCapabilityKeywords (Get-CfgObjectProperty $detectedValue "artifact_capabilities"))) | Out-Null
+        $sets.Add((Get-AuditRequirementSignalKeywords (Get-CfgObjectProperty $detectedValue "requirement_signals"))) | Out-Null
     }
     $riskValue = $null
     if (Get-AuditObjectFieldValue $scan "risks" ([ref]$riskValue)) {
@@ -1265,7 +1716,7 @@ function New-AuditTargetProfile($scans) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         derived_at = (Get-Date).ToString("o")
         derivation = "target_scans_only"
         target_names = @()
@@ -1288,9 +1739,12 @@ function New-AuditTargetProfile($scans) {
     }
     $profile.target_names = @($targetNames)
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
+    $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
+    $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
-    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    $demand = @($profile.requirement_signals | ForEach-Object { "{0}/{1}" -f [string]$_.domain, [string]$_.subject } | Select-Object -First 8)
+    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')；需求信号：$($demand -join ', ')。"
     return [pscustomobject]$profile
 }
 
@@ -1314,6 +1768,8 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
             (Convert-AuditStringArray $targetProfile.build_commands),
             (Convert-AuditStringArray $targetProfile.test_commands),
             (Convert-AuditStringArray $targetProfile.capabilities),
+            (Get-AuditArtifactCapabilityKeywords (Get-CfgObjectProperty $targetProfile "artifact_capabilities")),
+            (Get-AuditRequirementSignalKeywords (Get-CfgObjectProperty $targetProfile "requirement_signals")),
             (Convert-AuditStringArray $targetProfile.agent_rule_files),
             (Convert-AuditStringArray $targetProfile.notable_files),
             (Convert-AuditStringArray $targetProfile.risks)

@@ -152,6 +152,75 @@ function Add-AuditExactJsonValueReferences($value, [string]$needle, [string]$jso
     }
 }
 
+function Normalize-AuditRemovalSourcePart([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return "" }
+    return $value.Trim().Replace('/', '\\').TrimStart('\\').ToLowerInvariant()
+}
+
+function Test-AuditRemovalSourceIdentity([string]$leftVendor, [string]$leftFrom, [string]$rightVendor, [string]$rightFrom) {
+    if ([string]::IsNullOrWhiteSpace($leftVendor) -or [string]::IsNullOrWhiteSpace($leftFrom)) { return $false }
+    return ([string]$leftVendor).Trim().Equals(([string]$rightVendor).Trim(), [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Normalize-AuditRemovalSourcePart $leftFrom).Equals((Normalize-AuditRemovalSourcePart $rightFrom), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-AuditRemovalAlternativeSources {
+    param(
+        $Config,
+        $Candidate,
+        [string]$RepositoryRoot
+    )
+    $name = ([string]$Candidate.name).Trim()
+    $installed = if ($Candidate.PSObject.Properties.Match("installed").Count -gt 0) { $Candidate.installed } else { $null }
+    $candidateVendor = if ($null -ne $installed) { [string]$installed.vendor } else { "" }
+    $candidateFrom = if ($null -ne $installed) { [string]$installed.from } else { "" }
+    $sources = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $Config -and $Config.PSObject.Properties.Match("mappings").Count -gt 0) {
+        foreach ($mapping in @($Config.mappings)) {
+            if ($null -eq $mapping -or -not ([string]$mapping.to).Trim().Equals($name, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+            $vendor = [string]$mapping.vendor
+            $from = [string]$mapping.from
+            if (Test-AuditRemovalSourceIdentity $candidateVendor $candidateFrom $vendor $from) { continue }
+            $sources.Add([pscustomobject]([ordered]@{ kind = "mapping"; vendor = $vendor; from = $from; path = "skills.json" })) | Out-Null
+        }
+    }
+    if (-not ([string]$candidateVendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($relativePath in @("overrides\\patches\\$name\\SKILL.md", "overrides\\custom\\$name\\SKILL.md")) {
+            $fullPath = Join-Path $RepositoryRoot $relativePath
+            if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+                $sources.Add([pscustomobject]([ordered]@{ kind = "override"; vendor = "overrides"; from = $name; path = ($relativePath -replace '\\', '/') })) | Out-Null
+            }
+        }
+    }
+    return @($sources.ToArray())
+}
+
+function Add-AuditDependencySourceIdentityReferences {
+    param(
+        $DependencyConfig,
+        [string]$Vendor,
+        [string]$From,
+        [System.Collections.Generic.List[object]]$References
+    )
+    if ($null -eq $DependencyConfig -or [string]::IsNullOrWhiteSpace($Vendor) -or [string]::IsNullOrWhiteSpace($From)) { return }
+    $dependencies = if ($DependencyConfig.PSObject.Properties.Match("dependencies").Count -gt 0) { @($DependencyConfig.dependencies) } else { @() }
+    for ($dependencyIndex = 0; $dependencyIndex -lt $dependencies.Count; $dependencyIndex++) {
+        $requirements = if ($null -ne $dependencies[$dependencyIndex] -and $dependencies[$dependencyIndex].PSObject.Properties.Match("requires").Count -gt 0) { @($dependencies[$dependencyIndex].requires) } else { @() }
+        for ($requirementIndex = 0; $requirementIndex -lt $requirements.Count; $requirementIndex++) {
+            $requirement = $requirements[$requirementIndex]
+            $isMatch = $false
+            if ($null -ne $requirement -and $requirement -isnot [string] -and $requirement.PSObject.Properties.Match("vendor").Count -gt 0 -and $requirement.PSObject.Properties.Match("from").Count -gt 0) {
+                $isMatch = Test-AuditRemovalSourceIdentity $Vendor $From ([string]$requirement.vendor) ([string]$requirement.from)
+            }
+            elseif ($requirement -is [string]) {
+                $isMatch = ([string]$requirement).Trim().Equals(("{0}|{1}" -f $Vendor, $From), [System.StringComparison]::OrdinalIgnoreCase)
+            }
+            if ($isMatch) {
+                $References.Add([pscustomobject]([ordered]@{ file = "config/skill-dependency-closure.json"; path = ("$.dependencies[{0}].requires[{1}]" -f $dependencyIndex, $requirementIndex); reference_kind = "source_identity" })) | Out-Null
+            }
+        }
+    }
+}
+
 function Test-AuditRemovalDependencyClosure {
     param(
         $Config,
@@ -159,6 +228,7 @@ function Test-AuditRemovalDependencyClosure {
         [string]$RepositoryRoot = $Root
     )
     $blocked = New-Object System.Collections.Generic.List[object]
+    $satisfied = New-Object System.Collections.Generic.List[object]
     $issues = New-Object System.Collections.Generic.List[string]
     $checkedFiles = @(
         "skills.json",
@@ -170,41 +240,72 @@ function Test-AuditRemovalDependencyClosure {
         $candidateIndex++
         $name = ([string]$candidate.name).Trim()
         if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        $references = New-Object System.Collections.Generic.List[object]
+        $installed = if ($candidate.PSObject.Properties.Match("installed").Count -gt 0) { $candidate.installed } else { $null }
+        $vendor = if ($null -ne $installed) { [string]$installed.vendor } else { "" }
+        $from = if ($null -ne $installed) { [string]$installed.from } else { "" }
+        $logicalReferences = New-Object System.Collections.Generic.List[object]
+        $sourceIdentityReferences = New-Object System.Collections.Generic.List[object]
+        $alternativeSources = @(Get-AuditRemovalAlternativeSources $Config $candidate $RepositoryRoot)
         if ($null -ne $Config -and $Config.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $Config.skill_projection) {
             $projection = $Config.skill_projection
             if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
-                Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $references
+                Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $logicalReferences
             }
         }
-        foreach ($relativePath in @($checkedFiles | Select-Object -Skip 1)) {
-            $fullPath = Join-Path $RepositoryRoot $relativePath
-            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
+        $dependencyPath = Join-Path $RepositoryRoot "config/skill-dependency-closure.json"
+        if (Test-Path -LiteralPath $dependencyPath -PathType Leaf) {
             try {
-                $json = Get-ContentUtf8 $fullPath | ConvertFrom-Json
-                Add-AuditExactJsonValueReferences $json $name '$' ($relativePath -replace '\\', '/') $references
+                $dependencyJson = Get-ContentUtf8 $dependencyPath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $dependencyJson $name '$' "config/skill-dependency-closure.json" $logicalReferences
+                Add-AuditDependencySourceIdentityReferences $dependencyJson $vendor $from $sourceIdentityReferences
             }
             catch {
-                $references.Add([pscustomobject]([ordered]@{ file = ($relativePath -replace '\\', '/'); path = '$'; error = "json_parse_failed: $($_.Exception.Message)" })) | Out-Null
+                $sourceIdentityReferences.Add([pscustomobject]([ordered]@{ file = "config/skill-dependency-closure.json"; path = '$'; error = "json_parse_failed: $($_.Exception.Message)"; reference_kind = "parse_error" })) | Out-Null
             }
         }
+        $provenancePath = Join-Path $RepositoryRoot "overrides/patches/provenance.json"
+        if (([string]$vendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+            try {
+                $provenanceJson = Get-ContentUtf8 $provenancePath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $provenanceJson $name '$.patches' "overrides/patches/provenance.json" $sourceIdentityReferences
+            }
+            catch {
+                $sourceIdentityReferences.Add([pscustomobject]([ordered]@{ file = "overrides/patches/provenance.json"; path = '$'; error = "json_parse_failed: $($_.Exception.Message)"; reference_kind = "parse_error" })) | Out-Null
+            }
+        }
+        $references = New-Object System.Collections.Generic.List[object]
+        foreach ($reference in @($sourceIdentityReferences.ToArray())) { $references.Add($reference) | Out-Null }
+        $logicalNeedsAlternative = ($logicalReferences.Count -gt 0 -and $alternativeSources.Count -eq 0)
+        if ($logicalNeedsAlternative) {
+            foreach ($reference in @($logicalReferences.ToArray())) { $references.Add($reference) | Out-Null }
+        }
+        $originalIndex = if ($candidate.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$candidate.original_index } else { $candidateIndex }
         if ($references.Count -gt 0) {
-            $originalIndex = if ($candidate.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$candidate.original_index } else { $candidateIndex }
             $entry = [pscustomobject]([ordered]@{
                     original_index = $originalIndex
                     name = $name
+                    installed = [pscustomobject]@{ vendor = $vendor; from = $from }
                     references = $references.ToArray()
                 })
             $blocked.Add($entry) | Out-Null
             $referenceText = ($references.ToArray() | ForEach-Object { "{0}{1}" -f [string]$_.file, [string]$_.path }) -join ", "
-            $issues.Add(("removal_dependency_blocked：{0}) {1} <- {2}" -f $originalIndex, $name, $referenceText)) | Out-Null
+            $issues.Add(("removal_dependency_blocked：{0}) {1} [{2}|{3}] <- {4}" -f $originalIndex, $name, $vendor, $from, $referenceText)) | Out-Null
+        }
+        elseif ($logicalReferences.Count -gt 0) {
+            $satisfied.Add([pscustomobject]([ordered]@{
+                        original_index = $originalIndex
+                        name = $name
+                        logical_references = @($logicalReferences.ToArray())
+                        preserved_sources = @($alternativeSources)
+                    })) | Out-Null
         }
     }
     return [pscustomobject]([ordered]@{
             ok = ($blocked.Count -eq 0)
             checked_files = $checkedFiles
-            blocked = $blocked.ToArray()
-            issues = $issues.ToArray()
+            blocked = @($blocked.ToArray())
+            satisfied = @($satisfied.ToArray())
+            issues = @($issues.ToArray())
         })
 }
 

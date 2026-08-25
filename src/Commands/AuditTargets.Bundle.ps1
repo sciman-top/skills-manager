@@ -60,6 +60,20 @@ function Write-AuditThreeFileBundle {
         target_profile = $targetProfile
         source_strategy = $sourceStrategy
         decision_insights = $decisionInsights
+        native_ai_review = [pscustomobject]([ordered]@{
+                schema_version = 1
+                decision_owner = "host_ai"
+                purpose = "Read-only semantic synthesis of scan evidence into recommendations; deterministic scanners remain the source of traceable facts."
+                allowed_inputs = @("snapshot.json", "target_scans[].detected.*.evidence", "target_scans[].target.resolved_path referenced by evidence")
+                prohibited_inputs = @("user-profile.json", "unscanned personal directories", "host auth/provider/session state", "unverified marketplace claims")
+                required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install")
+                evidence_rules = @(
+                    "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
+                    "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
+                    "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
+                )
+                mutation_policy = "recommendations.json only; host, skill, MCP, target-repository, and provider mutation are outside semantic review."
+            })
         write_contract = [pscustomobject]@{
             editable_file = "recommendations.json"
             immutable_files = @("snapshot.json", "receipt.json")

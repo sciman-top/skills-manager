@@ -244,6 +244,47 @@ Describe "Audit target hardening" {
         $substringOnly.ok | Should -Be $true
     }
 
+    It "Allows a logical dependency when a distinct override source remains" {
+        $repo = Join-Path $TestDrive "removal-logical-alternative"
+        New-Item -ItemType Directory -Path (Join-Path $repo "config") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "overrides\patches\retired-skill") -Force | Out-Null
+        Set-ContentUtf8 (Join-Path $repo "overrides\patches\retired-skill\SKILL.md") "---`nname: retired-skill`ndescription: retained override`n---"
+        Set-ContentUtf8 (Join-Path $repo "config\skill-dependency-closure.json") '{"dependencies":[{"skill":"consumer","requires":["retired-skill"]}]}'
+        $cfg = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{ discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{ default = @("retired-skill") } } }
+            mappings = @([pscustomobject]@{ vendor = "manual"; from = "retired-skill"; to = "retired-skill" })
+        }
+        $removal = [pscustomobject]@{ name = "retired-skill"; original_index = 2; installed = [pscustomobject]@{ vendor = "manual"; from = "retired-skill" } }
+
+        $check = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates @($removal) -RepositoryRoot $repo
+
+        $check.ok | Should -Be $true
+        @($check.blocked).Count | Should -Be 0
+        @($check.satisfied).Count | Should -Be 1
+        $check.satisfied[0].preserved_sources[0].kind | Should -Be "override"
+        $check.satisfied[0].logical_references.Count | Should -Be 2
+    }
+
+    It "Blocks an explicit source identity dependency even when a same-name override exists" {
+        $repo = Join-Path $TestDrive "removal-source-identity"
+        New-Item -ItemType Directory -Path (Join-Path $repo "config") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "overrides\patches\retired-skill") -Force | Out-Null
+        Set-ContentUtf8 (Join-Path $repo "overrides\patches\retired-skill\SKILL.md") "---`nname: retired-skill`ndescription: retained override`n---"
+        Set-ContentUtf8 (Join-Path $repo "config\skill-dependency-closure.json") '{"dependencies":[{"skill":"consumer","requires":[{"vendor":"manual","from":"retired-skill"}]}]}'
+        $cfg = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{ discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{} } }
+            mappings = @([pscustomobject]@{ vendor = "manual"; from = "retired-skill"; to = "retired-skill" })
+        }
+        $removal = [pscustomobject]@{ name = "retired-skill"; original_index = 4; installed = [pscustomobject]@{ vendor = "manual"; from = "retired-skill" } }
+
+        $check = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates @($removal) -RepositoryRoot $repo
+
+        $check.ok | Should -Be $false
+        $check.blocked[0].original_index | Should -Be 4
+        $check.blocked[0].references[0].reference_kind | Should -Be "source_identity"
+        $check.blocked[0].references[0].path | Should -Be '$.dependencies[0].requires[0]'
+    }
+
     It "Reports removal dependency blockers from preflight" {
         $runDir = Join-Path $TestDrive "removal-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
