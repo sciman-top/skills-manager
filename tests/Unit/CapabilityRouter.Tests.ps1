@@ -52,6 +52,43 @@ Describe 'Capability router fallback' {
             Set-TestCatalogFingerprint $Document
             $Document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8
         }
+
+        function Invoke-RouterInChildProcess([string]$Router, [string[]]$Arguments) {
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = 'pwsh'
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in @('-NoProfile', '-File', $Router) + @($Arguments)) {
+                [void]$startInfo.ArgumentList.Add([string]$argument)
+            }
+
+            $process = [Diagnostics.Process]::Start($startInfo)
+            $stdout = [IO.MemoryStream]::new()
+            try {
+                $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
+                $stderrTask = $process.StandardError.ReadToEndAsync()
+                $process.WaitForExit()
+                $copyTask.GetAwaiter().GetResult()
+                $stderr = $stderrTask.GetAwaiter().GetResult()
+                $bytes = $stdout.ToArray()
+                $exitCode = $process.ExitCode
+            }
+            finally {
+                $stdout.Dispose()
+                $process.Dispose()
+            }
+
+            if ($exitCode -ne 0) {
+                throw ('router child process failed: {0}' -f $stderr)
+            }
+
+            $raw = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+            return [pscustomobject]@{
+                raw = $raw
+                result = $raw | ConvertFrom-Json
+            }
+        }
     }
 
     BeforeEach {
@@ -85,6 +122,25 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.writes_performed | Should -Be $false
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'activation_plan'
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'session_plan'
+    }
+
+    It 'emits valid UTF-8 JSON to a separate PowerShell process for non-ASCII skill metadata' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0].description = '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
+        Write-TestCatalog $document $catalog
+
+        $child = Invoke-RouterInChildProcess $router @(
+            '-Query', 'design',
+            '-CatalogPath', $catalog,
+            '-DomainHint', 'engineering',
+            '-Candidate', 'skill|codebase-design'
+        )
+
+        $child.raw | Should -Match '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
+        $child.result.catalog.status | Should -Be 'current'
+        $child.result.load_validation.pass | Should -Be $true
+        $child.result.selected[0].description | Should -Be '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
+        $child.result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
     }
 
     It 'validates an exact candidate and reports disclosed side effects' {
