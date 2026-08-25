@@ -223,6 +223,32 @@ finally {
         @($result.findings | ForEach-Object code) | Should -Contain 'closure_hash_drift'
     }
 
+    It 'rejects a rehashed plan that switches to another valid execution profile' {
+        $root = Join-Path $TestDrive 'plan-cross-profile-tamper'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $admission = New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+        # A persisted plan is deserialized independently from its admission;
+        # round-trip the fixture before simulating an attacker editing it so
+        # the mutation cannot alias the admission's in-memory objects.
+        $plan = $plan | ConvertTo-Json -Depth 60 | ConvertFrom-Json
+
+        $oneShot = [pscustomobject][ordered]@{ mode = 'one_shot'; native_agent = 'cold-capability-runner'; conversation_owner = 'runner'; stop_condition = 'parent_contract' }
+        $plan.effective_execution_contract = $oneShot
+        $plan.adapter = 'cold-capability-runner'
+        $plan.action = 'run_once'
+        $plan.stop_condition = 'parent_contract'
+        $plan.revalidation_snapshot.effective_execution_contract = $oneShot
+        $plan.plan_id = Get-ExecutionAdmissionDigest 'plan' (Get-ExecutionPlanPayload $plan)
+
+        $result = Test-ExecutionPlanContract -Plan $plan -Admission $admission
+
+        $result.pass | Should -BeFalse
+        @($result.findings | ForEach-Object code) | Should -Contain 'plan_admission_contract_mismatch'
+        @($result.findings | ForEach-Object code) | Should -Contain 'plan_admission_stop_mismatch'
+        @($result.findings | ForEach-Object code) | Should -Contain 'plan_admission_snapshot_mismatch'
+    }
+
     It 'fails closed when the router contract is not the design-griller multi-turn contract' {
         $root = Join-Path $TestDrive 'contract'
         $fixture = New-ExecutionAdmissionFixture $root

@@ -451,6 +451,36 @@ function Test-ExecutionPlanContract {
     if ($null -eq $planProfile -or [string](Get-ExecutionAdmissionProperty $Plan 'adapter') -ne $planProfile.native_agent -or [string](Get-ExecutionAdmissionProperty $Plan 'action') -ne $planProfile.action) { $findings.Add((New-ExecutionAdmissionFinding 'plan_dispatch_invalid' '$' 'Plan dispatch does not match its execution contract.')) | Out-Null }
     if ($null -eq $planProfile -or -not (Test-ExecutionAdmissionContractShape $planContract $planMode)) { $findings.Add((New-ExecutionAdmissionFinding 'plan_contract_invalid' '$.effective_execution_contract' 'Plan contract is invalid.')) | Out-Null }
     if ($null -eq $planProfile -or [string](Get-ExecutionAdmissionProperty $Plan 'stop_condition') -ne $planProfile.stop_condition) { $findings.Add((New-ExecutionAdmissionFinding 'plan_stop_invalid' '$.stop_condition' 'Plan stop condition is invalid.')) | Out-Null }
+
+    # The plan is a derived execution artifact, not an independent contract.
+    # Recomputing plan_id must not let a caller switch the admitted adapter,
+    # read set, proof, stop condition, or validation snapshot to another valid
+    # profile. Bind every execution-relevant field back to the immutable
+    # admission before accepting the plan.
+    $admissionSnapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
+    $admissionContract = if ($null -eq $admissionSnapshot) { $null } else { Get-ExecutionAdmissionProperty $admissionSnapshot 'effective_execution_contract' }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson $planContract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $admissionContract)) {
+        $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_contract_mismatch' '$.effective_execution_contract' 'Plan contract must match the admission validation snapshot.')) | Out-Null
+    }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson @(Get-ExecutionAdmissionProperty $Plan 'allowed_read_set')) -ne (ConvertTo-ExecutionAdmissionCanonicalJson @(Get-ExecutionAdmissionProperty $Admission 'allowed_read_set'))) {
+        $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_read_set_mismatch' '$.allowed_read_set' 'Plan read set must match the admission read set.')) | Out-Null
+    }
+    if ([string](Get-ExecutionAdmissionProperty $Plan 'minimum_proof') -ne [string](Get-ExecutionAdmissionProperty $Admission 'minimum_proof')) {
+        $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_proof_mismatch' '$.minimum_proof' 'Plan minimum proof must match the admission.')) | Out-Null
+    }
+    if ([string](Get-ExecutionAdmissionProperty $Plan 'stop_condition') -ne [string](Get-ExecutionAdmissionProperty $Admission 'stop_condition')) {
+        $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_stop_mismatch' '$.stop_condition' 'Plan stop condition must match the admission.')) | Out-Null
+    }
+    $expectedPlanSnapshot = [pscustomobject][ordered]@{
+        routing_receipt_id = [string](Get-ExecutionAdmissionProperty $admissionSnapshot 'routing_receipt_id')
+        catalog_fingerprint = [string](Get-ExecutionAdmissionProperty $admissionSnapshot 'catalog_fingerprint')
+        selected_candidate = [string](Get-ExecutionAdmissionProperty $admissionSnapshot 'selected_candidate')
+        validated_closure = @(Get-ExecutionAdmissionProperty $admissionSnapshot 'validated_closure')
+        effective_execution_contract = $admissionContract
+    }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson (Get-ExecutionAdmissionProperty $Plan 'revalidation_snapshot')) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $expectedPlanSnapshot)) {
+        $findings.Add((New-ExecutionAdmissionFinding 'plan_admission_snapshot_mismatch' '$.revalidation_snapshot' 'Plan revalidation snapshot must match the admission snapshot.')) | Out-Null
+    }
     $expectedId = Get-ExecutionAdmissionDigest 'plan' (Get-ExecutionPlanPayload $Plan)
     if ([string](Get-ExecutionAdmissionProperty $Plan 'plan_id') -ne $expectedId) { $findings.Add((New-ExecutionAdmissionFinding 'plan_id_mismatch' '$.plan_id' 'Plan id does not match its canonical payload.')) | Out-Null }
     return New-ExecutionAdmissionValidationResult $findings.ToArray()
