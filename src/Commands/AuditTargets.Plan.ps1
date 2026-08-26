@@ -588,6 +588,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             matched_skill = $matched
             status = $status
         })
@@ -635,6 +636,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             matched_server = $matched
             status = $status
         })
@@ -698,6 +700,19 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
+    $overlapFindings = @($plan.overlap_findings)
+    Write-Host ""
+    Write-Host ("重叠/保留观察: {0} 项" -f $overlapFindings.Count)
+    if ($overlapFindings.Count -eq 0) {
+        Write-Host "无已核实重叠：未发现需要单独路由的同名或原生/仓库来源重合。"
+    }
+    else {
+        foreach ($finding in $overlapFindings) {
+            Write-Host ("- {0} [report_only]" -f [string]$finding.name)
+            Write-Host ("  原因: {0}" -f [string]$finding.reason_target_profile)
+            Write-Host ("  处理: {0}" -f [string]$finding.note)
+        }
+    }
     $totalChanges = @($plan.items).Count + @($plan.removal_candidates).Count + @($plan.mcp_items).Count + @($plan.mcp_removal_candidates).Count
     if ($totalChanges -eq 0 -and $plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0 -and @($plan.empty_recommendation_reasons).Count -gt 0) {
         Write-Host ("空建议原因码: {0}" -f ((@($plan.empty_recommendation_reasons) | ForEach-Object { [string]$_ }) -join ", "))

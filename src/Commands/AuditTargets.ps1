@@ -876,6 +876,41 @@ function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$l
     )
 }
 
+function Get-AuditSourceFileIndex([string]$resolvedPath) {
+    # Source scanning is the hot path.  Several language/manifest probes already
+    # walk the same tree; keep one deterministic, filtered index per target so the
+    # expensive recursive enumeration is not repeated for every probe.
+    $cacheKey = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')
+    if ($null -eq $script:AuditSourceFileIndexCache) { $script:AuditSourceFileIndexCache = @{} }
+    if ($script:AuditSourceFileIndexCache.ContainsKey($cacheKey)) {
+        return @($script:AuditSourceFileIndexCache[$cacheKey])
+    }
+    $extensions = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @('.cs', '.fs', '.vb', '.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.kt', '.go', '.rs', '.rb', '.php', '.ps1')) {
+        $null = $extensions.Add($extension)
+    }
+    $files = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($fullPath in [System.IO.Directory]::EnumerateFiles($resolvedPath, '*', [System.IO.SearchOption]::AllDirectories)) {
+            if (Test-AuditIgnoredRecursivePath $resolvedPath $fullPath) { continue }
+            if (-not $extensions.Contains([System.IO.Path]::GetExtension($fullPath))) { continue }
+            try { $files.Add([System.IO.FileInfo]::new($fullPath)) | Out-Null } catch { continue }
+        }
+    }
+    catch {
+        # Preserve the previous best-effort behaviour if a provider/ACL blocks
+        # .NET enumeration part-way through a tree.
+        $files.Clear()
+        foreach ($file in @(Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue)) {
+            if ((Test-AuditIgnoredRecursivePath $resolvedPath $file.FullName) -or -not $extensions.Contains($file.Extension)) { continue }
+            $files.Add($file) | Out-Null
+        }
+    }
+    $result = @($files.ToArray() | Sort-Object FullName)
+    $script:AuditSourceFileIndexCache[$cacheKey] = $result
+    return $result
+}
+
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
@@ -1226,12 +1261,7 @@ function Add-AuditArtifactManifestFacts([string]$resolvedPath, $Accumulator, $Re
 }
 
 function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [System.Collections.Generic.List[string]]$risks, $RequirementAccumulator = $null) {
-    $sourceExtensions = @(".cs", ".fs", ".vb", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".ps1")
-    $allSourceFiles = @(
-        Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) -and $sourceExtensions -contains $_.Extension.ToLowerInvariant() } |
-            Sort-Object FullName
-    )
+    $allSourceFiles = @(Get-AuditSourceFileIndex $resolvedPath)
     $limit = 600
     $selectedSourceFiles = @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
@@ -1512,6 +1542,9 @@ function Get-AuditGitInfo([string]$resolvedPath) {
 }
 
 function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
+    # A scan is a single consistency window.  Do not reuse a source index from a
+    # prior scan invocation where the target may have changed.
+    $script:AuditSourceFileIndexCache = @{}
     $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
     $risks = New-Object System.Collections.Generic.List[string]
     $languages = New-Object System.Collections.Generic.List[string]

@@ -17035,6 +17035,41 @@ function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$l
     )
 }
 
+function Get-AuditSourceFileIndex([string]$resolvedPath) {
+    # Source scanning is the hot path.  Several language/manifest probes already
+    # walk the same tree; keep one deterministic, filtered index per target so the
+    # expensive recursive enumeration is not repeated for every probe.
+    $cacheKey = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')
+    if ($null -eq $script:AuditSourceFileIndexCache) { $script:AuditSourceFileIndexCache = @{} }
+    if ($script:AuditSourceFileIndexCache.ContainsKey($cacheKey)) {
+        return @($script:AuditSourceFileIndexCache[$cacheKey])
+    }
+    $extensions = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @('.cs', '.fs', '.vb', '.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.kt', '.go', '.rs', '.rb', '.php', '.ps1')) {
+        $null = $extensions.Add($extension)
+    }
+    $files = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($fullPath in [System.IO.Directory]::EnumerateFiles($resolvedPath, '*', [System.IO.SearchOption]::AllDirectories)) {
+            if (Test-AuditIgnoredRecursivePath $resolvedPath $fullPath) { continue }
+            if (-not $extensions.Contains([System.IO.Path]::GetExtension($fullPath))) { continue }
+            try { $files.Add([System.IO.FileInfo]::new($fullPath)) | Out-Null } catch { continue }
+        }
+    }
+    catch {
+        # Preserve the previous best-effort behaviour if a provider/ACL blocks
+        # .NET enumeration part-way through a tree.
+        $files.Clear()
+        foreach ($file in @(Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue)) {
+            if ((Test-AuditIgnoredRecursivePath $resolvedPath $file.FullName) -or -not $extensions.Contains($file.Extension)) { continue }
+            $files.Add($file) | Out-Null
+        }
+    }
+    $result = @($files.ToArray() | Sort-Object FullName)
+    $script:AuditSourceFileIndexCache[$cacheKey] = $result
+    return $result
+}
+
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
@@ -17385,12 +17420,7 @@ function Add-AuditArtifactManifestFacts([string]$resolvedPath, $Accumulator, $Re
 }
 
 function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [System.Collections.Generic.List[string]]$risks, $RequirementAccumulator = $null) {
-    $sourceExtensions = @(".cs", ".fs", ".vb", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".ps1")
-    $allSourceFiles = @(
-        Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) -and $sourceExtensions -contains $_.Extension.ToLowerInvariant() } |
-            Sort-Object FullName
-    )
+    $allSourceFiles = @(Get-AuditSourceFileIndex $resolvedPath)
     $limit = 600
     $selectedSourceFiles = @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
@@ -17671,6 +17701,9 @@ function Get-AuditGitInfo([string]$resolvedPath) {
 }
 
 function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
+    # A scan is a single consistency window.  Do not reuse a source index from a
+    # prior scan invocation where the target may have changed.
+    $script:AuditSourceFileIndexCache = @{}
     $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
     $risks = New-Object System.Collections.Generic.List[string]
     $languages = New-Object System.Collections.Generic.List[string]
@@ -19938,6 +19971,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             matched_skill = $matched
             status = $status
         })
@@ -19985,6 +20019,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             matched_server = $matched
             status = $status
         })
@@ -20048,6 +20083,19 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
+    $overlapFindings = @($plan.overlap_findings)
+    Write-Host ""
+    Write-Host ("重叠/保留观察: {0} 项" -f $overlapFindings.Count)
+    if ($overlapFindings.Count -eq 0) {
+        Write-Host "无已核实重叠：未发现需要单独路由的同名或原生/仓库来源重合。"
+    }
+    else {
+        foreach ($finding in $overlapFindings) {
+            Write-Host ("- {0} [report_only]" -f [string]$finding.name)
+            Write-Host ("  原因: {0}" -f [string]$finding.reason_target_profile)
+            Write-Host ("  处理: {0}" -f [string]$finding.note)
+        }
+    }
     $totalChanges = @($plan.items).Count + @($plan.removal_candidates).Count + @($plan.mcp_items).Count + @($plan.mcp_removal_candidates).Count
     if ($totalChanges -eq 0 -and $plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0 -and @($plan.empty_recommendation_reasons).Count -gt 0) {
         Write-Host ("空建议原因码: {0}" -f ((@($plan.empty_recommendation_reasons) | ForEach-Object { [string]$_ }) -join ", "))
@@ -20427,7 +20475,9 @@ function ConvertTo-AuditJsonArray($value) {
             }
         }
     }
-    return @($items.ToArray())
+    # Emit the array as one pipeline object; otherwise PowerShell unwraps a
+    # one-element array and receipt JSON becomes shape-unstable (object vs []).
+    return ,$items.ToArray()
 }
 
 function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
@@ -20461,6 +20511,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             status = [string]$item.status
         })
         $index++
@@ -20492,9 +20543,74 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             status = [string]$item.status
         })
         $index++
+    }
+    $manifest = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($add)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "add"
+            kind = "skill"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+        }) | Out-Null
+    }
+    foreach ($item in @($remove)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "remove"
+            kind = "skill"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+        }) | Out-Null
+    }
+    foreach ($item in @($mcpAdd)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "add"
+            kind = "mcp"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+        }) | Out-Null
+    }
+    foreach ($item in @($mcpRemove)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "remove"
+            kind = "mcp"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+        }) | Out-Null
+    }
+    foreach ($item in @($plan.overlap_findings)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "overlap"
+            kind = "skill_or_mcp"
+            index = 0
+            name = [string]$item.name
+            status = "report_only"
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            note = [string]$item.note
+            routing = $item.routing
+        }) | Out-Null
     }
     return [pscustomobject]([ordered]@{
         schema_version = 1
@@ -20506,18 +20622,22 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         run_id = [string]$plan.run_id
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
+        decision_basis = $plan.decision_basis
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { ConvertTo-AuditJsonArray $plan.empty_recommendation_reasons } else { @() }
-            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @(ConvertTo-AuditJsonArray $plan.source_observations) } else { @() }
+            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { [object[]](ConvertTo-AuditJsonArray @($plan.source_observations)) } else { [object[]]@() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
             mcp_add = @($mcpAdd).Count
             mcp_remove = @($mcpRemove).Count
+            overlap = @($plan.overlap_findings).Count
         }
         add = @($add)
         remove = @($remove)
         mcp_add = @($mcpAdd)
         mcp_remove = @($mcpRemove)
+        overlap_findings = if ($plan.PSObject.Properties.Match("overlap_findings").Count -gt 0) { [object[]](ConvertTo-AuditJsonArray @($plan.overlap_findings)) } else { [object[]]@() }
+        change_manifest = @($manifest.ToArray())
     })
 }
 

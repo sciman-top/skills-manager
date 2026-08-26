@@ -22,7 +22,9 @@ function ConvertTo-AuditJsonArray($value) {
             }
         }
     }
-    return @($items.ToArray())
+    # Emit the array as one pipeline object; otherwise PowerShell unwraps a
+    # one-element array and receipt JSON becomes shape-unstable (object vs []).
+    return ,$items.ToArray()
 }
 
 function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
@@ -56,6 +58,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             status = [string]$item.status
         })
         $index++
@@ -87,9 +90,74 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_target_profile = [string]$item.reason_target_profile
             sources = @($item.sources)
             keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
             status = [string]$item.status
         })
         $index++
+    }
+    $manifest = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($add)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "add"
+            kind = "skill"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+        }) | Out-Null
+    }
+    foreach ($item in @($remove)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "remove"
+            kind = "skill"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+        }) | Out-Null
+    }
+    foreach ($item in @($mcpAdd)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "add"
+            kind = "mcp"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+        }) | Out-Null
+    }
+    foreach ($item in @($mcpRemove)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "remove"
+            kind = "mcp"
+            index = [int]$item.index
+            name = [string]$item.name
+            status = [string]$item.status
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+        }) | Out-Null
+    }
+    foreach ($item in @($plan.overlap_findings)) {
+        $manifest.Add([pscustomobject][ordered]@{
+            action = "overlap"
+            kind = "skill_or_mcp"
+            index = 0
+            name = [string]$item.name
+            status = "report_only"
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            note = [string]$item.note
+            routing = $item.routing
+        }) | Out-Null
     }
     return [pscustomobject]([ordered]@{
         schema_version = 1
@@ -101,18 +169,22 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         run_id = [string]$plan.run_id
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
+        decision_basis = $plan.decision_basis
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { ConvertTo-AuditJsonArray $plan.empty_recommendation_reasons } else { @() }
-            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @(ConvertTo-AuditJsonArray $plan.source_observations) } else { @() }
+            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { [object[]](ConvertTo-AuditJsonArray @($plan.source_observations)) } else { [object[]]@() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
             mcp_add = @($mcpAdd).Count
             mcp_remove = @($mcpRemove).Count
+            overlap = @($plan.overlap_findings).Count
         }
         add = @($add)
         remove = @($remove)
         mcp_add = @($mcpAdd)
         mcp_remove = @($mcpRemove)
+        overlap_findings = if ($plan.PSObject.Properties.Match("overlap_findings").Count -gt 0) { [object[]](ConvertTo-AuditJsonArray @($plan.overlap_findings)) } else { [object[]]@() }
+        change_manifest = @($manifest.ToArray())
     })
 }
 
