@@ -1187,10 +1187,20 @@ public string CreatePresentation() => "courseware.pptx";
             @($priority.primary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 0
             @($priority.secondary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 1
             @($priority.observations | Where-Object key -eq "workflow/ocr").Count | Should -Be 1
+            $profile.user_need_summary.scope | Should -Be "portfolio"
+            $profile.user_need_summary.primary_needs[0].target_scope | Should -Contain "one"
+            $profile.user_need_summary.primary_needs[0].target_scope | Should -Contain "two"
+            $oneProfile = @($profile.target_need_profiles | Where-Object target -eq "one")
+            $twoProfile = @($profile.target_need_profiles | Where-Object target -eq "two")
+            $oneProfile.Count | Should -Be 1
+            $twoProfile.Count | Should -Be 1
+            @($oneProfile[0].prioritized_needs.primary_needs | Where-Object key -eq "workflow/document_processing").Count | Should -Be 1
+            @($twoProfile[0].prioritized_needs.primary_needs | Where-Object key -eq "workflow/document_processing").Count | Should -Be 1
 
             $insights = New-AuditDecisionInsights $profile @($scanOne, $scanTwo) @() @()
             $insights.keywords.primary_target_profile | Should -Contain "document_processing"
             $insights.keywords.primary_target_profile | Should -Not -Contain "web_ui"
+            ($insights.decision_checklist -join " ") | Should -Match "target_need_profiles"
         }
 
         It "Separates direct AI content generation from model integration and supporting diagnostic code" {

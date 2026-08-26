@@ -16171,7 +16171,7 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从 ``target_profile.prioritized_needs.primary_needs`` 开始：用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从组合级 ``target_profile.user_need_summary`` 和 ``target_profile.prioritized_needs.primary_needs`` 开始；要对单一目标仓下结论时，必须先核对该仓的 ``target_profile.target_need_profiles``。用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求，也不得把组合画像泛化给每一个目标仓。
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
@@ -17982,7 +17982,50 @@ function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
             secondary_needs = @($secondary.ToArray())
             supporting_artifacts = @($artifacts | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
             observations = @($observations)
+    })
+}
+
+function New-AuditUserNeedSummary($prioritizedNeeds) {
+    $primary = New-Object System.Collections.Generic.List[object]
+    foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $prioritizedNeeds "primary_needs"))) {
+        $coverage = Get-CfgObjectProperty $need "evidence_coverage"
+        $primary.Add([pscustomobject]([ordered]@{
+                    key = [string](Get-CfgObjectProperty $need "key")
+                    role = [string](Get-CfgObjectProperty $need "role")
+                    confidence = [string](Get-CfgObjectProperty $need "confidence")
+                    evidence_status = [string](Get-CfgObjectProperty $need "evidence_status")
+                    target_scope = @(Convert-AuditStringArray (Get-CfgObjectProperty $need "targets"))
+                    source_code_target_count = [int](Get-CfgObjectProperty $coverage "source_code_target_count")
+                    limitations = @(Convert-AuditStringArray (Get-CfgObjectProperty $need "limitations"))
+                })) | Out-Null
+    }
+    return [pscustomobject]([ordered]@{
+            derivation = "target_scans_only"
+            scope = "portfolio"
+            primary_needs = @($primary.ToArray())
+            interpretation_rules = @(
+                "This is a portfolio-level evidence summary, not a claim that every target repository has every listed need.",
+                "Use target_need_profiles to identify the needs supported inside one target repository before making a target-specific recommendation.",
+                "A listed limitation is an uncertainty boundary, not evidence of absence or a reason to add, remove, or configure a capability."
+            )
         })
+}
+
+function New-AuditTargetNeedProfiles($scans) {
+    $profiles = New-Object System.Collections.Generic.List[object]
+    foreach ($scan in @($scans)) {
+        $target = Get-CfgObjectProperty $scan "target"
+        $targetName = [string](Get-CfgObjectProperty $target "name")
+        $requirements = @(Merge-AuditRequirementSignals @($scan))
+        $artifacts = @(Merge-AuditArtifactCapabilities @($scan))
+        $needs = New-AuditPrioritizedNeeds $requirements $artifacts
+        $profiles.Add([pscustomobject]([ordered]@{
+                    target = $targetName
+                    scan_risks = @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))
+                    prioritized_needs = $needs
+                })) | Out-Null
+    }
+    return @($profiles.ToArray() | Sort-Object target)
 }
 
 function Get-AuditPrioritizedNeedKeywords($prioritizedNeeds) {
@@ -18095,13 +18138,15 @@ function New-AuditTargetProfile($scans) {
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
+    $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs
+    $profile.target_need_profiles = @(New-AuditTargetNeedProfiles $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
     $secondaryCount = @($profile.prioritized_needs.secondary_needs).Count
     $observationCount = @($profile.prioritized_needs.observations).Count
     $primaryText = if ($primary.Count -gt 0) { $primary -join ', ' } else { "无达到主需求阈值的扫描信号" }
-    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生的组合画像；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount。组合画像不等同于任一单仓用户需求，单仓判断必须读取 target_need_profiles；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
     return [pscustomobject]$profile
 }
 
@@ -18154,7 +18199,8 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
             }
             targets = @($repoKeywordSets)
             decision_checklist = @(
-                "Start with target_profile.prioritized_needs.primary_needs; prevalence alone is not a user-priority claim.",
+                "Start with target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs; prevalence alone is not a user-priority claim.",
+                "Use target_profile.target_need_profiles before attributing a portfolio need to one target repository; the portfolio summary must not be generalized to every target.",
                 "A host-AI promotion from secondary/context to primary requires inspected source evidence of a core user journey and a recorded uncertainty boundary.",
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
@@ -20156,7 +20202,8 @@ function Write-AuditThreeFileBundle {
                 required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install", "semantic_review_for_each_retirement")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
-                    "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "Start from target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "The portfolio image is not a claim about every repository: use target_profile.target_need_profiles before attributing a need to one target or proposing a target-specific change.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",

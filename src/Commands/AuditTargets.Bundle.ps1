@@ -69,7 +69,8 @@ function Write-AuditThreeFileBundle {
                 required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install", "semantic_review_for_each_retirement")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
-                    "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "Start from target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "The portfolio image is not a claim about every repository: use target_profile.target_need_profiles before attributing a need to one target or proposing a target-specific change.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
