@@ -1587,12 +1587,14 @@ $scan.detected.artifact_capabilities | Out-Null
             $template.recommendation_mode | Should -Be "target-repo"
             $template.decision_basis.target_scan_used | Should -Be $true
             $template.new_skills[0].install.repo | Should -Be "<owner/repo-or-local-path>"
-            @($template.removal_candidates).Count | Should -Be 0
+            $template.removal_candidates[0].semantic_review.decision_owner | Should -Be "host_ai"
+            $template.removal_candidates[0].semantic_review.independent_of_target_profile | Should -Be $true
+            $template.mcp_removal_candidates[0].semantic_review.requires_user_confirmation | Should -Be $true
             $template.do_not_install[0].name | Should -Be "<skill-not-recommended>"
             $template.overlap_findings[0].routing.decision_owner | Should -Be "host_ai"
             $template.overlap_findings[0].routing.router | Should -BeNullOrEmpty
             $template.mcp_new_servers[0].server.transport | Should -Be "stdio"
-            @($template.mcp_removal_candidates).Count | Should -Be 0
+            $template.mcp_removal_candidates[0].semantic_review.decision_owner | Should -Be "host_ai"
         }
 
         It "Builds profile-only recommendations template with target_scan_used false" -Skip {
@@ -1804,11 +1806,11 @@ $scan.detected.artifact_capabilities | Out-Null
             $thrown | Should -Be $true
         }
 
-        It "Rejects removal candidates because target-repo scans cannot prove non-use or equivalence" {
+        It "Rejects a removal candidate that only infers non-use from the target profile" {
             $path = Join-Path $TestDrive "recommendations-removal.json"
             Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_target_profile":"user no longer needs it","sources":["https://example.com"],"installed":{"vendor":"manual","from":"old-skill"}}],"do_not_install":[]}'
 
-            { Load-AuditRecommendations $path } | Should -Throw '*不能生成 removal_candidates*'
+            { Load-AuditRecommendations $path } | Should -Throw '*缺少 semantic_review*'
         }
 
         It "Preserves keyword trace from recommendations in supported change plan categories" {

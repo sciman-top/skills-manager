@@ -176,12 +176,13 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 min_installed_state_keywords_per_change = 0
             }
             required_evidence = @(
-                "Every add recommendation must cite sources inspected in this run.",
+                "Every add or retirement recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "Every add recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts.",
-                "Target-repo scans cannot recommend skill or MCP deletion: usage, semantic equivalence, migration, and explicit user authorization belong to a separate retirement workflow."
+                "A retirement recommendation is a host-AI semantic decision, not a profile absence: record installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and current-user-confirmation requirement.",
+                "Same name, an override, dependency closure, or a missing primary-profile match can only be an overlap fact; none is semantic equivalence or retirement proof."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -275,7 +276,8 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Delete example entries that are not needed, but keep the schema shape unchanged.",
         "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
-        "Target-repo scans must leave removal_candidates and mcp_removal_candidates empty; they cannot establish non-use or semantic equivalence."
+        "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
+        "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
     )
     $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
     $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
@@ -331,7 +333,27 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        removal_candidates = @()
+        removal_candidates = @(
+            [ordered]@{
+                name = "<installed-skill-name>"
+                reason_target_profile = "<profile context only; not the retirement proof>"
+                sources = @("<installed-skill-path-or-reviewed-source>")
+                installed = [ordered]@{ vendor = "<installed-vendor>"; from = "<installed-from>" }
+                semantic_review = [ordered]@{
+                    decision_owner = "host_ai"
+                    verdict = "removal_candidate"
+                    capability_class = "specialized"
+                    independent_of_target_profile = $true
+                    installed_capability = "<what this installed skill uniquely does>"
+                    retirement_basis = "semantic_replacement"
+                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
+                    requires_user_confirmation = $true
+                    replacement = [ordered]@{ kind = "skill"; name = "<replacement-skill>"; coverage = "<reviewed behavior covered by replacement>"; limitations = "<remaining gap or none-known>" }
+                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore the retired source>" }
+                    uncertainty = "<remaining semantic or usage uncertainty>"
+                }
+            }
+        )
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
@@ -355,6 +377,26 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        mcp_removal_candidates = @()
+        mcp_removal_candidates = @(
+            [ordered]@{
+                name = "<installed-mcp-name>"
+                reason_target_profile = "<profile context only; not the retirement proof>"
+                sources = @("<installed-mcp-config-or-reviewed-source>")
+                installed = [ordered]@{ name = "<installed-mcp-name>" }
+                semantic_review = [ordered]@{
+                    decision_owner = "host_ai"
+                    verdict = "removal_candidate"
+                    capability_class = "specialized"
+                    independent_of_target_profile = $true
+                    installed_capability = "<what this MCP exposes>"
+                    retirement_basis = "semantic_replacement"
+                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
+                    requires_user_confirmation = $true
+                    replacement = [ordered]@{ kind = "host_native"; name = "<host-native-capability>"; coverage = "<reviewed behavior covered>"; limitations = "<remaining gap or none-known>" }
+                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore this MCP>" }
+                    uncertainty = "<remaining semantic or usage uncertainty>"
+                }
+            }
+        )
     })
 }

@@ -285,21 +285,35 @@ Describe "Audit target hardening" {
         $check.blocked[0].references[0].path | Should -Be '$.dependencies[0].requires[0]'
     }
 
-    It "Rejects removal candidates before dependency preflight because target-repo scans cannot prove retirement" {
+    It "Rejects a profile-only removal because retirement needs host-AI semantic evidence" {
         $runDir = Join-Path $TestDrive "removal-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
         Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-removal-blocked","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"retired-skill","reason_target_profile":"u","sources":["https://example.com"],"installed":{"vendor":"manual","from":"retired-skill"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
         New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-removal-blocked"
+        { Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null } | Should -Throw
+
+        $report = (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight
+        $report.success | Should -Be $false
+        $report.error_code | Should -Be "invalid_recommendations"
+        ($report.issues -join " ") | Should -Match "缺少 semantic_review"
+    }
+
+    It "Allows a host-AI semantic removal candidate, then still blocks its dependency closure" {
+        $runDir = Join-Path $TestDrive "semantic-removal-preflight"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $recPath = Join-Path $runDir "recommendations.json"
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-semantic-removal","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"general-review","reason_target_profile":"profile context only","sources":["local reviewed SKILL.md"],"installed":{"vendor":"manual","from":"general-review"},"semantic_review":{"decision_owner":"host_ai","verdict":"removal_candidate","capability_class":"general","independent_of_target_profile":true,"installed_capability":"review implementation changes","retirement_basis":"semantic_replacement","usage_evidence":{"state":"unknown","evidence":"static scan cannot measure task invocation"},"requires_user_confirmation":true,"replacement":{"kind":"skill","name":"review-successor","coverage":"review workflow and output checks were compared","limitations":"interactive approval remains user-controlled"},"migration":{"plan":"run successor on next review task before removal","rollback":"restore manual import from backup"},"uncertainty":"historical task frequency is unknown"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-semantic-removal"
         Mock Test-AuditRemovalDependencyClosure {
             [pscustomobject]@{
                 ok = $false
                 blocked = @([pscustomobject]@{
-                        name = "retired-skill"
+                        name = "general-review"
                         original_index = 1
                         references = @([pscustomobject]@{ file = "config/skill-dependency-closure.json"; path = '$.dependencies[0].requires[0]' })
                     })
-                issues = @('removal_dependency_blocked：1) retired-skill <- config/skill-dependency-closure.json$.dependencies[0].requires[0]')
+                issues = @('removal_dependency_blocked：1) general-review <- config/skill-dependency-closure.json$.dependencies[0].requires[0]')
             }
         }
 
@@ -307,8 +321,8 @@ Describe "Audit target hardening" {
 
         $report = (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight
         $report.success | Should -Be $false
-        $report.error_code | Should -Be "invalid_recommendations"
-        ($report.issues -join " ") | Should -Match "不能生成 removal_candidates"
+        $report.error_code | Should -Be "removal_dependency_blocked"
+        $report.removal_dependency_check.blocked[0].name | Should -Be "general-review"
     }
 
     It "Scopes host projection health to the admitted resident set" {

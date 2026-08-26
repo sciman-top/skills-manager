@@ -344,6 +344,48 @@ function Assert-AuditRemovalCandidate($item) {
     Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("卸载建议缺少 installed：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.vendor)) ("卸载建议缺少 installed.vendor：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.from)) ("卸载建议缺少 installed.from：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "卸载建议"
+}
+
+function Assert-AuditSemanticRetirementReview($item, [string]$kind) {
+    Need ($item.PSObject.Properties.Match("semantic_review").Count -gt 0 -and $null -ne $item.semantic_review) ("{0} 缺少 semantic_review：{1}" -f $kind, [string]$item.name)
+    $review = $item.semantic_review
+    Need (Test-AuditObjectLike $review) ("{0} semantic_review 必须是对象：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.decision_owner).Trim().ToLowerInvariant() -eq "host_ai") ("{0} semantic_review.decision_owner 必须为 host_ai：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.verdict).Trim().ToLowerInvariant() -eq "removal_candidate") ("{0} semantic_review.verdict 必须为 removal_candidate：{1}" -f $kind, [string]$item.name)
+    $capabilityClass = ([string]$review.capability_class).Trim().ToLowerInvariant()
+    Need ($capabilityClass -in @("general", "specialized")) ("{0} semantic_review.capability_class 仅支持 general/specialized：{1}" -f $kind, [string]$item.name)
+    Need ($review.independent_of_target_profile -is [bool] -and [bool]$review.independent_of_target_profile) ("{0} semantic_review.independent_of_target_profile 必须为 true：画像未命中不能单独推出退役：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.installed_capability)) ("{0} semantic_review 缺少 installed_capability：{1}" -f $kind, [string]$item.name)
+    $retirementBasis = ([string]$review.retirement_basis).Trim().ToLowerInvariant()
+    Need ($retirementBasis -in @("semantic_replacement", "obsolete_or_unsupported")) ("{0} semantic_review.retirement_basis 仅支持 semantic_replacement/obsolete_or_unsupported：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("usage_evidence").Count -gt 0 -and (Test-AuditObjectLike $review.usage_evidence)) ("{0} semantic_review 缺少 usage_evidence：{1}" -f $kind, [string]$item.name)
+    $usageState = ([string]$review.usage_evidence.state).Trim().ToLowerInvariant()
+    Need ($usageState -in @("observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_unused/unknown；已观察到使用的能力不能列为退役候选：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.usage_evidence.evidence)) ("{0} semantic_review.usage_evidence 缺少 evidence：{1}" -f $kind, [string]$item.name)
+    Need ($review.requires_user_confirmation -is [bool] -and [bool]$review.requires_user_confirmation) ("{0} semantic_review.requires_user_confirmation 必须为 true：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("replacement").Count -gt 0 -and (Test-AuditObjectLike $review.replacement)) ("{0} semantic_review 缺少 replacement：{1}" -f $kind, [string]$item.name)
+    $replacement = $review.replacement
+    $replacementKind = ([string]$replacement.kind).Trim().ToLowerInvariant()
+    if ($retirementBasis -eq "semantic_replacement") {
+        Need ($replacementKind -in @("skill", "mcp", "host_native")) ("{0} semantic_replacement 必须指定 skill/mcp/host_native 替代项：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.name)) ("{0} semantic_replacement 缺少 replacement.name：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.coverage)) ("{0} semantic_replacement 缺少 replacement.coverage：{1}" -f $kind, [string]$item.name)
+    }
+    else {
+        Need ($replacementKind -eq "none") ("{0} obsolete_or_unsupported 必须声明 replacement.kind=none：{1}" -f $kind, [string]$item.name)
+    }
+    Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.limitations)) ("{0} semantic_review 缺少 replacement.limitations：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("migration").Count -gt 0 -and (Test-AuditObjectLike $review.migration)) ("{0} semantic_review 缺少 migration：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.plan)) ("{0} semantic_review.migration 缺少 plan：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.rollback)) ("{0} semantic_review.migration 缺少 rollback：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.uncertainty)) ("{0} semantic_review 缺少 uncertainty：{1}" -f $kind, [string]$item.name)
+    $review.decision_owner = "host_ai"
+    $review.verdict = "removal_candidate"
+    $review.capability_class = $capabilityClass
+    $review.retirement_basis = $retirementBasis
+    $review.usage_evidence.state = $usageState
+    $replacement.kind = $replacementKind
 }
 
 function Assert-AuditMcpServerPayload($server, [string]$itemName) {
@@ -390,6 +432,7 @@ function Assert-AuditMcpRemovalCandidate($item) {
     Assert-AuditReasonPair $item "MCP 卸载建议"
     Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("MCP 卸载建议缺少 installed：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.name)) ("MCP 卸载建议缺少 installed.name：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "MCP 卸载建议"
 }
 
 function Load-AuditRecommendations([string]$path) {
@@ -427,8 +470,6 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
-    Need (@($rec.removal_candidates).Count -eq 0) "target-repo 审查不能生成 removal_candidates：目标仓扫描不能证明用户不再使用技能、同名实现语义等价或来源可安全退役"
-    Need (@($rec.mcp_removal_candidates).Count -eq 0) "target-repo 审查不能生成 mcp_removal_candidates：目标仓扫描不能证明 MCP 已不再使用或可安全退役"
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item

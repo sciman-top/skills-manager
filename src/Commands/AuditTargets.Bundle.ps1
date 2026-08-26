@@ -63,16 +63,18 @@ function Write-AuditThreeFileBundle {
         native_ai_review = [pscustomobject]([ordered]@{
                 schema_version = 2
                 decision_owner = "host_ai"
-                purpose = "Read-only semantic synthesis that highlights the most supported user needs from scan evidence; deterministic scanners remain the source of traceable facts."
+                purpose = "Read-only semantic synthesis that highlights supported user needs and judges skill/MCP lifecycle candidates from explicit evidence; deterministic scanners remain the source of traceable facts and never infer retirement from profile absence."
                 allowed_inputs = @("snapshot.json", "target_scans[].detected.*.evidence", "target_scans[].target.resolved_path referenced by evidence")
                 prohibited_inputs = @("user-profile.json", "unscanned personal directories", "host auth/provider/session state", "unverified marketplace claims")
-                required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install")
+                required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install", "semantic_review_for_each_retirement")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
                     "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
+                    "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
+                    "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                 )
                 mutation_policy = "recommendations.json only; host, skill, MCP, target-repository, and provider mutation are outside semantic review."

@@ -16174,8 +16174,9 @@ function Get-DefaultAuditOuterAiPrompt {
 1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从 ``target_profile.prioritized_needs.primary_needs`` 开始：用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
-4. 这是 ``target-repo`` 需求画像，不是技能退役审计：``removal_candidates`` 与 ``mcp_removal_candidates`` 必须为空。同名、存在 override、配置依赖可满足、或本次重点需求未命中，都不是“不再使用”、行为等价或可删除的证据；退役必须由独立工作流取得实际使用、语义等价、迁移和当前用户授权证据。
-5. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
+5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
+6. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
 6. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
 7. 预检通过后执行：
@@ -18361,12 +18362,13 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 min_installed_state_keywords_per_change = 0
             }
             required_evidence = @(
-                "Every add recommendation must cite sources inspected in this run.",
+                "Every add or retirement recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "Every add recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts.",
-                "Target-repo scans cannot recommend skill or MCP deletion: usage, semantic equivalence, migration, and explicit user authorization belong to a separate retirement workflow."
+                "A retirement recommendation is a host-AI semantic decision, not a profile absence: record installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and current-user-confirmation requirement.",
+                "Same name, an override, dependency closure, or a missing primary-profile match can only be an overlap fact; none is semantic equivalence or retirement proof."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -18460,7 +18462,8 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Delete example entries that are not needed, but keep the schema shape unchanged.",
         "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
-        "Target-repo scans must leave removal_candidates and mcp_removal_candidates empty; they cannot establish non-use or semantic equivalence."
+        "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
+        "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
     )
     $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
     $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
@@ -18516,7 +18519,27 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        removal_candidates = @()
+        removal_candidates = @(
+            [ordered]@{
+                name = "<installed-skill-name>"
+                reason_target_profile = "<profile context only; not the retirement proof>"
+                sources = @("<installed-skill-path-or-reviewed-source>")
+                installed = [ordered]@{ vendor = "<installed-vendor>"; from = "<installed-from>" }
+                semantic_review = [ordered]@{
+                    decision_owner = "host_ai"
+                    verdict = "removal_candidate"
+                    capability_class = "specialized"
+                    independent_of_target_profile = $true
+                    installed_capability = "<what this installed skill uniquely does>"
+                    retirement_basis = "semantic_replacement"
+                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
+                    requires_user_confirmation = $true
+                    replacement = [ordered]@{ kind = "skill"; name = "<replacement-skill>"; coverage = "<reviewed behavior covered by replacement>"; limitations = "<remaining gap or none-known>" }
+                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore the retired source>" }
+                    uncertainty = "<remaining semantic or usage uncertainty>"
+                }
+            }
+        )
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
@@ -18540,7 +18563,27 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        mcp_removal_candidates = @()
+        mcp_removal_candidates = @(
+            [ordered]@{
+                name = "<installed-mcp-name>"
+                reason_target_profile = "<profile context only; not the retirement proof>"
+                sources = @("<installed-mcp-config-or-reviewed-source>")
+                installed = [ordered]@{ name = "<installed-mcp-name>" }
+                semantic_review = [ordered]@{
+                    decision_owner = "host_ai"
+                    verdict = "removal_candidate"
+                    capability_class = "specialized"
+                    independent_of_target_profile = $true
+                    installed_capability = "<what this MCP exposes>"
+                    retirement_basis = "semantic_replacement"
+                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
+                    requires_user_confirmation = $true
+                    replacement = [ordered]@{ kind = "host_native"; name = "<host-native-capability>"; coverage = "<reviewed behavior covered>"; limitations = "<remaining gap or none-known>" }
+                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore this MCP>" }
+                    uncertainty = "<remaining semantic or usage uncertainty>"
+                }
+            }
+        )
     })
 }
 
@@ -19501,6 +19544,48 @@ function Assert-AuditRemovalCandidate($item) {
     Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("卸载建议缺少 installed：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.vendor)) ("卸载建议缺少 installed.vendor：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.from)) ("卸载建议缺少 installed.from：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "卸载建议"
+}
+
+function Assert-AuditSemanticRetirementReview($item, [string]$kind) {
+    Need ($item.PSObject.Properties.Match("semantic_review").Count -gt 0 -and $null -ne $item.semantic_review) ("{0} 缺少 semantic_review：{1}" -f $kind, [string]$item.name)
+    $review = $item.semantic_review
+    Need (Test-AuditObjectLike $review) ("{0} semantic_review 必须是对象：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.decision_owner).Trim().ToLowerInvariant() -eq "host_ai") ("{0} semantic_review.decision_owner 必须为 host_ai：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.verdict).Trim().ToLowerInvariant() -eq "removal_candidate") ("{0} semantic_review.verdict 必须为 removal_candidate：{1}" -f $kind, [string]$item.name)
+    $capabilityClass = ([string]$review.capability_class).Trim().ToLowerInvariant()
+    Need ($capabilityClass -in @("general", "specialized")) ("{0} semantic_review.capability_class 仅支持 general/specialized：{1}" -f $kind, [string]$item.name)
+    Need ($review.independent_of_target_profile -is [bool] -and [bool]$review.independent_of_target_profile) ("{0} semantic_review.independent_of_target_profile 必须为 true：画像未命中不能单独推出退役：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.installed_capability)) ("{0} semantic_review 缺少 installed_capability：{1}" -f $kind, [string]$item.name)
+    $retirementBasis = ([string]$review.retirement_basis).Trim().ToLowerInvariant()
+    Need ($retirementBasis -in @("semantic_replacement", "obsolete_or_unsupported")) ("{0} semantic_review.retirement_basis 仅支持 semantic_replacement/obsolete_or_unsupported：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("usage_evidence").Count -gt 0 -and (Test-AuditObjectLike $review.usage_evidence)) ("{0} semantic_review 缺少 usage_evidence：{1}" -f $kind, [string]$item.name)
+    $usageState = ([string]$review.usage_evidence.state).Trim().ToLowerInvariant()
+    Need ($usageState -in @("observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_unused/unknown；已观察到使用的能力不能列为退役候选：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.usage_evidence.evidence)) ("{0} semantic_review.usage_evidence 缺少 evidence：{1}" -f $kind, [string]$item.name)
+    Need ($review.requires_user_confirmation -is [bool] -and [bool]$review.requires_user_confirmation) ("{0} semantic_review.requires_user_confirmation 必须为 true：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("replacement").Count -gt 0 -and (Test-AuditObjectLike $review.replacement)) ("{0} semantic_review 缺少 replacement：{1}" -f $kind, [string]$item.name)
+    $replacement = $review.replacement
+    $replacementKind = ([string]$replacement.kind).Trim().ToLowerInvariant()
+    if ($retirementBasis -eq "semantic_replacement") {
+        Need ($replacementKind -in @("skill", "mcp", "host_native")) ("{0} semantic_replacement 必须指定 skill/mcp/host_native 替代项：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.name)) ("{0} semantic_replacement 缺少 replacement.name：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.coverage)) ("{0} semantic_replacement 缺少 replacement.coverage：{1}" -f $kind, [string]$item.name)
+    }
+    else {
+        Need ($replacementKind -eq "none") ("{0} obsolete_or_unsupported 必须声明 replacement.kind=none：{1}" -f $kind, [string]$item.name)
+    }
+    Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.limitations)) ("{0} semantic_review 缺少 replacement.limitations：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("migration").Count -gt 0 -and (Test-AuditObjectLike $review.migration)) ("{0} semantic_review 缺少 migration：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.plan)) ("{0} semantic_review.migration 缺少 plan：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.rollback)) ("{0} semantic_review.migration 缺少 rollback：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.uncertainty)) ("{0} semantic_review 缺少 uncertainty：{1}" -f $kind, [string]$item.name)
+    $review.decision_owner = "host_ai"
+    $review.verdict = "removal_candidate"
+    $review.capability_class = $capabilityClass
+    $review.retirement_basis = $retirementBasis
+    $review.usage_evidence.state = $usageState
+    $replacement.kind = $replacementKind
 }
 
 function Assert-AuditMcpServerPayload($server, [string]$itemName) {
@@ -19547,6 +19632,7 @@ function Assert-AuditMcpRemovalCandidate($item) {
     Assert-AuditReasonPair $item "MCP 卸载建议"
     Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("MCP 卸载建议缺少 installed：{0}" -f [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.name)) ("MCP 卸载建议缺少 installed.name：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "MCP 卸载建议"
 }
 
 function Load-AuditRecommendations([string]$path) {
@@ -19584,8 +19670,6 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
-    Need (@($rec.removal_candidates).Count -eq 0) "target-repo 审查不能生成 removal_candidates：目标仓扫描不能证明用户不再使用技能、同名实现语义等价或来源可安全退役"
-    Need (@($rec.mcp_removal_candidates).Count -eq 0) "target-repo 审查不能生成 mcp_removal_candidates：目标仓扫描不能证明 MCP 已不再使用或可安全退役"
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
@@ -20031,16 +20115,18 @@ function Write-AuditThreeFileBundle {
         native_ai_review = [pscustomobject]([ordered]@{
                 schema_version = 2
                 decision_owner = "host_ai"
-                purpose = "Read-only semantic synthesis that highlights the most supported user needs from scan evidence; deterministic scanners remain the source of traceable facts."
+                purpose = "Read-only semantic synthesis that highlights supported user needs and judges skill/MCP lifecycle candidates from explicit evidence; deterministic scanners remain the source of traceable facts and never infer retirement from profile absence."
                 allowed_inputs = @("snapshot.json", "target_scans[].detected.*.evidence", "target_scans[].target.resolved_path referenced by evidence")
                 prohibited_inputs = @("user-profile.json", "unscanned personal directories", "host auth/provider/session state", "unverified marketplace claims")
-                required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install")
+                required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install", "semantic_review_for_each_retirement")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
                     "Start from target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
+                    "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
+                    "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                 )
                 mutation_policy = "recommendations.json only; host, skill, MCP, target-repository, and provider mutation are outside semantic review."
