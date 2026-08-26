@@ -869,55 +869,11 @@ function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidat
 }
 
 function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
-    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return @() }
-    $ignored = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $ignored.Add([string]$name) | Out-Null }
-    $pending = New-Object System.Collections.Generic.Stack[string]
-    $pending.Push([System.IO.Path]::GetFullPath($resolvedPath))
-    $matches = New-Object System.Collections.Generic.List[object]
-    while ($pending.Count -gt 0) {
-        $current = $pending.Pop()
-        foreach ($item in @(Get-ChildItem -LiteralPath $current -ErrorAction SilentlyContinue)) {
-            if ($item.PSIsContainer) {
-                if ($ignored.Contains([string]$item.Name)) { continue }
-                if (([int]$item.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-                $pending.Push([string]$item.FullName)
-                continue
-            }
-            if ($item.Name -like $filter) {
-                $matches.Add($item) | Out-Null
-                if ($limit -gt 0 -and $matches.Count -ge $limit) { return @($matches.ToArray()) }
-            }
-        }
-    }
-    return @($matches.ToArray())
-}
-
-function Get-AuditRecursiveFilesByExtensions([string]$resolvedPath, [string[]]$Extensions) {
-    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return @() }
-    $wanted = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($extension in @($Extensions)) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$extension)) { $wanted.Add(([string]$extension).Trim()) | Out-Null }
-    }
-    if ($wanted.Count -eq 0) { return @() }
-    $ignored = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $ignored.Add([string]$name) | Out-Null }
-    $pending = New-Object System.Collections.Generic.Stack[string]
-    $pending.Push([System.IO.Path]::GetFullPath($resolvedPath))
-    $matches = New-Object System.Collections.Generic.List[object]
-    while ($pending.Count -gt 0) {
-        $current = $pending.Pop()
-        foreach ($item in @(Get-ChildItem -LiteralPath $current -ErrorAction SilentlyContinue)) {
-            if ($item.PSIsContainer) {
-                if ($ignored.Contains([string]$item.Name)) { continue }
-                if (([int]$item.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-                $pending.Push([string]$item.FullName)
-                continue
-            }
-            if ($wanted.Contains([string]$item.Extension)) { $matches.Add($item) | Out-Null }
-        }
-    }
-    return @($matches | Sort-Object FullName)
+    return @(
+        Get-ChildItem -LiteralPath $resolvedPath -Filter $filter -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
+            Select-Object -First $limit
+    )
 }
 
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
@@ -1271,7 +1227,11 @@ function Add-AuditArtifactManifestFacts([string]$resolvedPath, $Accumulator, $Re
 
 function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [System.Collections.Generic.List[string]]$risks, $RequirementAccumulator = $null) {
     $sourceExtensions = @(".cs", ".fs", ".vb", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".ps1")
-    $allSourceFiles = @(Get-AuditRecursiveFilesByExtensions $resolvedPath $sourceExtensions)
+    $allSourceFiles = @(
+        Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) -and $sourceExtensions -contains $_.Extension.ToLowerInvariant() } |
+            Sort-Object FullName
+    )
     $limit = 600
     $selectedSourceFiles = @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
