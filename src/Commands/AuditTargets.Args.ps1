@@ -171,7 +171,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
-    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""

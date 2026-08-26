@@ -525,6 +525,7 @@ function Invoke-AuditRecommendationsPreflight {
     }
     $snapshotPath = Join-Path $recommendationDir "snapshot.json"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
+    $snapshot = Read-AuditSnapshot $recommendationDir
     $liveState = Get-AuditLiveInstalledState
     $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
@@ -589,6 +590,11 @@ function Invoke-AuditRecommendationsPreflight {
     if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
         $issues.Add($recommendationValidationIssue) | Out-Null
     }
+    $changeItemCount = if ($null -ne $rec) { Get-AuditRecommendationChangeItemCount $rec } else { 0 }
+    $hasScanContract = $snapshot.PSObject.Properties.Match("scan_contract").Count -gt 0 -and $null -ne $snapshot.scan_contract
+    if ($hasScanContract -and $changeItemCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$snapshot.query)) {
+        $issues.Add("query_required_for_changes：全仓能力盘点未提供用户任务语境，不能据此新增、删除或替换 skill/MCP；请使用 --query 重新扫描。") | Out-Null
+    }
     if ([bool]$targetStaleness.is_stale) {
         $targetNames = (@($targetStaleness.drifted_targets) | ForEach-Object { [string]$_.name }) -join ", "
         $issues.Add(("target_repo_drift：目标仓扫描快照与当前 HEAD/工作树不一致：{0}。请重新运行审查目标 扫描。" -f $targetNames)) | Out-Null
@@ -621,7 +627,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } elseif ($hasScanContract -and $changeItemCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$snapshot.query)) { "query_required_for_changes" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{

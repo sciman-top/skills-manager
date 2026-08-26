@@ -1192,8 +1192,8 @@ public string CreatePresentation() => "courseware.pptx";
             $profile.user_need_summary.scope | Should -Be "portfolio"
             $profile.user_need_summary.primary_needs[0].target_scope | Should -Contain "one"
             $profile.user_need_summary.primary_needs[0].target_scope | Should -Contain "two"
-            $oneProfile = @($profile.target_need_profiles | Where-Object target -eq "one")
-            $twoProfile = @($profile.target_need_profiles | Where-Object target -eq "two")
+            $oneProfile = @($profile.target_evidence_partitions | Where-Object target -eq "one")
+            $twoProfile = @($profile.target_evidence_partitions | Where-Object target -eq "two")
             $oneProfile.Count | Should -Be 1
             $twoProfile.Count | Should -Be 1
             @($oneProfile[0].prioritized_needs.primary_needs | Where-Object key -eq "workflow/document_processing").Count | Should -Be 1
@@ -1202,7 +1202,7 @@ public string CreatePresentation() => "courseware.pptx";
             $insights = New-AuditDecisionInsights $profile @($scanOne, $scanTwo) @() @()
             $insights.keywords.primary_target_profile | Should -Contain "document_processing"
             $insights.keywords.primary_target_profile | Should -Not -Contain "web_ui"
-            ($insights.decision_checklist -join " ") | Should -Match "target_need_profiles"
+            ($insights.decision_checklist -join " ") | Should -Match "target_scans"
             $insights.target_repo_by_target[0].target | Should -Be "one"
             $insights.target_repo_by_target[0].keywords | Should -Contain "document_processing"
         }
@@ -1217,14 +1217,25 @@ public string CreatePresentation() => "courseware.pptx";
             $scan = New-AuditRepoScan "coverage-demo" $repo "..\target-repo-coverage"
             $profile = New-AuditTargetProfile @($scan)
 
-            $profile.scope | Should -Be "repository"
-            $profile.profile_kind | Should -Be "repository_capability_profile"
-            $profile.user_need_summary.scope | Should -Be "repository"
-            $profile.user_need_summary.profile_kind | Should -Be "repository_capability_profile"
+            $profile.scope | Should -Be "portfolio"
+            $profile.profile_kind | Should -Be "portfolio_capability_profile"
+            $profile.user_need_summary.scope | Should -Be "portfolio"
+            $profile.user_need_summary.profile_kind | Should -Be "portfolio_capability_profile"
             $scan.scan_coverage.population_count | Should -Be 2
             $scan.scan_coverage.sampled_count | Should -Be 2
             $scan.scan_coverage.sampled_by_kind.non_product_code | Should -Be 1
             $scan.scan_coverage.confidence_ceiling | Should -Be "complete_source_population"
+        }
+
+        It "Keeps nested support code out of product-source attribution" {
+            $repo = Join-Path $TestDrive "target-repo-nested-support"
+            New-Item -ItemType Directory -Path (Join-Path $repo "packages\tools") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "packages\tools\diagnostic.py") 'provider = "diagnostic"'
+
+            $scan = New-AuditRepoScan "nested-support" $repo "..\target-repo-nested-support"
+
+            $scan.scan_coverage.sampled_by_kind.supporting_code | Should -Be 1
+            $scan.scan_coverage.sampled_by_kind.source_code | Should -Be 0
         }
 
         It "Caps confidence when a source file is too large or text is truncated" {

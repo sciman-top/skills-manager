@@ -43,7 +43,7 @@ function Write-AuditThreeFileBundle {
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
     $targetProfile = New-AuditTargetProfile $Scans
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
-    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } else { "*" }
+    $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
     $receiptPath = Join-Path $ReportRoot "receipt.json"
@@ -58,6 +58,8 @@ function Write-AuditThreeFileBundle {
                 purpose = if ([string]::IsNullOrWhiteSpace($Query)) { "repository_capability_inventory" } else { "task_oriented_capability_fit" }
                 query = [string]$Query
                 target_count = @($Scans).Count
+                aggregation = "all_enabled_targets"
+                target_selector_policy = "--target is accepted only for compatibility and does not narrow the scan"
                 evidence_scope = @("target repository files under the configured path, excluding generated/dependency/cache paths", "configured entrypoints and public contracts", "tests and formal product documents")
                 prohibited_scope = @("user personal directories", "host auth/provider/session state", "unscanned repositories", "generated outputs and dependency caches")
                 scan_budget = [pscustomobject]@{ max_source_files = 600; max_file_bytes = 1048576; max_text_bytes_per_file = 262144 }
@@ -81,7 +83,7 @@ function Write-AuditThreeFileBundle {
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
                     "Start from target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
-                    "The portfolio image is not a claim about every repository: use target_profile.target_need_profiles before attributing a need to one target or proposing a target-specific change.",
+                    "The portfolio image is the only user-need decision surface; target_scans are evidence partitions, not separate user-need profiles.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
@@ -161,12 +163,9 @@ function Invoke-AuditTargetsScan {
     $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
-        $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
-        Need ($targets.Count -gt 0) ("未找到目标仓：{0}" -f $Target)
+        Write-Warning "审查目标 扫描始终汇总全部 enabled 目标仓；--target 仅为兼容保留，不再缩小扫描范围。"
     }
-    else {
-        $targets = @($targets | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
-    }
+    $targets = @($targets | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
     $runId = Get-AuditRunId
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force

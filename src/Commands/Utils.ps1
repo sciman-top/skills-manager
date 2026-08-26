@@ -230,7 +230,7 @@ MCP：
   .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file>
@@ -435,26 +435,8 @@ function 审查目标菜单 {
                     Write-Host "未登记目标仓。"
                     continue
                 }
-                Write-Host "留空将扫描全部 enabled 目标仓。"
-                $selection = Select-Items $targets `
-                { param($idx, $item)
-                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
-                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
-                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
-                } `
-                    "请选择要扫描的目标仓（输入 0 或直接回车=全部 enabled）" `
-                    "未解析到有效序号，已取消生成审查包。"
-                if ($selection.canceled) {
-                    Invoke-AuditTargetsCommand @("scan")
-                    continue
-                }
-                $picked = @($selection.items)
-                if ($picked.Count -eq 0) {
-                    Invoke-AuditTargetsCommand @("scan")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
-                }
+                Write-Host "审查目标扫描固定汇总全部 enabled 目标仓。"
+                Invoke-AuditTargetsCommand @("scan")
             }
             "3" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")

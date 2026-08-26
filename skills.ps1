@@ -16171,7 +16171,7 @@ function Get-DefaultAuditOuterAiPrompt {
 
 目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从组合级 ``target_profile.user_need_summary`` 和 ``target_profile.prioritized_needs.primary_needs`` 开始；要对单一目标仓下结论时，必须先核对该仓的 ``target_profile.target_need_profiles``。用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求，也不得把组合画像泛化给每一个目标仓。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从全仓汇总的 ``target_profile.user_need_summary`` 和 ``target_profile.prioritized_needs.primary_needs`` 开始。``target_scans`` 仅用于逐条证据归属、冲突定位和覆盖统计，不是独立的用户需求画像。用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充整体需求。
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
@@ -17028,18 +17028,62 @@ function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidat
 }
 
 function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
-    return @(
-        Get-ChildItem -LiteralPath $resolvedPath -Filter $filter -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
-            Select-Object -First $limit
-    )
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return @() }
+    $ignored = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $ignored.Add([string]$name) | Out-Null }
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push([System.IO.Path]::GetFullPath($resolvedPath))
+    $matches = New-Object System.Collections.Generic.List[object]
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -ErrorAction SilentlyContinue)) {
+            if ($item.PSIsContainer) {
+                if ($ignored.Contains([string]$item.Name)) { continue }
+                if (([int]$item.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                $pending.Push([string]$item.FullName)
+                continue
+            }
+            if ($item.Name -like $filter) {
+                $matches.Add($item) | Out-Null
+                if ($limit -gt 0 -and $matches.Count -ge $limit) { return @($matches.ToArray()) }
+            }
+        }
+    }
+    return @($matches.ToArray())
+}
+
+function Get-AuditRecursiveFilesByExtensions([string]$resolvedPath, [string[]]$Extensions) {
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return @() }
+    $wanted = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @($Extensions)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$extension)) { $wanted.Add(([string]$extension).Trim()) | Out-Null }
+    }
+    if ($wanted.Count -eq 0) { return @() }
+    $ignored = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $ignored.Add([string]$name) | Out-Null }
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push([System.IO.Path]::GetFullPath($resolvedPath))
+    $matches = New-Object System.Collections.Generic.List[object]
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -ErrorAction SilentlyContinue)) {
+            if ($item.PSIsContainer) {
+                if ($ignored.Contains([string]$item.Name)) { continue }
+                if (([int]$item.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                $pending.Push([string]$item.FullName)
+                continue
+            }
+            if ($wanted.Contains([string]$item.Extension)) { $matches.Add($item) | Out-Null }
+        }
+    }
+    return @($matches | Sort-Object FullName)
 }
 
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
     if ($normalized -match '(?i)(^|\\)(examples?|samples?|fixtures?|mocks?|stubs?|benchmarks?|demos?)(\\|$)') { return "non_product_code" }
-    if ($normalized -match '(?i)^(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
+    if ($normalized -match '(?i)(^|\\)(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
     return "source_code"
 }
 
@@ -17386,11 +17430,7 @@ function Add-AuditArtifactManifestFacts([string]$resolvedPath, $Accumulator, $Re
 
 function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [System.Collections.Generic.List[string]]$risks, $RequirementAccumulator = $null) {
     $sourceExtensions = @(".cs", ".fs", ".vb", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".ps1")
-    $allSourceFiles = @(
-        Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) -and $sourceExtensions -contains $_.Extension.ToLowerInvariant() } |
-            Sort-Object FullName
-    )
+    $allSourceFiles = @(Get-AuditRecursiveFilesByExtensions $resolvedPath $sourceExtensions)
     $limit = 600
     $selectedSourceFiles = @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
@@ -18058,18 +18098,18 @@ function New-AuditUserNeedSummary($prioritizedNeeds, [int]$TargetCount = 0) {
     }
     return [pscustomobject]([ordered]@{
             derivation = "target_scans_only"
-            scope = if ($TargetCount -eq 1) { "repository" } else { "portfolio" }
-            profile_kind = if ($TargetCount -eq 1) { "repository_capability_profile" } else { "portfolio_capability_profile" }
+            scope = "portfolio"
+            profile_kind = "portfolio_capability_profile"
             primary_needs = @($primary.ToArray())
             interpretation_rules = @(
-                "This is a portfolio-level evidence summary, not a claim that every target repository has every listed need.",
-                "Use target_need_profiles to identify the needs supported inside one target repository before making a target-specific recommendation.",
+                "This is the aggregate user-need summary across all enabled target repositories.",
+                "Target-level scan partitions are evidence attribution only; they must not be treated as separate user-need profiles.",
                 "A listed limitation is an uncertainty boundary, not evidence of absence or a reason to add, remove, or configure a capability."
             )
         })
 }
 
-function New-AuditTargetNeedProfiles($scans) {
+function New-AuditTargetEvidencePartitions($scans) {
     $profiles = New-Object System.Collections.Generic.List[object]
     foreach ($scan in @($scans)) {
         $target = Get-CfgObjectProperty $scan "target"
@@ -18078,8 +18118,6 @@ function New-AuditTargetNeedProfiles($scans) {
         $artifacts = @(Merge-AuditArtifactCapabilities @($scan))
         $needs = New-AuditPrioritizedNeeds $requirements $artifacts
         $profiles.Add([pscustomobject]([ordered]@{
-                    profile_kind = "repository_capability_profile"
-                    scope = "repository"
                     target = $targetName
                     scan_risks = @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))
                     prioritized_needs = $needs
@@ -18194,21 +18232,21 @@ function New-AuditTargetProfile($scans) {
         foreach ($item in @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))) { $values["risks"].Add($item) | Out-Null }
     }
     $profile.target_names = @($targetNames)
-    $profile.profile_kind = if (@($scans).Count -eq 1) { "repository_capability_profile" } else { "portfolio_capability_profile" }
-    $profile.scope = if (@($scans).Count -eq 1) { "repository" } else { "portfolio" }
+    $profile.profile_kind = "portfolio_capability_profile"
+    $profile.scope = "portfolio"
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
-    $profile.target_need_profiles = @(New-AuditTargetNeedProfiles $scans)
+    $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
     $secondaryCount = @($profile.prioritized_needs.secondary_needs).Count
     $observationCount = @($profile.prioritized_needs.observations).Count
     $primaryText = if ($primary.Count -gt 0) { $primary -join ', ' } else { "无达到主需求阈值的扫描信号" }
-    $profile.summary = "由 $($profile.scanned_target_count) 个扫描目标仓派生的组合画像；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount。组合画像不等同于任一单仓用户需求，单仓判断必须读取 target_need_profiles；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    $profile.summary = "由 $($profile.scanned_target_count) 个启用目标仓派生的全仓汇总画像；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount。目标仓扫描仅用于证据归属与覆盖统计；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
     return [pscustomobject]$profile
 }
 
@@ -18222,14 +18260,6 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 target = $targetName
                 keywords = @(Get-AuditRepoScanKeywords $scan)
                 risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
-            })
-    }
-    $targetProfileKeywordSets = @()
-    foreach ($targetNeedProfile in @(Convert-AuditObjectArray (Get-CfgObjectProperty $targetProfile "target_need_profiles"))) {
-        $targetProfileKeywordSets += [pscustomobject]([ordered]@{
-                target = [string](Get-CfgObjectProperty $targetNeedProfile "target")
-                keywords = @(Get-AuditPrioritizedNeedKeywords (Get-CfgObjectProperty $targetNeedProfile "prioritized_needs"))
-                scope = "repository"
             })
     }
     $primaryFocusKeywords = @(Get-AuditPrioritizedNeedKeywords (Get-CfgObjectProperty $targetProfile "prioritized_needs"))
@@ -18268,15 +18298,14 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 installed_state = @($installedKeywords)
             }
             target_repo_by_target = @($repoKeywordSets)
-            target_profile_by_target = @($targetProfileKeywordSets)
             targets = @($repoKeywordSets)
             decision_checklist = @(
                 "Start with target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs; prevalence alone is not a user-priority claim.",
-                "Use target_profile.target_need_profiles before attributing a portfolio need to one target repository; the portfolio summary must not be generalized to every target.",
+                "Scan all enabled target repositories and use target_scans only for evidence attribution, conflict localization, and coverage accounting.",
                 "A host-AI promotion from secondary/context to primary requires inspected source evidence of a core user journey and a recorded uncertainty boundary.",
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
-                "For multi-target scans, use target_repo_by_target and target_profile_by_target; the flat target_repo list is only a union for discovery."
+                "The aggregate profile is the only user-need decision surface; target_repo_by_target is evidence attribution, not a per-repository recommendation surface."
             )
         })
 }
@@ -18453,6 +18482,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             schema_version = 1
             mode = $normalizedMode
             query = [string]$Query
+            aggregation = "all_enabled_targets"
             sources = @(
                 [ordered]@{
                     id = "official-docs"
@@ -20280,7 +20310,7 @@ function Write-AuditThreeFileBundle {
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
     $targetProfile = New-AuditTargetProfile $Scans
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
-    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } else { "*" }
+    $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
     $receiptPath = Join-Path $ReportRoot "receipt.json"
@@ -20295,6 +20325,8 @@ function Write-AuditThreeFileBundle {
                 purpose = if ([string]::IsNullOrWhiteSpace($Query)) { "repository_capability_inventory" } else { "task_oriented_capability_fit" }
                 query = [string]$Query
                 target_count = @($Scans).Count
+                aggregation = "all_enabled_targets"
+                target_selector_policy = "--target is accepted only for compatibility and does not narrow the scan"
                 evidence_scope = @("target repository files under the configured path, excluding generated/dependency/cache paths", "configured entrypoints and public contracts", "tests and formal product documents")
                 prohibited_scope = @("user personal directories", "host auth/provider/session state", "unscanned repositories", "generated outputs and dependency caches")
                 scan_budget = [pscustomobject]@{ max_source_files = 600; max_file_bytes = 1048576; max_text_bytes_per_file = 262144 }
@@ -20318,7 +20350,7 @@ function Write-AuditThreeFileBundle {
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
                     "Start from target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
-                    "The portfolio image is not a claim about every repository: use target_profile.target_need_profiles before attributing a need to one target or proposing a target-specific change.",
+                    "The portfolio image is the only user-need decision surface; target_scans are evidence partitions, not separate user-need profiles.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
@@ -20398,12 +20430,9 @@ function Invoke-AuditTargetsScan {
     $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
-        $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
-        Need ($targets.Count -gt 0) ("未找到目标仓：{0}" -f $Target)
+        Write-Warning "审查目标 扫描始终汇总全部 enabled 目标仓；--target 仅为兼容保留，不再缩小扫描范围。"
     }
-    else {
-        $targets = @($targets | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
-    }
+    $targets = @($targets | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
     $runId = Get-AuditRunId
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
@@ -20941,6 +20970,7 @@ function Invoke-AuditRecommendationsPreflight {
     }
     $snapshotPath = Join-Path $recommendationDir "snapshot.json"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
+    $snapshot = Read-AuditSnapshot $recommendationDir
     $liveState = Get-AuditLiveInstalledState
     $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
@@ -21005,6 +21035,11 @@ function Invoke-AuditRecommendationsPreflight {
     if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
         $issues.Add($recommendationValidationIssue) | Out-Null
     }
+    $changeItemCount = if ($null -ne $rec) { Get-AuditRecommendationChangeItemCount $rec } else { 0 }
+    $hasScanContract = $snapshot.PSObject.Properties.Match("scan_contract").Count -gt 0 -and $null -ne $snapshot.scan_contract
+    if ($hasScanContract -and $changeItemCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$snapshot.query)) {
+        $issues.Add("query_required_for_changes：全仓能力盘点未提供用户任务语境，不能据此新增、删除或替换 skill/MCP；请使用 --query 重新扫描。") | Out-Null
+    }
     if ([bool]$targetStaleness.is_stale) {
         $targetNames = (@($targetStaleness.drifted_targets) | ForEach-Object { [string]$_.name }) -join ", "
         $issues.Add(("target_repo_drift：目标仓扫描快照与当前 HEAD/工作树不一致：{0}。请重新运行审查目标 扫描。" -f $targetNames)) | Out-Null
@@ -21037,7 +21072,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$targetProfileCheck.ok) { "target_profile_invalid" } elseif ($hasScanContract -and $changeItemCount -gt 0 -and [string]::IsNullOrWhiteSpace([string]$snapshot.query)) { "query_required_for_changes" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -22071,7 +22106,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
-    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
@@ -23143,7 +23178,7 @@ MCP：
   .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file>
@@ -23348,26 +23383,8 @@ function 审查目标菜单 {
                     Write-Host "未登记目标仓。"
                     continue
                 }
-                Write-Host "留空将扫描全部 enabled 目标仓。"
-                $selection = Select-Items $targets `
-                { param($idx, $item)
-                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
-                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
-                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
-                } `
-                    "请选择要扫描的目标仓（输入 0 或直接回车=全部 enabled）" `
-                    "未解析到有效序号，已取消生成审查包。"
-                if ($selection.canceled) {
-                    Invoke-AuditTargetsCommand @("scan")
-                    continue
-                }
-                $picked = @($selection.items)
-                if ($picked.Count -eq 0) {
-                    Invoke-AuditTargetsCommand @("scan")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
-                }
+                Write-Host "审查目标扫描固定汇总全部 enabled 目标仓。"
+                Invoke-AuditTargetsCommand @("scan")
             }
             "3" {
                 $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")

@@ -113,6 +113,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             schema_version = 1
             mode = $normalizedMode
             query = [string]$Query
+            aggregation = "all_enabled_targets"
             sources = @(
                 [ordered]@{
                     id = "official-docs"

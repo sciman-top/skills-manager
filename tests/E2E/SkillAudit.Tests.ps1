@@ -98,6 +98,9 @@ Describe "Skill Audit E2E" {
             $repo = Join-Path $root "demo-repo"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null
             Add-AuditTargetConfigEntry "demo" ".\demo-repo" | Out-Null
+            $repoTwo = Join-Path $root "demo-repo-two"
+            New-Item -ItemType Directory -Path $repoTwo -Force | Out-Null
+            Add-AuditTargetConfigEntry "demo-two" ".\demo-repo-two" | Out-Null
             Mock Get-InstalledSkillFacts { @() }
 
             $result = Invoke-AuditTargetsScan -Target "demo"
@@ -107,7 +110,10 @@ Describe "Skill Audit E2E" {
             $receipt = Get-ContentUtf8 (Join-Path $result.path "receipt.json") | ConvertFrom-Json
 
             $snapshot.run_id | Should -Be $result.run_id
-            @($snapshot.target_scans).Count | Should -Be 1
+            @($snapshot.target_scans).Count | Should -Be 2
+            $recommendations.target | Should -Be "*"
+            $snapshot.scan_contract.aggregation | Should -Be "all_enabled_targets"
+            $snapshot.target_profile.scope | Should -Be "portfolio"
             $snapshot.target_profile.schema_version | Should -Be 3
             $snapshot.target_profile.prioritized_needs.ranking_method | Should -Be "role_then_source_coverage_v1"
             $snapshot.target_profile.prioritized_needs.policy | Should -Contain "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias."
