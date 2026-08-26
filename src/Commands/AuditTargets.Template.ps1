@@ -176,11 +176,12 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 min_installed_state_keywords_per_change = 0
             }
             required_evidence = @(
-                "Every add/remove recommendation must cite sources inspected in this run.",
+                "Every add recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
-                "Every recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts."
+                "Every add recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts.",
+                "Target-repo scans cannot recommend skill or MCP deletion: usage, semantic equivalence, migration, and explicit user authorization belong to a separate retirement workflow."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -273,11 +274,11 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Replace placeholder values wrapped in <> before using this file.",
         "Delete example entries that are not needed, but keep the schema shape unchanged.",
         "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-        "All install/remove decisions must cite scan-derived target-profile reasons only."
+        "All install decisions must cite scan-derived target-profile reasons only.",
+        "Target-repo scans must leave removal_candidates and mcp_removal_candidates empty; they cannot establish non-use or semantic equivalence."
     )
     $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
     $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
-    $targetReasonRemoval = "<why the scan-derived target profile no longer justifies this skill>"
     $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
     return [pscustomobject]([ordered]@{
         schema_version = 3
@@ -330,18 +331,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        removal_candidates = @(
-            [ordered]@{
-                name = "<installed-skill-name>"
-                reason_target_profile = $targetReasonRemoval
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                installed = [ordered]@{
-                    vendor = "<installed-vendor>"
-                    from = "<installed-from>"
-                }
-            }
-        )
+        removal_candidates = @()
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
@@ -365,16 +355,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        mcp_removal_candidates = @(
-            [ordered]@{
-                name = "<installed-mcp-name>"
-                reason_target_profile = $targetReasonRemoval
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                installed = [ordered]@{
-                    name = "<installed-mcp-name>"
-                }
-            }
-        )
+        mcp_removal_candidates = @()
     })
 }

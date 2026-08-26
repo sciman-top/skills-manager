@@ -1587,12 +1587,12 @@ $scan.detected.artifact_capabilities | Out-Null
             $template.recommendation_mode | Should -Be "target-repo"
             $template.decision_basis.target_scan_used | Should -Be $true
             $template.new_skills[0].install.repo | Should -Be "<owner/repo-or-local-path>"
-            $template.removal_candidates[0].installed.vendor | Should -Be "<installed-vendor>"
+            @($template.removal_candidates).Count | Should -Be 0
             $template.do_not_install[0].name | Should -Be "<skill-not-recommended>"
             $template.overlap_findings[0].routing.decision_owner | Should -Be "host_ai"
             $template.overlap_findings[0].routing.router | Should -BeNullOrEmpty
             $template.mcp_new_servers[0].server.transport | Should -Be "stdio"
-            $template.mcp_removal_candidates[0].installed.name | Should -Be "<installed-mcp-name>"
+            @($template.mcp_removal_candidates).Count | Should -Be 0
         }
 
         It "Builds profile-only recommendations template with target_scan_used false" -Skip {
@@ -1804,33 +1804,27 @@ $scan.detected.artifact_capabilities | Out-Null
             $thrown | Should -Be $true
         }
 
-        It "Allows removal candidates but does not create uninstall plan items" {
+        It "Rejects removal candidates because target-repo scans cannot prove non-use or equivalence" {
             $path = Join-Path $TestDrive "recommendations-removal.json"
             Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_target_profile":"user no longer needs it","sources":["https://example.com"],"installed":{"vendor":"manual","from":"old-skill"}}],"do_not_install":[]}'
 
-            $rec = Load-AuditRecommendations $path
-            $plan = New-AuditInstallPlan $rec
-
-            @($plan.items).Count | Should -Be 0
-            @($plan.removal_candidates).Count | Should -Be 1
+            { Load-AuditRecommendations $path } | Should -Throw '*不能生成 removal_candidates*'
         }
 
-        It "Preserves keyword trace from recommendations in every change plan category" {
+        It "Preserves keyword trace from recommendations in supported change plan categories" {
             $path = Join-Path $TestDrive "recommendations-keyword-trace.json"
-            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"add-skill","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"],"keyword_trace":{"target_profile":["ai/content_generation"],"target_repo":["demo"],"installed_state":["add-skill"]}}],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_target_profile":"u","sources":["local"],"installed":{"vendor":"manual","from":"old-skill"},"keyword_trace":{"target_profile":["workflow/document_processing"],"target_repo":["demo"],"installed_state":["old-skill"]}}],"do_not_install":[],"mcp_new_servers":[{"name":"new-mcp","reason_target_profile":"u","confidence":"medium","sources":["local"],"server":{"name":"new-mcp","transport":"stdio","command":"node","args":[]},"keyword_trace":{"target_profile":["ai/content_generation"],"target_repo":["demo"],"installed_state":["new-mcp"]}}],"mcp_removal_candidates":[{"name":"old-mcp","reason_target_profile":"u","sources":["local"],"installed":{"name":"old-mcp"},"keyword_trace":{"target_profile":["workflow/document_processing"],"target_repo":["demo"],"installed_state":["old-mcp"]}}]}'
-            $cfg = [pscustomobject]@{ vendors=@(); targets=@(); mappings=@(); imports=@(); mcp_servers=@([pscustomobject]@{ name="old-mcp"; transport="stdio"; command="node"; args=@() }); mcp_targets=@(); update_force=$false; sync_mode="sync" }
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"add-skill","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["local"],"keyword_trace":{"target_profile":["ai/content_generation"],"target_repo":["demo"],"installed_state":["add-skill"]}}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"new-mcp","reason_target_profile":"u","confidence":"medium","sources":["local"],"server":{"name":"new-mcp","transport":"stdio","command":"node","args":[]},"keyword_trace":{"target_profile":["ai/content_generation"],"target_repo":["demo"],"installed_state":["new-mcp"]}}],"mcp_removal_candidates":[]}'
+            $cfg = [pscustomobject]@{ vendors=@(); targets=@(); mappings=@(); imports=@(); mcp_servers=@(); mcp_targets=@(); update_force=$false; sync_mode="sync" }
 
             $plan = New-AuditInstallPlan (Load-AuditRecommendations $path) $cfg
 
             $plan.items[0].keyword_trace.target_profile[0] | Should -Be "ai/content_generation"
-            $plan.removal_candidates[0].keyword_trace.target_profile[0] | Should -Be "workflow/document_processing"
             $plan.mcp_items[0].keyword_trace.target_repo[0] | Should -Be "demo"
-            $plan.mcp_removal_candidates[0].keyword_trace.installed_state[0] | Should -Be "old-mcp"
         }
 
-        It "Supports MCP add/remove recommendations in plan output" {
+        It "Supports MCP add recommendations in plan output" {
             $path = Join-Path $TestDrive "recommendations-mcp.json"
-            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"context7","reason_target_profile":"u","confidence":"high","sources":["https://example.com/context7"],"server":{"name":"context7","transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}],"mcp_removal_candidates":[{"name":"legacy-fetch","reason_target_profile":"u2","sources":["https://example.com/legacy"],"installed":{"name":"legacy-fetch"}}]}'
+            Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"context7","reason_target_profile":"u","confidence":"high","sources":["https://example.com/context7"],"server":{"name":"context7","transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}],"mcp_removal_candidates":[]}'
 
             $cfg = [pscustomobject]@{
                 vendors = @()
@@ -1855,8 +1849,7 @@ $scan.detected.artifact_capabilities | Out-Null
 
             @($plan.mcp_items).Count | Should -Be 1
             $plan.mcp_items[0].status | Should -Be "planned"
-            @($plan.mcp_removal_candidates).Count | Should -Be 1
-            $plan.mcp_removal_candidates[0].status | Should -Be "planned"
+            @($plan.mcp_removal_candidates).Count | Should -Be 0
         }
 
         It "Builds install plan without modifying config" {

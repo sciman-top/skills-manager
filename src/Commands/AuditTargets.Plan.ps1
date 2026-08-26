@@ -427,6 +427,8 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
+    Need (@($rec.removal_candidates).Count -eq 0) "target-repo 审查不能生成 removal_candidates：目标仓扫描不能证明用户不再使用技能、同名实现语义等价或来源可安全退役"
+    Need (@($rec.mcp_removal_candidates).Count -eq 0) "target-repo 审查不能生成 mcp_removal_candidates：目标仓扫描不能证明 MCP 已不再使用或可安全退役"
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item

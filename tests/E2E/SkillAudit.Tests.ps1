@@ -121,7 +121,7 @@ Describe "Skill Audit E2E" {
     }
 
     Context "Recommendation apply" {
-        It "Applies selected add/remove recommendations and keeps add indexes stable" {
+        It "Applies a selected add recommendation and keeps add indexes stable" {
             $root = Join-Path $TestDrive "ws-skill-audit-apply"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-AuditTestWorkspace $root
@@ -196,17 +196,7 @@ Describe "Skill Audit E2E" {
                     }
                 )
                 overlap_findings = @()
-                removal_candidates = @(
-                    [pscustomobject]@{
-                        name = "old-skill"
-                        reason_target_profile = "User no longer needs it."
-                        sources = @("local-fixture")
-                        installed = [pscustomobject]@{
-                            vendor = "manual"
-                            from = "old-skill"
-                        }
-                    }
-                )
+                removal_candidates = @()
                 do_not_install = @()
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
@@ -216,7 +206,7 @@ Describe "Skill Audit E2E" {
             Mock 构建生效 {}
             Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
 
-            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -AddSelection "2" -RemoveSelection "1"
+            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -AddSelection "2"
             $saved = LoadCfg
 
             $report.success | Should -Be $true
@@ -224,16 +214,15 @@ Describe "Skill Audit E2E" {
             (Get-ContentUtf8 (Join-Path $root "receipt.json") | ConvertFrom-Json).apply.persisted | Should -Be $true
             $report.persisted | Should -Be $true
             $report.changed_counts.add_installed | Should -Be 1
-            $report.changed_counts.remove_removed | Should -Be 1
-            @($saved.imports).Count | Should -Be 1
-            @($saved.mappings).Count | Should -Be 1
-            $saved.mappings[0].to | Should -Be "demo-skill-2"
-            $report.removal_candidates[0].status | Should -Be "removed"
+            $report.changed_counts.remove_removed | Should -Be 0
+            @($saved.imports).Count | Should -Be 2
+            @($saved.mappings).Count | Should -Be 2
+            $saved.mappings[1].to | Should -Be "demo-skill-2"
             Should -Invoke 构建生效 -Times 1 -Exactly
             Should -Invoke Invoke-Doctor -Times 1 -Exactly
         }
 
-        It "Applies selected MCP add/remove recommendations" {
+        It "Applies a selected MCP add recommendation" {
             $root = Join-Path $TestDrive "ws-skill-audit-apply-mcp"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-AuditTestWorkspace $root
@@ -297,16 +286,7 @@ Describe "Skill Audit E2E" {
                         }
                     }
                 )
-                mcp_removal_candidates = @(
-                    [pscustomobject]@{
-                        name = "legacy-fetch"
-                        reason_target_profile = "User no longer needs this MCP."
-                        sources = @("local-fixture")
-                        installed = [pscustomobject]@{
-                            name = "legacy-fetch"
-                        }
-                    }
-                )
+                mcp_removal_candidates = @()
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
             New-E2EAuditSnapshot (Join-Path $root "snapshot.json") "r-mcp"
@@ -316,18 +296,18 @@ Describe "Skill Audit E2E" {
             Mock 构建生效 {}
             Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
 
-            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -McpAddSelection "1" -McpRemoveSelection "1"
+            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -McpAddSelection "1"
             $saved = LoadCfg
 
             $report.success | Should -Be $true
             $report.persisted | Should -Be $true
             $report.changed_counts.add_installed | Should -Be 0
             $report.changed_counts.mcp_add_added | Should -Be 1
-            $report.changed_counts.mcp_remove_removed | Should -Be 1
-            @($saved.mcp_servers).Count | Should -Be 1
-            $saved.mcp_servers[0].name | Should -Be "context7"
-            @($saved.mcp_profiles.profiles.default.enabled).Count | Should -Be 0
-            $saved.mcp_profiles.profiles.default.enabled_tools.PSObject.Properties.Match("legacy-fetch").Count | Should -Be 0
+            $report.changed_counts.mcp_remove_removed | Should -Be 0
+            @($saved.mcp_servers).Count | Should -Be 2
+            @($saved.mcp_servers | Where-Object name -eq "context7").Count | Should -Be 1
+            @($saved.mcp_profiles.profiles.default.enabled) | Should -Contain "legacy-fetch"
+            $saved.mcp_profiles.profiles.default.enabled_tools.PSObject.Properties.Match("legacy-fetch").Count | Should -Be 1
             Should -Invoke 同步MCP -Times 1 -Exactly -Scope It
             Should -Invoke 构建生效 -Times 0 -Exactly -Scope It
             Should -Invoke Invoke-Doctor -Times 1 -Exactly -Scope It

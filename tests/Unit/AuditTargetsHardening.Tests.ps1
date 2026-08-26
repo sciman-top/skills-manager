@@ -285,7 +285,7 @@ Describe "Audit target hardening" {
         $check.blocked[0].references[0].path | Should -Be '$.dependencies[0].requires[0]'
     }
 
-    It "Reports removal dependency blockers from preflight" {
+    It "Rejects removal candidates before dependency preflight because target-repo scans cannot prove retirement" {
         $runDir = Join-Path $TestDrive "removal-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
@@ -307,8 +307,8 @@ Describe "Audit target hardening" {
 
         $report = (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight
         $report.success | Should -Be $false
-        $report.error_code | Should -Be "removal_dependency_blocked"
-        $report.removal_dependency_check.blocked[0].name | Should -Be "retired-skill"
+        $report.error_code | Should -Be "invalid_recommendations"
+        ($report.issues -join " ") | Should -Match "不能生成 removal_candidates"
     }
 
     It "Scopes host projection health to the admitted resident set" {

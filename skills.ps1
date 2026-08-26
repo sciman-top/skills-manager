@@ -16173,9 +16173,9 @@ function Get-DefaultAuditOuterAiPrompt {
 
 1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从 ``target_profile.prioritized_needs.primary_needs`` 开始：用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充需求。
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
-3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装或卸载结论。
-4. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
-5. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
+3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
+4. 这是 ``target-repo`` 需求画像，不是技能退役审计：``removal_candidates`` 与 ``mcp_removal_candidates`` 必须为空。同名、存在 override、配置依赖可满足、或本次重点需求未命中，都不是“不再使用”、行为等价或可删除的证据；退役必须由独立工作流取得实际使用、语义等价、迁移和当前用户授权证据。
+5. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
 6. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
 7. 预检通过后执行：
@@ -18361,11 +18361,12 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 min_installed_state_keywords_per_change = 0
             }
             required_evidence = @(
-                "Every add/remove recommendation must cite sources inspected in this run.",
+                "Every add recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
-                "Every recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts."
+                "Every add recommendation must be justified by the scan-derived target profile; do not introduce personal preferences or unscanned repository facts.",
+                "Target-repo scans cannot recommend skill or MCP deletion: usage, semantic equivalence, migration, and explicit user authorization belong to a separate retirement workflow."
             )
         })
     $strategy = Apply-AuditSourceStrategyOverride $strategy $normalizedMode
@@ -18458,11 +18459,11 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Replace placeholder values wrapped in <> before using this file.",
         "Delete example entries that are not needed, but keep the schema shape unchanged.",
         "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
-        "All install/remove decisions must cite scan-derived target-profile reasons only."
+        "All install decisions must cite scan-derived target-profile reasons only.",
+        "Target-repo scans must leave removal_candidates and mcp_removal_candidates empty; they cannot establish non-use or semantic equivalence."
     )
     $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
     $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
-    $targetReasonRemoval = "<why the scan-derived target profile no longer justifies this skill>"
     $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
     return [pscustomobject]([ordered]@{
         schema_version = 3
@@ -18515,18 +18516,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        removal_candidates = @(
-            [ordered]@{
-                name = "<installed-skill-name>"
-                reason_target_profile = $targetReasonRemoval
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                installed = [ordered]@{
-                    vendor = "<installed-vendor>"
-                    from = "<installed-from>"
-                }
-            }
-        )
+        removal_candidates = @()
         do_not_install = @(
             [ordered]@{
                 name = "<skill-not-recommended>"
@@ -18550,17 +18540,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 }
             }
         )
-        mcp_removal_candidates = @(
-            [ordered]@{
-                name = "<installed-mcp-name>"
-                reason_target_profile = $targetReasonRemoval
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                installed = [ordered]@{
-                    name = "<installed-mcp-name>"
-                }
-            }
-        )
+        mcp_removal_candidates = @()
     })
 }
 
@@ -19604,6 +19584,8 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
+    Need (@($rec.removal_candidates).Count -eq 0) "target-repo 审查不能生成 removal_candidates：目标仓扫描不能证明用户不再使用技能、同名实现语义等价或来源可安全退役"
+    Need (@($rec.mcp_removal_candidates).Count -eq 0) "target-repo 审查不能生成 mcp_removal_candidates：目标仓扫描不能证明 MCP 已不再使用或可安全退役"
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
