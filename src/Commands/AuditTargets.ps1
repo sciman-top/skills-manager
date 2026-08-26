@@ -876,6 +876,14 @@ function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$l
     )
 }
 
+function Get-AuditSourceEvidenceKind([string]$RelativePath) {
+    $normalized = ([string]$RelativePath).Replace('/', '\')
+    if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
+    if ($normalized -match '(?i)(^|\\)(examples?|samples?|fixtures?|mocks?|stubs?|benchmarks?|demos?)(\\|$)') { return "non_product_code" }
+    if ($normalized -match '(?i)^(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
+    return "source_code"
+}
+
 function Select-AuditBalancedSourceFiles([string]$resolvedPath, [object[]]$Files, [int]$Limit = 600) {
     if ($Limit -le 0 -or @($Files).Count -eq 0) { return @() }
     if (@($Files).Count -le $Limit) { return @($Files) }
@@ -1225,22 +1233,56 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
             Sort-Object FullName
     )
     $limit = 600
+    $selectedSourceFiles = @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
-    foreach ($file in @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)) {
-        if ($file.Length -gt 1048576) { continue }
+    $sourceScanKindCounts = @{ source_code = 0; supporting_code = 0; test = 0; non_product_code = 0 }
+    $sourceScanLargeFileCount = 0
+    $sourceScanReadFailureCount = 0
+    $sourceScanTextTruncatedCount = 0
+    $sourceScanSelfReferentialCount = 0
+    foreach ($file in @($selectedSourceFiles)) {
+        if ($file.Length -gt 1048576) { $sourceScanLargeFileCount++; continue }
         try {
             $content = Get-ContentUtf8 $file.FullName
-            if ($content.Length -gt 262144) { $content = $content.Substring(0, 262144) }
-            if (Test-AuditSelfReferentialAnalysisFile $content) { continue }
+            $contentBytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+            if ($contentBytes.Length -gt 262144) {
+                $sourceScanTextTruncatedCount++
+                $cutLength = 262144
+                while ($cutLength -gt 0 -and (($contentBytes[$cutLength] -band 0xC0) -eq 0x80)) { $cutLength-- }
+                $content = [System.Text.Encoding]::UTF8.GetString($contentBytes, 0, $cutLength)
+            }
+            if (Test-AuditSelfReferentialAnalysisFile $content) {
+                $sourceScanSelfReferentialCount++
+                continue
+            }
             $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
             $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } elseif ($relativePath -match '(?i)^(tools|scripts|build)(\\|$)') { "supporting_code" } else { "source_code" }
+            $kind = Get-AuditSourceEvidenceKind $relativePath
+            if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
             Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
             Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath
         }
         catch {
-            continue
+            $sourceScanReadFailureCount++
         }
     }
+    $script:AuditLastSourceScanCoverage = [pscustomobject]([ordered]@{
+            population_count = @($allSourceFiles).Count
+            sampled_count = @($selectedSourceFiles).Count
+            sample_limit = $limit
+            truncated = (@($allSourceFiles).Count -gt $limit)
+            large_file_count = $sourceScanLargeFileCount
+            text_truncated_count = $sourceScanTextTruncatedCount
+            self_referential_count = $sourceScanSelfReferentialCount
+            read_failure_count = $sourceScanReadFailureCount
+            sampled_by_kind = [pscustomobject]([ordered]@{
+                    source_code = [int]$sourceScanKindCounts.source_code
+                    supporting_code = [int]$sourceScanKindCounts.supporting_code
+                    test = [int]$sourceScanKindCounts.test
+                    non_product_code = [int]$sourceScanKindCounts.non_product_code
+                })
+            confidence_ceiling = if (@($allSourceFiles).Count -eq 0) { "unknown" } elseif (@($allSourceFiles).Count -le $limit -and $sourceScanLargeFileCount -eq 0 -and $sourceScanTextTruncatedCount -eq 0 -and $sourceScanSelfReferentialCount -eq 0 -and $sourceScanReadFailureCount -eq 0) { "complete_source_population" } else { "representative_sample" }
+        })
 }
 
 function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
@@ -1482,6 +1524,19 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     $requirementSignals = New-AuditRequirementSignalAccumulator
     $agentRuleFiles = New-Object System.Collections.Generic.List[string]
     $notableFiles = New-Object System.Collections.Generic.List[string]
+    $scanCoverage = [pscustomobject]([ordered]@{
+            population_count = 0
+            sampled_count = 0
+            sample_limit = 600
+            truncated = $false
+            large_file_count = 0
+            text_truncated_count = 0
+            self_referential_count = 0
+            read_failure_count = 0
+            sampled_by_kind = [pscustomobject]@{ source_code = 0; supporting_code = 0; test = 0; non_product_code = 0 }
+            confidence_ceiling = "unknown"
+        })
+    $script:AuditLastSourceScanCoverage = $null
 
     if (-not $exists) {
         Add-AuditUniqueValue $risks "target_missing"
@@ -1577,6 +1632,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         Add-AuditArtifactManifestFacts $resolvedPath $artifactCapabilities $requirementSignals
         Add-AuditArtifactSourceFacts $resolvedPath $artifactCapabilities $risks $requirementSignals
+        if ($null -ne $script:AuditLastSourceScanCoverage) { $scanCoverage = $script:AuditLastSourceScanCoverage }
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
         $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 1)
         if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) {
@@ -1606,6 +1662,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
             agent_rule_files = @($agentRuleFiles)
             notable_files = @($notableFiles)
         }
+        scan_coverage = $scanCoverage
         risks = @($risks)
     })
 }
@@ -1826,7 +1883,7 @@ function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
     })
 }
 
-function New-AuditUserNeedSummary($prioritizedNeeds) {
+function New-AuditUserNeedSummary($prioritizedNeeds, [int]$TargetCount = 0) {
     $primary = New-Object System.Collections.Generic.List[object]
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $prioritizedNeeds "primary_needs"))) {
         $coverage = Get-CfgObjectProperty $need "evidence_coverage"
@@ -1842,7 +1899,8 @@ function New-AuditUserNeedSummary($prioritizedNeeds) {
     }
     return [pscustomobject]([ordered]@{
             derivation = "target_scans_only"
-            scope = "portfolio"
+            scope = if ($TargetCount -eq 1) { "repository" } else { "portfolio" }
+            profile_kind = if ($TargetCount -eq 1) { "repository_capability_profile" } else { "portfolio_capability_profile" }
             primary_needs = @($primary.ToArray())
             interpretation_rules = @(
                 "This is a portfolio-level evidence summary, not a claim that every target repository has every listed need.",
@@ -1861,6 +1919,8 @@ function New-AuditTargetNeedProfiles($scans) {
         $artifacts = @(Merge-AuditArtifactCapabilities @($scan))
         $needs = New-AuditPrioritizedNeeds $requirements $artifacts
         $profiles.Add([pscustomobject]([ordered]@{
+                    profile_kind = "repository_capability_profile"
+                    scope = "repository"
                     target = $targetName
                     scan_risks = @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))
                     prioritized_needs = $needs
@@ -1975,11 +2035,13 @@ function New-AuditTargetProfile($scans) {
         foreach ($item in @(Convert-AuditStringArray (Get-CfgObjectProperty $scan "risks"))) { $values["risks"].Add($item) | Out-Null }
     }
     $profile.target_names = @($targetNames)
+    $profile.profile_kind = if (@($scans).Count -eq 1) { "repository_capability_profile" } else { "portfolio_capability_profile" }
+    $profile.scope = if (@($scans).Count -eq 1) { "repository" } else { "portfolio" }
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
-    $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs
+    $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_need_profiles = @(New-AuditTargetNeedProfiles $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
@@ -2001,6 +2063,14 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 target = $targetName
                 keywords = @(Get-AuditRepoScanKeywords $scan)
                 risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
+            })
+    }
+    $targetProfileKeywordSets = @()
+    foreach ($targetNeedProfile in @(Convert-AuditObjectArray (Get-CfgObjectProperty $targetProfile "target_need_profiles"))) {
+        $targetProfileKeywordSets += [pscustomobject]([ordered]@{
+                target = [string](Get-CfgObjectProperty $targetNeedProfile "target")
+                keywords = @(Get-AuditPrioritizedNeedKeywords (Get-CfgObjectProperty $targetNeedProfile "prioritized_needs"))
+                scope = "repository"
             })
     }
     $primaryFocusKeywords = @(Get-AuditPrioritizedNeedKeywords (Get-CfgObjectProperty $targetProfile "prioritized_needs"))
@@ -2038,6 +2108,8 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 target_repo = @($profileKeywords)
                 installed_state = @($installedKeywords)
             }
+            target_repo_by_target = @($repoKeywordSets)
+            target_profile_by_target = @($targetProfileKeywordSets)
             targets = @($repoKeywordSets)
             decision_checklist = @(
                 "Start with target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs; prevalence alone is not a user-priority claim.",
@@ -2045,6 +2117,7 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 "A host-AI promotion from secondary/context to primary requires inspected source evidence of a core user journey and a recorded uncertainty boundary.",
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
+                "For multi-target scans, use target_repo_by_target and target_profile_by_target; the flat target_repo list is only a union for discovery."
             )
         })
 }

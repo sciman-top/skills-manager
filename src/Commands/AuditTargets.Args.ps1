@@ -70,6 +70,12 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.target = [string]$items[++$i]
                 continue
             }
+            "--query" {
+                Need ($i + 1 -lt $items.Count) "--query 缺少值"
+                $result.query = [string]$items[++$i]
+                Need (-not (Test-AuditPlaceholderToken $result.query)) "--query 不能使用未替换占位符"
+                continue
+            }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
                 $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
@@ -165,7 +171,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
-    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
@@ -202,7 +208,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "status" { Show-AuditLatestStatus }
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
         "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
-        "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
+        "scan" { Invoke-AuditTargetsScan -Target $opts.target -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" {
             if (-not $opts.apply) {

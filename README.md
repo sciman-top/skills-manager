@@ -107,13 +107,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```powershell
 .\skills.ps1 审查目标 列表
 .\skills.ps1 审查目标 添加 <name> <path>
-.\skills.ps1 审查目标 扫描 --target <name>
+.\skills.ps1 审查目标 扫描 --target <name> [--query "<user-goal>"]
 .\skills.ps1 审查目标 预检 --recommendations <file>
 .\skills.ps1 审查目标 应用确认 --recommendations <file>
 .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes
 ```
 
-扫描产物位于 ignored `reports/skill-audit/<run-id>/`，每个 run 固定只有三个文件：`snapshot.json` 是不可变审查输入，`recommendations.json` 是唯一允许 AI 编辑的决策文件，`receipt.json` 是命令维护的阶段、结果、补偿/回滚与 truth-boundary 记录。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。缺少 snapshot 直接阻断，不生成第四个报告或 evidence 文件。
+扫描产物位于 ignored `reports/skill-audit/<run-id>/`，每个 run 固定只有三个文件：`snapshot.json` 是不可变审查输入，`recommendations.json` 是唯一允许 AI 编辑的决策文件，`receipt.json` 是命令维护的阶段、结果、补偿/回滚与 truth-boundary 记录。`--query` 用于冻结本次任务语境；省略时只生成仓库能力盘点，不得据此声称存在用户需求缺口。`snapshot.json` 还记录 `scan_contract`、单仓/组合画像和 `scan_coverage`，用于披露证据范围与采样上限。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。缺少 snapshot 直接阻断，不生成第四个报告或 evidence 文件。
 
 ### 规则审查
 

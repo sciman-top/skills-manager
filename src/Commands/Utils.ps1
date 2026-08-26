@@ -230,7 +230,7 @@ MCP：
   .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 扫描 [--target <name>] [--query <user-goal>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file>

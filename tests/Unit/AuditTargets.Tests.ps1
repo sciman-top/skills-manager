@@ -271,6 +271,8 @@ Describe "Audit Targets" {
 
             (Parse-AuditTargetsArgs @("list")).action | Should -Be "list"
             (Parse-AuditTargetsArgs @("scan", "--target", "demo")).target | Should -Be "demo"
+            $scanWithQuery = Parse-AuditTargetsArgs @("scan", "--target", "demo", "--query", "import scanned exams")
+            $scanWithQuery.query | Should -Be "import scanned exams"
 
             $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes")
             $apply.action | Should -Be "apply"
@@ -1201,6 +1203,46 @@ public string CreatePresentation() => "courseware.pptx";
             $insights.keywords.primary_target_profile | Should -Contain "document_processing"
             $insights.keywords.primary_target_profile | Should -Not -Contain "web_ui"
             ($insights.decision_checklist -join " ") | Should -Match "target_need_profiles"
+            $insights.target_repo_by_target[0].target | Should -Be "one"
+            $insights.target_repo_by_target[0].keywords | Should -Contain "document_processing"
+        }
+
+        It "Emits repository scope and source scan coverage for a single target" {
+            $repo = Join-Path $TestDrive "target-repo-coverage"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "examples") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "src\main.py") 'def process_document(path): return path'
+            Set-ContentUtf8 (Join-Path $repo "examples\sample.py") 'def process_document(path): return path'
+
+            $scan = New-AuditRepoScan "coverage-demo" $repo "..\target-repo-coverage"
+            $profile = New-AuditTargetProfile @($scan)
+
+            $profile.scope | Should -Be "repository"
+            $profile.profile_kind | Should -Be "repository_capability_profile"
+            $profile.user_need_summary.scope | Should -Be "repository"
+            $profile.user_need_summary.profile_kind | Should -Be "repository_capability_profile"
+            $scan.scan_coverage.population_count | Should -Be 2
+            $scan.scan_coverage.sampled_count | Should -Be 2
+            $scan.scan_coverage.sampled_by_kind.non_product_code | Should -Be 1
+            $scan.scan_coverage.confidence_ceiling | Should -Be "complete_source_population"
+        }
+
+        It "Caps confidence when a source file is too large or text is truncated" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-ceiling"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "src\large.py") ("x" * 1048577)
+
+            $scan = New-AuditRepoScan "coverage-ceiling-large" $repo "..\target-repo-coverage-ceiling"
+
+            $scan.scan_coverage.large_file_count | Should -Be 1
+            $scan.scan_coverage.confidence_ceiling | Should -Be "representative_sample"
+
+            Remove-Item -LiteralPath (Join-Path $repo "src\large.py") -Force
+            Set-ContentUtf8 (Join-Path $repo "src\truncated.py") (("# signal`n" * 40000) + "def process_document(path): return path")
+            $scan = New-AuditRepoScan "coverage-ceiling-text" $repo "..\target-repo-coverage-ceiling"
+
+            $scan.scan_coverage.text_truncated_count | Should -Be 1
+            $scan.scan_coverage.confidence_ceiling | Should -Be "representative_sample"
         }
 
         It "Separates direct AI content generation from model integration and supporting diagnostic code" {

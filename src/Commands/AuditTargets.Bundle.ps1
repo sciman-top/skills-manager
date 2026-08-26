@@ -53,6 +53,17 @@ function Write-AuditThreeFileBundle {
         run_id = $RunId
         mode = $Mode
         query = [string]$Query
+        scan_contract = [pscustomobject]([ordered]@{
+                schema_version = 1
+                purpose = if ([string]::IsNullOrWhiteSpace($Query)) { "repository_capability_inventory" } else { "task_oriented_capability_fit" }
+                query = [string]$Query
+                target_count = @($Scans).Count
+                evidence_scope = @("target repository files under the configured path, excluding generated/dependency/cache paths", "configured entrypoints and public contracts", "tests and formal product documents")
+                prohibited_scope = @("user personal directories", "host auth/provider/session state", "unscanned repositories", "generated outputs and dependency caches")
+                scan_budget = [pscustomobject]@{ max_source_files = 600; max_file_bytes = 1048576; max_text_bytes_per_file = 262144 }
+                interpretation = if ([string]::IsNullOrWhiteSpace($Query)) { "No user goal was supplied; output is repository capability evidence only." } else { "The query is decision context, not proof that the repository lacks a capability." }
+                stop_conditions = @("insufficient evidence", "target drift", "representative sampling ceiling", "contradictory evidence")
+            })
         generated_at = (Get-Date).ToString("o")
         prompt_contract_version = Get-AuditPromptContractVersion
         installed_state = $installedState
@@ -77,6 +88,8 @@ function Write-AuditThreeFileBundle {
                     "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
                     "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
+                    "When scan_coverage.confidence_ceiling is representative_sample, sample-only signals cannot be treated as complete repository coverage."
+                    "A blank query permits repository capability inventory only; task-specific recommendations require an explicit query and target-local evidence."
                 )
                 mutation_policy = "recommendations.json only; host, skill, MCP, target-repository, and provider mutation are outside semantic review."
             })
@@ -144,7 +157,7 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
 }
 
 function Invoke-AuditTargetsScan {
-    param([string]$Target, [string]$OutDir, [switch]$Force)
+    param([string]$Target, [string]$Query = "", [string]$OutDir, [switch]$Force)
     $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -161,5 +174,5 @@ function Invoke-AuditTargetsScan {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
     })
-    return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" "" $cfg $scans
+    return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" ([string]$Query) $cfg $scans
 }
