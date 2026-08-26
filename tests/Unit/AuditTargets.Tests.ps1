@@ -1647,10 +1647,11 @@ $scan.detected.artifact_capabilities | Out-Null
             @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "security-and-permission-notes" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should -Be 1
-            $strategy.evidence_policy.min_unique_sources_for_changes | Should -Be 0
+            $strategy.evidence_policy.min_unique_sources_for_changes | Should -Be 1
             $strategy.evidence_policy.require_http_source_for_changes | Should -Be $false
-            $strategy.evidence_policy.require_source_observations_for_changes | Should -Be $false
-            $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should -Be $false
+            $strategy.evidence_policy.require_source_observations_for_changes | Should -Be $true
+            $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should -Be $true
+            $strategy.decision_quality_policy.require_keyword_trace_membership | Should -Be $true
             $strategy.decision_quality_policy.min_target_profile_keywords_per_change | Should -Be 0
             $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should -Be 0
             $strategy.decision_quality_policy.min_installed_state_keywords_per_change | Should -Be 0
@@ -1842,6 +1843,30 @@ $scan.detected.artifact_capabilities | Out-Null
             Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r1","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"old-skill","reason_target_profile":"user no longer needs it","sources":["https://example.com"],"installed":{"vendor":"manual","from":"old-skill"}}],"do_not_install":[]}'
 
             { Load-AuditRecommendations $path } | Should -Throw '*缺少 semantic_review*'
+        }
+
+        It "Calculates per-change source-observation and HTTP coverage" {
+            $rec = [pscustomobject]@{
+                new_skills = @([pscustomobject]@{ name = "skill-a"; sources = @("https://example.com/skill-a") })
+                removal_candidates = @()
+                mcp_new_servers = @()
+                mcp_removal_candidates = @()
+                source_observations = @([pscustomobject]@{ source = "https://example.com/skill-a"; summary = "Documents the supported skill trigger." })
+            }
+
+            $coverage = Get-AuditRecommendationSourceCoverage $rec
+
+            $coverage.unique_source_count | Should -Be 1
+            $coverage.http_source_count | Should -Be 1
+            $coverage.source_observation_count | Should -Be 1
+            $coverage.items_with_source_observation | Should -Be 1
+            @($coverage.change_items_missing_source_observation).Count | Should -Be 0
+
+            $rec.source_observations = @()
+            $policy = [pscustomobject]@{ enabled = $true; min_unique_sources_for_changes = 1; require_http_source_for_changes = $false; require_source_observations_for_changes = $true }
+            $check = Test-AuditRecommendationSourceCoveragePolicy $rec $policy
+            $check.pass | Should -Be $false
+            @($check.issues) | Should -Match "source_observations"
         }
 
         It "Preserves keyword trace from recommendations in supported change plan categories" {

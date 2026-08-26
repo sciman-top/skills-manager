@@ -164,13 +164,13 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
             }
             evidence_policy = [ordered]@{
-                min_unique_sources_for_changes = 0
+                min_unique_sources_for_changes = 1
                 require_http_source_for_changes = $false
-                require_source_observations_for_changes = $false
+                require_source_observations_for_changes = $true
             }
             decision_quality_policy = [ordered]@{
-                require_keyword_trace_for_changes = $false
-                require_keyword_trace_membership = $false
+                require_keyword_trace_for_changes = $true
+                require_keyword_trace_membership = $true
                 min_target_profile_keywords_per_change = 0
                 min_target_repo_keywords_per_change = 0
                 min_installed_state_keywords_per_change = 0
@@ -295,6 +295,12 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        source_observations = @(
+            [ordered]@{
+                source = "<same-source-url-or-local-path-used-by-a-change>"
+                summary = "<specific fact observed from this source and relevant to the recommendation>"
+            }
+        )
         empty_recommendation_reasons = @("insufficient_reliable_evidence")
         new_skills = @(
             [ordered]@{

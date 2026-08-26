@@ -18431,13 +18431,13 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
             }
             evidence_policy = [ordered]@{
-                min_unique_sources_for_changes = 0
+                min_unique_sources_for_changes = 1
                 require_http_source_for_changes = $false
-                require_source_observations_for_changes = $false
+                require_source_observations_for_changes = $true
             }
             decision_quality_policy = [ordered]@{
-                require_keyword_trace_for_changes = $false
-                require_keyword_trace_membership = $false
+                require_keyword_trace_for_changes = $true
+                require_keyword_trace_membership = $true
                 min_target_profile_keywords_per_change = 0
                 min_target_repo_keywords_per_change = 0
                 min_installed_state_keywords_per_change = 0
@@ -18562,6 +18562,12 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        source_observations = @(
+            [ordered]@{
+                source = "<same-source-url-or-local-path-used-by-a-change>"
+                summary = "<specific fact observed from this source and relevant to the recommendation>"
+            }
+        )
         empty_recommendation_reasons = @("insufficient_reliable_evidence")
         new_skills = @(
             [ordered]@{
@@ -19310,11 +19316,31 @@ function Get-AuditRecommendationChangeItemCount($rec) {
 
 function Get-AuditRecommendationSourceCoverage($rec) {
     $allSources = New-Object System.Collections.Generic.List[string]
+    $observedSources = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $observationCount = 0
+    Ensure-AuditArrayProperty $rec "source_observations"
+    foreach ($observation in @($rec.source_observations)) {
+        Need ($null -ne $observation -and (Test-AuditObjectLike $observation)) "source_observations 条目必须是对象"
+        $source = ([string]$observation.source).Trim()
+        $summary = ([string]$observation.summary).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($source)) "source_observations 条目缺少 source"
+        Need (-not [string]::IsNullOrWhiteSpace($summary)) "source_observations 条目缺少 summary"
+        $observedSources.Add($source) | Out-Null
+        $observationCount++
+    }
+
+    $itemsMissingObservation = New-Object System.Collections.Generic.List[string]
+    $itemsWithObservation = 0
     foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
         foreach ($item in @($collection)) {
-            foreach ($source in @(Normalize-AuditStringArray $item.sources)) {
+            $itemSources = @(Normalize-AuditStringArray $item.sources)
+            $hasObservation = $false
+            foreach ($source in $itemSources) {
                 $allSources.Add($source) | Out-Null
+                if ($observedSources.Contains($source)) { $hasObservation = $true }
             }
+            if ($hasObservation) { $itemsWithObservation++ }
+            else { $itemsMissingObservation.Add(('{0}:{1}' -f [string]$item.name, ($itemSources -join '|'))) | Out-Null }
         }
     }
     $uniqueSources = @(Normalize-AuditStringArray $allSources)
@@ -19322,6 +19348,10 @@ function Get-AuditRecommendationSourceCoverage($rec) {
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         unique_sources = @($uniqueSources)
         unique_source_count = @($uniqueSources).Count
+        http_source_count = @($uniqueSources | Where-Object { $_ -match '^https?://' }).Count
+        source_observation_count = $observationCount
+        items_with_source_observation = $itemsWithObservation
+        change_items_missing_source_observation = @($itemsMissingObservation)
     })
 }
 
@@ -19751,6 +19781,7 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
+    Ensure-AuditArrayProperty $rec "source_observations"
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
