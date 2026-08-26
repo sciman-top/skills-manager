@@ -1268,6 +1268,27 @@ $scan.detected.artifact_capabilities | Out-Null
             ($testOnlyPdf[0].evidence | ForEach-Object { [string]$_.kind } | Select-Object -Unique) | Should -Be @("test")
         }
 
+        It "Samples oversized source scans across source areas instead of a lexical prefix" {
+            $repo = Join-Path $TestDrive "target-repo-balanced-source-scan"
+            New-Item -ItemType Directory -Path (Join-Path $repo "apps\alpha") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "apps\omega") -Force | Out-Null
+            $files = New-Object System.Collections.Generic.List[object]
+            foreach ($i in 1..4) {
+                $alpha = Join-Path $repo ("apps\alpha\{0:D2}.cs" -f $i)
+                $omega = Join-Path $repo ("apps\omega\{0:D2}.cs" -f $i)
+                Set-ContentUtf8 $alpha "class Alpha$i {}"
+                Set-ContentUtf8 $omega "class Omega$i {}"
+                $files.Add((Get-Item -LiteralPath $alpha)) | Out-Null
+                $files.Add((Get-Item -LiteralPath $omega)) | Out-Null
+            }
+
+            $sample = @(Select-AuditBalancedSourceFiles $repo @($files.ToArray()) 4)
+
+            $sample.Count | Should -Be 4
+            @($sample | Where-Object { $_.FullName -match 'apps\\alpha\\' }).Count | Should -Be 2
+            @($sample | Where-Object { $_.FullName -match 'apps\\omega\\' }).Count | Should -Be 2
+        }
+
         It "Extracts java/ruby/php/container/monorepo signals from repo scan inputs" {
             $repo = Join-Path $TestDrive "target-repo-polyglot"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null

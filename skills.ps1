@@ -17035,6 +17035,41 @@ function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$l
     )
 }
 
+function Select-AuditBalancedSourceFiles([string]$resolvedPath, [object[]]$Files, [int]$Limit = 600) {
+    if ($Limit -le 0 -or @($Files).Count -eq 0) { return @() }
+    if (@($Files).Count -le $Limit) { return @($Files) }
+
+    # A lexical prefix can omit entire applications in a large repository.  Round-robin
+    # across two-level source areas so a bounded scan remains representative and repeatable.
+    $buckets = @{}
+    foreach ($file in @($Files | Sort-Object FullName)) {
+        $relative = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
+        $segments = @($relative -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $directoryCount = [Math]::Max(0, $segments.Count - 1)
+        $bucketDepth = [Math]::Min(2, $directoryCount)
+        $bucket = if ($bucketDepth -eq 0) { '(root)' } else { ($segments | Select-Object -First $bucketDepth) -join '/' }
+        if (-not $buckets.ContainsKey($bucket)) {
+            $buckets[$bucket] = New-Object System.Collections.Generic.Queue[object]
+        }
+        $buckets[$bucket].Enqueue($file)
+    }
+
+    $selected = New-Object System.Collections.Generic.List[object]
+    $keys = @($buckets.Keys | Sort-Object)
+    while ($selected.Count -lt $Limit) {
+        $added = $false
+        foreach ($key in $keys) {
+            $queue = $buckets[$key]
+            if ($queue.Count -eq 0) { continue }
+            $selected.Add($queue.Dequeue()) | Out-Null
+            $added = $true
+            if ($selected.Count -ge $Limit) { break }
+        }
+        if (-not $added) { break }
+    }
+    return @($selected.ToArray() | Sort-Object FullName)
+}
+
 function New-AuditArtifactCapabilityAccumulator {
     return @{}
 }
@@ -17350,7 +17385,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
     )
     $limit = 600
     if ($allSourceFiles.Count -gt $limit) { Add-AuditUniqueValue $risks "artifact_source_scan_truncated" }
-    foreach ($file in @($allSourceFiles | Select-Object -First $limit)) {
+    foreach ($file in @(Select-AuditBalancedSourceFiles $resolvedPath $allSourceFiles $limit)) {
         if ($file.Length -gt 1048576) { continue }
         try {
             $content = Get-ContentUtf8 $file.FullName
