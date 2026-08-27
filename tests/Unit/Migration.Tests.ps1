@@ -74,6 +74,12 @@ Describe 'Migration bundles' {
         $result.path | Should -Match '\\artifacts\\migration\\[^\\]+\\migration-rescan-[^\\]+\.zip$'
     }
 
+    It 'rejects repository artifact-root output that bypasses the migration contract' {
+        $out = Join-Path $repoRoot 'artifacts\migration-contract.zip'
+        { Invoke-MigrationCommand @('--mode','rescan','--out',$out) } | Should -Throw '*Migration output under artifacts*'
+        Test-Path -LiteralPath $out | Should -BeFalse
+    }
+
     It 'general bundle uses core skills and strips MCP credential values' {
         $out = Join-Path $TestDrive 'general.zip'
         Invoke-MigrationCommand @('--mode','general','--out',$out)

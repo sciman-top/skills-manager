@@ -17,6 +17,16 @@ $outputParent = [IO.Path]::GetFullPath($OutputDirectory)
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $outputParent $Version))
 $workRoot = Join-Path $outputRoot '.release-work'
 
+function Assert-ReleaseOutputContract {
+    $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'release')).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if ($outputParent.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        ($outputParent.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -and
+         -not $outputParent.Equals($releaseRoot, [StringComparison]::OrdinalIgnoreCase))) {
+        throw "Release output directory must be artifacts\release (the version subdirectory is added automatically): $outputParent"
+    }
+}
+
 function Assert-InsideOutput([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     $prefix = $outputRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -333,6 +343,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the release source worktree.
 if ($trackedChanges.Count -gt 0 -and -not $AllowDirtyWorktree) {
     throw 'Release build requires a clean tracked worktree. Use -AllowDirtyWorktree only for non-publishable development tests.'
 }
+Assert-ReleaseOutputContract
 if (-not (Test-Path -LiteralPath $outputRoot)) { New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null }
 Assert-InsideOutput $workRoot
 if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force }

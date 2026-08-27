@@ -39,6 +39,8 @@ artifacts/release/<version>/
 
 `portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证证据路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；若 pinned commit 没有这些文件，仅当同一 commit 根 `README.md` 明确包含 License section 和 SPDX 名称时，才按原始字节物化该 README 作为可追溯证据。同一来源的多个技能共享一份证据，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树 frontmatter 或远端口头声明不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
 
+`-OutputDirectory` 表示 release staging 的父目录；当它指向本仓 `artifacts` 时，脚本只接受 `artifacts/release`，并自动追加 `<version>`。仓库内不允许通过参数把公共 ZIP 写回根层或其他分类目录；测试可使用外部临时目录。
+
 只构建一种包：
 
 ```powershell

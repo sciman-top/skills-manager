@@ -16162,6 +16162,14 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path 'migration' $stamp)
         Join-Path $migrationRunRoot ("migration-{0}-{1}.zip" -f $options.mode, $stamp)
     } else { [IO.Path]::GetFullPath($options.out_path) }
+    $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $Root 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if ($outPath.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $outPath.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        $relativeArtifactPath = [IO.Path]::GetRelativePath($artifactsRoot, $outPath).Replace('\', '/')
+        if ($relativeArtifactPath -notmatch '^migration/[^/]+/[^/]+\.zip$') {
+            throw 'Migration output under artifacts must be artifacts\migration\<run-id>\<file>.zip; use an external temporary path only for isolated tests.'
+        }
+    }
     $outParent = Split-Path -Parent $outPath
     if (-not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Path $outParent -Force | Out-Null }
     Need ($options.force -or -not (Test-Path -LiteralPath $outPath)) ("迁移输出已存在：{0}；如需覆盖请使用 --force" -f $outPath)
