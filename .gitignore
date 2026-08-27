@@ -6,6 +6,7 @@
 /reports/
 /docs/runtime-*.txt
 /artifacts/
+/migration-*.zip
 
 # backups created when linking
 **/*.bak.*

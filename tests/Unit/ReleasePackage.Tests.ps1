@@ -35,6 +35,9 @@ Describe 'Release packaging' {
         $bootstrapManifest.includes_prebuilt_agent | Should -Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'setup.cmd') | Should -Be $true
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'LICENSE') | Should -Be $true
+        Test-Path -LiteralPath (Join-Path $bootstrapRoot 'scripts\release\release-update-worker.ps1') | Should -Be $true
+        Test-Path -LiteralPath (Join-Path $bootstrapRoot 'scripts\release\release-update-scheduled-runner.ps1') | Should -Be $true
+        Test-Path -LiteralPath (Join-Path $bootstrapRoot 'scripts\release\register-release-update-task.ps1') | Should -Be $true
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'reports') | Should -Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot '.git') | Should -Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'THIRD-PARTY-NOTICES.json') | Should -Be $false
@@ -74,6 +77,9 @@ Describe 'Release packaging' {
         $fixtureVendor = Join-Path $fixtureRoot 'vendor\unlicensed'
         New-Item -ItemType Directory -Path $fixtureScriptRoot, $fixtureApplicationRoot, $fixtureDocs, $fixtureAgent, $fixtureVendor -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\release\build-release.ps1') -Destination (Join-Path $fixtureScriptRoot 'build-release.ps1')
+        foreach ($helper in @('release-update-worker.ps1', 'release-update-scheduled-runner.ps1', 'register-release-update-task.ps1')) {
+            Copy-Item -LiteralPath (Join-Path $repoRoot (Join-Path 'scripts\release' $helper)) -Destination (Join-Path $fixtureScriptRoot $helper)
+        }
         Copy-Item -LiteralPath (Join-Path $repoRoot 'src\Application\SkillSupply.ps1') -Destination (Join-Path $fixtureApplicationRoot 'SkillSupply.ps1')
 
         & git -C $fixtureVendor init --quiet

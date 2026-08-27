@@ -233,7 +233,8 @@ function New-ReleasePackage([string]$Kind) {
     $rootFiles = @(
         'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
         'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.lock.json', 'skills.ps1',
-        'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md'
+        'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1',
+        'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1'
     )
     foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles)) {
         Copy-ReleaseFile $file $packageRoot

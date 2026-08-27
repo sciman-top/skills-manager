@@ -54,6 +54,16 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
 
+### 三种交付形态
+
+| 形态 | 获取方式 | 内容与边界 |
+| --- | --- | --- |
+| 公共 `general` 安装版 | GitHub Releases 的 `bootstrap.zip` | 面向普通用户；按锁文件安装通用 skills/MCP 意图，可显式启用经过校验的 Release 更新。 |
+| 公共源码开发版 | GitHub 仓库、tag 或 fork | 完整 Git 历史和开发文件；长期开发、定制和贡献一律走 Git，不由 Release 更新器覆盖。 |
+| 私用 `all` 快照包 | 本机 `迁移 --mode private-all --encrypt` | 全量已构建 skills、MCP 和可继续开发的源码快照；可加密携带 MCP `env`/`headers`，不得 push 到公共 GitHub 仓库、公共 Release 或公共网盘。 |
+
+`rescan` 是一种不携带 skills/MCP 内容的辅助迁移清单，不属于上述对外发行形态。
+
 ### 项目迁移
 
 可用 `迁移` 命令生成跨电脑 ZIP，按需选择范围：
@@ -65,11 +75,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 迁移 --mode general --out .\artifacts\migration-general.zip
 # private-general：通用 skills + default MCP；交互输入口令加密 env/header 值
 .\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip
+# private-all：全部 skills + MCP；交互输入口令加密 env/header 值，仅限私用
+.\skills.ps1 迁移 --mode private-all --encrypt --out .\artifacts\migration-private-all.zip
 # rescan：不携带 skills/MCP，仅带新电脑重新发现、安装的指引
 .\skills.ps1 迁移 --mode rescan --out .\artifacts\migration-rescan.zip
 ```
 
-迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；MCP 仅保留可重建的声明和脱敏后的凭据引用名称。`all`/`general`/`private-general` 包会携带 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、源物化目录和 `LICENSE`，可在新电脑继续开发，但不包含 `.git` 历史。`all`/`general` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`private-general` 只有在显式 `--encrypt` 时才会把 MCP `env`/`headers` 放入 AES-256-GCM 加密 companion file。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
+迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；MCP 仅保留可重建的声明和脱敏后的凭据引用名称。`all`/`general`/`private-general`/`private-all` 包会携带 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、源物化目录和 `LICENSE`，可在新电脑继续开发，但不包含 `.git` 历史。`all`/`general` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`private-general` 和 `private-all` 只有在显式 `--encrypt` 时才会把 MCP `env`/`headers` 放入 AES-256-GCM 加密 companion file。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
 
 `private-general` 是唯一允许携带 MCP `env`/`headers` 值的模式，必须显式 `--encrypt`。它使用交互口令加密凭据；口令不进入命令行、日志或 manifest。新电脑解压后可直接运行：
 
@@ -79,7 +91,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 migration-apply --skip-mcp
 ```
 
-等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`。不要把该包上传到公共网盘；迁移完成后建议轮换长期或高权限 token。
+等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，但携带全部技能和 MCP。不要把私用加密包上传到任何公共 GitHub 仓库、GitHub Release 或公共网盘；迁移完成后建议轮换长期或高权限 token。
 - `skill_projection`：技能来源、domain catalog、native placement 与按宿主的 projection profiles；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
@@ -103,7 +115,24 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```
 
 `check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
-公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装；发布包同时带源代码、测试、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。当前版本支持显式检查和更新上游技能，但不会后台静默联网替换自身，也不会自动创建计划任务。若需要“新版本通知 + 自动更新本体”，应由用户或宿主/operator 调度一个经过 SHA-256 校验、保留旧目录可回滚的 release 更新流程；这属于宿主/release 写入域，不能由普通 `check-updates` 推导为已安装或已验收。
+公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
+
+`check-updates` 继续只检查上游技能；以下命令检查并更新 skills-manager 本体 Release。它只接受未被本地修改的 GitHub Release 安装目录，先核对 GitHub 发布的 SHA-256，再把目录替换交给独立进程，保留同级旧目录备份。源码开发版必须通过 Git 更新，不能使用此命令覆盖。
+
+```powershell
+.\skills.ps1 release-update --check --json
+.\skills.ps1 release-update --apply --yes
+# 自动更新成功后才同步 MCP；默认不会同步 MCP
+.\skills.ps1 release-update --apply --yes --sync-mcp
+
+# 每天 09:00 检查并弹出更新提示
+.\skills.ps1 release-update-schedule --enable --time=09:00
+# 每天 09:00 检查、通知并自动启动已校验更新
+.\skills.ps1 release-update-schedule --enable --time=09:00 --auto-apply
+.\skills.ps1 release-update-schedule --disable
+```
+
+调度任务仅在用户显式运行 `--enable` 时创建，使用当前交互用户和非提权权限；更新后的 `reports/release-update/last.json` 保存结果。下载、checksum、解压、安装或切换任一步失败都会保持或回滚到旧目录。它仍不迁移登录态、provider/auth/session、插件缓存，也不证明 `host_loaded` 或 `live_accepted`。
 
 ### Skills 投影档位
 

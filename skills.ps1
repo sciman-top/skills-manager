@@ -1,6 +1,6 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "check-updates", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "迁移", "migration", "迁移解锁", "migration-unlock", "迁移应用", "migration-apply", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "check-updates", "release-update", "发行更新", "release-update-schedule", "发行更新调度", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "迁移", "migration", "迁移解锁", "migration-unlock", "迁移应用", "migration-apply", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "prune-invalid-mappings")]
     [Parameter(Position = 0)]
     [string]$Cmd = "menu",
     [string]$Filter = "",
@@ -15775,8 +15775,8 @@ function Get-MigrationTokens([string[]]$Tokens) {
         }
     }
     $result.mode = ([string]$result.mode).Trim().ToLowerInvariant()
-    Need (@('all','general','private-general','rescan') -contains $result.mode) '迁移模式必须是 all、general、private-general 或 rescan'
-    Need ($result.mode -ne 'private-general' -or $result.encrypt) 'private-general 必须显式加 --encrypt'
+    Need (@('all','general','private-general','private-all','rescan') -contains $result.mode) '迁移模式必须是 all、general、private-general、private-all 或 rescan'
+    Need ($result.mode -notin @('private-general','private-all') -or $result.encrypt) 'private-general 和 private-all 必须显式加 --encrypt'
     return [pscustomobject]$result
 }
 
@@ -15949,7 +15949,7 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -eq 'private-general') '当前迁移包不是 private-general'
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('private-general','private-all')) '当前迁移包不是私用加密迁移包'
     $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) { Join-Path $Root 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
     Need (Test-Path -LiteralPath $credentialPath -PathType Leaf) ("缺少迁移凭据文件：{0}" -f $credentialPath)
@@ -15977,7 +15977,7 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
     Assert-Cfg $cfg
     $raw = Get-ContentUtf8 $CfgPath
     SaveCfgSafe $cfg $raw
-    $result = [pscustomobject]@{ command = 'migration-unlock'; mode = 'private-general'; restored_fields = $changed; path = $CfgPath; passphrase_exposed = $false }
+    $result = [pscustomobject]@{ command = 'migration-unlock'; mode = [string]$manifest.mode; restored_fields = $changed; path = $CfgPath; passphrase_exposed = $false }
     if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
     Write-Host ("已恢复 {0} 个 MCP 凭据字段到 skills.json。" -f $changed) -ForegroundColor Green
     return $result
@@ -15988,8 +15988,8 @@ function Invoke-MigrationApplyCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general')) 'migration-apply 只接受 all、general 或 private-general 包'
-    if ([string]$manifest.mode -eq 'private-general') { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general','private-all')) 'migration-apply 只接受 all、general 或私用加密迁移包'
+    if ([string]$manifest.mode -in @('private-general','private-all')) { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
     $installPath = Join-Path $Root 'install.ps1'
     Need (Test-Path -LiteralPath $installPath -PathType Leaf) '迁移包缺少 install.ps1'
     $pwsh = Get-Command pwsh -ErrorAction Stop | Select-Object -First 1
@@ -16007,7 +16007,7 @@ function Invoke-MigrationApplyCommand([string[]]$Tokens) {
 function New-MigrationConfig($Config, [string]$Mode, [string[]]$SkillNames, [string[]]$McpNames) {
     $json = $Config | ConvertTo-Json -Depth 100
     $copy = $json | ConvertFrom-Json
-    if ($Mode -ne 'all') {
+    if ($Mode -notin @('all','private-all')) {
         $copy.mappings = @($copy.mappings | Where-Object { $SkillNames -contains [string]$_.to })
         $usedVendors = @($copy.mappings | ForEach-Object { [string]$_.vendor } | Sort-Object -Unique)
         $manualImportNames = @($copy.mappings | Where-Object { [string]$_.vendor -eq 'manual' } | ForEach-Object { [string]$_.from } | Sort-Object -Unique)
@@ -16039,12 +16039,12 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         $profiles = $cfg.skill_projection.projection_profiles.profiles
         $skillNames = @($profiles.core.include | ForEach-Object { [string]$_ } | Sort-Object -Unique)
     }
-    elseif ($options.mode -eq 'all') {
+    elseif ($options.mode -in @('all','private-all')) {
         $skillNames = @(Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object Name | Sort-Object)
     }
-    $mcpNames = if ($options.mode -in @('general','private-general')) { @($cfg.mcp_profiles.profiles.default.enabled | ForEach-Object { [string]$_ }) } elseif ($options.mode -eq 'all') { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
+    $mcpNames = if ($options.mode -in @('general','private-general')) { @($cfg.mcp_profiles.profiles.default.enabled | ForEach-Object { [string]$_ }) } elseif ($options.mode -in @('all','private-all')) { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
     $encryptedCredentials = $null
-    if ($options.mode -eq 'private-general') {
+    if ($options.mode -in @('private-general','private-all')) {
         $privatePayload = Get-MigrationCredentialPayload $cfg $mcpNames
         $passphrase = Read-MigrationPassphrase '请输入私用迁移包加密口令（不会保存）' -Confirm
         $encryptedCredentials = Protect-MigrationCredentialPayload $privatePayload $passphrase
@@ -16063,14 +16063,14 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             created_at = (Get-Date).ToUniversalTime().ToString('o')
             skills = @($skillNames)
             mcp_servers = @($mcpNames)
-            includes_credentials = ($options.mode -eq 'private-general')
+            includes_credentials = ($options.mode -in @('private-general','private-all'))
             includes_materialized_sources = ($options.mode -ne 'rescan')
             development_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
             source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides') } else { @() }
-            credential_file = if ($options.mode -eq 'private-general') { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
-            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -eq 'private-general') { @('解压后运行 migration-apply（输入同一加密口令）', '或先运行 migration-unlock，再运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '或运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') }
+            credential_file = if ($options.mode -in @('private-general','private-all')) { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
+            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '或先运行 migration-unlock，再运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '或运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') }
         }
         $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MANIFEST.json') -Encoding utf8
         if ($null -ne $encryptedCredentials) {
@@ -16088,7 +16088,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
             }
             if (Test-Path -LiteralPath (Join-Path $Root 'overrides') -PathType Container) { Copy-MigrationTree (Join-Path $Root 'overrides') (Join-Path $packageRoot 'overrides') | Out-Null }
-            $sourceRoots = if ($options.mode -eq 'all') { @('vendor','imports') } else {
+            $sourceRoots = if ($options.mode -in @('all','private-all')) { @('vendor','imports') } else {
                 @($migrationCfg.vendors | ForEach-Object { "vendor\$($_.name)" }) + @($migrationCfg.imports | ForEach-Object { "imports\$($_.name)" })
             }
             foreach ($relativeSource in @($sourceRoots | Sort-Object -Unique)) {
@@ -16096,7 +16096,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 $destination = Join-Path $packageRoot $relativeSource
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source $destination | Out-Null }
             }
-            if ($options.mode -eq 'all') {
+            if ($options.mode -in @('all','private-all')) {
                 if (Test-Path -LiteralPath $AgentDir -PathType Container) { Copy-MigrationTree $AgentDir (Join-Path $packageRoot 'agent') | Out-Null }
             }
             else {
@@ -16116,6 +16116,193 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         return $result
     }
     finally { if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue } }
+}
+
+$script:ReleaseUpdateRepository = 'sciman-top/skills-manager'
+$script:ReleaseUpdateHttpGet = $null
+
+function Get-ReleaseUpdateTokens([string[]]$Tokens) {
+    $result = [ordered]@{ action = 'check'; yes = $false; json = $false; repository = $script:ReleaseUpdateRepository; sync_mcp = $false }
+    foreach ($token in @($Tokens)) {
+        $value = [string]$token
+        switch -Regex ($value.ToLowerInvariant()) {
+            '^--check$' { $result.action = 'check'; continue }
+            '^--apply$' { $result.action = 'apply'; continue }
+            '^--yes$' { $result.yes = $true; continue }
+            '^--json$' { $result.json = $true; continue }
+            '^--sync-mcp$' { $result.sync_mcp = $true; continue }
+            '^--repo=' { $result.repository = $value.Substring(7); continue }
+            default { throw ("release-update 不支持参数：{0}" -f $value) }
+        }
+    }
+    $result.repository = ([string]$result.repository).Trim()
+    Need ($result.repository -match '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') 'release-update --repo 必须是 owner/repository'
+    Need ($result.action -ne 'apply' -or $result.yes) 'release-update --apply 必须显式加 --yes'
+    return [pscustomobject]$result
+}
+
+function Get-ReleaseUpdateManifest([string]$InstallRoot = $Root) {
+    $path = Join-Path $InstallRoot 'RELEASE-MANIFEST.json'
+    Need (Test-Path -LiteralPath $path -PathType Leaf) '当前目录不是 GitHub Release 安装目录；源码开发版请使用 Git 更新'
+    $manifest = Get-ContentUtf8 $path | ConvertFrom-Json
+    Need ([string]$manifest.product -eq 'skills-manager' -and -not [string]::IsNullOrWhiteSpace([string]$manifest.version)) 'RELEASE-MANIFEST.json 无效'
+    return $manifest
+}
+
+function Invoke-ReleaseUpdateHttpGet([string]$Uri, [string]$OutFile = '') {
+    if ($null -ne $script:ReleaseUpdateHttpGet) { return & $script:ReleaseUpdateHttpGet $Uri $OutFile }
+    $headers = @{ 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'skills-manager-release-update' }
+    if ([string]::IsNullOrWhiteSpace($OutFile)) { return Invoke-RestMethod -Uri $Uri -Headers $headers -ErrorAction Stop }
+    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile -ErrorAction Stop | Out-Null
+}
+
+function ConvertFrom-ReleaseChecksumText([string]$Text, [string]$FileName) {
+    foreach ($line in @($Text -split "`r?`n")) {
+        $match = [regex]::Match($line, '^\s*(?<hash>[A-Fa-f0-9]{64})\s+\*?(?<name>.+?)\s*$')
+        if ($match.Success -and [string]$match.Groups['name'].Value -eq $FileName) { return $match.Groups['hash'].Value.ToLowerInvariant() }
+    }
+    throw ("SHA256SUMS.txt 未包含发布资产：{0}" -f $FileName)
+}
+
+function Get-ReleaseUpdateSnapshot([string]$Repository, $LocalManifest) {
+    $release = Invoke-ReleaseUpdateHttpGet ("https://api.github.com/repos/{0}/releases/latest" -f $Repository)
+    Need ($null -ne $release -and -not [bool]$release.draft -and -not [bool]$release.prerelease) 'GitHub latest Release 不可用或不是正式版'
+    $tag = ([string]$release.tag_name).Trim()
+    Need ($tag -match '^v[0-9A-Za-z][0-9A-Za-z._-]*$') 'GitHub Release tag 格式不受支持'
+    $assets = @($release.assets)
+    $bootstrap = @($assets | Where-Object { [string]$_.name -eq ("skills-manager-{0}-bootstrap.zip" -f $tag) }) | Select-Object -First 1
+    $checksums = @($assets | Where-Object { [string]$_.name -eq ("skills-manager-{0}-SHA256SUMS.txt" -f $tag) }) | Select-Object -First 1
+    Need ($null -ne $bootstrap -and $null -ne $checksums) 'GitHub Release 缺少 bootstrap ZIP 或 SHA256SUMS.txt'
+    $checksumText = [string](Invoke-ReleaseUpdateHttpGet ([string]$checksums.browser_download_url))
+    $hash = ConvertFrom-ReleaseChecksumText $checksumText ([string]$bootstrap.name)
+    return [pscustomobject][ordered]@{
+        repository = $Repository
+        current_version = [string]$LocalManifest.version
+        latest_version = $tag
+        update_available = ([string]$LocalManifest.version -ne $tag)
+        release_url = [string]$release.html_url
+        bootstrap_name = [string]$bootstrap.name
+        bootstrap_url = [string]$bootstrap.browser_download_url
+        bootstrap_sha256 = $hash
+    }
+}
+
+function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest) {
+    $root = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\', '/')
+    $entries = @($Manifest.files)
+    Need ($entries.Count -gt 0) 'RELEASE-MANIFEST.json 缺少文件清单，无法安全覆盖本地安装'
+    foreach ($entry in $entries) {
+        $relative = [string]$entry.path
+        Need (-not [string]::IsNullOrWhiteSpace($relative) -and -not [IO.Path]::IsPathRooted($relative) -and $relative -notmatch '(^|[\\/])\.\.([\\/]|$)') 'RELEASE-MANIFEST.json 包含不安全路径'
+        $path = [IO.Path]::GetFullPath((Join-Path $root $relative))
+        Need (Is-PathInsideOrEqual $path $root) 'RELEASE-MANIFEST.json 文件路径越界'
+        Need (Test-Path -LiteralPath $path -PathType Leaf) ("发行文件缺失：{0}" -f $relative)
+        $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        Need ($actual -eq ([string]$entry.sha256).ToLowerInvariant()) ("本地发行文件已修改：{0}；请使用 Git 源码开发版或先迁移定制内容" -f $relative)
+    }
+    return $true
+}
+
+function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersion) {
+    $manifest = Get-ReleaseUpdateManifest $PackageRoot
+    Need ([string]$manifest.version -eq $ExpectedVersion -and [string]$manifest.package -eq 'bootstrap') '下载的 Release 包版本或类型不匹配'
+    foreach ($required in @('install.ps1','build.ps1','skills.ps1','skills.json','LICENSE')) {
+        Need (Test-Path -LiteralPath (Join-Path $PackageRoot $required) -PathType Leaf) ("下载的 Release 包缺少：{0}" -f $required)
+    }
+    return $manifest
+}
+
+function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [switch]$SyncMcp) {
+    $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $parent = Split-Path -Parent $currentRoot
+    $leaf = Split-Path -Leaf $currentRoot
+    Need (-not [string]::IsNullOrWhiteSpace($parent) -and -not [string]::IsNullOrWhiteSpace($leaf)) '当前安装目录不适合自动替换'
+    $backupRoot = Join-Path $parent ("{0}.backup-{1}-{2}" -f $leaf, $ExpectedVersion, (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))
+    $workerSource = Join-Path $currentRoot 'scripts\release\release-update-worker.ps1'
+    Need (Test-Path -LiteralPath $workerSource -PathType Leaf) '当前安装缺少 release update worker；请手动安装新版本'
+    $workerPath = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-release-update-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
+    Copy-Item -LiteralPath $workerSource -Destination $workerPath -Force
+    $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
+    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-ParentProcessId',$PID)
+    if ($SyncMcp) { $args += '-SyncMcp' }
+    $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
+    return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
+}
+
+function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
+    $options = Get-ReleaseUpdateTokens $Tokens
+    $manifest = Get-ReleaseUpdateManifest
+    $snapshot = Get-ReleaseUpdateSnapshot $options.repository $manifest
+    $result = [ordered]@{ schema_version = 1; command = 'release-update'; action = $options.action; current_version = $snapshot.current_version; latest_version = $snapshot.latest_version; update_available = $snapshot.update_available; repository = $snapshot.repository; release_url = $snapshot.release_url; host_loaded = $false; live_accepted = $false }
+    if ($options.action -eq 'check' -or -not $snapshot.update_available) {
+        $result.status = if ($snapshot.update_available) { 'update_available' } else { 'up_to_date' }
+        if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+        Write-Host ("Release 检查完成：{0} -> {1}（{2}）" -f $snapshot.current_version, $snapshot.latest_version, $result.status)
+        return [pscustomobject]$result
+    }
+
+    Test-ReleaseUpdatePristineInstallation $Root $manifest | Out-Null
+    $parent = Split-Path -Parent ([IO.Path]::GetFullPath($Root))
+    $stage = Join-Path $parent (".skills-manager-release-stage-{0}" -f ([guid]::NewGuid().ToString('N')))
+    $zip = Join-Path $stage $snapshot.bootstrap_name
+    try {
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        Invoke-ReleaseUpdateHttpGet $snapshot.bootstrap_url $zip | Out-Null
+        $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        Need ($actualHash -eq $snapshot.bootstrap_sha256) '下载的 Release ZIP SHA-256 不匹配'
+        $extract = Join-Path $stage 'extract'
+        Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+        $roots = @(Get-ChildItem -LiteralPath $extract -Directory -Force)
+        Need ($roots.Count -eq 1) 'Release ZIP 必须只包含一个根目录'
+        $package = $roots[0].FullName
+        Test-ReleaseUpdatePackage $package $snapshot.latest_version | Out-Null
+        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version -SyncMcp:$options.sync_mcp
+        $result.status = $handoff.status; $result.worker_pid = $handoff.worker_pid; $result.backup_root = $handoff.backup_root
+        if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+        Write-Host ("Release 更新已交给后台进程：{0}。旧目录备份将保留在：{1}" -f $handoff.worker_pid, $handoff.backup_root) -ForegroundColor Green
+        return [pscustomobject]$result
+    }
+    catch {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+}
+
+function Get-ReleaseUpdateScheduleTokens([string[]]$Tokens) {
+    $result = [ordered]@{ action = ''; time = '09:00'; auto_apply = $false; sync_mcp = $false; json = $false }
+    foreach ($token in @($Tokens)) {
+        $value = [string]$token
+        switch -Regex ($value.ToLowerInvariant()) {
+            '^--enable$' { $result.action = 'Enable'; continue }
+            '^--disable$' { $result.action = 'Disable'; continue }
+            '^--auto-apply$' { $result.auto_apply = $true; continue }
+            '^--sync-mcp$' { $result.sync_mcp = $true; continue }
+            '^--json$' { $result.json = $true; continue }
+            '^--time=' { $result.time = $value.Substring(7); continue }
+            default { throw ("release-update-schedule 不支持参数：{0}" -f $value) }
+        }
+    }
+    Need ($result.action -in @('Enable','Disable')) 'release-update-schedule 必须指定 --enable 或 --disable'
+    Need ($result.time -match '^([01]\d|2[0-3]):[0-5]\d$') 'release-update-schedule --time 必须为 HH:mm'
+    Need ($result.action -eq 'Enable' -or (-not $result.auto_apply -and -not $result.sync_mcp)) '--auto-apply 和 --sync-mcp 仅可与 --enable 一起使用'
+    return [pscustomobject]$result
+}
+
+function Invoke-ReleaseUpdateScheduleCommand([string[]]$Tokens) {
+    $options = Get-ReleaseUpdateScheduleTokens $Tokens
+    Get-ReleaseUpdateManifest | Out-Null
+    $scriptPath = Join-Path $Root 'scripts\release\register-release-update-task.ps1'
+    Need (Test-Path -LiteralPath $scriptPath -PathType Leaf) '当前安装缺少 Release 更新调度脚本；请手动安装新版本'
+    $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
+    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Action',$options.action,'-Root',$Root,'-Time',$options.time)
+    if ($options.auto_apply) { $args += '-AutoApply' }
+    if ($options.sync_mcp) { $args += '-SyncMcp' }
+    $raw = & $pwsh @args
+    Need ($LASTEXITCODE -eq 0) ("Release 更新调度配置失败，exit={0}" -f $LASTEXITCODE)
+    $result = ($raw | Out-String | ConvertFrom-Json)
+    if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+    Write-Host ("Release 更新调度已{0}：{1}" -f $(if ($options.action -eq 'Enable') { '启用' } else { '停用' }), $result.task) -ForegroundColor Green
+    return $result
 }
 
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
@@ -23583,7 +23770,8 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
-  - 项目迁移：按 all/general/private-general/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
+  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
+  - 发行更新：仅对未修改的 GitHub Release 安装版校验、备份并更新本体；源码开发版仍通过 Git 更新
 
 易混点：
   - 只想让本地配置重新输出：用“重建并同步”（CLI：`构建生效`）
@@ -23609,10 +23797,12 @@ Skills 管理器（中文菜单）
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
-  .\skills.ps1 迁移 --mode all|general|private-general|rescan [--out <迁移包.zip>] [--force]
-  .\skills.ps1 迁移 --mode private-general --encrypt [--out <迁移包.zip>] [--force]
+  .\skills.ps1 迁移 --mode all|general|private-general|private-all|rescan [--out <迁移包.zip>] [--force]
+  .\skills.ps1 迁移 --mode private-general|private-all --encrypt [--out <迁移包.zip>] [--force]
   .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
+  .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
+  .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply] [--sync-mcp]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
@@ -23958,6 +24148,10 @@ if ($MyInvocation.InvocationName -ne '.') {
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
+            "发行更新" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "release-update" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "发行更新调度" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "release-update-schedule" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
             "锁定" { 锁定 }
             "验证锁定" { 验证锁定 }
             "verify-lock" { 验证锁定 }

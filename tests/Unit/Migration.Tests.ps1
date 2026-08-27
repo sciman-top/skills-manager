@@ -9,6 +9,8 @@ Describe 'Migration bundles' {
         $options = Get-MigrationTokens @('--mode','private-general','--encrypt')
         $options.mode | Should -Be 'private-general'
         $options.encrypt | Should -BeTrue
+        { Get-MigrationTokens @('--mode','private-all') } | Should -Throw '*必须显式加 --encrypt*'
+        (Get-MigrationTokens @('--mode','private-all','--encrypt')).mode | Should -Be 'private-all'
     }
 
     It 'round-trips MCP credentials with authenticated encryption without exposing plaintext' {

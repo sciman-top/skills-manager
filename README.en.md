@@ -47,6 +47,20 @@ The interactive menu uses direct frequent actions plus domain submenus.
 
 The `Target Repo Audit` submenu follows the workflow: scan, preflight, dry-run, then explicit apply.
 
+## Distribution models
+
+There are three distinct delivery paths: the public `general` Release installer for ordinary users, the public Git source repository for development and contributions, and a private `all` migration snapshot for moving one user's full environment between machines. `rescan` is only a migration manifest mode, not a development distribution.
+
+Release installations can check for a newer skills-manager release and, only after explicit confirmation, verify the published SHA-256, preserve a sibling backup, and hand off a directory switch to an independent updater. Source checkouts must use Git rather than the Release updater.
+
+```powershell
+.\skills.ps1 release-update --check --json
+.\skills.ps1 release-update --apply --yes
+.\skills.ps1 release-update-schedule --enable --time=09:00
+```
+
+`--auto-apply` is an explicit scheduler option. It never migrates host login, provider/auth/session state, plugin caches, or MCP credentials, and it does not prove host loading or live acceptance.
+
 ## Sources of truth
 
 `skills.json` owns vendors, imports, mappings, targets, MCP configuration, and skill projection. `skills.lock.json` pins resolved sources. `src/` is the CLI source and `build.ps1` generates `skills.ps1`; `overrides/{custom,patches,resources}` generates `agent/`. Do not hand-edit generated, vendored, or runtime report directories.

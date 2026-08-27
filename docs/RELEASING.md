@@ -7,6 +7,9 @@
 - `bootstrap` 是默认推荐下载：小、可复现，按 `skills.lock.json` 拉取锁定来源并安装。
 - `portable` 是完整绿色包：内置当前构建好的 `agent/`，适合离线、演示和机器迁移。
 - 源码归 Git tag；ZIP 是便利交付物，不替代仓库历史。
+- 公共 `general` 安装版可通过包内 Release 更新器检查最新正式 Release；更新器只接受未修改的 Release 安装目录，校验 `SHA256SUMS.txt`，保留同级 backup，并由独立进程切换目录。Git 源码开发版必须走 Git 更新。
+
+公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 加密迁移包不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
 
 项目自身代码采用根目录 [MIT License](../LICENSE)。发布包必须包含该文件；引入的第三方技能、源码和依赖仍保留各自许可证，MIT 不会覆盖或重许可第三方内容。
 
@@ -27,7 +30,7 @@ skills-manager-2026.08.13-portable.zip
 skills-manager-2026.08.13-SHA256SUMS.txt
 ```
 
-脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。
+脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
 
 `portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；同一来源的多个技能共享一份许可证，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树文件、README 标签或远端口头声明都不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把可分发的许可证证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
 

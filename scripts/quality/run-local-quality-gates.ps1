@@ -30,6 +30,13 @@ function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
 
 function Assert-HostSchedulerOwnershipContract {
     $gatePath = [IO.Path]::GetFullPath($PSCommandPath)
+    $approvedSchedulerPath = [IO.Path]::GetFullPath((Join-Path $root 'scripts\release\register-release-update-task.ps1'))
+    if (-not (Test-Path -LiteralPath $approvedSchedulerPath -PathType Leaf)) { throw 'Approved release update scheduler entrypoint is missing.' }
+    $approvedText = [IO.File]::ReadAllText($approvedSchedulerPath)
+    foreach ($required in @("`$taskName = 'skills-manager-release-update'", '-LogonType Interactive -RunLevel Limited', "-Description 'Checks skills-manager GitHub Releases")) {
+        if (-not $approvedText.Contains($required, [StringComparison]::Ordinal)) { throw "Approved release update scheduler contract is missing: $required" }
+    }
+    if ($approvedText -match '(?i)-RunLevel\s+Highest') { throw 'Approved release update scheduler must not request RunLevel Highest.' }
     $patterns = @(
         [regex]::new('\b(?:Register|Set|Unregister)-ScheduledTask\b', [Text.RegularExpressions.RegexOptions]::IgnoreCase),
         [regex]::new('\bschtasks(?:\.exe)?\b[^\r\n]*(?:/Create|/Change|/Delete)\b', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
@@ -39,6 +46,7 @@ function Assert-HostSchedulerOwnershipContract {
     foreach ($scanRoot in @((Join-Path $root 'src'), (Join-Path $root 'scripts'))) {
         foreach ($file in @(Get-ChildItem -LiteralPath $scanRoot -Recurse -File -Filter '*.ps1')) {
             if ([IO.Path]::GetFullPath($file.FullName) -eq $gatePath) { continue }
+            if ([IO.Path]::GetFullPath($file.FullName) -eq $approvedSchedulerPath) { continue }
             $lines = [IO.File]::ReadAllLines($file.FullName)
             for ($index = 0; $index -lt $lines.Count; $index++) {
                 if (@($patterns | Where-Object { $_.IsMatch($lines[$index]) }).Count -gt 0) {

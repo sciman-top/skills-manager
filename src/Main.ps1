@@ -48,6 +48,10 @@ if ($MyInvocation.InvocationName -ne '.') {
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
+            "发行更新" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "release-update" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "发行更新调度" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
+            "release-update-schedule" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
             "锁定" { 锁定 }
             "验证锁定" { 验证锁定 }
             "verify-lock" { 验证锁定 }
