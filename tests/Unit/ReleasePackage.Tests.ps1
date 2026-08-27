@@ -150,9 +150,17 @@ Describe 'Release packaging' {
     It 'rejects a tracked dirty release source unless explicitly marked non-publishable' {
         $output = Join-Path $TestDrive 'dirty-source-output'
         $script = Join-Path $repoRoot 'scripts\release\build-release.ps1'
-        $result = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.dirty' -Package Bootstrap -OutputDirectory $output 2>&1)
-        $LASTEXITCODE | Should -Not -Be 0
-        $result -join "`n" | Should -Match 'requires a clean tracked worktree'
-        Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.dirty-bootstrap.zip') | Should -BeFalse
+        $trackedFile = Join-Path $repoRoot 'README.md'
+        $original = [IO.File]::ReadAllBytes($trackedFile)
+        try {
+            [IO.File]::WriteAllBytes($trackedFile, $original + [Text.Encoding]::UTF8.GetBytes("`r`n# dirty release fixture`r`n"))
+            $result = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.dirty' -Package Bootstrap -OutputDirectory $output 2>&1)
+            $LASTEXITCODE | Should -Not -Be 0
+            $result -join "`n" | Should -Match 'requires a clean tracked worktree'
+            Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.dirty-bootstrap.zip') | Should -BeFalse
+        }
+        finally {
+            [IO.File]::WriteAllBytes($trackedFile, $original)
+        }
     }
 }
