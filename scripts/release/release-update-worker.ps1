@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory)][string]$StagedRoot,
     [Parameter(Mandatory)][string]$BackupRoot,
     [Parameter(Mandatory)][string]$ExpectedVersion,
+    [ValidateSet('bootstrap','portable')][string]$PackageType = 'bootstrap',
     [Parameter(Mandatory)][int]$ParentProcessId,
     [switch]$SyncMcp
 )
@@ -22,6 +23,7 @@ function Write-UpdateWorkerReceipt([string]$Root, [string]$Status, [string]$Mess
         current_root = $CurrentRoot
         backup_root = $BackupRoot
         sync_mcp = [bool]$SyncMcp
+        package = $PackageType
         completed_at = (Get-Date).ToUniversalTime().ToString('o')
         message = $Message
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $reports 'last.json') -Encoding utf8
@@ -71,12 +73,17 @@ try {
         throw
     }
 
-    $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
-    $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $current 'install.ps1'),'-Mode','CurrentUser')
-    if ($SyncMcp) { $installArgs += '-SyncMcp' }
-    & $pwsh @installArgs
-    if ($LASTEXITCODE -ne 0) { throw "Updated release installation failed: exit=$LASTEXITCODE" }
-    Write-UpdateWorkerReceipt $current 'updated' 'Release files were replaced and the new installer completed.'
+    if ($PackageType -eq 'bootstrap') {
+        $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
+        $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $current 'install.ps1'),'-Mode','CurrentUser')
+        if ($SyncMcp) { $installArgs += '-SyncMcp' }
+        & $pwsh @installArgs
+        if ($LASTEXITCODE -ne 0) { throw "Updated release installation failed: exit=$LASTEXITCODE" }
+        Write-UpdateWorkerReceipt $current 'updated' 'Release files were replaced and the new bootstrap installer completed.'
+    }
+    else {
+        Write-UpdateWorkerReceipt $current 'updated' 'Portable Release files were replaced; no Git-based installer was invoked.'
+    }
 }
 catch {
     $message = $_.Exception.Message

@@ -35,13 +35,16 @@ Describe 'Migration bundles' {
         $manifest.credential_file | Should -Be 'MIGRATION-MCP-CREDENTIALS.enc.json'
         Test-Path -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.enc.json') | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.enc.json') -Raw) | Should -Not -Match 'migration-test-passphrase'
-        $manifest.development_ready | Should -BeTrue
+        $manifest.development_ready | Should -BeFalse
+        $manifest.restore_ready | Should -BeTrue
         $manifest.git_history_included | Should -BeFalse
         $manifest.license_file | Should -Be 'LICENSE'
         Test-Path -LiteralPath (Join-Path $root 'LICENSE') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'tests\Unit\Migration.Tests.ps1') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'docs\INSTALLATION_AND_MIGRATION.md') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $root 'MIGRATION-CONTENT.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $root 'references\reference-shelf.manifest.json') | Should -BeTrue
     }
 
     It 'accepts documented CLI long options without top-level PowerShell binding loss' {

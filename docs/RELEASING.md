@@ -11,6 +11,8 @@
 
 公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 加密迁移包不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
 
+发布后可用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 核对 artifact attestation；同时应在仓库启用 immutable releases、保护 `main` 与 `v*` tag。Release ZIP 的 manifest `publishable=true` 只表示构建时来自 clean tracked worktree，不代表宿主 `host_loaded` 或 `live_accepted`。
+
 项目自身代码采用根目录 [MIT License](../LICENSE)。发布包必须包含该文件；引入的第三方技能、源码和依赖仍保留各自许可证，MIT 不会覆盖或重许可第三方内容。
 
 ## 本地一键打包
@@ -32,7 +34,7 @@ skills-manager-2026.08.13-SHA256SUMS.txt
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
 
-`portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；同一来源的多个技能共享一份许可证，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树文件、README 标签或远端口头声明都不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把可分发的许可证证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
+`portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证证据路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；若 pinned commit 没有这些文件，仅当同一 commit 根 `README.md` 明确包含 License section 和 SPDX 名称时，才按原始字节物化该 README 作为可追溯证据。同一来源的多个技能共享一份证据，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树 frontmatter 或远端口头声明不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
 
 只构建一种包：
 

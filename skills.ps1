@@ -1954,6 +1954,116 @@ function Assert-SkillPackageSafe {
     }
 }
 
+function Get-PackagePayloadFiles([string]$Root) {
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    if (-not (Test-Path -LiteralPath $rootFull -PathType Container)) {
+        throw "package_payload_missing:$rootFull"
+    }
+    return @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -File -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
+        if ([bool]($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ("package_payload_reparse_point:{0}" -f $_.FullName)
+        }
+        $_
+    })
+}
+
+function Get-PackageFileEntries([string]$Root) {
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    return @(Get-PackagePayloadFiles $rootFull | ForEach-Object {
+        [ordered]@{
+            path = [IO.Path]::GetRelativePath($rootFull, $_.FullName).Replace('\', '/')
+            size = $_.Length
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    })
+}
+
+function New-VerifiedPackageArchive([string]$SourceRoot, [string]$DestinationPath) {
+    $sourceFull = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
+    $destinationFull = [IO.Path]::GetFullPath($DestinationPath)
+    $archiveRoot = Split-Path -Leaf $sourceFull
+    if ([string]::IsNullOrWhiteSpace($archiveRoot)) { throw 'package_archive_root_missing' }
+
+    $destinationParent = Split-Path -Parent $destinationFull
+    if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $destinationFull) { [IO.File]::Delete($destinationFull) }
+
+    $files = @(Get-PackagePayloadFiles $sourceFull)
+    $expected = @{}
+    foreach ($file in $files) {
+        $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
+        $expected[$relative] = [ordered]@{
+            size = $file.Length
+            sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+
+    $stream = [IO.File]::Open($destinationFull, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+        try {
+            foreach ($file in $files) {
+                $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
+                $entry = $archive.CreateEntry(("{0}/{1}" -f $archiveRoot, $relative), [IO.Compression.CompressionLevel]::Optimal)
+                $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+                $input = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                try {
+                    $output = $entry.Open()
+                    try { $input.CopyTo($output) }
+                    finally { $output.Dispose() }
+                }
+                finally { $input.Dispose() }
+            }
+        }
+        finally { $archive.Dispose() }
+    }
+    finally { $stream.Dispose() }
+
+    $observed = @{}
+    $readStream = [IO.File]::Open($destinationFull, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $readArchive = [IO.Compression.ZipArchive]::new($readStream, [IO.Compression.ZipArchiveMode]::Read, $false)
+        try {
+            foreach ($entry in @($readArchive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })) {
+                $prefix = $archiveRoot + '/'
+                if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) {
+                    throw ("package_archive_root_mismatch:{0}" -f $entry.FullName)
+                }
+                $relative = $entry.FullName.Substring($prefix.Length)
+                if ($observed.ContainsKey($relative)) { throw ("package_archive_duplicate:{0}" -f $relative) }
+                $entryStream = $entry.Open()
+                try {
+                    $sha = [Security.Cryptography.SHA256]::Create()
+                    try { $hash = [Convert]::ToHexString($sha.ComputeHash($entryStream)).ToLowerInvariant() }
+                    finally { $sha.Dispose() }
+                }
+                finally { $entryStream.Dispose() }
+                $observed[$relative] = [ordered]@{ size = $entry.Length; sha256 = $hash }
+            }
+        }
+        finally { $readArchive.Dispose() }
+    }
+    finally { $readStream.Dispose() }
+
+    if ($observed.Count -ne $expected.Count) {
+        throw ("package_archive_file_count_mismatch:expected={0}:actual={1}" -f $expected.Count, $observed.Count)
+    }
+    foreach ($relative in @($expected.Keys | Sort-Object)) {
+        if (-not $observed.ContainsKey($relative)) { throw ("package_archive_missing:{0}" -f $relative) }
+        if ([long]$observed[$relative].size -ne [long]$expected[$relative].size -or [string]$observed[$relative].sha256 -ne [string]$expected[$relative].sha256) {
+            throw ("package_archive_hash_mismatch:{0}" -f $relative)
+        }
+    }
+    return [pscustomobject][ordered]@{
+        path = $destinationFull
+        file_count = $observed.Count
+        size = (Get-Item -LiteralPath $destinationFull).Length
+        sha256 = (Get-FileHash -LiteralPath $destinationFull -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
 function New-OperationFinding([string]$Code, [string]$Severity, [string]$Path, [string]$Message) {
     return [pscustomobject]@{ code = $Code; severity = $Severity; path = $Path; message = $Message }
 }
@@ -15884,6 +15994,23 @@ function Copy-MigrationTree([string]$Source, [string]$Destination) {
     return $true
 }
 
+function Assert-MigrationContentIntegrity([string]$PackageRoot, $Manifest) {
+    $contentPath = Join-Path $PackageRoot 'MIGRATION-CONTENT.json'
+    Need (Test-Path -LiteralPath $contentPath -PathType Leaf) '迁移包缺少 MIGRATION-CONTENT.json'
+    $content = Get-ContentUtf8 $contentPath | ConvertFrom-Json
+    Need ([int]$content.schema_version -eq 1 -and $null -ne $content.files) 'MIGRATION-CONTENT.json schema 无效'
+    $expected = @($content.files)
+    $actual = @(Get-PackageFileEntries $PackageRoot | Where-Object { $_.path -ne 'MIGRATION-CONTENT.json' })
+    Need ($expected.Count -eq $actual.Count) '迁移包内容文件数量不匹配'
+    $byPath = @{}; foreach ($entry in $actual) { $byPath[[string]$entry.path] = $entry }
+    foreach ($entry in $expected) {
+        $path = [string]$entry.path
+        Need ($byPath.ContainsKey($path)) ("迁移包缺少内容文件：{0}" -f $path)
+        Need ([long]$byPath[$path].size -eq [long]$entry.size -and [string]$byPath[$path].sha256 -eq ([string]$entry.sha256).ToLowerInvariant()) ("迁移包内容校验失败：{0}" -f $path)
+    }
+    return $true
+}
+
 function Get-MigrationMcpIntent($Server) {
     $item = [ordered]@{}
     foreach ($name in @('name','enabled','transport','command','args','url','startup_timeout_sec','enabled_tools','bearer_token_env_var')) {
@@ -15949,6 +16076,7 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Assert-MigrationContentIntegrity $Root $manifest | Out-Null
     Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('private-general','private-all')) '当前迁移包不是私用加密迁移包'
     $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) { Join-Path $Root 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
@@ -15988,6 +16116,7 @@ function Invoke-MigrationApplyCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Assert-MigrationContentIntegrity $Root $manifest | Out-Null
     Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general','private-all')) 'migration-apply 只接受 all、general 或私用加密迁移包'
     if ([string]$manifest.mode -in @('private-general','private-all')) { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
     $installPath = Join-Path $Root 'install.ps1'
@@ -16065,12 +16194,13 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             mcp_servers = @($mcpNames)
             includes_credentials = ($options.mode -in @('private-general','private-all'))
             includes_materialized_sources = ($options.mode -ne 'rescan')
-            development_ready = ($options.mode -ne 'rescan')
+            development_ready = $false
+            restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
-            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides') } else { @() }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides','vendor','imports','agent','references','.github') } else { @() }
             credential_file = if ($options.mode -in @('private-general','private-all')) { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
-            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '或先运行 migration-unlock，再运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '或运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') }
+            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') }
         }
         $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MANIFEST.json') -Encoding utf8
         if ($null -ne $encryptedCredentials) {
@@ -16084,6 +16214,10 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
             foreach ($directory in @('src','config','tests','scripts','docs')) {
+                $source = Join-Path $Root $directory
+                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
+            }
+            foreach ($directory in @('references','.github')) {
                 $source = Join-Path $Root $directory
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
             }
@@ -16107,9 +16241,13 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 }
             }
         }
+        $contentEntries = @(Get-PackageFileEntries $packageRoot)
+        [ordered]@{ schema_version = 1; files = @($contentEntries) } |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-CONTENT.json') -Encoding utf8
+        Assert-MigrationContentIntegrity $packageRoot $manifest | Out-Null
         if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
-        Compress-Archive -LiteralPath $packageRoot -DestinationPath $outPath -CompressionLevel Optimal
-        $result = [pscustomobject]@{ mode = $options.mode; path = $outPath; size = (Get-Item -LiteralPath $outPath).Length; sha256 = (Get-FileHash -LiteralPath $outPath -Algorithm SHA256).Hash.ToLowerInvariant(); skills = @($skillNames); mcp_servers = @($mcpNames) }
+        $archive = New-VerifiedPackageArchive $packageRoot $outPath
+        $result = [pscustomobject]@{ mode = $options.mode; path = $archive.path; size = $archive.size; sha256 = $archive.sha256; skills = @($skillNames); mcp_servers = @($mcpNames) }
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
         Write-Host ("迁移包已生成：{0}" -f $outPath) -ForegroundColor Green
         Write-Host ("模式={0}，技能={1}，MCP={2}，SHA-256={3}" -f $options.mode, $skillNames.Count, $mcpNames.Count, $result.sha256)
@@ -16164,26 +16302,49 @@ function ConvertFrom-ReleaseChecksumText([string]$Text, [string]$FileName) {
     throw ("SHA256SUMS.txt 未包含发布资产：{0}" -f $FileName)
 }
 
+function ConvertTo-ReleaseVersionKey([string]$Version) {
+    $value = ([string]$Version).Trim()
+    Need ($value -match '^v(?<year>\d{4})\.(?<month>\d{2})\.(?<day>\d{2})(?:\.(?<patch>\d+))?(?:-(?<pre>[0-9A-Za-z.-]+))?$') ("Release version 不符合 vYYYY.MM.DD[.N][-prerelease]：{0}" -f $Version)
+    $date = [DateTime]::new([int]$Matches.year, [int]$Matches.month, [int]$Matches.day)
+    $patch = if ($Matches.patch) { [int64]$Matches.patch } else { 0L }
+    $pre = if ($Matches.pre) { [string]$Matches.pre } else { $null }
+    return [pscustomobject]@{ date = $date; patch = $patch; prerelease = $pre }
+}
+
+function Compare-ReleaseVersion([string]$Left, [string]$Right) {
+    $a = ConvertTo-ReleaseVersionKey $Left; $b = ConvertTo-ReleaseVersionKey $Right
+    $cmp = $a.date.CompareTo($b.date)
+    if ($cmp -ne 0) { return $cmp }
+    $cmp = $a.patch.CompareTo($b.patch)
+    if ($cmp -ne 0) { return $cmp }
+    if ($null -eq $a.prerelease -and $null -ne $b.prerelease) { return 1 }
+    if ($null -ne $a.prerelease -and $null -eq $b.prerelease) { return -1 }
+    return [StringComparer]::Ordinal.Compare([string]$a.prerelease, [string]$b.prerelease)
+}
+
 function Get-ReleaseUpdateSnapshot([string]$Repository, $LocalManifest) {
     $release = Invoke-ReleaseUpdateHttpGet ("https://api.github.com/repos/{0}/releases/latest" -f $Repository)
     Need ($null -ne $release -and -not [bool]$release.draft -and -not [bool]$release.prerelease) 'GitHub latest Release 不可用或不是正式版'
     $tag = ([string]$release.tag_name).Trim()
-    Need ($tag -match '^v[0-9A-Za-z][0-9A-Za-z._-]*$') 'GitHub Release tag 格式不受支持'
+    ConvertTo-ReleaseVersionKey $tag | Out-Null
+    $packageType = ([string]$LocalManifest.package).Trim().ToLowerInvariant()
+    Need ($packageType -in @('bootstrap','portable')) '当前 RELEASE-MANIFEST.json package 必须是 bootstrap 或 portable'
     $assets = @($release.assets)
-    $bootstrap = @($assets | Where-Object { [string]$_.name -eq ("skills-manager-{0}-bootstrap.zip" -f $tag) }) | Select-Object -First 1
+    $packageAsset = @($assets | Where-Object { [string]$_.name -eq ("skills-manager-{0}-{1}.zip" -f $tag, $packageType) }) | Select-Object -First 1
     $checksums = @($assets | Where-Object { [string]$_.name -eq ("skills-manager-{0}-SHA256SUMS.txt" -f $tag) }) | Select-Object -First 1
-    Need ($null -ne $bootstrap -and $null -ne $checksums) 'GitHub Release 缺少 bootstrap ZIP 或 SHA256SUMS.txt'
+    Need ($null -ne $packageAsset -and $null -ne $checksums) 'GitHub Release 缺少当前安装类型 ZIP 或 SHA256SUMS.txt'
     $checksumText = [string](Invoke-ReleaseUpdateHttpGet ([string]$checksums.browser_download_url))
-    $hash = ConvertFrom-ReleaseChecksumText $checksumText ([string]$bootstrap.name)
+    $hash = ConvertFrom-ReleaseChecksumText $checksumText ([string]$packageAsset.name)
     return [pscustomobject][ordered]@{
         repository = $Repository
         current_version = [string]$LocalManifest.version
         latest_version = $tag
-        update_available = ([string]$LocalManifest.version -ne $tag)
+        update_available = ((Compare-ReleaseVersion ([string]$LocalManifest.version) $tag) -lt 0)
         release_url = [string]$release.html_url
-        bootstrap_name = [string]$bootstrap.name
-        bootstrap_url = [string]$bootstrap.browser_download_url
-        bootstrap_sha256 = $hash
+        package = $packageType
+        package_name = [string]$packageAsset.name
+        package_url = [string]$packageAsset.browser_download_url
+        package_sha256 = $hash
     }
 }
 
@@ -16203,16 +16364,16 @@ function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest)
     return $true
 }
 
-function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersion) {
+function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersion, [string]$ExpectedPackage) {
     $manifest = Get-ReleaseUpdateManifest $PackageRoot
-    Need ([string]$manifest.version -eq $ExpectedVersion -and [string]$manifest.package -eq 'bootstrap') '下载的 Release 包版本或类型不匹配'
+    Need ([string]$manifest.version -eq $ExpectedVersion -and [string]$manifest.package -eq $ExpectedPackage -and [bool]$manifest.publishable) '下载的 Release 包版本、类型或发布状态不匹配'
     foreach ($required in @('install.ps1','build.ps1','skills.ps1','skills.json','LICENSE')) {
         Need (Test-Path -LiteralPath (Join-Path $PackageRoot $required) -PathType Leaf) ("下载的 Release 包缺少：{0}" -f $required)
     }
     return $manifest
 }
 
-function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [switch]$SyncMcp) {
+function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [switch]$SyncMcp) {
     $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
     $parent = Split-Path -Parent $currentRoot
     $leaf = Split-Path -Leaf $currentRoot
@@ -16223,7 +16384,7 @@ function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersio
     $workerPath = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-release-update-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
     Copy-Item -LiteralPath $workerSource -Destination $workerPath -Force
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
-    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-ParentProcessId',$PID)
+    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ParentProcessId',$PID)
     if ($SyncMcp) { $args += '-SyncMcp' }
     $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
     return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
@@ -16234,6 +16395,7 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
     $manifest = Get-ReleaseUpdateManifest
     $snapshot = Get-ReleaseUpdateSnapshot $options.repository $manifest
     $result = [ordered]@{ schema_version = 1; command = 'release-update'; action = $options.action; current_version = $snapshot.current_version; latest_version = $snapshot.latest_version; update_available = $snapshot.update_available; repository = $snapshot.repository; release_url = $snapshot.release_url; host_loaded = $false; live_accepted = $false }
+    Need (-not ($snapshot.package -eq 'portable' -and $options.sync_mcp)) 'portable Release 更新不支持 --sync-mcp；请单独执行 MCP 同步'
     if ($options.action -eq 'check' -or -not $snapshot.update_available) {
         $result.status = if ($snapshot.update_available) { 'update_available' } else { 'up_to_date' }
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
@@ -16244,19 +16406,19 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
     Test-ReleaseUpdatePristineInstallation $Root $manifest | Out-Null
     $parent = Split-Path -Parent ([IO.Path]::GetFullPath($Root))
     $stage = Join-Path $parent (".skills-manager-release-stage-{0}" -f ([guid]::NewGuid().ToString('N')))
-    $zip = Join-Path $stage $snapshot.bootstrap_name
+    $zip = Join-Path $stage $snapshot.package_name
     try {
         New-Item -ItemType Directory -Path $stage -Force | Out-Null
-        Invoke-ReleaseUpdateHttpGet $snapshot.bootstrap_url $zip | Out-Null
+        Invoke-ReleaseUpdateHttpGet $snapshot.package_url $zip | Out-Null
         $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-        Need ($actualHash -eq $snapshot.bootstrap_sha256) '下载的 Release ZIP SHA-256 不匹配'
+        Need ($actualHash -eq $snapshot.package_sha256) '下载的 Release ZIP SHA-256 不匹配'
         $extract = Join-Path $stage 'extract'
         Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
         $roots = @(Get-ChildItem -LiteralPath $extract -Directory -Force)
         Need ($roots.Count -eq 1) 'Release ZIP 必须只包含一个根目录'
         $package = $roots[0].FullName
-        Test-ReleaseUpdatePackage $package $snapshot.latest_version | Out-Null
-        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version -SyncMcp:$options.sync_mcp
+        Test-ReleaseUpdatePackage $package $snapshot.latest_version $snapshot.package | Out-Null
+        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version $snapshot.package -SyncMcp:$options.sync_mcp
         $result.status = $handoff.status; $result.worker_pid = $handoff.worker_pid; $result.backup_root = $handoff.backup_root
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
         Write-Host ("Release 更新已交给后台进程：{0}。旧目录备份将保留在：{1}" -f $handoff.worker_pid, $handoff.backup_root) -ForegroundColor Green

@@ -35,10 +35,37 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *skills-manager
             }
             return ([string]::new([char]'c', 64)) + ' *skills-manager-v2026.08.27-bootstrap.zip'
         }
-        $snapshot = Get-ReleaseUpdateSnapshot 'sciman-top/skills-manager' ([pscustomobject]@{ version = 'v2026.08.01' })
+        $snapshot = Get-ReleaseUpdateSnapshot 'sciman-top/skills-manager' ([pscustomobject]@{ version = 'v2026.08.01'; package = 'bootstrap' })
         $snapshot.update_available | Should -BeTrue
         $snapshot.latest_version | Should -Be 'v2026.08.27'
-        $snapshot.bootstrap_sha256 | Should -Be ([string]::new([char]'c', 64))
+        $snapshot.package_sha256 | Should -Be ([string]::new([char]'c', 64))
+    }
+
+    It 'compares release versions monotonically and selects portable assets' {
+        (Compare-ReleaseVersion 'v2026.08.27' 'v2026.08.27.1') | Should -BeLessThan 0
+        (Compare-ReleaseVersion 'v2026.08.27.1' 'v2026.08.27') | Should -BeGreaterThan 0
+        (Compare-ReleaseVersion 'v2026.08.27' 'v2026.08.26') | Should -BeGreaterThan 0
+        $script:ReleaseUpdateHttpGet = {
+            param($Uri, $OutFile)
+            if ($Uri -match '/releases/latest$') {
+                return [pscustomobject]@{
+                    tag_name = 'v2026.08.27.1'; draft = $false; prerelease = $false; html_url = 'https://example.invalid/release'
+                    assets = @(
+                        [pscustomobject]@{ name = 'skills-manager-v2026.08.27.1-bootstrap.zip'; browser_download_url = 'https://example.invalid/bootstrap.zip' },
+                        [pscustomobject]@{ name = 'skills-manager-v2026.08.27.1-portable.zip'; browser_download_url = 'https://example.invalid/portable.zip' },
+                        [pscustomobject]@{ name = 'skills-manager-v2026.08.27.1-SHA256SUMS.txt'; browser_download_url = 'https://example.invalid/checksums.txt' }
+                    )
+                }
+            }
+            return ([string]::new([char]'d', 64)) + ' *skills-manager-v2026.08.27.1-portable.zip'
+        }
+        $portable = Get-ReleaseUpdateSnapshot 'sciman-top/skills-manager' ([pscustomobject]@{ version = 'v2026.08.27'; package = 'portable' })
+        $portable.package | Should -Be 'portable'
+        $portable.package_name | Should -Be 'skills-manager-v2026.08.27.1-portable.zip'
+        $portable.package_sha256 | Should -Be ([string]::new([char]'d', 64))
+        $portable.update_available | Should -BeTrue
+        $older = Get-ReleaseUpdateSnapshot 'sciman-top/skills-manager' ([pscustomobject]@{ version = 'v2026.08.28'; package = 'portable' })
+        $older.update_available | Should -BeFalse
     }
 
     It 'refuses automatic replacement when a Release-managed file has changed locally' {

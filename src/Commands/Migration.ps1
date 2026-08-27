@@ -138,6 +138,23 @@ function Copy-MigrationTree([string]$Source, [string]$Destination) {
     return $true
 }
 
+function Assert-MigrationContentIntegrity([string]$PackageRoot, $Manifest) {
+    $contentPath = Join-Path $PackageRoot 'MIGRATION-CONTENT.json'
+    Need (Test-Path -LiteralPath $contentPath -PathType Leaf) '迁移包缺少 MIGRATION-CONTENT.json'
+    $content = Get-ContentUtf8 $contentPath | ConvertFrom-Json
+    Need ([int]$content.schema_version -eq 1 -and $null -ne $content.files) 'MIGRATION-CONTENT.json schema 无效'
+    $expected = @($content.files)
+    $actual = @(Get-PackageFileEntries $PackageRoot | Where-Object { $_.path -ne 'MIGRATION-CONTENT.json' })
+    Need ($expected.Count -eq $actual.Count) '迁移包内容文件数量不匹配'
+    $byPath = @{}; foreach ($entry in $actual) { $byPath[[string]$entry.path] = $entry }
+    foreach ($entry in $expected) {
+        $path = [string]$entry.path
+        Need ($byPath.ContainsKey($path)) ("迁移包缺少内容文件：{0}" -f $path)
+        Need ([long]$byPath[$path].size -eq [long]$entry.size -and [string]$byPath[$path].sha256 -eq ([string]$entry.sha256).ToLowerInvariant()) ("迁移包内容校验失败：{0}" -f $path)
+    }
+    return $true
+}
+
 function Get-MigrationMcpIntent($Server) {
     $item = [ordered]@{}
     foreach ($name in @('name','enabled','transport','command','args','url','startup_timeout_sec','enabled_tools','bearer_token_env_var')) {
@@ -203,6 +220,7 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Assert-MigrationContentIntegrity $Root $manifest | Out-Null
     Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('private-general','private-all')) '当前迁移包不是私用加密迁移包'
     $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) { Join-Path $Root 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
@@ -242,6 +260,7 @@ function Invoke-MigrationApplyCommand([string[]]$Tokens) {
     $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Assert-MigrationContentIntegrity $Root $manifest | Out-Null
     Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general','private-all')) 'migration-apply 只接受 all、general 或私用加密迁移包'
     if ([string]$manifest.mode -in @('private-general','private-all')) { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
     $installPath = Join-Path $Root 'install.ps1'
@@ -319,12 +338,13 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             mcp_servers = @($mcpNames)
             includes_credentials = ($options.mode -in @('private-general','private-all'))
             includes_materialized_sources = ($options.mode -ne 'rescan')
-            development_ready = ($options.mode -ne 'rescan')
+            development_ready = $false
+            restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
-            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides') } else { @() }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides','vendor','imports','agent','references','.github') } else { @() }
             credential_file = if ($options.mode -in @('private-general','private-all')) { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
-            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '或先运行 migration-unlock，再运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '或运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') }
+            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') }
         }
         $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MANIFEST.json') -Encoding utf8
         if ($null -ne $encryptedCredentials) {
@@ -338,6 +358,10 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
             foreach ($directory in @('src','config','tests','scripts','docs')) {
+                $source = Join-Path $Root $directory
+                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
+            }
+            foreach ($directory in @('references','.github')) {
                 $source = Join-Path $Root $directory
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
             }
@@ -361,9 +385,13 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 }
             }
         }
+        $contentEntries = @(Get-PackageFileEntries $packageRoot)
+        [ordered]@{ schema_version = 1; files = @($contentEntries) } |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-CONTENT.json') -Encoding utf8
+        Assert-MigrationContentIntegrity $packageRoot $manifest | Out-Null
         if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
-        Compress-Archive -LiteralPath $packageRoot -DestinationPath $outPath -CompressionLevel Optimal
-        $result = [pscustomobject]@{ mode = $options.mode; path = $outPath; size = (Get-Item -LiteralPath $outPath).Length; sha256 = (Get-FileHash -LiteralPath $outPath -Algorithm SHA256).Hash.ToLowerInvariant(); skills = @($skillNames); mcp_servers = @($mcpNames) }
+        $archive = New-VerifiedPackageArchive $packageRoot $outPath
+        $result = [pscustomobject]@{ mode = $options.mode; path = $archive.path; size = $archive.size; sha256 = $archive.sha256; skills = @($skillNames); mcp_servers = @($mcpNames) }
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
         Write-Host ("迁移包已生成：{0}" -f $outPath) -ForegroundColor Green
         Write-Host ("模式={0}，技能={1}，MCP={2}，SHA-256={3}" -f $options.mode, $skillNames.Count, $mcpNames.Count, $result.sha256)

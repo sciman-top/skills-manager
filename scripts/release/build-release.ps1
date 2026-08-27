@@ -6,7 +6,8 @@ param(
     [string]$Version,
     [ValidateSet('Bootstrap', 'Portable', 'Both')]
     [string]$Package = 'Both',
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts'),
+    [switch]$AllowDirtyWorktree
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,6 +116,12 @@ function Get-PinnedSourceLicenseFiles(
     $rootLicenseNames = @(& git -C $sourceRoot ls-tree --name-only $Commit | Where-Object {
             $_ -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\..*)?$'
         } | Sort-Object -Unique)
+    & git -C $sourceRoot cat-file -e ("{0}:README.md" -f $Commit) 2>$null
+    $hasReadme = $LASTEXITCODE -eq 0
+    if ($rootLicenseNames.Count -eq 0 -and $hasReadme) {
+        $readmeText = (& git -C $sourceRoot show ("{0}:README.md" -f $Commit) | Out-String)
+        if ($readmeText -match '(?im)^##\s+License\s*$' -and $readmeText -match '(?im)^MIT\s*$') { $rootLicenseNames = @('README.md') }
+    }
     if ($LASTEXITCODE -ne 0) { throw "Unable to inspect pinned license files for $SourceName at $Commit." }
 
     $safeSourceName = [regex]::Replace($SourceName, '[^0-9A-Za-z._-]', '-')
@@ -206,7 +213,7 @@ function Get-PortableThirdPartyNotices([string]$PackageRoot, [string]$AgentRoot)
                 source_path = if ($null -eq $sourcePath) { $null } else { $sourcePath.Replace('\', '/') }
                 declared_license = if ([string]::IsNullOrWhiteSpace($declaredLicense)) { $null } else { $declaredLicense }
                 license_files = $licenseFiles
-                license_status = if (-not [string]::IsNullOrWhiteSpace($declaredLicense) -or $licenseFiles.Count -gt 0) { 'observed' } else { 'unknown_review_required' }
+                license_status = if ($licenseFiles.Count -gt 0) { 'materialized' } else { 'unknown_review_required' }
                 content_sha256 = $contentHash
             }) | Out-Null
     }
@@ -217,7 +224,7 @@ function Get-PortableThirdPartyNotices([string]$PackageRoot, [string]$AgentRoot)
         skills = @($entries.ToArray())
         summary = [ordered]@{
             total = $entries.Count
-            observed_license = @($entries | Where-Object license_status -eq 'observed').Count
+            materialized_license = @($entries | Where-Object license_status -eq 'materialized').Count
             unknown_license = @($entries | Where-Object license_status -eq 'unknown_review_required').Count
         }
     }
@@ -234,7 +241,8 @@ function New-ReleasePackage([string]$Kind) {
         'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
         'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.lock.json', 'skills.ps1',
         'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1',
-        'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1'
+        'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1',
+        'references\README.md', 'references\reference-shelf.manifest.json', 'references\updates\README.md'
     )
     foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles)) {
         Copy-ReleaseFile $file $packageRoot
@@ -246,9 +254,29 @@ function New-ReleasePackage([string]$Kind) {
         if (-not (Test-Path -LiteralPath $agentSource -PathType Container)) {
             throw 'Portable package requires a built agent directory. Run build.ps1 first.'
         }
-        foreach ($skillDirectory in @(Get-ChildItem -LiteralPath $agentSource -Directory -Force)) {
-            if (-not (Test-Path -LiteralPath (Join-Path $skillDirectory.FullName 'SKILL.md') -PathType Leaf)) { continue }
-            Assert-SkillPackageSafe -Path $skillDirectory.FullName -ContainmentRoot $agentSource -Label ("portable:{0}" -f $skillDirectory.Name) | Out-Null
+        $releaseConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding utf8 | ConvertFrom-Json
+        $supportPaths = @(
+            [string]$releaseConfig.skill_projection.native_agent_bridge.source_root,
+            [IO.Path]::GetDirectoryName(([string]$releaseConfig.skill_projection.discovery_catalog.catalog_path).Replace('/', '\'))
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+        $supportRoots = @($supportPaths | ForEach-Object {
+                $normalized = ([string]$_).Replace('\', '/').Trim('/')
+                if ($normalized -notmatch '^agent/(?<name>[^/]+)$') { throw ("Portable agent support path must be a direct child of agent/: {0}" -f $_) }
+                $Matches.name
+            } | Sort-Object -Unique)
+        $resourceRoot = Join-Path $repoRoot 'overrides\resources'
+        if (Test-Path -LiteralPath $resourceRoot -PathType Container) {
+            $supportRoots += @(Get-ChildItem -LiteralPath $resourceRoot -Force -Directory |
+                    Where-Object { -not (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf) } |
+                    ForEach-Object Name)
+        }
+        $supportRoots = @($supportRoots | Sort-Object -Unique)
+        foreach ($entry in @(Get-ChildItem -LiteralPath $agentSource -Force | Sort-Object Name)) {
+            if (-not $entry.PSIsContainer) { throw ("Portable agent payload has unexpected root file: {0}" -f $entry.Name) }
+            $isMetadata = $supportRoots -contains $entry.Name
+            $isSkill = Test-Path -LiteralPath (Join-Path $entry.FullName 'SKILL.md') -PathType Leaf
+            if (-not $isMetadata -and -not $isSkill) { throw ("Portable agent payload has unexpected root directory: {0}" -f $entry.Name) }
+            Assert-SkillPackageSafe -Path $entry.FullName -ContainmentRoot $agentSource -Label ("portable:{0}" -f $entry.Name) | Out-Null
         }
         Copy-Item -LiteralPath $agentSource -Destination (Join-Path $packageRoot 'agent') -Recurse -Force
         $notices = Get-PortableThirdPartyNotices $packageRoot (Join-Path $packageRoot 'agent')
@@ -264,21 +292,23 @@ function New-ReleasePackage([string]$Kind) {
 
     $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve the release commit.' }
-    $fileEntries = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
-        [ordered]@{
-            path = [IO.Path]::GetRelativePath($packageRoot, $_.FullName).Replace('\', '/')
-            size = $_.Length
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        }
-    })
+    $fileEntries = @(Get-PackageFileEntries $packageRoot)
     $manifest = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         product = 'skills-manager'
         version = $Version
         package = $Kind.ToLowerInvariant()
         commit = $commit
+        source_state = if ($AllowDirtyWorktree) { 'dirty_development' } else { 'clean_commit' }
+        publishable = (-not $AllowDirtyWorktree)
         built_at = (Get-Date).ToUniversalTime().ToString('o')
-        requires = [ordered]@{ os = 'Windows'; powershell = '7+'; git_for_install_or_update = $true }
+        requires = [ordered]@{
+            os = 'Windows'
+            powershell = '7+'
+            git_for_green_run = $false
+            git_for_install = ($Kind -eq 'Bootstrap')
+            git_for_update = ($Kind -eq 'Bootstrap')
+        }
         includes_prebuilt_agent = $includesAgent
         green_run = if ($includesAgent) { '.\skills.cmd' } else { $null }
         install = '.\setup.cmd'
@@ -287,17 +317,21 @@ function New-ReleasePackage([string]$Kind) {
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE-MANIFEST.json') -Encoding utf8
 
     $zipPath = Join-Path $outputRoot "$slug.zip"
-    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-    Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+    $archive = New-VerifiedPackageArchive $packageRoot $zipPath
     return [pscustomobject]@{
         package = $Kind.ToLowerInvariant()
-        path = $zipPath
-        size = (Get-Item -LiteralPath $zipPath).Length
-        sha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        path = $archive.path
+        size = $archive.size
+        sha256 = $archive.sha256
     }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is required to build a release from tracked inputs.' }
+$trackedChanges = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=no)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the release source worktree.' }
+if ($trackedChanges.Count -gt 0 -and -not $AllowDirtyWorktree) {
+    throw 'Release build requires a clean tracked worktree. Use -AllowDirtyWorktree only for non-publishable development tests.'
+}
 if (-not (Test-Path -LiteralPath $outputRoot)) { New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null }
 Assert-InsideOutput $workRoot
 if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force }

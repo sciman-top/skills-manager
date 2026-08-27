@@ -59,7 +59,7 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 .\skills.ps1 迁移 --mode rescan --out .\artifacts\migration-rescan.zip   # 不带 skills/MCP，只带重扫指引
 ```
 
-迁移包内的 `MIGRATION-MANIFEST.json` 是范围和后续动作的真值。`all`、`general`、`private-general` 和 `private-all` 会携带对应的 `agent/`、配置、锁文件、`src/`、测试、脚本、文档和 MIT `LICENSE`，解压后可继续开发；`rescan` 只携带清单，不会复制任何 skill 或 MCP 声明。所有迁移包都不携带 `.git` 历史，若要继续使用版本控制，请在新电脑重新 clone，或在副本中自行 `git init`。使用 `rescan` 时，先在新电脑安装同版本的 skills-manager，再按清单重新发现和安装。
+迁移包内的 `MIGRATION-MANIFEST.json` 是范围和后续动作的真值，`MIGRATION-CONTENT.json` 对每个实际文件提供 SHA-256 完整性校验。`all`、`general`、`private-general` 和 `private-all` 会携带恢复所需的 `agent/`、配置、锁文件、`src/`、测试、脚本、文档、参考治理、CI 元数据和 MIT `LICENSE`；它们不携带 `.git` 历史，也不声称是公共源码开发版。持续开发请从公共 Git clone/fork/tag 获取；需要离线保留完整 Git 历史时，另行在可信介质生成 `git bundle --all` 并按 Git 官方流程校验导入。`rescan` 只携带清单，不会复制任何 skill 或 MCP 声明。使用 `rescan` 时，先在新电脑安装同版本的 skills-manager，再按清单重新发现和安装。
 
 ### 私用 + general / all（携带 MCP 凭据）
 
