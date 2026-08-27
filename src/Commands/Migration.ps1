@@ -303,15 +303,15 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
     $cfg = LoadCfg
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $outPath = if ([string]::IsNullOrWhiteSpace($options.out_path)) {
-        $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path 'migration' $stamp)
+        $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path 'deliveries\migration' $stamp)
         Join-Path $migrationRunRoot ("migration-{0}-{1}.zip" -f $options.mode, $stamp)
     } else { [IO.Path]::GetFullPath($options.out_path) }
     $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $Root 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if ($outPath.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
         $outPath.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         $relativeArtifactPath = [IO.Path]::GetRelativePath($artifactsRoot, $outPath).Replace('\', '/')
-        if ($relativeArtifactPath -notmatch '^migration/[^/]+/[^/]+\.zip$') {
-            throw 'Migration output under artifacts must be artifacts\migration\<run-id>\<file>.zip; use an external temporary path only for isolated tests.'
+        if ($relativeArtifactPath -notmatch '^deliveries/migration/[^/]+/[^/]+\.zip$') {
+            throw 'Migration output under artifacts must be artifacts\deliveries\migration\<run-id>\<file>.zip; use an external temporary path only for isolated tests.'
         }
     }
     $outParent = Split-Path -Parent $outPath

@@ -6,7 +6,7 @@ param(
     [string]$Version,
     [ValidateSet('Bootstrap', 'Portable', 'Both')]
     [string]$Package = 'Both',
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\release'),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\deliveries\release'),
     [switch]$AllowDirtyWorktree
 )
 
@@ -19,11 +19,11 @@ $workRoot = Join-Path $outputRoot '.release-work'
 
 function Assert-ReleaseOutputContract {
     $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
-    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'release')).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'deliveries\release')).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if ($outputParent.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
         ($outputParent.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -and
          -not $outputParent.Equals($releaseRoot, [StringComparison]::OrdinalIgnoreCase))) {
-        throw "Release output directory must be artifacts\release (the version subdirectory is added automatically): $outputParent"
+        throw "Release output directory must be artifacts\deliveries\release (the version subdirectory is added automatically): $outputParent"
     }
 }
 

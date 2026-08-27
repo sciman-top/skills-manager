@@ -22,7 +22,7 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 需要离线或 U 盘绿色运行时下载 `portable.zip`，解压后运行 `skills.cmd`；它不会自动写宿主目录。两种包的选择、SHA-256 校验和迁移步骤见 [安装、绿色运行与迁移](docs/INSTALLATION_AND_MIGRATION.md)。
 
-`artifacts/` 只是本机 ignored 输出目录，不是公共下载目录；正式公共制品、校验清单和 attestation 以 GitHub Release 为准。目录清理规则见 [`artifacts/README.md`](artifacts/README.md)。
+`artifacts/` 只是本机 ignored 输出目录，不是公共下载目录；正式公共制品、校验清单和 attestation 以 GitHub Release 为准。目录按 `deliveries/history/work` 分层，规则见 [`artifacts/README.md`](artifacts/README.md)。
 
 ### 从源码使用
 
@@ -69,7 +69,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### 项目迁移
 
-可用 `迁移` 命令生成跨电脑 ZIP，默认写入 `artifacts\migration\<run-id>\`，按需选择范围：
+可用 `迁移` 命令生成跨电脑 ZIP，默认写入 `artifacts\deliveries\migration\<run-id>\`，按需选择范围：
 
 ```powershell
 # all：携带当前已构建的全部 skills 与 MCP 配置意图

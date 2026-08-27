@@ -70,8 +70,8 @@ Describe 'Migration bundles' {
 
     It 'uses a timestamped ignored migration directory when no output path is supplied' {
         $result = Invoke-MigrationCommand @('--mode','rescan','--json') | ConvertFrom-Json
-        $result.path | Should -Match ([regex]::Escape('\artifacts\migration\'))
-        $result.path | Should -Match '\\artifacts\\migration\\[^\\]+\\migration-rescan-[^\\]+\.zip$'
+        $result.path | Should -Match ([regex]::Escape('\artifacts\deliveries\migration\'))
+        $result.path | Should -Match '\\artifacts\\deliveries\\migration\\[^\\]+\\migration-rescan-[^\\]+\.zip$'
     }
 
     It 'rejects repository artifact-root output that bypasses the migration contract' {

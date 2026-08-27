@@ -7,7 +7,25 @@
 /docs/runtime-*.txt
 /artifacts/*
 !/artifacts/README.md
-# Generated release, migration, archive, and smoke output stays local.
+# Keep category README anchors tracked while all generated children stay local.
+!/artifacts/deliveries/
+!/artifacts/deliveries/README.md
+!/artifacts/deliveries/release/
+!/artifacts/deliveries/migration/
+!/artifacts/deliveries/release/README.md
+!/artifacts/deliveries/migration/README.md
+/artifacts/deliveries/release/*
+/artifacts/deliveries/migration/*
+!/artifacts/deliveries/release/README.md
+!/artifacts/deliveries/migration/README.md
+!/artifacts/history/
+!/artifacts/history/README.md
+!/artifacts/history/*/
+/artifacts/history/*/*
+!/artifacts/work/
+!/artifacts/work/README.md
+!/artifacts/work/*/
+/artifacts/work/*/*
 /migration-*.zip
 
 # backups created when linking

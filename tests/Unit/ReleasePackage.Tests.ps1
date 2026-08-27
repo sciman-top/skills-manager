@@ -169,7 +169,7 @@ Describe 'Release packaging' {
         $script = Join-Path $repoRoot 'scripts\release\build-release.ps1'
         $result = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.root' -Package Bootstrap -OutputDirectory (Join-Path $repoRoot 'artifacts') -AllowDirtyWorktree 2>&1)
         $LASTEXITCODE | Should -Not -Be 0
-        $result -join "`n" | Should -Match 'Release output directory must be artifacts\\release'
+        $result -join "`n" | Should -Match 'Release output directory must be artifacts\\deliveries\\release'
         Test-Path -LiteralPath (Join-Path $repoRoot 'artifacts\test.root') | Should -BeFalse
     }
 }

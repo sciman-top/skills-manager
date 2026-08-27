@@ -1,46 +1,30 @@
-# Local Artifacts
+# 本机交付产物目录
 
-This directory is a local, ignored output area. It is not a source tree,
-backup location, or public distribution channel. The root must contain no
-generated files; only this README is tracked.
+`artifacts/` 是本机和 CI 的可重建输出目录，不是源码或长期证据仓库。
+根层禁止放生成文件；除本说明外，各分类目录的 README 是 Git 中的固定锚点。
 
-## Fixed layout
+## 固定布局
 
 ```text
 artifacts/
-├─ README.md                         # tracked path contract
-├─ release/<version>/                # public ZIP staging for one version
-├─ migration/<run-id>/               # migration ZIPs for one invocation
-├─ archive/<kind>/<version-or-date>/ # deliberate long-term local retention
-└─ tmp/<run-id>/                     # smoke extracts and disposable output
+├─ README.md
+├─ deliveries/                         # 当前可交付物
+│  ├─ README.md
+│  ├─ release/<version>/               # bootstrap/portable/校验清单
+│  └─ migration/<run-id>/              # general/private-all/rescan 迁移包
+├─ history/                            # 人工明确保留的历史副产物
+│  └─ README.md
+└─ work/                               # 可删除的构建、验证和 evidence
+   └─ README.md
 ```
 
-`release/<version>/` and `migration/<run-id>/` are created by the supported
-commands. `archive/` is never populated automatically: copy an artifact there
-only when a human explicitly chooses to retain it. `tmp/` is for disposable
-smoke/unpack output and should be cleared after verification.
+`deliveries/`、`history/`、`work/` 三类禁止混放：
 
-## Keep only current-run outputs
+- `deliveries/release/<version>/` 由 `build-release.ps1` 创建，正式公共下载以 GitHub Release 为准。
+- `deliveries/migration/<run-id>/` 由 `迁移` 默认创建；`private-*` 包应立即转移到可信私有存储。
+- `history/` 从不由脚本自动填充；只有明确需要保留的旧版本或审计副本才允许人工复制进去。
+- `work/` 用于 smoke 解压、临时报告、截图和验证 evidence，完成后应清理。
 
-- Release builds write under `release/<version>/`:
-  `skills-manager-<version>-bootstrap.zip`,
-  `skills-manager-<version>-portable.zip`, and the matching
-  `skills-manager-<version>-SHA256SUMS.txt` here.
-- Migration commands write under `migration/<run-id>/` with names such as
-  `migration-<mode>-<run-id>.zip`. Treat `private-*` packages as sensitive and move them to approved
-  private storage immediately.
-- Smoke extracts, screenshots, classroom documents, illustrations, and audit
-  leftovers belong under `tmp/<run-id>/` or external storage and must not
-  accumulate in `release/` or `migration/`. Old release archives belong under
-  the explicit `archive/` retention path, never beside current outputs.
+仓库内的脚本会拒绝把 Release 或 migration 输出写到 `artifacts/` 根层或其他分类目录；测试可以使用仓库外临时目录。
 
-## Public release source of truth
-
-Public installers are published from a clean tagged commit by GitHub Actions.
-Use the [GitHub Releases page](https://github.com/sciman-top/skills-manager/releases)
-for distributable downloads. The latest verified public release is
-`v2026.08.27.1`; local files are disposable copies and are not release
-evidence until they are compared with the release checksum and attestation.
-
-This directory is safe to clear after a build or migration run has completed;
-preserve only deliberately retained files under `archive/`.
+当前已验证公共 Release 为 `v2026.08.27.1`，其公共资产位于 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases)，不是本地 `artifacts/` 目录。

@@ -49,10 +49,10 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 对外产品渠道固定为三条、形态固定为四种：公共 `general` Release 的 `bootstrap.zip` 和 `portable.zip`、公共 Git 源码开发版、私用 `private-all` 恢复快照。当前公共 Release 为 `v2026.08.27.1`；`rescan` 只是辅助迁移清单，不是开发发行物。旧电脑还可以直接生成这些迁移包：
 
-只有公共 `general` Release 安装版与公共 Git 源码开发版可以 push 到公共 GitHub。`private-all`（以及任何携带私用 MCP 凭据的 `private-*` 包）只能通过可信私有介质或用户控制的私有存储转移；不得 push 到公共仓库、公共 Release 或公共网盘。未指定 `--out` 时，迁移包固定写入 `artifacts/migration/<run-id>/`；不要把迁移包直接写到 `artifacts/` 根目录。
+只有公共 `general` Release 安装版与公共 Git 源码开发版可以 push 到公共 GitHub。`private-all`（以及任何携带私用 MCP 凭据的 `private-*` 包）只能通过可信私有介质或用户控制的私有存储转移；不得 push 到公共仓库、公共 Release 或公共网盘。未指定 `--out` 时，迁移包固定写入 `artifacts/deliveries/migration/<run-id>/`；不要把迁移包直接写到 `artifacts/` 根目录。
 
 ```powershell
-.\skills.ps1 迁移 --mode all                         # 默认：artifacts/migration/<run-id>/
+.\skills.ps1 迁移 --mode all                         # 默认：artifacts/deliveries/migration/<run-id>/
 .\skills.ps1 迁移 --mode general                     # core 通用 skills + default MCP
 .\skills.ps1 迁移 --mode private-general --encrypt   # 私用加密：core + default MCP 凭据
 .\skills.ps1 迁移 --mode private-all --encrypt       # 私用加密：全部 skills + MCP 凭据

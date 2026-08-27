@@ -24,22 +24,22 @@ pwsh -NoProfile -File .\build.ps1
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
-输出到 ignored `artifacts/release/<version>/`（每个版本独立目录；该目录不是公共下载源，完整目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
+输出到 ignored `artifacts/deliveries/release/<version>/`（每个版本独立目录；该目录不是公共下载源，完整目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
 
 ```text
-artifacts/release/<version>/
+artifacts/deliveries/release/<version>/
 ├─ skills-manager-<version>-bootstrap.zip
 ├─ skills-manager-<version>-portable.zip
 └─ skills-manager-<version>-SHA256SUMS.txt
 ```
 
-当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理 `artifacts/tmp/<run-id>/` 下的 smoke 解压和其他临时副产物；迁移包写入 `artifacts/migration/<run-id>/`，历史留存只能显式放到 `artifacts/archive/<kind>/<version-or-date>/`。正式下载统一指向 GitHub Release 页面，禁止从 `artifacts/` 根目录或历史目录取包。
+当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理 `artifacts/work/<kind>/<run-id>/` 下的 smoke 解压和其他临时副产物；迁移包写入 `artifacts/deliveries/migration/<run-id>/`，历史留存只能显式放到 `artifacts/history/<kind>/<version-or-date>/`。正式下载统一指向 GitHub Release 页面，禁止从 `artifacts/` 根目录或历史目录取包。
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
 
 `portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证证据路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；若 pinned commit 没有这些文件，仅当同一 commit 根 `README.md` 明确包含 License section 和 SPDX 名称时，才按原始字节物化该 README 作为可追溯证据。同一来源的多个技能共享一份证据，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树 frontmatter 或远端口头声明不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
 
-`-OutputDirectory` 表示 release staging 的父目录；当它指向本仓 `artifacts` 时，脚本只接受 `artifacts/release`，并自动追加 `<version>`。仓库内不允许通过参数把公共 ZIP 写回根层或其他分类目录；测试可使用外部临时目录。
+`-OutputDirectory` 表示 release staging 的父目录；当它指向本仓 `artifacts` 时，脚本只接受 `artifacts/deliveries/release`，并自动追加 `<version>`。仓库内不允许通过参数把公共 ZIP 写回根层或其他分类目录；测试可使用外部临时目录。
 
 只构建一种包：
 

@@ -20,7 +20,7 @@ The current stable release is [v2026.08.27.1](https://github.com/sciman-top/skil
 .\setup.cmd
 ```
 
-For offline or USB-style green use, download `portable.zip`, extract it, and run `skills.cmd`. It does not write host directories automatically. See the [installation and migration guide](docs/INSTALLATION_AND_MIGRATION.md) for package selection, checksums, and migration boundaries. Local migration output is isolated under `artifacts/migration/<run-id>/`; release staging uses `artifacts/release/<version>/`.
+For offline or USB-style green use, download `portable.zip`, extract it, and run `skills.cmd`. It does not write host directories automatically. See the [installation and migration guide](docs/INSTALLATION_AND_MIGRATION.md) for package selection, checksums, and migration boundaries. Local outputs follow the `deliveries/history/work` layout: migrations use `artifacts/deliveries/migration/<run-id>/`, and release staging uses `artifacts/deliveries/release/<version>/`.
 
 `artifacts/` is only a local ignored output directory. Public downloads, checksums, and attestations are sourced from the GitHub Release, not from this directory. See [`artifacts/README.md`](artifacts/README.md) for the local retention rules.
 
