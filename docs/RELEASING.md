@@ -21,16 +21,18 @@
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
+pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
-输出到 ignored `artifacts/`：
+输出到 ignored `artifacts/`（只保留当前 run 的 ZIP 和 checksum；该目录不是公共下载源，目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
 
 ```text
-skills-manager-2026.08.13-bootstrap.zip
-skills-manager-2026.08.13-portable.zip
-skills-manager-2026.08.13-SHA256SUMS.txt
+skills-manager-<version>-bootstrap.zip
+skills-manager-<version>-portable.zip
+skills-manager-<version>-SHA256SUMS.txt
 ```
+
+当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理本地旧 ZIP、smoke 解压目录、迁移 rescan 副本和其他非发布文件；正式下载统一指向 GitHub Release 页面。
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
 
@@ -39,8 +41,8 @@ skills-manager-2026.08.13-SHA256SUMS.txt
 只构建一种包：
 
 ```powershell
-.\scripts\release\build-release.ps1 -Version 2026.08.13 -Package Bootstrap
-.\scripts\release\build-release.ps1 -Version 2026.08.13 -Package Portable
+.\scripts\release\build-release.ps1 -Version <version> -Package Bootstrap
+.\scripts\release\build-release.ps1 -Version <version> -Package Portable
 ```
 
 ## Tag 自动发布
@@ -53,7 +55,7 @@ CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，为三个
 2. 运行 full gate；检查 `build.ps1` 未产生生成物漂移。
 3. 在本地实际构建并抽查两个 ZIP。
 4. 确认 MIT `LICENSE` 已进入制品，检查 `THIRD-PARTY-NOTICES.json`，并复核第三方来源、所有 `unknown_review_required`、许可证与 release notes。
-5. 创建并推送 annotated tag，例如 `git tag -a v2026.08.13 -m "v2026.08.13"`、`git push origin v2026.08.13`。
+5. 创建并推送 annotated tag，例如 `git tag -a vYYYY.MM.DD -m "vYYYY.MM.DD"`、`git push origin vYYYY.MM.DD`。
 6. 等待 GitHub Actions 成功，再使用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 验证三个资产的 provenance，并从 Release 页面下载制品复核 SHA-256 与安装烟测。
 
 GitHub Actions 与 attestation 成功只证明 `repo_verified`、制品生成和构建来源；不证明技能已被宿主加载。至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude/ZCode 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。

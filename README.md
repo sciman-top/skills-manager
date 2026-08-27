@@ -14,13 +14,15 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 ### 推荐：Release 一键安装
 
-从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载 `bootstrap.zip`，解压后运行：
+当前稳定版为 [v2026.08.27.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.27.1)。从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载对应版本的 `bootstrap.zip`，先核对 `SHA256SUMS.txt`，再解压运行：
 
 ```powershell
 .\setup.cmd
 ```
 
 需要离线或 U 盘绿色运行时下载 `portable.zip`，解压后运行 `skills.cmd`；它不会自动写宿主目录。两种包的选择、SHA-256 校验和迁移步骤见 [安装、绿色运行与迁移](docs/INSTALLATION_AND_MIGRATION.md)。
+
+`artifacts/` 只是本机 ignored 输出目录，不是公共下载目录；正式公共制品、校验清单和 attestation 以 GitHub Release 为准。目录清理规则见 [`artifacts/README.md`](artifacts/README.md)。
 
 ### 从源码使用
 

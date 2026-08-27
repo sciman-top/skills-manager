@@ -14,13 +14,15 @@ PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupporte
 
 ### Recommended: one-step Release install
 
-Download `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), extract it, and run:
+The current stable release is [v2026.08.27.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.27.1). Download the matching `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), verify `SHA256SUMS.txt`, extract it, and run:
 
 ```powershell
 .\setup.cmd
 ```
 
 For offline or USB-style green use, download `portable.zip`, extract it, and run `skills.cmd`. It does not write host directories automatically. See the [installation and migration guide](docs/INSTALLATION_AND_MIGRATION.md) for package selection, checksums, and migration boundaries.
+
+`artifacts/` is only a local ignored output directory. Public downloads, checksums, and attestations are sourced from the GitHub Release, not from this directory. See [`artifacts/README.md`](artifacts/README.md) for the local retention rules.
 
 ### From source
 

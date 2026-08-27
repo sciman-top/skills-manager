@@ -47,7 +47,7 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 ## 从旧电脑迁移
 
-对外产品形态固定为：公共 `general` Release 安装版、公共 Git 源码开发版、私用 `all` 快照包。`rescan` 只是辅助迁移清单，不是开发发行物。旧电脑还可以直接生成这些迁移包：
+对外产品渠道固定为三条、形态固定为四种：公共 `general` Release 的 `bootstrap.zip` 和 `portable.zip`、公共 Git 源码开发版、私用 `private-all` 恢复快照。当前公共 Release 为 `v2026.08.27.1`；`rescan` 只是辅助迁移清单，不是开发发行物。旧电脑还可以直接生成这些迁移包：
 
 只有公共 `general` Release 安装版与公共 Git 源码开发版可以 push 到公共 GitHub。`private-all`（以及任何携带私用 MCP 凭据的 `private-*` 包）只能通过可信私有介质或用户控制的私有存储转移；不得 push 到公共仓库、公共 Release 或公共网盘。
 

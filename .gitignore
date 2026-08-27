@@ -5,7 +5,8 @@
 /reports/*.log
 /reports/
 /docs/runtime-*.txt
-/artifacts/
+/artifacts/*
+!/artifacts/README.md
 /migration-*.zip
 
 # backups created when linking
