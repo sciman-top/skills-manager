@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.77
-**最后更新**: 2026-08-25
+**最后更新**: 2026-08-27
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 同时是 Codex、Claude 与 ZCode 的项目级规则源；ZCode 仅读取当前 Workspace 根文件。
@@ -11,6 +11,7 @@
 ## A. 仓库真值与领域不变量
 - `build.ps1` 只从 `src/` 生成根 `skills.ps1`；`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
+- 交付物目录契约固定为：公共 Release staging=`artifacts/release/<version>/`，迁移包=`artifacts/migration/<run-id>/`，临时 smoke/解压=`artifacts/tmp/<run-id>/`，人工历史留存=`artifacts/archive/<kind>/<version-or-date>/`；`artifacts/` 根层不得放生成文件，正式公共下载以 GitHub Release 为准。
 - AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。
 - Rule Estate 写入必须绑定 reviewed input、精确 scope/token/before-hash、receipt 与回滚；全局规则投影必须绑定 source/target hash、plan token、备份与精确回滚。
 - runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
