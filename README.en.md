@@ -149,7 +149,7 @@ See [docs/product/README.md](docs/product/README.md), [CONTRIBUTING.md](CONTRIBU
 Build both release packages with:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
+pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
 Maintainers should read [the release guide](docs/RELEASING.md), especially the third-party provenance and clean-machine acceptance requirements.

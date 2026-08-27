@@ -272,7 +272,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 一键发布包：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
+pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
 发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是第三方来源和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。
