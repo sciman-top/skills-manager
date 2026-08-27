@@ -49,7 +49,7 @@ The `Target Repo Audit` submenu follows the workflow: scan, preflight, dry-run, 
 
 ## Distribution models
 
-There are three distinct delivery paths: the public `general` Release installer for ordinary users, the public Git source repository for development and contributions, and a private `all` migration snapshot for moving one user's full environment between machines. `rescan` is only a migration manifest mode, not a development distribution.
+There are three delivery channels: public `general` Release installers, the public Git source repository, and a private `all` migration snapshot. The `general` Release has two variants: `bootstrap.zip` is the default installer and downloads locked sources through Git; `portable.zip` includes the prebuilt `agent/` directory for portable or network-constrained use. Both include an MIT `src/` source snapshot for inspection and rebuilding, but neither is a full development checkout: they contain no `.git` history or test suite. Use a Git clone or fork for ongoing development, branches, tests, contributions, and Git-based updates. `rescan` is only a migration manifest mode, not a development distribution.
 
 Release installations can check for a newer skills-manager release and, only after explicit confirmation, verify the published SHA-256, preserve a sibling backup, and hand off a directory switch to an independent updater. Source checkouts must use Git rather than the Release updater.
 

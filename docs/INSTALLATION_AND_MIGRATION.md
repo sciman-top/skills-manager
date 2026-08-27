@@ -6,12 +6,12 @@
 
 | 目标 | 推荐包 | 首次动作 | 是否写入宿主目录 |
 | --- | --- | --- | --- |
-| 新电脑正式安装 | `bootstrap.zip` | 解压后运行 `setup.cmd` | 是，安装配置中的技能目标；MCP 需显式 `-SyncMcp` |
-| U 盘/临时目录直接查看和运行 | `portable.zip` | 解压后运行 `skills.cmd` | 否；仅显式执行安装/同步命令时写入 |
+| 新电脑标准安装 | `bootstrap.zip` | 解压后运行 `setup.cmd` | 是，安装配置中的技能目标；MCP 需显式 `-SyncMcp` |
+| U 盘/临时目录或网络受限环境 | `portable.zip` | 解压后运行 `skills.cmd` | 否；仅显式执行安装/同步命令时写入 |
 | 开发或贡献 | Git clone | `pwsh -File .\install.ps1` | 是 |
 | 私用全量迁移 | `private-all` ZIP | 解压后运行 `migration-apply` | 是；MCP 凭据仅在加密包中恢复 |
 
-两种包都要求 Windows 与 PowerShell 7。`bootstrap` 安装和任何上游更新需要 Git 与网络；`portable` 已内置构建好的 `agent/`，可离线打开菜单、浏览本地内容，但联网型技能及外部工具仍取决于各自环境。
+两种公共 `general` 包都要求 Windows 与 PowerShell 7，也都携带本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不含 `.git` 历史或测试集。要开发、创建分支、运行完整测试、贡献或用 Git 更新，请使用公共 Git clone/fork。`bootstrap` 安装和任何上游更新需要 Git 与网络；`portable` 已内置构建好的 `agent/`，可离线打开菜单、浏览本地内容，但联网型技能及外部工具仍取决于各自环境。
 
 ## 新电脑一键安装
 

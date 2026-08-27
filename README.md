@@ -54,15 +54,16 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
 
-### 三种交付形态
+### 三类交付路径
 
 | 形态 | 获取方式 | 内容与边界 |
 | --- | --- | --- |
-| 公共 `general` 安装版 | GitHub Releases 的 `bootstrap.zip` | 面向普通用户；按锁文件安装通用 skills/MCP 意图，可显式启用经过校验的 Release 更新。 |
+| 公共 `general` 标准安装版 | GitHub Releases 的 `bootstrap.zip` | 默认推荐；按锁文件安装通用 skills/MCP 意图，需要 Git 与网络，可显式启用经过校验的 Release 更新。 |
+| 公共 `general` 完整绿色版 | GitHub Releases 的 `portable.zip` | 内置当前构建好的 `agent/`，适合 U 盘、离线浏览、演示和网络受限的机器；联网型 skill 与外部工具仍取决于各自环境。 |
 | 公共源码开发版 | GitHub 仓库、tag 或 fork | 完整 Git 历史和开发文件；长期开发、定制和贡献一律走 Git，不由 Release 更新器覆盖。 |
 | 私用 `all` 快照包 | 本机 `迁移 --mode private-all --encrypt` | 全量已构建 skills、MCP 和可继续开发的源码快照；可加密携带 MCP `env`/`headers`，不得 push 到公共 GitHub 仓库、公共 Release 或公共网盘。 |
 
-`rescan` 是一种不携带 skills/MCP 内容的辅助迁移清单，不属于上述对外发行形态。
+两个公共 `general` ZIP 都携带本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不是完整源码开发包，不含 `.git` 历史或测试集。需要持续开发、分支、测试、贡献或通过 Git 更新时，请 clone/fork 公共源码仓库。`rescan` 是一种不携带 skills/MCP 内容的辅助迁移清单，不属于上述对外发行形态。
 
 ### 项目迁移
 

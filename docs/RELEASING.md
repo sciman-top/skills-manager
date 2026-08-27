@@ -4,9 +4,9 @@
 
 最佳方式是 GitHub Release + 两个版本化 ZIP + SHA-256 清单：
 
-- `bootstrap` 是默认推荐下载：小、可复现，按 `skills.lock.json` 拉取锁定来源并安装。
-- `portable` 是完整绿色包：内置当前构建好的 `agent/`，适合离线、演示和机器迁移。
-- 源码归 Git tag；ZIP 是便利交付物，不替代仓库历史。
+- `bootstrap` 是默认推荐下载：小、可复现，按 `skills.lock.json` 拉取锁定来源并安装，需要 Git 与网络。
+- `portable` 是完整绿色包：内置当前构建好的 `agent/`，适合 U 盘、离线浏览、演示和网络受限的机器；联网型 skill 与外部工具仍取决于各自环境。
+- 两个公开 ZIP 都含本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不含 `.git` 历史或测试集，不是完整开发 checkout。源码开发、分支、测试与贡献归 Git clone/fork/tag；ZIP 是便利交付物，不替代仓库历史。
 - 公共 `general` 安装版可通过包内 Release 更新器检查最新正式 Release；更新器只接受未修改的 Release 安装目录，校验 `SHA256SUMS.txt`，保留同级 backup，并由独立进程切换目录。Git 源码开发版必须走 Git 更新。
 
 公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 加密迁移包不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
