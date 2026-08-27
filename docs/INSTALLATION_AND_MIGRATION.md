@@ -49,14 +49,14 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 对外产品渠道固定为三条、形态固定为四种：公共 `general` Release 的 `bootstrap.zip` 和 `portable.zip`、公共 Git 源码开发版、私用 `private-all` 恢复快照。当前公共 Release 为 `v2026.08.27.1`；`rescan` 只是辅助迁移清单，不是开发发行物。旧电脑还可以直接生成这些迁移包：
 
-只有公共 `general` Release 安装版与公共 Git 源码开发版可以 push 到公共 GitHub。`private-all`（以及任何携带私用 MCP 凭据的 `private-*` 包）只能通过可信私有介质或用户控制的私有存储转移；不得 push 到公共仓库、公共 Release 或公共网盘。
+只有公共 `general` Release 安装版与公共 Git 源码开发版可以 push 到公共 GitHub。`private-all`（以及任何携带私用 MCP 凭据的 `private-*` 包）只能通过可信私有介质或用户控制的私有存储转移；不得 push 到公共仓库、公共 Release 或公共网盘。未指定 `--out` 时，迁移包固定写入 `artifacts/migration/<run-id>/`；不要把迁移包直接写到 `artifacts/` 根目录。
 
 ```powershell
-.\skills.ps1 迁移 --mode all --out .\artifacts\migration-all.zip       # 全部已构建 skills + MCP 意图
-.\skills.ps1 迁移 --mode general --out .\artifacts\migration-general.zip # core 通用 skills + default MCP
-.\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip # 私用加密：core + default MCP 凭据
-.\skills.ps1 迁移 --mode private-all --encrypt --out .\artifacts\migration-private-all.zip # 私用加密：全部 skills + MCP 凭据
-.\skills.ps1 迁移 --mode rescan --out .\artifacts\migration-rescan.zip   # 不带 skills/MCP，只带重扫指引
+.\skills.ps1 迁移 --mode all                         # 默认：artifacts/migration/<run-id>/
+.\skills.ps1 迁移 --mode general                     # core 通用 skills + default MCP
+.\skills.ps1 迁移 --mode private-general --encrypt   # 私用加密：core + default MCP 凭据
+.\skills.ps1 迁移 --mode private-all --encrypt       # 私用加密：全部 skills + MCP 凭据
+.\skills.ps1 迁移 --mode rescan                      # 不带 skills/MCP，只带重扫指引
 ```
 
 迁移包内的 `MIGRATION-MANIFEST.json` 是范围和后续动作的真值，`MIGRATION-CONTENT.json` 对每个实际文件提供 SHA-256 完整性校验。`all`、`general`、`private-general` 和 `private-all` 会携带恢复所需的 `agent/`、配置、锁文件、`src/`、测试、脚本、文档、参考治理、CI 元数据和 MIT `LICENSE`；它们不携带 `.git` 历史，也不声称是公共源码开发版。持续开发请从公共 Git clone/fork/tag 获取；需要离线保留完整 Git 历史时，另行在可信介质生成 `git bundle --all` 并按 Git 官方流程校验导入。`rescan` 只携带清单，不会复制任何 skill 或 MCP 声明。使用 `rescan` 时，先在新电脑安装同版本的 skills-manager，再按清单重新发现和安装。
@@ -67,12 +67,14 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 ```powershell
 # 旧电脑
-.\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip
-Get-FileHash .\artifacts\migration-private-general.zip -Algorithm SHA256
+.\skills.ps1 迁移 --mode private-general --encrypt --json | Tee-Object -Variable privateGeneralJson
+$privateGeneralPath = ($privateGeneralJson | ConvertFrom-Json).path
+Get-FileHash $privateGeneralPath -Algorithm SHA256
 
 # 全部 skills + 全部 MCP；同样加密 env/header
-.\skills.ps1 迁移 --mode private-all --encrypt --out .\artifacts\migration-private-all.zip
-Get-FileHash .\artifacts\migration-private-all.zip -Algorithm SHA256
+.\skills.ps1 迁移 --mode private-all --encrypt --json | Tee-Object -Variable privateAllJson
+$privateAllPath = ($privateAllJson | ConvertFrom-Json).path
+Get-FileHash $privateAllPath -Algorithm SHA256
 ```
 
 把 ZIP 和 SHA-256 通过可信介质传到新电脑。新电脑先安装 PowerShell 7，解压到稳定目录，然后在解压目录执行一键流程：

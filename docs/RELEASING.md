@@ -24,15 +24,16 @@ pwsh -NoProfile -File .\build.ps1
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
-输出到 ignored `artifacts/`（只保留当前 run 的 ZIP 和 checksum；该目录不是公共下载源，目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
+输出到 ignored `artifacts/release/<version>/`（每个版本独立目录；该目录不是公共下载源，完整目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
 
 ```text
-skills-manager-<version>-bootstrap.zip
-skills-manager-<version>-portable.zip
-skills-manager-<version>-SHA256SUMS.txt
+artifacts/release/<version>/
+├─ skills-manager-<version>-bootstrap.zip
+├─ skills-manager-<version>-portable.zip
+└─ skills-manager-<version>-SHA256SUMS.txt
 ```
 
-当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理本地旧 ZIP、smoke 解压目录、迁移 rescan 副本和其他非发布文件；正式下载统一指向 GitHub Release 页面。
+当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理 `artifacts/tmp/<run-id>/` 下的 smoke 解压和其他临时副产物；迁移包写入 `artifacts/migration/<run-id>/`，历史留存只能显式放到 `artifacts/archive/<kind>/<version-or-date>/`。正式下载统一指向 GitHub Release 页面，禁止从 `artifacts/` 根目录或历史目录取包。
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
 

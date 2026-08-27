@@ -22,9 +22,10 @@ Describe 'Release packaging' {
         & pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.1' -Package Bootstrap -OutputDirectory $output -AllowDirtyWorktree | Out-Null
         $LASTEXITCODE | Should -Be 0
 
-        $bootstrap = Join-Path $output 'skills-manager-test.1-bootstrap.zip'
+        $releaseRoot = Join-Path $output 'test.1'
+        $bootstrap = Join-Path $releaseRoot 'skills-manager-test.1-bootstrap.zip'
         Test-Path -LiteralPath $bootstrap | Should -Be $true
-        Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.1-SHA256SUMS.txt') | Should -Be $true
+        Test-Path -LiteralPath (Join-Path $releaseRoot 'skills-manager-test.1-SHA256SUMS.txt') | Should -Be $true
 
         $extract = Join-Path $TestDrive 'extracted'
         Expand-Archive -LiteralPath $bootstrap -DestinationPath (Join-Path $extract 'bootstrap')
@@ -61,7 +62,7 @@ Describe 'Release packaging' {
         & pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.2' -Package Portable -OutputDirectory $output -AllowDirtyWorktree | Out-Null
         $LASTEXITCODE | Should -Be 0
 
-        $portable = Join-Path $output 'skills-manager-test.2-portable.zip'
+        $portable = Join-Path (Join-Path $output 'test.2') 'skills-manager-test.2-portable.zip'
         Test-Path -LiteralPath $portable | Should -BeTrue
         $extract = Join-Path $TestDrive 'portable-extracted'
         Expand-Archive -LiteralPath $portable -DestinationPath $extract
@@ -144,7 +145,7 @@ Describe 'Release packaging' {
 
         $LASTEXITCODE | Should -Not -Be 0
         $result -join "`n" | Should -Match 'Portable release blocked: 1 skills require license review: unknown-skill'
-        Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.3-portable.zip') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path (Join-Path $output 'test.3') 'skills-manager-test.3-portable.zip') | Should -BeFalse
     }
 
     It 'rejects a tracked dirty release source unless explicitly marked non-publishable' {
@@ -157,7 +158,7 @@ Describe 'Release packaging' {
             $result = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.dirty' -Package Bootstrap -OutputDirectory $output 2>&1)
             $LASTEXITCODE | Should -Not -Be 0
             $result -join "`n" | Should -Match 'requires a clean tracked worktree'
-            Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.dirty-bootstrap.zip') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path (Join-Path $output 'test.dirty') 'skills-manager-test.dirty-bootstrap.zip') | Should -BeFalse
         }
         finally {
             [IO.File]::WriteAllBytes($trackedFile, $original)

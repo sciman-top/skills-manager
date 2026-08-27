@@ -6,14 +6,15 @@ param(
     [string]$Version,
     [ValidateSet('Bootstrap', 'Portable', 'Both')]
     [string]$Package = 'Both',
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts'),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\release'),
     [switch]$AllowDirtyWorktree
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 . (Join-Path $repoRoot 'src\Application\SkillSupply.ps1')
-$outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
+$outputParent = [IO.Path]::GetFullPath($OutputDirectory)
+$outputRoot = [IO.Path]::GetFullPath((Join-Path $outputParent $Version))
 $workRoot = Join-Path $outputRoot '.release-work'
 
 function Assert-InsideOutput([string]$Path) {

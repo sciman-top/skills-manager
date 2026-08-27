@@ -68,9 +68,10 @@ Describe 'Migration bundles' {
         Test-Path -LiteralPath (Join-Path $root 'skills.json') | Should -BeFalse
     }
 
-    It 'uses the ignored artifacts directory when no output path is supplied' {
+    It 'uses a timestamped ignored migration directory when no output path is supplied' {
         $result = Invoke-MigrationCommand @('--mode','rescan','--json') | ConvertFrom-Json
-        $result.path | Should -Match ([regex]::Escape('\artifacts\migration-rescan-'))
+        $result.path | Should -Match ([regex]::Escape('\artifacts\migration\'))
+        $result.path | Should -Match '\\artifacts\\migration\\[^\\]+\\migration-rescan-[^\\]+\.zip$'
     }
 
     It 'general bundle uses core skills and strips MCP credential values' {

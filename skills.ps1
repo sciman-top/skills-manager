@@ -16158,7 +16158,10 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
     $options = Get-MigrationTokens $Tokens
     $cfg = LoadCfg
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
-    $outPath = if ([string]::IsNullOrWhiteSpace($options.out_path)) { Join-Path (Join-Path $Root 'artifacts') ("migration-{0}-{1}.zip" -f $options.mode, $stamp) } else { [IO.Path]::GetFullPath($options.out_path) }
+    $outPath = if ([string]::IsNullOrWhiteSpace($options.out_path)) {
+        $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path 'migration' $stamp)
+        Join-Path $migrationRunRoot ("migration-{0}-{1}.zip" -f $options.mode, $stamp)
+    } else { [IO.Path]::GetFullPath($options.out_path) }
     $outParent = Split-Path -Parent $outPath
     if (-not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Path $outParent -Force | Out-Null }
     Need ($options.force -or -not (Test-Path -LiteralPath $outPath)) ("迁移输出已存在：{0}；如需覆盖请使用 --force" -f $outPath)

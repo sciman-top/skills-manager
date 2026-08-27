@@ -69,19 +69,19 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### 项目迁移
 
-可用 `迁移` 命令生成跨电脑 ZIP，按需选择范围：
+可用 `迁移` 命令生成跨电脑 ZIP，默认写入 `artifacts\migration\<run-id>\`，按需选择范围：
 
 ```powershell
 # all：携带当前已构建的全部 skills 与 MCP 配置意图
-.\skills.ps1 迁移 --mode all --out .\artifacts\migration-all.zip
+.\skills.ps1 迁移 --mode all
 # general：仅携带 core 通用 skills 与 default MCP
-.\skills.ps1 迁移 --mode general --out .\artifacts\migration-general.zip
+.\skills.ps1 迁移 --mode general
 # private-general：通用 skills + default MCP；交互输入口令加密 env/header 值
-.\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip
+.\skills.ps1 迁移 --mode private-general --encrypt
 # private-all：全部 skills + MCP；交互输入口令加密 env/header 值，仅限私用
-.\skills.ps1 迁移 --mode private-all --encrypt --out .\artifacts\migration-private-all.zip
+.\skills.ps1 迁移 --mode private-all --encrypt
 # rescan：不携带 skills/MCP，仅带新电脑重新发现、安装的指引
-.\skills.ps1 迁移 --mode rescan --out .\artifacts\migration-rescan.zip
+.\skills.ps1 迁移 --mode rescan
 ```
 
 迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；MCP 仅保留可重建的声明和脱敏后的凭据引用名称。`all`/`general`/`private-general`/`private-all` 包会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`all`/`general` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`private-general` 和 `private-all` 只有在显式 `--encrypt` 时才会把 MCP `env`/`headers` 放入 AES-256-GCM 加密 companion file。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。

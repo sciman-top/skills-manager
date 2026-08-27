@@ -76,7 +76,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
     It 'attests exactly the three release assets with pinned provenance action and minimal tag-job permissions' {
         $script:workflow | Should -Match '(?ms)^  release:.*?permissions:\s*\r?\n\s+contents:\s*write\s*\r?\n\s+id-token:\s*write\s*\r?\n\s+attestations:\s*write'
         $script:workflow | Should -Match 'actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a'
-        $script:workflow | Should -Match '(?ms)subject-path:\s*\|\s*\r?\n\s+artifacts/\*\.zip\s*\r?\n\s+artifacts/\*-SHA256SUMS\.txt\s*$'
+        $script:workflow | Should -Match '(?ms)subject-path:\s*\|\s*\r?\n\s+artifacts/release/\$\{\{ github\.ref_name \}\}/\*\.zip\s*\r?\n\s+artifacts/release/\$\{\{ github\.ref_name \}\}/\*-SHA256SUMS\.txt\s*$'
         @([regex]::Matches($script:workflow, '(?m)^\s+(id-token|attestations):\s*write\s*$')).Count | Should -Be 2
     }
 }

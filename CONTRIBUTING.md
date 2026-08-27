@@ -38,7 +38,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 
 ## Release tooling
 
-`scripts/release/build-release.ps1` is the single release-package entrypoint. It creates bootstrap and portable ZIPs plus a SHA-256 list under ignored `artifacts/`. Do not hand-assemble or upload a package containing `.git`, runtime reports, credentials, host configuration, or plugin caches. Follow [docs/RELEASING.md](docs/RELEASING.md); every public package must include the repository MIT `LICENSE` while preserving third-party license obligations.
+`scripts/release/build-release.ps1` is the single release-package entrypoint. It creates bootstrap and portable ZIPs plus a SHA-256 list under ignored `artifacts/release/<version>/`; migration bundles belong under `artifacts/migration/<run-id>/`, and smoke output under `artifacts/tmp/<run-id>/`. Do not hand-assemble or upload a package containing `.git`, runtime reports, credentials, host configuration, or plugin caches. Follow [docs/RELEASING.md](docs/RELEASING.md); every public package must include the repository MIT `LICENSE` while preserving third-party license obligations.
 
 ## Documentation and evidence
 
