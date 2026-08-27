@@ -5,6 +5,15 @@
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
+        # Command-specific parsers own all remaining tokens, including --long-options.
+        $args = @($CommandArgs)
+        # These top-level aliases prevent PowerShell from treating --out as an
+        # abbreviated common parameter. Restore them for every command-specific
+        # parser so existing --mode/--out/--force/--json contracts remain intact.
+        if (-not [string]::IsNullOrWhiteSpace($MigrationMode)) { $args += @('--mode', $MigrationMode) }
+        if (-not [string]::IsNullOrWhiteSpace($MigrationOut)) { $args += @('--out', $MigrationOut) }
+        if ($MigrationForce) { $args += '--force' }
+        if ($MigrationJson) { $args += '--json' }
         $deprecatedCommandAliases = @{
             "发现技能" = "发现"
             "从技能库选择安装" = "安装"
@@ -27,6 +36,12 @@ if ($MyInvocation.InvocationName -ne '.') {
             "命令导入安装" { 命令导入安装 }
             "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
+            "迁移" { Invoke-MigrationCommand $args }
+            "migration" { Invoke-MigrationCommand $args }
+            "迁移解锁" { Invoke-MigrationUnlockCommand $args }
+            "migration-unlock" { Invoke-MigrationUnlockCommand $args }
+            "迁移应用" { Invoke-MigrationApplyCommand $args }
+            "migration-apply" { Invoke-MigrationApplyCommand $args }
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }

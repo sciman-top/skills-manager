@@ -170,6 +170,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
+  - 项目迁移：按 all/general/private-general/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
 
 易混点：
   - 只想让本地配置重新输出：用“重建并同步”（CLI：`构建生效`）
@@ -195,6 +196,10 @@ Skills 管理器（中文菜单）
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
+  .\skills.ps1 迁移 --mode all|general|private-general|rescan [--out <迁移包.zip>] [--force]
+  .\skills.ps1 迁移 --mode private-general --encrypt [--out <迁移包.zip>] [--force]
+  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.enc.json>] [--yes]
+  .\skills.ps1 migration-apply [--skip-mcp] [--json]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）

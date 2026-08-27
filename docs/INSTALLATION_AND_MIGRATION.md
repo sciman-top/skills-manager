@@ -46,6 +46,44 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 ## 从旧电脑迁移
 
+也可以在旧电脑直接生成三种范围的迁移包：
+
+```powershell
+.\skills.ps1 迁移 --mode all --out .\artifacts\migration-all.zip       # 全部已构建 skills + MCP 意图
+.\skills.ps1 迁移 --mode general --out .\artifacts\migration-general.zip # core 通用 skills + default MCP
+.\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip # 私用加密：core + default MCP 凭据
+.\skills.ps1 迁移 --mode rescan --out .\artifacts\migration-rescan.zip   # 不带 skills/MCP，只带重扫指引
+```
+
+迁移包内的 `MIGRATION-MANIFEST.json` 是范围和后续动作的真值。`all` 和 `general` 会携带对应的 `agent/`、配置、锁文件、`src/`、测试、脚本、文档和 MIT `LICENSE`，解压后可继续开发；`rescan` 只携带清单，不会复制任何 skill 或 MCP 声明。所有迁移包都不携带 `.git` 历史，若要继续使用版本控制，请在新电脑重新 clone，或在副本中自行 `git init`。使用 `rescan` 时，先在新电脑安装同版本的 skills-manager，再按清单重新发现和安装。
+
+### 私用 + general（携带 MCP 凭据）
+
+旧电脑执行打包命令时会交互输入并确认一次加密口令。口令不会写入命令行、日志或 `MIGRATION-MANIFEST.json`；ZIP 中的 `MIGRATION-MCP-CREDENTIALS.enc.json` 使用 PBKDF2-SHA256 + AES-256-GCM 保护。
+
+```powershell
+# 旧电脑
+.\skills.ps1 迁移 --mode private-general --encrypt --out .\artifacts\migration-private-general.zip
+Get-FileHash .\artifacts\migration-private-general.zip -Algorithm SHA256
+```
+
+把 ZIP 和 SHA-256 通过可信介质传到新电脑。新电脑先安装 PowerShell 7，解压到稳定目录，然后在解压目录执行一键流程：
+
+```powershell
+# 新电脑：恢复凭据、重建/投影 skills，并同步 MCP（交互输入同一口令）
+.\skills.ps1 migration-apply
+# 如暂时不想改宿主 MCP 配置：
+.\skills.ps1 migration-apply --skip-mcp
+```
+
+`migration-apply` 会调用包内 `install.ps1 -SkipRebuildLocked`；私用包会先调用 `migration-unlock --yes`，再把配置写入已声明的宿主目标。手动等价流程是 `migration-unlock`（写包内 `skills.json`，随后需输入 `RESTORE`）再执行 `setup.cmd -SkipRebuildLocked -SyncMcp`。新电脑需要自行具备 MCP 的外部依赖（例如 Node.js、npx）和新的宿主登录环境；本流程不迁移 provider/auth/session 或插件缓存。
+
+### 从 GitHub 下载、安装与后续更新
+
+公开分发使用 GitHub Releases：`bootstrap.zip` 是按锁文件联网重建的安装包，`portable.zip` 是带预构建 `agent/` 的绿色包；两者都包含源代码、测试、脚本、文档和 MIT `LICENSE`，但不包含 `.git` 历史。下载后先核对 release 提供的 `SHA256SUMS.txt`，再运行 `setup.cmd` 或 `skills.cmd`。日后上游技能的更新可用 `check-updates --json`、`更新 -Plan` 和 `更新 -Upgrade`；仓库还提供 `scripts/weekly-skills-update.ps1` 作为可由用户自行调度的 skills-only runner。
+
+当前版本不会在后台静默联网、自行替换运行中的安装目录，也不会擅自创建计划任务。需要“通知有新版本并自动升级 skills-manager 本体”时，应由宿主/operator 明确安排调度，并在下载后重新校验 SHA-256、保留旧目录再切换；这属于 release/宿主写入域，不由普通 `check-updates` 或迁移命令隐式完成。这样可避免把网络可达、下载成功或本地文件替换误报为 `host_loaded` / `live_accepted`。
+
 推荐迁移配置意图，不复制宿主缓存或目录链接：
 
 1. 在旧电脑备份自己修改过的 `skills.json`、`skills.lock.json` 和 `overrides/`。

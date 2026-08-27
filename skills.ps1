@@ -1,6 +1,7 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "check-updates", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "check-updates", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "迁移", "migration", "迁移解锁", "migration-unlock", "迁移应用", "migration-apply", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "prune-invalid-mappings")]
+    [Parameter(Position = 0)]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -10,7 +11,17 @@ param(
     [switch]$Upgrade,
     [string]$SkillProfile = "",
     [switch]$AllowUnverifiedHostProjection,
-    [switch]$SkipHostProjection
+    [switch]$SkipHostProjection,
+    [Alias('mode')]
+    [string]$MigrationMode = '',
+    [Alias('out')]
+    [string]$MigrationOut = '',
+    [Alias('force')]
+    [switch]$MigrationForce,
+    [Alias('json')]
+    [switch]$MigrationJson,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$CommandArgs = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -15733,6 +15744,380 @@ function 同步MCP {
     }
 }
 
+function Get-MigrationTokens([string[]]$Tokens) {
+    $result = [ordered]@{ mode = 'all'; out_path = ''; force = $false; json = $false; encrypt = $false }
+    $items = @($Tokens)
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $token = [string]$items[$i]
+        switch -Regex ($token.ToLowerInvariant()) {
+            '^(--mode|-m)$' {
+                Need ($i + 1 -lt $items.Count) '迁移 --mode 需要 all、general 或 rescan'
+                $result.mode = [string]$items[++$i]
+                continue
+            }
+            '^--mode=' {
+                $result.mode = $token.Substring(7)
+                continue
+            }
+            '^(--out|-o)$' {
+                Need ($i + 1 -lt $items.Count) '迁移 --out 需要输出 ZIP 路径'
+                $result.out_path = [string]$items[++$i]
+                continue
+            }
+            '^--out=' {
+                $result.out_path = $token.Substring(6)
+                continue
+            }
+            '^--force$' { $result.force = $true; continue }
+            '^--json$' { $result.json = $true; continue }
+            '^--encrypt$' { $result.encrypt = $true; continue }
+            default { throw ("迁移不支持参数：{0}" -f $token) }
+        }
+    }
+    $result.mode = ([string]$result.mode).Trim().ToLowerInvariant()
+    Need (@('all','general','private-general','rescan') -contains $result.mode) '迁移模式必须是 all、general、private-general 或 rescan'
+    Need ($result.mode -ne 'private-general' -or $result.encrypt) 'private-general 必须显式加 --encrypt'
+    return [pscustomobject]$result
+}
+
+function ConvertFrom-MigrationSecureString([System.Security.SecureString]$Value) {
+    Need ($null -ne $Value) '迁移加密口令不能为空'
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+}
+
+function Read-MigrationPassphrase([string]$Prompt, [switch]$Confirm) {
+    $firstSecure = Read-Host -Prompt $Prompt -AsSecureString
+    $first = ConvertFrom-MigrationSecureString $firstSecure
+    Need (-not [string]::IsNullOrWhiteSpace($first)) '迁移加密口令不能为空'
+    if ($Confirm) {
+        $secondSecure = Read-Host -Prompt '请再次输入迁移加密口令（不会保存）' -AsSecureString
+        $second = ConvertFrom-MigrationSecureString $secondSecure
+        $a = [Text.Encoding]::UTF8.GetBytes($first)
+        $b = [Text.Encoding]::UTF8.GetBytes($second)
+        try {
+            Need ($a.Length -eq $b.Length -and [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($a, $b)) '两次输入的迁移加密口令不一致'
+        }
+        finally { [Array]::Clear($a, 0, $a.Length); [Array]::Clear($b, 0, $b.Length) }
+    }
+    return $firstSecure
+}
+
+function Protect-MigrationCredentialPayload($Payload, [System.Security.SecureString]$Passphrase) {
+    $pass = ConvertFrom-MigrationSecureString $Passphrase
+    $plainBytes = [Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 30 -Compress))
+    $salt = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Fill($salt)
+    $nonce = New-Object byte[] 12; [Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+    $key = New-Object byte[] 32
+    $iterations = 600000
+    $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($pass, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
+    $cipherBytes = New-Object byte[] $plainBytes.Length
+    $tag = New-Object byte[] 16
+    $aad = [Text.Encoding]::UTF8.GetBytes('skills-manager:migration:mcp:v1')
+    try {
+        [Array]::Copy($kdf.GetBytes($key.Length), $key, $key.Length)
+        $aes = [Security.Cryptography.AesGcm]::new($key, $tag.Length)
+        try { $aes.Encrypt($nonce, $plainBytes, $cipherBytes, $tag, $aad) }
+        finally { $aes.Dispose() }
+        return [ordered]@{
+            schema_version = 1
+            algorithm = 'AES-256-GCM'
+            kdf = 'PBKDF2-SHA256'
+            iterations = $iterations
+            salt = [Convert]::ToBase64String($salt)
+            nonce = [Convert]::ToBase64String($nonce)
+            tag = [Convert]::ToBase64String($tag)
+            ciphertext = [Convert]::ToBase64String($cipherBytes)
+        }
+    }
+    finally {
+        [Array]::Clear($plainBytes, 0, $plainBytes.Length); [Array]::Clear($key, 0, $key.Length)
+        [Array]::Clear($salt, 0, $salt.Length); [Array]::Clear($nonce, 0, $nonce.Length); [Array]::Clear($tag, 0, $tag.Length)
+    }
+}
+
+function Unprotect-MigrationCredentialPayload($Encrypted, [System.Security.SecureString]$Passphrase) {
+    Need ([int]$Encrypted.schema_version -eq 1) '迁移凭据文件 schema_version 不支持'
+    Need ([string]$Encrypted.algorithm -eq 'AES-256-GCM' -and [string]$Encrypted.kdf -eq 'PBKDF2-SHA256') '迁移凭据文件加密算法不支持'
+    $iterations = [int]$Encrypted.iterations
+    Need ($iterations -ge 100000 -and $iterations -le 5000000) '迁移凭据文件 KDF iterations 非法'
+    try {
+        $salt = [Convert]::FromBase64String([string]$Encrypted.salt); $nonce = [Convert]::FromBase64String([string]$Encrypted.nonce)
+        $tag = [Convert]::FromBase64String([string]$Encrypted.tag); $cipherBytes = [Convert]::FromBase64String([string]$Encrypted.ciphertext)
+    }
+    catch { throw '迁移凭据文件 Base64 字段非法' }
+    Need ($salt.Length -eq 16 -and $nonce.Length -eq 12 -and $tag.Length -eq 16 -and $cipherBytes.Length -gt 0) '迁移凭据文件字段长度非法'
+    $pass = ConvertFrom-MigrationSecureString $Passphrase
+    $key = New-Object byte[] 32; $plainBytes = New-Object byte[] $cipherBytes.Length
+    $aad = [Text.Encoding]::UTF8.GetBytes('skills-manager:migration:mcp:v1')
+    $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($pass, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
+    try {
+        [Array]::Copy($kdf.GetBytes($key.Length), $key, $key.Length)
+        $aes = [Security.Cryptography.AesGcm]::new($key, $tag.Length)
+        try { $aes.Decrypt($nonce, $cipherBytes, $tag, $plainBytes, $aad) }
+        catch { throw '迁移加密口令错误或凭据文件已损坏' }
+        finally { $aes.Dispose() }
+        return [Text.Encoding]::UTF8.GetString($plainBytes)
+    }
+    finally { [Array]::Clear($key, 0, $key.Length); [Array]::Clear($plainBytes, 0, $plainBytes.Length) }
+}
+
+function Copy-MigrationTree([string]$Source, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return $false }
+    $sourceRoot = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+    if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop)) {
+        # Migration contains package payload only: never follow links and never copy Git history.
+        if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
+        $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
+        $target = Join-Path $Destination $relative
+        if ($entry.PSIsContainer) {
+            if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
+            continue
+        }
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        Copy-Item -LiteralPath $entry.FullName -Destination $target -Force
+    }
+    return $true
+}
+
+function Get-MigrationMcpIntent($Server) {
+    $item = [ordered]@{}
+    foreach ($name in @('name','enabled','transport','command','args','url','startup_timeout_sec','enabled_tools','bearer_token_env_var')) {
+        $property = $Server.PSObject.Properties[$name]
+        if ($null -ne $property) { $item[$name] = $property.Value }
+    }
+    $credentialNames = @()
+    foreach ($field in @('env','headers')) {
+        $property = $Server.PSObject.Properties[$field]
+        if ($null -eq $property -or $null -eq $property.Value) { continue }
+        foreach ($entry in $property.Value.PSObject.Properties) { $credentialNames += [string]$entry.Name }
+    }
+    if ($credentialNames.Count -gt 0) { $item.credential_reference_names = @($credentialNames | Sort-Object -Unique) }
+    return [pscustomobject]$item
+}
+
+function Get-MigrationCredentialPayload($Config, [string[]]$McpNames) {
+    $servers = New-Object Collections.Generic.List[object]
+    foreach ($server in @($Config.mcp_servers | Where-Object { $McpNames -contains [string]$_.name })) {
+        $item = [ordered]@{ name = [string]$server.name }
+        foreach ($field in @('env','headers')) {
+            $property = $server.PSObject.Properties[$field]
+            if ($null -eq $property -or $null -eq $property.Value) { continue }
+            $map = [ordered]@{}
+            foreach ($entry in $property.Value.PSObject.Properties) { $map[[string]$entry.Name] = [string]$entry.Value }
+            if ($map.Count -gt 0) { $item[$field] = $map }
+        }
+        if ($item.Keys.Count -gt 1) { $servers.Add([pscustomobject]$item) | Out-Null }
+    }
+    return [pscustomobject][ordered]@{ schema_version = 1; mcp_servers = @($servers.ToArray()) }
+}
+
+function Get-MigrationUnlockTokens([string[]]$Tokens) {
+    $result = [ordered]@{ credentials_path = ''; yes = $false; json = $false }
+    $items = @($Tokens)
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $token = [string]$items[$i]
+        switch -Regex ($token.ToLowerInvariant()) {
+            '^(--credentials|-c)$' { Need ($i + 1 -lt $items.Count) 'migration-unlock --credentials 需要文件路径'; $result.credentials_path = [string]$items[++$i]; continue }
+            '^--credentials=' { $result.credentials_path = $token.Substring(14); continue }
+            '^--yes$' { $result.yes = $true; continue }
+            '^--json$' { $result.json = $true; continue }
+            default { throw ("migration-unlock 不支持参数：{0}" -f $token) }
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function Get-MigrationApplyTokens([string[]]$Tokens) {
+    $result = [ordered]@{ skip_mcp = $false; json = $false }
+    foreach ($token in @($Tokens)) {
+        switch ([string]$token) {
+            '--skip-mcp' { $result.skip_mcp = $true; continue }
+            '--json' { $result.json = $true; continue }
+            default { throw ("migration-apply 不支持参数：{0}" -f $token) }
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
+    $options = Get-MigrationUnlockTokens $Tokens
+    $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
+    Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
+    $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -eq 'private-general') '当前迁移包不是 private-general'
+    $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) { Join-Path $Root 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { [IO.Path]::GetFullPath($options.credentials_path) }
+    Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
+    Need (Test-Path -LiteralPath $credentialPath -PathType Leaf) ("缺少迁移凭据文件：{0}" -f $credentialPath)
+    $encrypted = Get-ContentUtf8 $credentialPath | ConvertFrom-Json
+    $passphrase = Read-MigrationPassphrase '请输入迁移加密口令（不会保存）'
+    $payload = Unprotect-MigrationCredentialPayload $encrypted $passphrase | ConvertFrom-Json
+    Need ([int]$payload.schema_version -eq 1 -and $null -ne $payload.mcp_servers) '迁移凭据明文载荷 schema 无效'
+    $cfg = LoadCfg
+    $changed = 0
+    foreach ($payloadServer in @($payload.mcp_servers)) {
+        $name = [string]$payloadServer.name
+        Need (@($manifest.mcp_servers) -contains $name) ("迁移凭据服务不在 manifest 中：{0}" -f $name)
+        $server = @($cfg.mcp_servers | Where-Object { [string]$_.name -eq $name }) | Select-Object -First 1
+        Need ($null -ne $server) ("迁移凭据服务不在当前 skills.json 中：{0}" -f $name)
+        foreach ($field in @('env','headers')) {
+            $property = $payloadServer.PSObject.Properties[$field]
+            if ($null -eq $property) { continue }
+            $map = [ordered]@{}
+            foreach ($entry in $property.Value.PSObject.Properties) { $map[[string]$entry.Name] = [string]$entry.Value }
+            $server | Add-Member -NotePropertyName $field -NotePropertyValue ([pscustomobject]$map) -Force
+            $changed++
+        }
+    }
+    Need ($options.yes -or (Confirm-Action ("将恢复 {0} 个 MCP 凭据字段到当前 skills.json" -f $changed) 'RESTORE' -DefaultNo)) '已取消恢复 MCP 凭据'
+    Assert-Cfg $cfg
+    $raw = Get-ContentUtf8 $CfgPath
+    SaveCfgSafe $cfg $raw
+    $result = [pscustomobject]@{ command = 'migration-unlock'; mode = 'private-general'; restored_fields = $changed; path = $CfgPath; passphrase_exposed = $false }
+    if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+    Write-Host ("已恢复 {0} 个 MCP 凭据字段到 skills.json。" -f $changed) -ForegroundColor Green
+    return $result
+}
+
+function Invoke-MigrationApplyCommand([string[]]$Tokens) {
+    $options = Get-MigrationApplyTokens $Tokens
+    $manifestPath = Join-Path $Root 'MIGRATION-MANIFEST.json'
+    Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
+    $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general')) 'migration-apply 只接受 all、general 或 private-general 包'
+    if ([string]$manifest.mode -eq 'private-general') { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
+    $installPath = Join-Path $Root 'install.ps1'
+    Need (Test-Path -LiteralPath $installPath -PathType Leaf) '迁移包缺少 install.ps1'
+    $pwsh = Get-Command pwsh -ErrorAction Stop | Select-Object -First 1
+    $installArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$installPath,'-Mode','CurrentUser','-SkipRebuildLocked')
+    if (-not $options.skip_mcp) { $installArgs += '-SyncMcp' }
+    & $pwsh.Source @installArgs
+    $exitCode = $LASTEXITCODE
+    Need ($exitCode -eq 0) ("迁移安装失败，exit={0}" -f $exitCode)
+    $result = [pscustomobject]@{ command = 'migration-apply'; mode = [string]$manifest.mode; sync_mcp = (-not $options.skip_mcp); exit_code = $exitCode; host_loaded = $false; live_accepted = $false }
+    if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+    Write-Host ("迁移安装完成：mode={0}，MCP同步={1}" -f $manifest.mode, (-not $options.skip_mcp)) -ForegroundColor Green
+    return $result
+}
+
+function New-MigrationConfig($Config, [string]$Mode, [string[]]$SkillNames, [string[]]$McpNames) {
+    $json = $Config | ConvertTo-Json -Depth 100
+    $copy = $json | ConvertFrom-Json
+    if ($Mode -ne 'all') {
+        $copy.mappings = @($copy.mappings | Where-Object { $SkillNames -contains [string]$_.to })
+        $usedVendors = @($copy.mappings | ForEach-Object { [string]$_.vendor } | Sort-Object -Unique)
+        $manualImportNames = @($copy.mappings | Where-Object { [string]$_.vendor -eq 'manual' } | ForEach-Object { [string]$_.from } | Sort-Object -Unique)
+        $copy.vendors = @($copy.vendors | Where-Object { $usedVendors -contains [string]$_.name })
+        $copy.imports = @($copy.imports | Where-Object { $manualImportNames -contains [string]$_.name })
+        $copy.mcp_servers = @($copy.mcp_servers | Where-Object { $McpNames -contains [string]$_.name } | ForEach-Object { Get-MigrationMcpIntent $_ })
+        if ($copy.PSObject.Properties['mcp_profiles']) {
+            $default = $copy.mcp_profiles.profiles.default
+            $copy.mcp_profiles = [pscustomobject]@{ active = 'default'; profiles = [pscustomobject]@{ default = $default } }
+        }
+    }
+    else {
+        $copy.mcp_servers = @($copy.mcp_servers | ForEach-Object { Get-MigrationMcpIntent $_ })
+    }
+    return $copy
+}
+
+function Invoke-MigrationCommand([string[]]$Tokens) {
+    $options = Get-MigrationTokens $Tokens
+    $cfg = LoadCfg
+    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+    $outPath = if ([string]::IsNullOrWhiteSpace($options.out_path)) { Join-Path (Join-Path $Root 'artifacts') ("migration-{0}-{1}.zip" -f $options.mode, $stamp) } else { [IO.Path]::GetFullPath($options.out_path) }
+    $outParent = Split-Path -Parent $outPath
+    if (-not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Path $outParent -Force | Out-Null }
+    Need ($options.force -or -not (Test-Path -LiteralPath $outPath)) ("迁移输出已存在：{0}；如需覆盖请使用 --force" -f $outPath)
+
+    $skillNames = @()
+    if ($options.mode -in @('general','private-general')) {
+        $profiles = $cfg.skill_projection.projection_profiles.profiles
+        $skillNames = @($profiles.core.include | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+    }
+    elseif ($options.mode -eq 'all') {
+        $skillNames = @(Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object Name | Sort-Object)
+    }
+    $mcpNames = if ($options.mode -in @('general','private-general')) { @($cfg.mcp_profiles.profiles.default.enabled | ForEach-Object { [string]$_ }) } elseif ($options.mode -eq 'all') { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
+    $encryptedCredentials = $null
+    if ($options.mode -eq 'private-general') {
+        $privatePayload = Get-MigrationCredentialPayload $cfg $mcpNames
+        $passphrase = Read-MigrationPassphrase '请输入私用迁移包加密口令（不会保存）' -Confirm
+        $encryptedCredentials = Protect-MigrationCredentialPayload $privatePayload $passphrase
+    }
+
+    $work = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-migration-{0}" -f ([guid]::NewGuid().ToString('N')))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    try {
+        $packageRoot = Join-Path $work ("skills-manager-migration-{0}" -f $options.mode)
+        New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
+        $manifest = [ordered]@{
+            schema_version = 1
+            product = 'skills-manager'
+            kind = 'migration'
+            mode = $options.mode
+            created_at = (Get-Date).ToUniversalTime().ToString('o')
+            skills = @($skillNames)
+            mcp_servers = @($mcpNames)
+            includes_credentials = ($options.mode -eq 'private-general')
+            includes_materialized_sources = ($options.mode -ne 'rescan')
+            development_ready = ($options.mode -ne 'rescan')
+            git_history_included = $false
+            license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides') } else { @() }
+            credential_file = if ($options.mode -eq 'private-general') { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
+            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -eq 'private-general') { @('解压后运行 migration-apply（输入同一加密口令）', '或先运行 migration-unlock，再运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '或运行 setup.cmd -SkipRebuildLocked -SyncMcp', '在新电脑开启全新宿主会话验证') }
+        }
+        $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MANIFEST.json') -Encoding utf8
+        if ($null -ne $encryptedCredentials) {
+            $encryptedCredentials | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MCP-CREDENTIALS.enc.json') -Encoding utf8
+        }
+        if ($options.mode -ne 'rescan') {
+            $migrationCfg = New-MigrationConfig $cfg $options.mode $skillNames $mcpNames
+            $migrationCfg | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $packageRoot 'skills.json') -Encoding utf8
+            foreach ($name in @('skills.lock.json','setup.cmd','install.ps1','build.ps1','skills.cmd','skills.ps1','LICENSE','README.md','README.en.md','AGENTS.md','CODE_OF_CONDUCT.md','CONTRIBUTING.md','SECURITY.md','.gitignore')) {
+                $source = Join-Path $Root $name
+                if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
+            }
+            foreach ($directory in @('src','config','tests','scripts','docs')) {
+                $source = Join-Path $Root $directory
+                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
+            }
+            if (Test-Path -LiteralPath (Join-Path $Root 'overrides') -PathType Container) { Copy-MigrationTree (Join-Path $Root 'overrides') (Join-Path $packageRoot 'overrides') | Out-Null }
+            $sourceRoots = if ($options.mode -eq 'all') { @('vendor','imports') } else {
+                @($migrationCfg.vendors | ForEach-Object { "vendor\$($_.name)" }) + @($migrationCfg.imports | ForEach-Object { "imports\$($_.name)" })
+            }
+            foreach ($relativeSource in @($sourceRoots | Sort-Object -Unique)) {
+                $source = Join-Path $Root $relativeSource
+                $destination = Join-Path $packageRoot $relativeSource
+                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source $destination | Out-Null }
+            }
+            if ($options.mode -eq 'all') {
+                if (Test-Path -LiteralPath $AgentDir -PathType Container) { Copy-MigrationTree $AgentDir (Join-Path $packageRoot 'agent') | Out-Null }
+            }
+            else {
+                $agentTarget = Join-Path $packageRoot 'agent'; New-Item -ItemType Directory -Path $agentTarget -Force | Out-Null
+                foreach ($name in $skillNames) {
+                    $source = Join-Path $AgentDir $name
+                    if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $agentTarget $name) | Out-Null }
+                }
+            }
+        }
+        if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
+        Compress-Archive -LiteralPath $packageRoot -DestinationPath $outPath -CompressionLevel Optimal
+        $result = [pscustomobject]@{ mode = $options.mode; path = $outPath; size = (Get-Item -LiteralPath $outPath).Length; sha256 = (Get-FileHash -LiteralPath $outPath -Algorithm SHA256).Hash.ToLowerInvariant(); skills = @($skillNames); mcp_servers = @($mcpNames) }
+        if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
+        Write-Host ("迁移包已生成：{0}" -f $outPath) -ForegroundColor Green
+        Write-Host ("模式={0}，技能={1}，MCP={2}，SHA-256={3}" -f $options.mode, $skillNames.Count, $mcpNames.Count, $result.sha256)
+        return $result
+    }
+    finally { if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue } }
+}
+
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
     $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null; host_probe = $false }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
@@ -23198,6 +23583,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
+  - 项目迁移：按 all/general/private-general/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
 
 易混点：
   - 只想让本地配置重新输出：用“重建并同步”（CLI：`构建生效`）
@@ -23223,6 +23609,10 @@ Skills 管理器（中文菜单）
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
+  .\skills.ps1 迁移 --mode all|general|private-general|rescan [--out <迁移包.zip>] [--force]
+  .\skills.ps1 迁移 --mode private-general --encrypt [--out <迁移包.zip>] [--force]
+  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.enc.json>] [--yes]
+  .\skills.ps1 migration-apply [--skip-mcp] [--json]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
@@ -23525,6 +23915,15 @@ function 菜单 {
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
+        # Command-specific parsers own all remaining tokens, including --long-options.
+        $args = @($CommandArgs)
+        # These top-level aliases prevent PowerShell from treating --out as an
+        # abbreviated common parameter. Restore them for every command-specific
+        # parser so existing --mode/--out/--force/--json contracts remain intact.
+        if (-not [string]::IsNullOrWhiteSpace($MigrationMode)) { $args += @('--mode', $MigrationMode) }
+        if (-not [string]::IsNullOrWhiteSpace($MigrationOut)) { $args += @('--out', $MigrationOut) }
+        if ($MigrationForce) { $args += '--force' }
+        if ($MigrationJson) { $args += '--json' }
         $deprecatedCommandAliases = @{
             "发现技能" = "发现"
             "从技能库选择安装" = "安装"
@@ -23547,6 +23946,12 @@ if ($MyInvocation.InvocationName -ne '.') {
             "命令导入安装" { 命令导入安装 }
             "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
+            "迁移" { Invoke-MigrationCommand $args }
+            "migration" { Invoke-MigrationCommand $args }
+            "迁移解锁" { Invoke-MigrationUnlockCommand $args }
+            "migration-unlock" { Invoke-MigrationUnlockCommand $args }
+            "迁移应用" { Invoke-MigrationApplyCommand $args }
+            "migration-apply" { Invoke-MigrationApplyCommand $args }
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
