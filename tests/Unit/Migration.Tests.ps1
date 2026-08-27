@@ -4,12 +4,14 @@ BeforeAll {
 }
 
 Describe 'Migration bundles' {
-    It 'requires explicit encryption for private-general' {
-        { Get-MigrationTokens @('--mode','private-general') } | Should -Throw '*必须显式加 --encrypt*'
-        $options = Get-MigrationTokens @('--mode','private-general','--encrypt')
+    It 'allows private migration modes with optional encryption' {
+        $options = Get-MigrationTokens @('--mode','private-general')
         $options.mode | Should -Be 'private-general'
+        $options.encrypt | Should -BeFalse
+        $options = Get-MigrationTokens @('--mode','private-general','--encrypt')
         $options.encrypt | Should -BeTrue
-        { Get-MigrationTokens @('--mode','private-all') } | Should -Throw '*必须显式加 --encrypt*'
+        $options = Get-MigrationTokens @('--mode','private-all')
+        $options.encrypt | Should -BeFalse
         (Get-MigrationTokens @('--mode','private-all','--encrypt')).mode | Should -Be 'private-all'
     }
 
@@ -32,6 +34,7 @@ Describe 'Migration bundles' {
         $root = Join-Path $extract 'skills-manager-migration-private-general'
         $manifest = Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MANIFEST.json') -Raw | ConvertFrom-Json
         $manifest.includes_credentials | Should -BeTrue
+        $manifest.credentials_encrypted | Should -BeTrue
         $manifest.credential_file | Should -Be 'MIGRATION-MCP-CREDENTIALS.enc.json'
         Test-Path -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.enc.json') | Should -BeTrue
         (Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.enc.json') -Raw) | Should -Not -Match 'migration-test-passphrase'
@@ -45,6 +48,28 @@ Describe 'Migration bundles' {
         Test-Path -LiteralPath (Join-Path $root 'docs\INSTALLATION_AND_MIGRATION.md') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'MIGRATION-CONTENT.json') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'references\reference-shelf.manifest.json') | Should -BeTrue
+    }
+
+    It 'creates a private-all bundle with plaintext credentials without prompting' {
+        Mock Read-Host { throw 'private-all plaintext mode must not prompt for a passphrase' }
+        $out = Join-Path $TestDrive 'private-all.zip'
+        Invoke-MigrationCommand @('--mode','private-all','--out',$out)
+        $extract = Join-Path $TestDrive 'private-all-extract'
+        Expand-Archive -LiteralPath $out -DestinationPath $extract
+        $root = Join-Path $extract 'skills-manager-migration-private-all'
+        $manifest = Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MANIFEST.json') -Raw | ConvertFrom-Json
+        $manifest.private_use_only | Should -BeTrue
+        $manifest.includes_credentials | Should -BeTrue
+        $manifest.credentials_encrypted | Should -BeFalse
+        $manifest.credential_file | Should -Be 'MIGRATION-MCP-CREDENTIALS.json'
+        Test-Path -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.enc.json') | Should -BeFalse
+        $credentialPayload = Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MCP-CREDENTIALS.json') -Raw | ConvertFrom-Json
+        $credentialPayload.schema_version | Should -Be 1
+        $manifest.skills.Count | Should -BeGreaterThan 0
+        $manifest.development_ready | Should -BeFalse
+        $manifest.restore_ready | Should -BeTrue
+        $manifest.git_history_included | Should -BeFalse
     }
 
     It 'accepts documented CLI long options without top-level PowerShell binding loss' {

@@ -9,7 +9,7 @@
 | 新电脑标准安装 | `bootstrap.zip` | 解压后运行 `setup.cmd` | 是，安装配置中的技能目标；MCP 需显式 `-SyncMcp` |
 | U 盘/临时目录或网络受限环境 | `portable.zip` | 解压后运行 `skills.cmd` | 否；仅显式执行安装/同步命令时写入 |
 | 开发或贡献 | Git clone | `pwsh -File .\install.ps1` | 是 |
-| 私用全量迁移 | `private-all` ZIP | 解压后运行 `migration-apply` | 是；MCP 凭据仅在加密包中恢复 |
+| 私用全量迁移 | `private-all` ZIP | 解压后运行 `migration-apply` | 是；默认从明文 companion file 恢复 MCP 凭据，也可选加密 |
 
 两种公共 `general` 包都要求 Windows 与 PowerShell 7，也都携带本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不含 `.git` 历史或测试集。要开发、创建分支、运行完整测试、贡献或用 Git 更新，请使用公共 Git clone/fork。`bootstrap` 安装和任何上游更新需要 Git 与网络；`portable` 已内置构建好的 `agent/`，可离线打开菜单、浏览本地内容，但联网型技能及外部工具仍取决于各自环境。
 
@@ -54,8 +54,9 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 ```powershell
 .\skills.ps1 迁移 --mode all                         # 默认：artifacts/deliveries/migration/<run-id>/
 .\skills.ps1 迁移 --mode general                     # core 通用 skills + default MCP
-.\skills.ps1 迁移 --mode private-general --encrypt   # 私用加密：core + default MCP 凭据
-.\skills.ps1 迁移 --mode private-all --encrypt       # 私用加密：全部 skills + MCP 凭据
+.\skills.ps1 迁移 --mode private-general             # 私用明文：core + default MCP 凭据
+.\skills.ps1 迁移 --mode private-all                 # 私用明文：全部 skills + MCP 凭据
+.\skills.ps1 迁移 --mode private-all --encrypt       # 可选：改为加密 MCP 凭据
 .\skills.ps1 迁移 --mode rescan                      # 不带 skills/MCP，只带重扫指引
 ```
 
@@ -63,15 +64,20 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 
 ### 私用 + general / all（携带 MCP 凭据）
 
-旧电脑执行打包命令时会交互输入并确认一次加密口令。口令不会写入命令行、日志或 `MIGRATION-MANIFEST.json`；ZIP 中的 `MIGRATION-MCP-CREDENTIALS.enc.json` 使用 PBKDF2-SHA256 + AES-256-GCM 保护。
+私用模式默认生成明文 `MIGRATION-MCP-CREDENTIALS.json`，不询问口令，适合只在你控制的本机或私有介质中使用。若要保护传输介质上的凭据，再显式加 `--encrypt`；此时打包和恢复才会交互输入口令，ZIP 中改为 `MIGRATION-MCP-CREDENTIALS.enc.json`，使用 PBKDF2-SHA256 + AES-256-GCM 保护。无论是否加密，私用包都不得上传公共 GitHub、公共 Release 或公共网盘。
 
 ```powershell
-# 旧电脑
+# 旧电脑：默认明文，不需要口令
+.\skills.ps1 迁移 --mode private-all --json | Tee-Object -Variable privateAllJson
+$privateAllPath = ($privateAllJson | ConvertFrom-Json).path
+Get-FileHash $privateAllPath -Algorithm SHA256
+
+# 如需加密，再显式使用 --encrypt
 .\skills.ps1 迁移 --mode private-general --encrypt --json | Tee-Object -Variable privateGeneralJson
 $privateGeneralPath = ($privateGeneralJson | ConvertFrom-Json).path
 Get-FileHash $privateGeneralPath -Algorithm SHA256
 
-# 全部 skills + 全部 MCP；同样加密 env/header
+# 全部 skills + 全部 MCP；加密 env/header
 .\skills.ps1 迁移 --mode private-all --encrypt --json | Tee-Object -Variable privateAllJson
 $privateAllPath = ($privateAllJson | ConvertFrom-Json).path
 Get-FileHash $privateAllPath -Algorithm SHA256
@@ -80,13 +86,13 @@ Get-FileHash $privateAllPath -Algorithm SHA256
 把 ZIP 和 SHA-256 通过可信介质传到新电脑。新电脑先安装 PowerShell 7，解压到稳定目录，然后在解压目录执行一键流程：
 
 ```powershell
-# 新电脑：恢复凭据、重建/投影 skills，并同步 MCP（交互输入同一口令）
+# 新电脑：恢复凭据、重建/投影 skills，并同步 MCP；明文包不询问口令，加密包询问同一口令
 .\skills.ps1 migration-apply
 # 如暂时不想改宿主 MCP 配置：
 .\skills.ps1 migration-apply --skip-mcp
 ```
 
-`migration-apply` 会调用包内 `install.ps1 -SkipRebuildLocked`；私用包会先调用 `migration-unlock --yes`，再把配置写入已声明的宿主目标。手动等价流程是 `migration-unlock`（写包内 `skills.json`，随后需输入 `RESTORE`）再执行 `setup.cmd -SkipRebuildLocked -SyncMcp`。新电脑需要自行具备 MCP 的外部依赖（例如 Node.js、npx）和新的宿主登录环境；本流程不迁移 provider/auth/session 或插件缓存。
+`migration-apply` 会调用包内 `install.ps1 -SkipRebuildLocked`；私用包会先调用 `migration-unlock --yes`，按 manifest 判断是否需要口令，再把配置写入已声明的宿主目标。手动等价流程是 `migration-unlock`（写包内 `skills.json`；加密包才需随后输入 `RESTORE`）再执行 `setup.cmd -SkipRebuildLocked -SyncMcp`。新电脑需要自行具备 MCP 的外部依赖（例如 Node.js、npx）和新的宿主登录环境；本流程不迁移 provider/auth/session 或插件缓存。
 
 ### 从 GitHub 下载、安装与后续更新
 

@@ -170,7 +170,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
-  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
+  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；private-* 默认生成明文私用快照，可用 --encrypt 生成加密 companion file
   - 发行更新：仅对未修改的 GitHub Release 安装版校验、备份并更新本体；源码开发版仍通过 Git 更新
 
 易混点：
@@ -198,8 +198,8 @@ Skills 管理器（中文菜单）
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
   .\skills.ps1 迁移 --mode all|general|private-general|private-all|rescan [--out <迁移包.zip>] [--force]
-  .\skills.ps1 迁移 --mode private-general|private-all --encrypt [--out <迁移包.zip>] [--force]
-  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.enc.json>] [--yes]
+  .\skills.ps1 迁移 --mode private-general|private-all [--encrypt] [--out <迁移包.zip>] [--force]
+  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
   .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply] [--sync-mcp]

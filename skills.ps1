@@ -15861,7 +15861,7 @@ function Get-MigrationTokens([string[]]$Tokens) {
         $token = [string]$items[$i]
         switch -Regex ($token.ToLowerInvariant()) {
             '^(--mode|-m)$' {
-                Need ($i + 1 -lt $items.Count) '迁移 --mode 需要 all、general 或 rescan'
+                Need ($i + 1 -lt $items.Count) '迁移 --mode 需要 all、general、private-general、private-all 或 rescan'
                 $result.mode = [string]$items[++$i]
                 continue
             }
@@ -15886,7 +15886,6 @@ function Get-MigrationTokens([string[]]$Tokens) {
     }
     $result.mode = ([string]$result.mode).Trim().ToLowerInvariant()
     Need (@('all','general','private-general','private-all','rescan') -contains $result.mode) '迁移模式必须是 all、general、private-general、private-all 或 rescan'
-    Need ($result.mode -notin @('private-general','private-all') -or $result.encrypt) 'private-general 和 private-all 必须显式加 --encrypt'
     return [pscustomobject]$result
 }
 
@@ -16077,13 +16076,28 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
     Assert-MigrationContentIntegrity $Root $manifest | Out-Null
-    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('private-general','private-all')) '当前迁移包不是私用加密迁移包'
-    $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) { Join-Path $Root 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { [IO.Path]::GetFullPath($options.credentials_path) }
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('private-general','private-all')) '当前迁移包不是私用迁移包'
+    $manifestCredentialFile = [string]$manifest.credential_file
+    $credentialsEncrypted = if ($manifest.PSObject.Properties['credentials_encrypted']) {
+        [bool]$manifest.credentials_encrypted
+    } else {
+        # Compatibility with manifests produced before credentials_encrypted existed.
+        $manifestCredentialFile -like '*.enc.json'
+    }
+    $defaultCredentialFile = if ($credentialsEncrypted) { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { 'MIGRATION-MCP-CREDENTIALS.json' }
+    $credentialFile = if ([string]::IsNullOrWhiteSpace($manifestCredentialFile)) { $defaultCredentialFile } else { $manifestCredentialFile }
+    $credentialPath = if ([string]::IsNullOrWhiteSpace($options.credentials_path)) {
+        Join-Path $Root $credentialFile
+    } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
     Need (Test-Path -LiteralPath $credentialPath -PathType Leaf) ("缺少迁移凭据文件：{0}" -f $credentialPath)
-    $encrypted = Get-ContentUtf8 $credentialPath | ConvertFrom-Json
-    $passphrase = Read-MigrationPassphrase '请输入迁移加密口令（不会保存）'
-    $payload = Unprotect-MigrationCredentialPayload $encrypted $passphrase | ConvertFrom-Json
+    $credentialDocument = Get-ContentUtf8 $credentialPath | ConvertFrom-Json
+    $payload = if ($credentialsEncrypted) {
+        $passphrase = Read-MigrationPassphrase '请输入迁移加密口令（不会保存）'
+        Unprotect-MigrationCredentialPayload $credentialDocument $passphrase | ConvertFrom-Json
+    } else {
+        $credentialDocument
+    }
     Need ([int]$payload.schema_version -eq 1 -and $null -ne $payload.mcp_servers) '迁移凭据明文载荷 schema 无效'
     $cfg = LoadCfg
     $changed = 0
@@ -16117,8 +16131,8 @@ function Invoke-MigrationApplyCommand([string[]]$Tokens) {
     Need (Test-Path -LiteralPath $manifestPath -PathType Leaf) '当前目录缺少 MIGRATION-MANIFEST.json'
     $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
     Assert-MigrationContentIntegrity $Root $manifest | Out-Null
-    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general','private-all')) 'migration-apply 只接受 all、general 或私用加密迁移包'
-    if ([string]$manifest.mode -in @('private-general','private-all')) { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
+    Need ([string]$manifest.kind -eq 'migration' -and [string]$manifest.mode -in @('all','general','private-general','private-all')) 'migration-apply 只接受 all、general 或私用迁移包'
+    if ([string]$manifest.mode -in @('private-general','private-all') -and [bool]$manifest.includes_credentials) { Invoke-MigrationUnlockCommand @('--yes') | Out-Null }
     $installPath = Join-Path $Root 'install.ps1'
     Need (Test-Path -LiteralPath $installPath -PathType Leaf) '迁移包缺少 install.ps1'
     $pwsh = Get-Command pwsh -ErrorAction Stop | Select-Object -First 1
@@ -16183,11 +16197,20 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         $skillNames = @(Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object Name | Sort-Object)
     }
     $mcpNames = if ($options.mode -in @('general','private-general')) { @($cfg.mcp_profiles.profiles.default.enabled | ForEach-Object { [string]$_ }) } elseif ($options.mode -in @('all','private-all')) { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
-    $encryptedCredentials = $null
-    if ($options.mode -in @('private-general','private-all')) {
+    $credentialPayload = $null
+    $credentialFileName = $null
+    $privateMode = $options.mode -in @('private-general','private-all')
+    if ($privateMode) {
         $privatePayload = Get-MigrationCredentialPayload $cfg $mcpNames
-        $passphrase = Read-MigrationPassphrase '请输入私用迁移包加密口令（不会保存）' -Confirm
-        $encryptedCredentials = Protect-MigrationCredentialPayload $privatePayload $passphrase
+        if ($options.encrypt) {
+            $passphrase = Read-MigrationPassphrase '请输入私用迁移包加密口令（不会保存）' -Confirm
+            $credentialPayload = Protect-MigrationCredentialPayload $privatePayload $passphrase
+            $credentialFileName = 'MIGRATION-MCP-CREDENTIALS.enc.json'
+        } else {
+            # Explicit private modes may carry plaintext credentials for local-only use.
+            $credentialPayload = $privatePayload
+            $credentialFileName = 'MIGRATION-MCP-CREDENTIALS.json'
+        }
     }
 
     $work = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-migration-{0}" -f ([guid]::NewGuid().ToString('N')))
@@ -16203,19 +16226,29 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             created_at = (Get-Date).ToUniversalTime().ToString('o')
             skills = @($skillNames)
             mcp_servers = @($mcpNames)
-            includes_credentials = ($options.mode -in @('private-general','private-all'))
+            private_use_only = $privateMode
+            includes_credentials = $privateMode
+            credentials_encrypted = ($privateMode -and $options.encrypt)
             includes_materialized_sources = ($options.mode -ne 'rescan')
             development_ready = $false
             restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
             source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides','vendor','imports','agent','references','.github') } else { @() }
-            credential_file = if ($options.mode -in @('private-general','private-all')) { 'MIGRATION-MCP-CREDENTIALS.enc.json' } else { $null }
-            apply = if ($options.mode -eq 'rescan') { @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP') } elseif ($options.mode -in @('private-general','private-all')) { @('解压后运行 migration-apply（输入同一加密口令）', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') } else { @('解压后运行 migration-apply', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证') }
+            credential_file = $credentialFileName
+            apply = if ($options.mode -eq 'rescan') {
+                @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP')
+            } elseif ($privateMode -and $options.encrypt) {
+                @('解压后运行 migration-apply（输入同一加密口令）', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证')
+            } elseif ($privateMode) {
+                @('解压后运行 migration-apply（本包为明文私用快照，不需要口令）', '不要上传公共 GitHub、公共 Release 或公共网盘', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证')
+            } else {
+                @('解压后运行 migration-apply', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证')
+            }
         }
         $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MANIFEST.json') -Encoding utf8
-        if ($null -ne $encryptedCredentials) {
-            $encryptedCredentials | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-MCP-CREDENTIALS.enc.json') -Encoding utf8
+        if ($null -ne $credentialPayload) {
+            $credentialPayload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot $credentialFileName) -Encoding utf8
         }
         if ($options.mode -ne 'rescan') {
             $migrationCfg = New-MigrationConfig $cfg $options.mode $skillNames $mcpNames
@@ -23943,7 +23976,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
-  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；私用凭据只进入加密 companion file
+  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；private-* 默认生成明文私用快照，可用 --encrypt 生成加密 companion file
   - 发行更新：仅对未修改的 GitHub Release 安装版校验、备份并更新本体；源码开发版仍通过 Git 更新
 
 易混点：
@@ -23971,8 +24004,8 @@ Skills 管理器（中文菜单）
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
   .\skills.ps1 迁移 --mode all|general|private-general|private-all|rescan [--out <迁移包.zip>] [--force]
-  .\skills.ps1 迁移 --mode private-general|private-all --encrypt [--out <迁移包.zip>] [--force]
-  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.enc.json>] [--yes]
+  .\skills.ps1 迁移 --mode private-general|private-all [--encrypt] [--out <迁移包.zip>] [--force]
+  .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
   .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply] [--sync-mcp]

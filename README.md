@@ -63,7 +63,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 | 公共 `general` 标准安装版 | GitHub Releases 的 `bootstrap.zip` | 默认推荐；按锁文件安装通用 skills/MCP 意图，需要 Git 与网络，可显式启用经过校验的 Release 更新。 |
 | 公共 `general` 完整绿色版 | GitHub Releases 的 `portable.zip` | 内置当前构建好的 `agent/`，适合 U 盘、离线浏览、演示和网络受限的机器；联网型 skill 与外部工具仍取决于各自环境。 |
 | 公共源码开发版 | GitHub 仓库、tag 或 fork | 完整 Git 历史和开发文件；长期开发、定制和贡献一律走 Git，不由 Release 更新器覆盖。 |
-| 私用 `private-all` 迁移快照 | 本机 `迁移 --mode private-all --encrypt` | 全量已构建 skills、MCP 和恢复所需源码快照；可加密携带 MCP `env`/`headers`，不含 Git 历史，不是第二个开发真值，不得 push 到公共 GitHub 仓库、公共 Release 或公共网盘。 |
+| 私用 `private-all` 迁移快照 | 本机 `迁移 --mode private-all` | 全量已构建 skills、MCP 和恢复所需源码快照；默认携带明文 MCP `env`/`headers`，可用 `--encrypt` 改为 AES-256-GCM 加密；不含 Git 历史，不是第二个开发真值，不得 push 到公共 GitHub 仓库、公共 Release 或公共网盘。 |
 
 两个公共 `general` ZIP 都携带本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不是完整源码开发包，不含 `.git` 历史或测试集。需要持续开发、分支、测试、贡献或通过 Git 更新时，请 clone/fork 公共源码仓库。`rescan` 是一种不携带 skills/MCP 内容的辅助迁移清单，不属于上述对外发行形态。
 
@@ -76,17 +76,19 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 迁移 --mode all
 # general：仅携带 core 通用 skills 与 default MCP
 .\skills.ps1 迁移 --mode general
-# private-general：通用 skills + default MCP；交互输入口令加密 env/header 值
-.\skills.ps1 迁移 --mode private-general --encrypt
-# private-all：全部 skills + MCP；交互输入口令加密 env/header 值，仅限私用
+# private-general：通用 skills + default MCP；私用明文快照，不需要口令
+.\skills.ps1 迁移 --mode private-general
+# private-all：全部 skills + MCP；私用明文快照，不需要口令
+.\skills.ps1 迁移 --mode private-all
+# 如需在传输介质上保护 MCP env/header，再显式加密
 .\skills.ps1 迁移 --mode private-all --encrypt
 # rescan：不携带 skills/MCP，仅带新电脑重新发现、安装的指引
 .\skills.ps1 迁移 --mode rescan
 ```
 
-迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；MCP 仅保留可重建的声明和脱敏后的凭据引用名称。`all`/`general`/`private-general`/`private-all` 包会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`all`/`general` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`private-general` 和 `private-all` 只有在显式 `--encrypt` 时才会把 MCP `env`/`headers` 放入 AES-256-GCM 加密 companion file。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
+迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；`all`/`general` 仅保留可重建的 MCP 声明和脱敏后的凭据引用名称。`private-general` 和 `private-all` 是仅限私用的例外：默认把 MCP `env`/`headers` 写入明文 companion file `MIGRATION-MCP-CREDENTIALS.json`，不询问口令；显式加 `--encrypt` 时改为 `MIGRATION-MCP-CREDENTIALS.enc.json`，使用 AES-256-GCM 保护。所有非 `rescan` 模式都会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`all`/`general`/`private-*` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
 
-`private-general` 和 `private-all` 是允许携带 MCP `env`/`headers` 值的模式，必须显式 `--encrypt`。它们使用交互口令加密凭据；口令不进入命令行、日志或 manifest。新电脑解压后可直接运行：
+`private-general` 和 `private-all` 是允许携带 MCP `env`/`headers` 值的私用模式。默认快照为明文，不需要口令；如果使用 `--encrypt`，打包时和恢复时才会交互输入口令，口令不进入命令行、日志或 manifest。明文包只应通过你控制的本地或私有介质传输，绝不要上传公共 GitHub、公共 Release 或公共网盘。新电脑解压后可直接运行：
 
 ```powershell
 .\skills.ps1 migration-apply
@@ -94,7 +96,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 migration-apply --skip-mcp
 ```
 
-等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，但携带全部技能和 MCP。不要把私用加密包上传到任何公共 GitHub 仓库、GitHub Release 或公共网盘；迁移完成后建议轮换长期或高权限 token。
+等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`；明文包的 `migration-unlock` 不会询问口令，加密包才会询问。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，但携带全部技能和 MCP。迁移完成后建议轮换长期或高权限 token。
 - `skill_projection`：技能来源、domain catalog、native placement 与按宿主的 projection profiles；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。

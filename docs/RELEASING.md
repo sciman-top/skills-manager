@@ -9,7 +9,7 @@
 - 两个公开 ZIP 都含本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不含 `.git` 历史或测试集，不是完整开发 checkout。源码开发、分支、测试与贡献归 Git clone/fork/tag；ZIP 是便利交付物，不替代仓库历史。
 - 公共 `general` 安装版可通过包内 Release 更新器检查最新正式 Release；更新器只接受未修改的 Release 安装目录，校验 `SHA256SUMS.txt`，保留同级 backup，并由独立进程切换目录。Git 源码开发版必须走 Git 更新。
 
-公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 加密迁移包不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
+公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 迁移包（无论明文还是加密）不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
 
 发布后可用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 核对 artifact attestation；同时应在仓库启用 immutable releases、保护 `main` 与 `v*` tag。Release ZIP 的 manifest `publishable=true` 只表示构建时来自 clean tracked worktree，不代表宿主 `host_loaded` 或 `live_accepted`。
 
