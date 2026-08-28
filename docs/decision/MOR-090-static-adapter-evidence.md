@@ -55,23 +55,14 @@
 
 ## 5. 采纳决定
 
-### 5.1 逐项 (surface, model, effort) 能力矩阵
+### 5.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
 
-**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项组合（model×surface×effort）。只有逐项 `verified` 的 tuple 可进 Adapter allowlist；任何跨 surface 外推（如 API 面的 `max` → codex config 面）一律禁止。
+**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。
 
-| surface | model | effort 组合 | 状态 | 依据 |
-| --- | --- | --- | --- | --- |
-| `openai_api`（Responses/Chat Completions） | `gpt-5.6-sol` | none/low/medium(默认)/high/xhigh/max | verified | 官方模型页 2026-08-28 |
-| `openai_api` | `gpt-5.6-terra` | none/low/medium/high/xhigh/max | verified | 官方模型页 |
-| `openai_api` | `gpt-5.6-luna` | none/low/medium(默认)/high/xhigh/max | verified | 官方模型页 2026-08-28 |
-| `codex_config_surface` | gpt-5.6-\* | 字段词表 minimal..xhigh = verified；逐项 (model, xhigh) 为 model-dependent，待 MOR-100 本机 fixture | partial | C1 |
-| `codex_security_cli_surface` | gpt-5.6-\* | max | candidate | C2 |
-| `zcode_ui` | `glm-5.3-flash` | low/high/max | verified（文档）+ operator_declared（UI） | Z3 |
-| `claude_host`（effortLevel） | 按具体 model 分列 | low..max；不支持档位向下 clamp | verified（行为）；逐项随 MOR-400 fixture | A2a/A2b |
-| `deepseek_provider`（output_config.effort） | deepseek-v4-flash/pro | low/high/max | verified | D3/D4 |
+逐项 tuple 矩阵（45 行，每行唯一 tuple，含 tuple_status 与 fact_ids）独立维护于 **[MOR-090-tuple-matrix.md](MOR-090-tuple-matrix.md)**——它是 allowlist 的唯一机械依据：只有 `tuple_status=verified` 的行（当前 24 行）可进 Adapter allowlist；`partial/candidate/operator_declared/unknown` 行一律 `manual_mapping_required`；任何跨 surface 外推（如 `openai_api` 的 `max` → `codex_config_surface`）禁止。
 
-- 进入 Adapter allowlist 的最小集（全部 verified，按 §5.1 矩阵逐项）：C1/C3/C4/C6（openai_api 面三模型全档）、Z2、Z3 文档半边、A1/A2a/A2b/A4/A6、D1/D2/D3/D4。
-- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、codex_config_surface 的逐项 (model, xhigh) 组合（MOR-100 fixture 确认）、Z3 UI 半边（operator_declared，附件留存后复评）、Z5/A×D 交叉项（取证后评审）。
+- Adapter allowlist = [tuple-matrix](MOR-090-tuple-matrix.md) 中 `tuple_status=verified` 的行（当前 24 行：openai_api 18 + deepseek_provider 6）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 12 行 partial（MOR-100 fixture 逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、claude_host unknown（MOR-400 钉定）、Z5/A×D 交叉项。
 
 ## 6. 来源 URL 清单（全部抓取于 2026-08-28）
 
@@ -79,7 +70,9 @@
 - Codex Security CLI quickstart：https://learn.chatgpt.com/docs/security/cli
 - Codex Security workbench：https://learn.chatgpt.com/docs/security/plugin/workbench
 - GPT-5.6 官方公告：https://openai.com/index/gpt-5-6/
+- gpt-5.6-sol 官方模型页（2026-08-28 抓取）：https://developers.openai.com/api/docs/models/gpt-5.6-sol
 - gpt-5.6-terra 官方模型页：https://developers.openai.com/api/docs/models/gpt-5.6-terra
+- gpt-5.6-luna 官方模型页（2026-08-28 抓取）：https://developers.openai.com/api/docs/models/gpt-5.6-luna
 - GLM Coding Plan：https://z.ai/subscribe
 - GLM-5.3-Flash 模型页：https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash
 - GLM-5.3 模型页：https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3

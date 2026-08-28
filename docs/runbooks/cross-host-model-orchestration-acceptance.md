@@ -164,7 +164,7 @@ Review 要回答：
 }
 ```
 
-receipt verifier 至少拒绝：secret-like value、未知 slot/key、route-key 与 actual model/effort 不匹配、scope 混用、Luna high-risk 非 block、Terra high-risk 缺 emergency、无授权 projection apply、`host_loaded`/`observed_host_route` 无独立 host evidence、缺失 fallback/clamp 字段、未知字段。
+receipt verifier 至少拒绝：secret-like value、未知 slot/key、route-key 与 actual model/effort 不匹配、scope 混用、Luna high-risk 非 block、Terra high-risk 缺 emergency、无授权 projection apply、**任何持久化的 `host_loaded` 字段**（该值只能由 `observation_status` 派生，verifier 输出三态结论而不读取持久字段）、`observed_host_route` 出现但 `observed_by`/`observed_at` 或独立 host evidence 不齐全、缺失 fallback/clamp 字段、constrained 约束对象违反冻结形状、未知字段。verifier fixture 须覆盖 `match`/`route_mismatch`/`not_observable` 三种 receipt。
 
 ## 9. 停止、恢复和回滚
 

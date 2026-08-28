@@ -169,7 +169,7 @@ receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱�
 }
 ```
 
-规则：`constrained=false` 时不得出现任何限制字段；`constrained=true` 时三个限制字段必须非空；route 的 risk/operation/写集/verifier 与约束对象不一致即 fail closed；receipt verifier 必须覆盖该约束。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
+规则：`constrained=false` 时**四个限制字段全部禁止出现**；`constrained=true` 时 `constraint_reasons`/`max_risk_level`/`allowed_operations`/`required_verifiers` 四个字段**都必须存在、非空且取值合法**（`max_risk_level` 须为合法 risk 枚举，且不得低于请求 `risk_level` 所需上限）；route 的 risk/operation/写集/verifier 与约束对象不一致即 fail closed。四字段校验属 MOR-010 schema tests（缺失/为空/非法枚举/`max_risk_level` 缺失或与请求 `risk_level` 不一致均拒绝），MOR-050 另覆盖运行时一致性。receipt verifier 必须覆盖该约束。`fallback_applied`/`clamp_applied` 布尔为兼容字段：置 true 时必须另附结构化事件（`source/reason/from/to/observed_at`）。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
 
 ## 5. 静态 effort 合同与三档模板
 

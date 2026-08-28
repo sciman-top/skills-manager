@@ -94,7 +94,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：定义 versioned schema，分别表达 `RouteKey`、固定五项 `ExecutionSlot`、risk gate、static Adapter contract、host default、operator override、projection plan 和 receipt。
 - **Exact write set**：`config/model-orchestration.schema.json`、`config/model-orchestration.defaults.yaml`、`tests/Contract/PolicySchema.Tests.ps1`。
-- **必测**：unknown property；重复 id；未定义引用；空/secret-like 值；unknown model/effort；错误 host scope；缺 `owner/reason/expires_at` 的 Terra emergency；Luna high-risk 非 block；illegal provider/auth/base URL field。
+- **必测**：unknown property；重复 id；未定义引用；空/secret-like 值；unknown model/effort；错误 host scope；缺 `owner/reason/expires_at` 的 Terra emergency；Luna high-risk 非 block；illegal provider/auth/base URL field；constrained 约束对象 schema 校验（四限制字段缺失/为空/非法枚举拒绝；`max_risk_level` 缺失、非法值、与请求 `risk_level` 不一致拒绝；`constrained=false` 时出现限制字段拒绝）。
 - **Minimum proof**：schema validator 与 focused tests；样例无 secret。
 - **Stop / rollback**：schema 被要求接收自由 URL/token 或运行时 catalog 时 stop；revert 三文件。
 - **Truth boundary**：`repo_verified`。
@@ -240,7 +240,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：消费 MOR-090 的一手事实，分别建立 `ClaudeCodeHostAdapter`（宿主 model 选择、`effortLevel`、`fallbackModel` 链、组织 clamp、fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名 `deepseek-v4-flash`/`deepseek-v4-pro`、未知名回落 flash、`output_config` effort 透传）两份合同；两合同各自取证并交叉验证前，`claude_deepseek_candidate` 保持 candidate：quick=Flash/high，routine/review/bounded=Flash/max constrained，deep=Pro/max，high-risk=Pro/max + policy。
 - **Exact write set**：`src/Adapters/ClaudeCode.ps1`、Claude static fixture、policy default、`tests/Unit/ClaudeCodeAdapter.Tests.ps1`、launch-plan tests。
-- **必测**：fixture parser + offline resolution；精确 V4 Pro/Flash 名称和 effort token 被原样保留；Claude effort clamp fixture（不支持档位静默降档必须留痕，不一致不得 host_loaded）；`fallbackModel` 链（≤3、529 触发）fixture；DeepSeek 未知名回落 flash fixture；unknown target -> manual。
+- **必测**：fixture parser + offline resolution；精确 V4 Pro/Flash 名称和 effort token 被原样保留；Claude effort clamp fixture（不支持档位静默降档必须留痕，不一致不得标 `host_loaded=true`）；fallback 触发矩阵 fixture——正向三类（overload、unavailable、non-retryable server error 各自触发）+ 负向五类（auth、billing、rate-limit、request-size、transport 均不触发），并验证链长上限 ≤3、去重、触发原因、最终模型与 receipt 留痕；第三方 provider 上自动 fallback 禁用的独立测试；DeepSeek 未知名回落 flash fixture；unknown target -> manual。
 - **Stop / rollback**：不得复制/修改 `CLAUDE_CONFIG_DIR`、登录或借 Pro/max 名称绕过 high-risk gate；revert。
 - **Truth boundary**：`repo_verified` + static-fact evidence。
 
