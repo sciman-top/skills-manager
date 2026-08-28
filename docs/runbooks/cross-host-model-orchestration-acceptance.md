@@ -21,7 +21,7 @@
 记录：
 
 1. runtime repo revision、`git status`、policy revision、Adapter revision、run id、UTC 时间和执行者；
-2. exact `host`、`identity_selector`、route source、执行槽位、route key、model、effort、workload、operation、workspace classification 与 stop condition；
+2. exact `host`（canonical：`codex_cli`）、`identity_selector`、`selection_plane`/`route_map_id`、执行槽位、route key、model、effort、workload、operation、workspace classification 与 stop condition；
 3. 是否为 `resolve`、private override 写入、projection plan/apply/rollback、fresh host observation 或真实业务验收；
 4. 当前授权仅覆盖什么；没有授权时默认执行 offline resolve 或 dry-run；
 5. 私有 receipt root 和 exact rollback entry。
@@ -33,7 +33,7 @@ receipt root 的 canonical path 为 `<runtime-root>/.ai/receipts/<yyyy-mm-dd>/<r
 在 fixture/state root 上执行，不访问网络或宿主用户配置：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex --identity current-redacted-identity --workload standard_review --risk-level normal --operation read_only --workspace-root <root> --offline
+pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex_cli --identity current-redacted-identity --workload standard_review --risk-level normal --operation read_only --workspace-root <root> --offline
 ```
 
 `--workload` 是常规入口；`--execution-slot` 仅为 fixture/dry-run 直通参数，必须与 `--workload` 派生结果一致，且不能替代完整字段（缺 `--risk-level`/`--operation`/`--workspace-root` 一律拒绝）。
@@ -131,7 +131,7 @@ Review 要回答：
   "schema_version": 1,
   "run_id": "2026-08-28-codex-terra-only",
   "scope": {
-    "host": "codex",
+    "host": "codex_cli",
     "identity_selector": "redacted-current"
   },
   "request": {
@@ -145,11 +145,7 @@ Review 要回答：
   "selection_plane": "operator_override",
   "route_map_id": "gpt56_terra_only",
   "verification": "operator_declared_unverified",
-  "requested_route": {
-    "model": "gpt-5.6-terra",
-    "effort": "high",
-    "constrained": false
-  },
+  "requested_route": null,
   "resolved_route": {
     "model": "gpt-5.6-terra",
     "effort": "high",

@@ -57,7 +57,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 ```json
 {
   "request_id": "uuid",
-  "host": "codex",
+  "host": "codex_cli",
   "identity_selector": "current-redacted-identity",
   "workload": "bounded_implementation",
   "risk_level": "normal",
@@ -67,7 +67,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 }
 ```
 
-输入不含 prompt、secret、完整 base URL 或未经合同批准的自由模型名。输出必须是以下之一：
+输入不含 prompt、secret、完整 base URL 或未经合同批准的自由模型名。**canonical host identifier** 固定为 `codex_cli | zcode | claude_code`；`codex` 仅为自然语言/CLI 输入别名，入口归一化为 `codex_cli`——state scope key、receipt、Adapter lookup 一律使用 canonical 值（MOR-050/MOR-060 含 alias normalization 测试）。输出必须是以下之一：
 
 | status | 含义 | 后续 |
 | --- | --- | --- |
@@ -155,7 +155,21 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 }
 ```
 
-receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱敏环境变量或 provider 配置。`requested_route` 为 `null` 表示该次请求无显式 model/effort（preset/模板级声明）；仅当调用方显式携带 model/effort 时记录原始值，使 verifier 能区分"请求→解析"是否发生过真实转换。`observation_status` 三态：`not_observable`（无宿主观察证据）/ `match`（观察一致，`host_loaded=true`）/ `route_mismatch`（观察不一致，`host_loaded=false`，hard fail）。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
+receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱敏环境变量或 provider 配置。`requested_route` 为 `null` 表示该次请求无显式 model/effort（preset/模板级声明）；仅当调用方显式携带 model/effort 时记录原始值，使 verifier 能区分"请求→解析"是否发生过真实转换。**`host_loaded` 不是持久字段**：由 `observation_status` 推导（`match`→true / `route_mismatch`→false / `not_observable`→not_observable），receipt 只持久化 `observation_status` 与 `observed_host_route`。字段 `route_source` **已废弃**：canonical 为 `selection_plane`（`manual_override | operator_override | host_default`）+ `route_map_id`（override 情形另有 `override_id`）；schema 禁止 `route_source` 进入任何 plane。
+
+**constrained 约束对象（frozen shape）**——`constrained` 不是裸布尔标签：
+
+```json
+{
+  "constrained": true,
+  "constraint_reasons": ["no_high_risk_adjudication", "bounded_write_set_only", "independent_verifier_required"],
+  "max_risk_level": "normal",
+  "allowed_operations": ["read_only", "workspace_write"],
+  "required_verifiers": ["contract", "focused_test"]
+}
+```
+
+规则：`constrained=false` 时不得出现任何限制字段；`constrained=true` 时三个限制字段必须非空；route 的 risk/operation/写集/verifier 与约束对象不一致即 fail closed；receipt verifier 必须覆盖该约束。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
 
 ## 5. 静态 effort 合同与三档模板
 

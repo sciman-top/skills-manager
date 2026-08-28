@@ -48,7 +48,7 @@ ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effor
 - **基础 route key**：日常用于模型/effort 切换的当前三档：`light`、`standard`、`deep`。它们是当前预设的便捷层，不是 schema 上限；未来可新增 `review`、`max_depth` 等 key。
 - **执行槽位**：policy 依据 workload、risk 与 operation 派生出的稳定语义类别（semantic workload slot），不是可调度的并发槽位，也不是 effort 的同义词。首版目录固定提供五项：`quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation`、`deep_investigation_or_implementation`；多个 slot 可复用同一 route key。workload 是调用方声明的任务意图，slot 是 policy 派生结果；首版两者共用相同五个 identifier，属 1:1 实现细节，不是同一领域对象。并发/队列/超时等宿主容量语义不在本控制面（它是明确的非目标），未来如需要走独立 host-specific capacity contract，不改 slot 枚举。
 - **风险 gate**：`high_risk_adjudication` 覆盖任何 workload 的垂直风险 gate，不是第四个常用 route key。
-- **constrained**：policy 输出的决策属性，不是 effort 标签；启用时必须携带 `constraint_reasons` 与可执行含义（风险上限、写集限制、必需 verifier、禁止进入高风险门），并进入 MOR-020 contracts、resolver 输出与 receipt。
+- **constrained**：policy 输出的决策属性，不是 effort 标签，也不是裸布尔——启用时必须携带冻结形状的约束对象（`constraint_reasons`/`max_risk_level`/`allowed_operations`/`required_verifiers`，形状见架构 §4.2），并进入 MOR-020 contracts、resolver 输出与 receipt verifier。
 - **capability profile**：独立概念已删除；如需展示别名，必须由 execution slot/route key 唯一派生并在 schema 注明派生规则，不参与 Resolve、Adapter 或 receipt 合同。
 - **candidate**：一个 `(host, identity, model, effort, operation/risk bound)` 组合；gateway route 只能作为脱敏 fingerprint 成分，不能被控制面读取或修改。
 - **host_default**：一个 `(host, identity)` 的稳定日常 route map。
@@ -179,7 +179,7 @@ preset_used_efforts:
 
 ### 6.1 Resolve 与风险门禁
 
-- `MOR-FR-001`：常规入口必须接受 exact `host`、`identity_selector`、`workload`、`risk_level`、`operation`、`workspace_root` 和可选的一次性 `manual_override`；不得从 prompt、目录名、模型名或上次任务猜复杂度。`--execution-slot` 只作为 fixture/dry-run 直通入口，且必须校验与 workload 派生结果一致；缺 `risk_level`/`operation`/`workspace_root` 一律拒绝。
+- `MOR-FR-001`：常规入口必须接受 exact `host`、`identity_selector`、`workload`、`risk_level`、`operation`、`workspace_root` 和可选的一次性 `manual_override`；不得从 prompt、目录名、模型名或上次任务猜复杂度。canonical host identifier 为 `codex_cli | zcode | claude_code`（`codex` 为输入别名，归一化后使用；state/receipt/Adapter 只存 canonical 值）。`--execution-slot` 只作为 fixture/dry-run 直通入口，且必须校验与 workload 派生结果一致；缺 `risk_level`/`operation`/`workspace_root` 一律拒绝。
 - `MOR-FR-002`：workload/operation/risk/slot/route-key 映射只能来自 versioned policy；未知 workload、slot 或 route key fail closed；`risk_level` 枚举固定为 `normal | high`（`high` 必须通过 high-risk gate）；请求 `operation` 超出 slot 允许 operation（如 read_only slot 收到 workspace_write）时 `blocked`，不得自动改派 slot。
 - `MOR-FR-003`：选择 precedence 固定为 `manual_override -> operator_override -> host_default`；每项都必须再经过静态 Adapter、工作区、数据分级、operation 和风险校验。
 - `MOR-FR-004`：无安全 mapping、参数不在 allowlist、缺少 risk approval、或宿主选择面未知时，返回 `blocked`、`manual_host_selection_required` 或 `manual_mapping_required`；不得启用隐式 fallback。

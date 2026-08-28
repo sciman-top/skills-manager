@@ -3,7 +3,7 @@
 **状态**：static-fact evidence；采集日期 2026-08-28。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
 **证据状态词表**：`verified`（官方文档/本机 help 直证）｜`operator_declared`（操作者一手声明/界面证据，无独立附件复核）｜`inferred`（由命名/公告推断的精确值）｜`unknown`（无一手来源）。**只有 `verified` 条目可进 Adapter allowlist**。
 **消费方**：未来 `<runtime-root>` runtime 的 Adapter contract/fixture（MOR-100/MOR-300/MOR-400）；runtime 未选定前 fixtures 不创建
-**方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取 `~/.codex`、`~/.zcode`、`CLAUDE_CONFIG_DIR` 等用户配置或凭据；未发送任何模型请求；社区资料仅作结构启发，不作为能力证据
+**方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取用户配置、凭据或运行状态（`~/.codex`、`~/.zcode` 配置、`CLAUDE_CONFIG_DIR` 等均未触碰）；Z3 引用的 UI 截图为**操作者提供的 artifact**，不属读取用户目录运行状态；未发送任何模型请求；社区资料仅作结构启发/secondary corroboration，不作为能力证据
 
 ## 1. codex_cli（本机 `codex-cli 0.150.1`）
 
@@ -14,7 +14,7 @@
 | C3 | launch 面：`codex exec -m <MODEL>`、`-c <key=value>`（dotted path 覆盖 config.toml 值） | 本机 `codex exec --help`（0.150.1），2026-08-28 | verified（本机只读 help） |
 | C4 | profile 机制：`$CODEX_HOME/profile-name.config.toml` 独立文件 + `--profile` 选择；project-scoped config 不可覆盖 provider/auth/profile selection | Configuration Reference，2026-08-28 | verified；additive profile 为投影 POC 首选候选 |
 | C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
-| C6 | `gpt-5.6-sol` 模型 slug 真实（官方安全扫描推荐 "gpt-5.6-sol with xhigh reasoning effort"）；GPT-5.6 官方公告确认 Sol/Terra/Luna 三档横跨 ChatGPT/Codex/API，`gpt-5.6-terra` 有官方模型页 | Codex Security workbench + openai.com/index/gpt-5-6 + developers.openai.com/api/docs/models/gpt-5.6-terra，2026-08-28 | Sol/Terra slug `verified`（公告/模型页级）；`gpt-5.6-luna` 精确 slug 为 `inferred`（推断自公告命名，无独立 exact model page 直证）——不进 allowlist，保持 candidate，进 MOR-100 fixture 前须本机 help 或官方 exact page 证实 |
+| C6 | GPT-5.6 三档 slug 全部经官方 exact model page 直证：`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna`，且 **openai_api 面**（Responses/Chat Completions）`Reasoning.effort supports: none, low, medium (default), high, xhigh, and max`（sol/luna 页 2026-08-28 本轮抓取；terra 页同型） | developers.openai.com/api/docs/models/gpt-5.6-{sol,terra,luna} + Security workbench | `verified`（openai_api 面逐项）；注意：**API 面词表不外推到 codex_config_surface**（后者仍以 C1 为准） |
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
@@ -35,9 +35,10 @@
 | # | 事实 | 来源 | 状态 |
 | --- | --- | --- | --- |
 | A1 | 模型选择优先级：`/model` > `--model` > `ANTHROPIC_MODEL` > settings `"model"` > `ANTHROPIC_DEFAULT_MODEL`；`/model` 自 v2.1.153 可持久写入用户 settings | code.claude.com/docs/en/model-config，2026-08-28 | verified；settings `"model"` 为候选投影字段 |
-| A2 | effort 面：`/effort`、`--effort`、`CLAUDE_CODE_EFFORT_LEVEL`、settings `"effortLevel"`；词表 `low..max`，model-dependent（Opus 4.6/Sonnet 4.6 上限 high） | 同上 | verified |
+| A2a | model_effort_capability：effort 词表 `low..max` **按具体 model 分列**，model-dependent（Opus 4.6/Sonnet 4.6 上限 high；默认 high，Opus 4.7 默认 xhigh）；不支持的档位向下 clamp | code.claude.com/docs/en/model-config，2026-08-28 | verified（行为）；逐项 (model, effort) 随 MOR-400 fixture |
+| A2b | effort_persistence_surface：`max` 默认仅作用于当前 session，持久化方式与 low/medium/high/xhigh 不同；settings `"effortLevel"`/env/flag 的持久化语义须逐档记录 | 同上 | verified（行为级）；逐档持久化细节进 MOR-400 fixture，不得把 max 假设为可持久化 settings 值 |
 | A3 | **clamp 行为**：不支持的档位静默向下降档（"xhigh runs as high on Opus 4.6"） | 同上 | verified；fixture 必须留痕，请求≠观察不得标 `host_loaded` |
-| A4 | **fallback 行为**：`fallbackModel` 链上限 3 个模型（去重），529 过载触发，subagents 继承 | 同上 + claude-code issue #65782，2026-08-28 | verified；同上纪律 |
+| A4 | **fallback 触发矩阵**：`fallbackModel` 链上限 3 个模型（去重），subagents 继承；触发限于 overload/unavailable/non-retryable server error——auth、billing、rate-limit、request-size、transport 等错误**不**触发 fallback | Claude model-config 官方文档，2026-08-28（issue #65782 仅作 secondary corroboration，不参与 verified 证明） | verified；fixture 须按错误类别记录 fallback 触发原因矩阵 |
 | A5 | 自定义模型串经 flag/env/settings 不做前缀校验；`ANTHROPIC_CUSTOM_MODEL_OPTION`、`ANTHROPIC_DEFAULT_*_MODEL` 可重指向别名 | 同上 | verified |
 | A6 | 第三方 provider（自定义 base URL）上**自动模型 fallback 被禁用**；桌面应用路由读其自身 third-party inference 配置而**不是** `ANTHROPIC_BASE_URL`/settings.json（CLI 与桌面投影面必须分列） | code.claude.com/docs/en/env-vars + /llm-gateway-connect，2026-08-28 | verified；对 DeepSeek 场景利好（fallback 面收窄），但桌面宿主的投影/表达面未取证 |
 
@@ -54,8 +55,23 @@
 
 ## 5. 采纳决定
 
-- 进入 Adapter allowlist 的最小集（全部 verified）：C1/C3/C4/C6（Sol/Terra slug）、Z2、Z3 文档半边、A1/A2/A6、D1/D2/D3/D4。
-- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、`gpt-5.6-luna` 精确 slug（inferred）、Z3 UI 半边（operator_declared，附件留存后复评）、Z5/A×D 交叉项（取证后评审）。
+### 5.1 逐项 (surface, model, effort) 能力矩阵
+
+**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项组合（model×surface×effort）。只有逐项 `verified` 的 tuple 可进 Adapter allowlist；任何跨 surface 外推（如 API 面的 `max` → codex config 面）一律禁止。
+
+| surface | model | effort 组合 | 状态 | 依据 |
+| --- | --- | --- | --- | --- |
+| `openai_api`（Responses/Chat Completions） | `gpt-5.6-sol` | none/low/medium(默认)/high/xhigh/max | verified | 官方模型页 2026-08-28 |
+| `openai_api` | `gpt-5.6-terra` | none/low/medium/high/xhigh/max | verified | 官方模型页 |
+| `openai_api` | `gpt-5.6-luna` | none/low/medium(默认)/high/xhigh/max | verified | 官方模型页 2026-08-28 |
+| `codex_config_surface` | gpt-5.6-\* | 字段词表 minimal..xhigh = verified；逐项 (model, xhigh) 为 model-dependent，待 MOR-100 本机 fixture | partial | C1 |
+| `codex_security_cli_surface` | gpt-5.6-\* | max | candidate | C2 |
+| `zcode_ui` | `glm-5.3-flash` | low/high/max | verified（文档）+ operator_declared（UI） | Z3 |
+| `claude_host`（effortLevel） | 按具体 model 分列 | low..max；不支持档位向下 clamp | verified（行为）；逐项随 MOR-400 fixture | A2a/A2b |
+| `deepseek_provider`（output_config.effort） | deepseek-v4-flash/pro | low/high/max | verified | D3/D4 |
+
+- 进入 Adapter allowlist 的最小集（全部 verified，按 §5.1 矩阵逐项）：C1/C3/C4/C6（openai_api 面三模型全档）、Z2、Z3 文档半边、A1/A2a/A2b/A4/A6、D1/D2/D3/D4。
+- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、codex_config_surface 的逐项 (model, xhigh) 组合（MOR-100 fixture 确认）、Z3 UI 半边（operator_declared，附件留存后复评）、Z5/A×D 交叉项（取证后评审）。
 
 ## 6. 来源 URL 清单（全部抓取于 2026-08-28）
 

@@ -131,7 +131,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：离线得到 deterministic route，不接触 host/network。
 - **Exact write set**：`src/Resolver.ps1`、`src/Receipt.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Resolver.Tests.ps1`、`tests/Contract/Receipt.Tests.ps1`。
-- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 surface 分列）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段。
+- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 §5.1 矩阵逐项，仅 verified tuple）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段；host alias 归一化（`codex`→`codex_cli`，state/receipt 只存 canonical）；constrained 约束对象（false 无限制字段 / true 限制字段非空 / 不一致 fail closed）。
 - **Minimum proof**：所有 fixture 的 `resolve --offline` 和 focused tests；零 network/process/host write。
 - **Stop / rollback**：CLI 试图访问 gateway、读取 OAuth、执行 child 或改 host config 时停止；revert。
 - **Truth boundary**：`repo_verified`。
@@ -160,7 +160,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：消费 MOR-090 的官方/本机一手事实及被批准的结构参考，建立 Codex static contract/fixture；运行时不 discovery。
 - **Exact write set**：`src/Adapters/CodexCli.ps1`、`tests/fixtures/codex-static/*.txt`、`tests/Unit/CodexCliAdapter.Tests.ps1`、policy contract entry。
-- **必测**：Sol/low、medium、xhigh 的精确 token（config 面）；Terra/Luna medium/high/xhigh；`max` 不得进入 config 面合同（security 等 surface 单列 candidate）；未知参数拒绝；capability=false 即 launch/manual；无 private user-dir read。
+- **必测**：按 MOR-090 §5.1 矩阵逐项验证 codex_config_surface 组合——openai_api 面已 verified 的 (model, effort) **不自动外推**；字段词表 minimal..xhigh verified，逐项 (model, xhigh) 为 model-dependent，经本机 help/fixture 确认后才进 allowlist；`max` 不得进入 config 面合同（security 等 surface 单列 candidate）；未证实组合一律 manual/block；未知参数拒绝；capability=false 即 launch/manual；无 private user-dir read。
 - **Minimum proof**：fixture parser/contract tests；真机事实采集若有仅是 read-only maintenance evidence。
 - **Stop / rollback**：需要修改 `~/.codex`、login、重启 Desktop 或执行模型任务才能“确认”时停止；revert。
 - **Truth boundary**：`repo_verified` + static-fact evidence，非 live。
@@ -203,7 +203,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：实现 Sol-only、Terra-only、Luna-only 的当前三 route-key policy，并用固定五个 execution slot 验证 route-key 复用和风险覆盖。
 - **Exact write set**：policy defaults、fixtures、resolver/adapter tests、slot catalog docs。
-- **必测**：`quick_triage` light；`routine_maintenance`、`standard_review`、`bounded_implementation` standard；`deep_investigation_or_implementation` deep；Terra critical emergency；Luna critical block；Sol/low absent -> manual/block；unused max not auto-added。
+- **必测**：`quick_triage` light；`routine_maintenance`、`standard_review`、`bounded_implementation` standard；`deep_investigation_or_implementation` deep；Terra critical emergency；Luna critical block；Sol/low absent -> manual/block；unused max not auto-added；Luna preset 各组合在 codex_config_surface fixture 证实前按 candidate/manual 解析（不因 preset 存在而视为可用）。
 - **Minimum proof**：focused resolver/adapter tests；零实时 API。
 - **Stop / rollback**：将 Luna/Flash 自动升为 high-risk，把模型多一档误当作新增 slot 的理由，或在无迁移兼容/rollback 的情况下改五 slot 目录时 stop；revert policy/tests。
 - **Truth boundary**：`repo_verified`。
