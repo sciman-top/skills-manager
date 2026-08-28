@@ -1,7 +1,7 @@
 # 跨宿主模型编排控制面架构
 
 **状态**：design-only；目标为独立的 host-local runtime，不修改 skills-manager runtime
-**关联**：[PRD](cross-host-model-orchestration-prd.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
+**关联**：[PRD](cross-host-model-orchestration-prd.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-001 自动故障切换模拟准入规格](../decision/MOR-001-automatic-failover-simulation.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
 ## 1. 架构结论
 
@@ -17,7 +17,7 @@
   -> 用户说“恢复默认”时，只删除当前 scope 的 override
 ```
 
-它没有运行期环境发现：不读模型列表、OAuth、token、gateway、账号套餐或请求状态；任务失败也不会自动重试、换模型、改写 preset/default/override，或修改宿主配置。变化来自用户明确声明，证据等级标为 `operator_declared_unverified`。
+它没有运行期环境发现：不读模型列表、OAuth、token、gateway、账号套餐或请求状态；任务失败也不会自动重试、换模型、改写 preset/default/override，或修改宿主配置。变化来自用户明确声明，证据等级标为 `operator_declared_unverified`。自动故障切换即使将来获准，也必须作为 [MOR-001](../decision/MOR-001-automatic-failover-simulation.md) 定义的**独立模块**接入，不能向本模块的 `RecordTaskOutcome` 添加隐式 reroute 行为。
 
 ## 2. 深模块、Adapter 与数据流
 

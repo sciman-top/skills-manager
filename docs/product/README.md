@@ -18,6 +18,7 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Cross-host model orchestration PRD](cross-host-model-orchestration-prd.md)：日常 Codex、Claude Code、ZCode 的人工声明编排、五执行槽位、route key、风险与用户价值。
 - [Cross-host model orchestration architecture](cross-host-model-orchestration-architecture.md)：唯一深模块、静态宿主 Adapter、private default/override、五 slot/可扩展 route key 与 receipt 合同。
 - [MOR-000 决议（暂缓实现）](../decision/MOR-000-brief.md)：runtime 归属、首期 host/preset、identity binding、bridge pin 优先级与 ingress 合同；2026-08-28 决定暂不实现，未来启动按 §3 基线。
+- [MOR-001 自动故障切换模拟准入规格](../decision/MOR-001-automatic-failover-simulation.md)：未来独立 failover module 的离线 scenario、失败分类、熔断/恢复与 receipt 合同；不改变当前人工切换禁令，也不构成 runtime 或真实探测授权。
 - [MOR-090 静态证据包](../decision/MOR-090-static-adapter-evidence.md)：Codex/ZCode/Claude/DeepSeek 的一手 model/effort/field 事实、来源与未决项，是未来 Adapter fixture 的唯一输入底稿。
 
 这些计划文档是 versioned design input，不是 Hermes、Codex、CI 或人工验收的运行状态。它们不会授权安装软件、修改 `~/.codex` / `~/.hermes`、创建计划任务、投影技能、合并分支或执行线上操作。跨宿主模型编排文档同样不授权读取 OAuth/API 凭据、扫描网关/模型列表、发送模型探测请求，或改写 OAuth/API 凭据、网关、宿主配置、会话或插件缓存；只有独立 runtime 在当前授权、静态 Adapter contract 和受控投影事务均满足时，才可变更已验证的非秘密宿主模型选择字段。
