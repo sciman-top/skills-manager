@@ -20,6 +20,8 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Cross-host model orchestration roadmap](cross-host-model-orchestration-roadmap.md)：从离线策略到受控投影、各宿主采纳和只读 Preset Review 的阶段门禁。
 - [Cross-host model orchestration implementation plan](cross-host-model-orchestration-implementation-plan.md)：MOR-000 至 MOR-850 的原子任务、目标 write set、验证、回滚与停止条件。
 - [Cross-host model orchestration acceptance runbook](../runbooks/cross-host-model-orchestration-acceptance.md)：离线解析、人工声明、受控投影、fresh host 采纳和按宿主验收的 receipt 要求。
+- [MOR-000 决议草案](../decision/MOR-000-brief.md)：runtime 归属、首期 host/preset、identity binding、bridge pin 优先级与 ingress 合同；`<runtime-root>` 待 owner 选定。
+- [MOR-090 静态证据包](../decision/MOR-090-static-adapter-evidence.md)：Codex/ZCode/Claude/DeepSeek 的一手 model/effort/field 事实、来源与未决项，是未来 Adapter fixture 的唯一输入底稿。
 
 这些计划文档是 versioned design input，不是 Hermes、Codex、CI 或人工验收的运行状态。它们不会授权安装软件、修改 `~/.codex` / `~/.hermes`、创建计划任务、投影技能、合并分支或执行线上操作。跨宿主模型编排文档同样不授权读取 OAuth/API 凭据、扫描网关/模型列表、发送模型探测请求，或改写 OAuth/API 凭据、网关、宿主配置、会话或插件缓存；只有独立 runtime 在当前授权、静态 Adapter contract 和受控投影事务均满足时，才可变更已验证的非秘密宿主模型选择字段。
 
