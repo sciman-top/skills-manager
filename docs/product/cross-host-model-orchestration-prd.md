@@ -18,7 +18,7 @@
 
 Codex 的日常 default 为 `gpt56_sol_only`；用户可以随时切换到 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
-ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo），且 `glm-5.3-flash` 官方文档写明 `thinking.type` 仅支持 `enabled`（思考不可关闭）、推荐 `reasoning_effort: max`，low/high 未在该 Flash 模型文档枚举，也不得把其他 GLM 模型的 effort 词表套给 Flash；DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
+ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
 ## 2. 问题、目标与成功定义
 
@@ -235,7 +235,7 @@ preset_used_efforts:
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`，low/high 未证实） | candidate | candidate，`constrained` | candidate，`constrained` | `blocked` |
+| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；surface 词表 `low/high/max` 已证实，`thinking` 不可关闭、默认 `max`；ZCode 投影面未取证） | candidate（`low`） | candidate（`high`），`constrained` | candidate（`max`），`constrained` | `blocked` |
 | `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（DeepSeek 词表含 `high`） | candidate（`max` 在词表内），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
 
 实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。Claude 侧必须分别取证 `ClaudeCodeHostAdapter`（宿主 model/effortLevel/fallback/clamp 面与 fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名、未知名回落、effort 透传）；provider 方言可表达不等于宿主当前环境生效。尤其 DeepSeek V4 Pro/max 进入高风险门并不表示“Pro/max 自动安全”；仍需当前 policy、明确 operation/写集和独立验证。GLM 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。

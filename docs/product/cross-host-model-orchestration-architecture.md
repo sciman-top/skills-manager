@@ -237,7 +237,7 @@ route_keys:                      # 当前 GPT 预设使用三条
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`，low/high 未证实） | candidate | candidate，`constrained` | candidate，`constrained` | `blocked` |
+| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；surface 词表 `low/high/max` 已证实，`thinking` 不可关闭、默认 `max`；ZCode 投影面未取证） | candidate（`low`） | candidate（`high`），`constrained` | candidate（`max`），`constrained` | `blocked` |
 | `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate | candidate，`constrained` | candidate | candidate + high-risk policy |
 
 每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。`DeepSeek V4 Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权；它并非模型名称带 `Pro`/`max` 就自然获得的权限。

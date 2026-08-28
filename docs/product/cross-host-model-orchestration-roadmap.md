@@ -104,7 +104,7 @@ R4.5 不请求模型、不验证网关、不写任何 plane。对当前基线，
 
 | host | 静态三槽位 default | R5/R6 最小验收 | 不可推导 |
 | --- | --- | --- | --- |
-| ZCode | GLM 模板整行为 candidate（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`），MOR-090 取证前 manual | offline plan + contract tests | Flash/max 等于 critical；把其他 GLM 模型词表套给 Flash |
+| ZCode | GLM 模板为 candidate（当前候选 slug `glm-5.3-flash`；surface 词表 `low/high/max` 已证实，`thinking` 不可关闭；ZCode 投影面未取证），MOR-090 取证前 manual | offline plan + contract tests | Flash/max 等于 critical |
 | Claude Code | DeepSeek V4 Flash/high（轻量）；Flash/max（有界 constrained）；V4 Pro/max（深度）；Pro/max + policy（高风险） | offline plan + contract tests | Claude 成功代表 ZCode/Codex，或 Pro/max 自动获批 |
 
 若 target ownership、schema 或模型选择面不能被验证，返回 handoff/manual，不能编辑 `.zcode`、Claude 用户配置或认证资产。

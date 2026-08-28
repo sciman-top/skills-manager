@@ -219,7 +219,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 ### MOR-300：ZCode GLM static Adapter 与 default
 
-- **Goal**：消费 MOR-090 的一手事实后，才可把 GLM 模板从 candidate 升为 default。`GLM-3.5-Flash` 未见于当前官方阵容（2026-08-28 检索），退出 static default；当前候选 slug 为 `glm-5.3-flash`（GLM Coding Plan 在列），但其 `thinking.type` 仅支持 `enabled`、官方仅证实 `reasoning_effort: max`，low/high 未证实，且不得把其他 GLM 模型的 effort 词表套给 Flash。取证前任何 GLM route 解析为 `manual_mapping_required`。
+- **Goal**：消费 MOR-090 的一手事实后，才可把 GLM 模板从 candidate 升为 default。`GLM-3.5-Flash` 未见于当前官方阵容（2026-08-28 检索），退出 static default；当前候选 slug 为 `glm-5.3-flash`（GLM Coding Plan 在列）。GLM surface 词表已证实：bigmodel Chat Completion API `reasoning_effort` 枚举 GLM-5.2+ 支持 `low/high/max`（默认 `max`），ZCode 选择面 低/高/最高 对应；仍待取证的是 ZCode 宿主投影面与 identity surface，且 `thinking` 不可关闭需在 light 档语义中明示。取证前任何 GLM route 解析为 `manual_mapping_required`。
 - **Exact write set**：`src/Adapters/ZCode.ps1`、ZCode static fixture、policy default、`tests/Unit/ZCodeAdapter.Tests.ps1`、launch-plan tests。
 - **Minimum proof**：fixture parser + offline resolution；每个精确 token 必在 static allowlist；未知 target -> manual。
 - **Stop / rollback**：不得以 skills/MCP config 当 model target，不读/写 `.zcode` 用户配置或认证资产；revert。
