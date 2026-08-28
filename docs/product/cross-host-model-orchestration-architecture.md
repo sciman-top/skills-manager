@@ -114,6 +114,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
       "deep": {"model": "gpt-5.6-terra", "effort": "xhigh"}
     },
     "declared_at": "UTC timestamp",
+    "requires_reconfirm_after": null,
     "policy_revision": "sha256:...",
     "rollback_reference": "private receipt id"
   }
@@ -139,7 +140,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   "selection_plane": "operator_override",
   "route_map_id": "gpt56_terra_only",
   "verification": "operator_declared_unverified",
-  "requested_route": {"model": "gpt-5.6-terra", "effort": "high", "constrained": false},
+  "requested_route": null,
   "resolved_route": {"model": "gpt-5.6-terra", "effort": "high", "constrained": false},
   "fallback_applied": false,
   "clamp_applied": false,
@@ -154,7 +155,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 }
 ```
 
-receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱敏环境变量或 provider 配置。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
+receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱敏环境变量或 provider 配置。`requested_route` 为 `null` 表示该次请求无显式 model/effort（preset/模板级声明）；仅当调用方显式携带 model/effort 时记录原始值，使 verifier 能区分"请求→解析"是否发生过真实转换。`observation_status` 三态：`not_observable`（无宿主观察证据）/ `match`（观察一致，`host_loaded=true`）/ `route_mismatch`（观察不一致，`host_loaded=false`，hard fail）。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
 
 ## 5. 静态 effort 合同与三档模板
 
@@ -248,7 +249,7 @@ route_keys:                      # 当前 GPT 预设使用三条
 1. Validate request schema, exact host/identity scope, workload, operation, workspace policy and risk.
 2. Load the exact scoped host_default.
 3. If one-task manual_override exists, validate it first.
-4. Else if exact scoped operator_override exists, select its route map.
+4. Else if exact scoped operator_override exists, check `requires_reconfirm_after` first: if expired（`requires_reconfirm_after <= now`），return `manual_mapping_required` with reason `override_reconfirmation_required`——不自动切换、不静默续期；未过期才选择其 route map.
 5. Else select host_default route map.
 6. Validate the chosen model/effort against static Adapter allowlist, allowed data class,
    operation, maximum risk and any required emergency approval.

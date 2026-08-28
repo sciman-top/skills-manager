@@ -48,18 +48,21 @@ PowerShell 7 是建议实现介质；R0 如选择既有 C# runtime，可改用�
 ## 2. 依赖图
 
 ```text
-MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
-                    |                                  |            |
-                    v                                  v            v
-                 MOR-090                            MOR-050 -> MOR-055 -> MOR-060
-                    |                                  |             |
-          +---------+---------+                        |             +--------------------> MOR-850
-          v                   v                        v
-       MOR-100             MOR-300 / MOR-400        MOR-140 -> MOR-210 -> MOR-230
-          |                   |                         |              |
-          v                   v                         v              v
-       MOR-110            MOR-310 / MOR-410        MOR-150 -> MOR-200  MOR-600 -> MOR-700
+MOR-DOC-001 -> MOR-090                              # 只读事实采集，不依赖 root；evidence 文档留在设计仓
+MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040 -> MOR-050
+MOR-030 / MOR-050 -> MOR-210                        # R4 preset policy 只依赖 R1 离线链，不等 projection
+MOR-210 (+ receipt/verifier) -> MOR-230             # R4.5 只读 review
+MOR-090 + MOR-000 -> MOR-100 / MOR-300 / MOR-400    # Adapter 合同需一手事实 + root 选定
+MOR-100 -> MOR-110
+MOR-300 -> MOR-310
+MOR-400 -> MOR-410
+MOR-050 -> MOR-140 -> MOR-150 -> MOR-200            # 投影链，独立于 preset policy
+MOR-230 -> MOR-600 -> MOR-700
+MOR-050 -> MOR-055 -> MOR-060
+MOR-060 -> MOR-850
 ```
+
+注：runtime fixtures（`tests/fixtures/<host>-static/`）仍须等 `<runtime-root>` 选定后在目标 runtime 创建；MOR-090 的持久化 evidence 文档保留在当前设计仓（`docs/decision/`），不阻塞于 root。
 
 ## 3. R0-R1：设计、策略、离线 resolver
 

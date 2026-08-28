@@ -26,7 +26,7 @@
 4. 当前授权仅覆盖什么；没有授权时默认执行 offline resolve 或 dry-run；
 5. 私有 receipt root 和 exact rollback entry。
 
-receipt root 建议为 `<runtime-state-root>/receipts/<yyyy-mm-dd>/<run-id>/`，为 ignored/private 且只允许当前用户读取。不得把 token、cookie、prompt、完整 command、base URL query 或未脱敏环境变量写进 receipt。
+receipt root 的 canonical path 为 `<runtime-root>/.ai/receipts/<yyyy-mm-dd>/<run-id>/`（state 为 `<runtime-root>/.ai/state/`），为 ignored/private 且只允许当前用户读取。不得把 token、cookie、prompt、完整 command、base URL query 或未脱敏环境变量写进 receipt。
 
 ## 3. 步骤 A：离线 policy 与五槽位验收
 
@@ -103,8 +103,9 @@ host adoption 只在用户明确授权启动一个**fresh、范围受控的真�
 
 | 观察 | 可报告的最高结论 | 禁止外推 |
 | --- | --- | --- |
-| host 可观察到实际采用的计划参数/配置 | 此 route 的 `host_loaded` | 其他 host/identity/slot |
+| host 可观察到实际采用的计划参数/配置 | 此 route 的 `host_loaded=true` | 其他 host/identity/slot |
 | host 不能观察 model/effort | `host_loaded=not_observable` | 不能靠任务看似成功补写 |
+| 观察到宿主加载与 resolved route **不一致** | `host_loaded=false`、`observation_status=route_mismatch`、**hard fail** | 不得记为 `not_observable`；不得以控制面选择搪塞 |
 | 指定 slot 产出满足独立 verifier | 此 host/identity/route/slot 的 `live_accepted` | 全局质量、长期稳定、跨模型等价 |
 
 任务结果与 plan 不一致是 hard fail。运行中会话不热切换；中断后只能创建带 handover 的新任务，receipt 写 `continuity=not_proven`。不得为改善结果重启/kill host、gateway 或 proxy，或改 OAuth/provider/共享配置。

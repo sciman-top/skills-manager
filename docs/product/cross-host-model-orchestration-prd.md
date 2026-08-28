@@ -212,7 +212,7 @@ preset_used_efforts:
 - `MOR-FR-033`：正在运行会话、unknown target ownership、schema 不明、target hash drift、路径逃逸、无 backup、并发 lock 或 UI-only surface 均 fail closed。
 - `MOR-FR-034`：默认 `PrepareLaunch` 只生成 dry-run。没有明确当前执行授权时不得启动 child/task。
 - `MOR-FR-035`：日志、receipt、错误和 hash input 不得出现 secret、完整 command、prompt、未脱敏环境变量或 cookie。
-- `MOR-FR-036`：route receipt 必须分列 `requested_route`（调用方请求）、`resolved_route`（控制面按 policy 选中）与 `observed_host_route`（仅当存在独立 host 证据时填写），并记录 `fallback_applied`/`clamp_applied` 与 `observed_by`/`observed_at`/`observation_status`；请求与观察不一致时 `host_loaded=not_observable`，不得以控制面选择充当宿主事实。宿主自身 fallback/clamp（如 Claude Code effort clamp 与 `fallbackModel` 链、DeepSeek 未知名回落 flash）不是控制面失败，但必须留痕。
+- `MOR-FR-036`：route receipt 必须分列 `requested_route`（调用方**显式**请求的 model/effort；普通 RouteRequest 只含 workload/risk/operation，model/effort 是 resolve 产物，故无显式请求时为 `null`；仅 manual_override 或用户声明携带显式 model/effort 时记录原始值）、`resolved_route`（控制面按 policy 选中）与 `observed_host_route`（仅当存在独立 host 证据时填写），并记录 `fallback_applied`/`clamp_applied` 与 `observed_by`/`observed_at`/`observation_status`。`host_loaded` 状态机固定为三态：无宿主观察证据 = `not_observable`；观察到且与 `resolved_route` 一致 = `host_loaded=true`；观察到但不一致 = `host_loaded=false`、`observation_status=route_mismatch`、**hard fail**——不得把"宿主错误加载"隐藏成"无法观察"。宿主自身 fallback/clamp（如 Claude Code effort clamp 与 `fallbackModel` 链、DeepSeek 未知名回落 flash）不是控制面失败，但必须留痕。
 
 ### 6.5 宿主 AI 一句话操作
 

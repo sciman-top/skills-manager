@@ -1,6 +1,7 @@
 # MOR-090：静态 Adapter 事实证据包（Codex / ZCode / Claude+DeepSeek）
 
 **状态**：static-fact evidence；采集日期 2026-08-28。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
+**证据状态词表**：`verified`（官方文档/本机 help 直证）｜`operator_declared`（操作者一手声明/界面证据，无独立附件复核）｜`inferred`（由命名/公告推断的精确值）｜`unknown`（无一手来源）。**只有 `verified` 条目可进 Adapter allowlist**。
 **消费方**：未来 `<runtime-root>` runtime 的 Adapter contract/fixture（MOR-100/MOR-300/MOR-400）；runtime 未选定前 fixtures 不创建
 **方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取 `~/.codex`、`~/.zcode`、`CLAUDE_CONFIG_DIR` 等用户配置或凭据；未发送任何模型请求；社区资料仅作结构启发，不作为能力证据
 
@@ -13,7 +14,7 @@
 | C3 | launch 面：`codex exec -m <MODEL>`、`-c <key=value>`（dotted path 覆盖 config.toml 值） | 本机 `codex exec --help`（0.150.1），2026-08-28 | verified（本机只读 help） |
 | C4 | profile 机制：`$CODEX_HOME/profile-name.config.toml` 独立文件 + `--profile` 选择；project-scoped config 不可覆盖 provider/auth/profile selection | Configuration Reference，2026-08-28 | verified；additive profile 为投影 POC 首选候选 |
 | C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
-| C6 | `gpt-5.6-sol` 模型 slug 真实（官方安全扫描推荐 "gpt-5.6-sol with xhigh reasoning effort"）；GPT-5.6 官方公告确认 Sol/Terra/Luna 三档横跨 ChatGPT/Codex/API，`gpt-5.6-terra` 有官方模型页（developers.openai.com/api/docs/models/gpt-5.6-terra）；Luna 为最便宜档，存在 Luna Pro 变体命名 | Codex Security workbench + openai.com/index/gpt-5-6 + 官方模型页，2026-08-28 | verified（公告/模型页级）；`gpt-5.6-luna` 精确 slug 推断自公告命名，进 MOR-100 fixture 时按本机 help 最终确认 |
+| C6 | `gpt-5.6-sol` 模型 slug 真实（官方安全扫描推荐 "gpt-5.6-sol with xhigh reasoning effort"）；GPT-5.6 官方公告确认 Sol/Terra/Luna 三档横跨 ChatGPT/Codex/API，`gpt-5.6-terra` 有官方模型页 | Codex Security workbench + openai.com/index/gpt-5-6 + developers.openai.com/api/docs/models/gpt-5.6-terra，2026-08-28 | Sol/Terra slug `verified`（公告/模型页级）；`gpt-5.6-luna` 精确 slug 为 `inferred`（推断自公告命名，无独立 exact model page 直证）——不进 allowlist，保持 candidate，进 MOR-100 fixture 前须本机 help 或官方 exact page 证实 |
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
@@ -23,7 +24,7 @@
 | --- | --- | --- | --- |
 | Z1 | GLM Coding Plan 当前阵容 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo；无 `GLM-3.5-Flash`（旧模板名，未见于当前阵容） | z.ai/subscribe + docs.bigmodel.cn 新品页，2026-08-28 | verified；旧名退出 static default |
 | Z2 | 候选 slug `glm-5.3-flash`（GLM-5.3-Flash，2026-08-26 发布，Coding Plan 已全面放开） | docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash，2026-08-28 | verified |
-| Z3 | surface 词表：Chat Completion API `reasoning_effort` 为枚举，GLM-5.2+ 支持 `low / high / max`（默认 `max`）；ZCode 选择面提供 低/高/最高 三档对应（操作者界面证据，2026-08-28） | docs.bigmodel.cn API 参考/核心参数/GLM-5.3 页 + 操作者截图 | verified（文档 + operator_declared） |
+| Z3 | surface 词表：Chat Completion API `reasoning_effort` 为枚举，GLM-5.2+ 支持 `low / high / max`（默认 `max`）——`verified`（官方文档）；ZCode 选择面提供 低/高/最高 三档与之对应——`operator_declared`（操作者界面截图，2026-08-28，artifact：`~/.zcode/cli/image-cache/sess_fe51fa41-48ad-4999-a591-903968c6fe16/image-c09cf0b5b9c0de7bf52238a342b48f13.png`，SHA-256 `6b79b0e22cd9c37fc8569cd5ff9631f77edefd5c5df663cd7585556f8d1514a5`；image-cache 为易失缓存，附件留存前该半边证据按 operator_declared 计） | docs.bigmodel.cn API 参考/核心参数/GLM-5.3 页 + 操作者截图 | 拆分：文档半边 verified；UI 半边 operator_declared |
 | Z4 | `thinking` 不可关闭：GLM-5.3+ 始终启用思考，不再支持 `thinking.type: "disabled"`；默认 max 档 token 消耗显著 | GLM-5.3 模型页，2026-08-28 | verified；light 档语义须在 MOR-030 明示"low effort 仍思考" |
 | Z5 | **投影面未取证**：ZCode 档位选择位于桌面 UI/计划层；控制面能否表达/投影该选择未知，预期 manual handoff | 无一手来源 | unknown → MOR-090 后续采集项；取证前 GLM route 一律 `manual_mapping_required` |
 
@@ -53,7 +54,27 @@
 
 ## 5. 采纳决定
 
-- 进入 Adapter allowlist 的最小集：C1/C3/C4/C6、Z2/Z3、A1/A2/A6、D1/D2/D3/D4。
-- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、`gpt-5.6-luna` 精确 slug（fixture 时确认）、Z5/A×D 交叉项（取证后评审）。
+- 进入 Adapter allowlist 的最小集（全部 verified）：C1/C3/C4/C6（Sol/Terra slug）、Z2、Z3 文档半边、A1/A2/A6、D1/D2/D3/D4。
+- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、`gpt-5.6-luna` 精确 slug（inferred）、Z3 UI 半边（operator_declared，附件留存后复评）、Z5/A×D 交叉项（取证后评审）。
+
+## 6. 来源 URL 清单（全部抓取于 2026-08-28）
+
+- Codex Configuration Reference：https://learn.chatgpt.com/docs/config-file/config-reference
+- Codex Security CLI quickstart：https://learn.chatgpt.com/docs/security/cli
+- Codex Security workbench：https://learn.chatgpt.com/docs/security/plugin/workbench
+- GPT-5.6 官方公告：https://openai.com/index/gpt-5-6/
+- gpt-5.6-terra 官方模型页：https://developers.openai.com/api/docs/models/gpt-5.6-terra
+- GLM Coding Plan：https://z.ai/subscribe
+- GLM-5.3-Flash 模型页：https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash
+- GLM-5.3 模型页：https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3
+- bigmodel Chat Completion API：https://docs.bigmodel.cn/api-reference/模型-api/对话补全
+- bigmodel 核心参数说明：https://docs.bigmodel.cn/cn/guide/start/concept-param
+- Claude Code model configuration：https://code.claude.com/docs/en/model-config
+- Claude Code environment variables：https://code.claude.com/docs/en/env-vars
+- Claude Code LLM gateway connect：https://code.claude.com/docs/en/llm-gateway-connect
+- DeepSeek Anthropic API：https://api-docs.deepseek.com/guides/anthropic_api/
+- DeepSeek Claude Code 集成：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/
+- DeepSeek 更新日志：https://api-docs.deepseek.com/updates/
+- claude-code issue #65782（fallbackModel）：https://github.com/anthropics/claude-code/issues/65782
 - 拒绝：GLM-3.5-Flash 旧名；把 provider 方言可表达性当作宿主生效证明；以社区配置补齐任何 token。
 - fixtures（`tests/fixtures/<host>-static/`）待 `<runtime-root>` 选定后随 MOR-100/300/400 创建；本证据包为其唯一输入底稿。
