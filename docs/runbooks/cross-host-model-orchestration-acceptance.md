@@ -85,7 +85,7 @@ pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex_cli --identity
 才可执行：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\ai-route.ps1 project --host codex --from-current-override --plan
+pwsh -NoProfile -File .\scripts\ai-route.ps1 project --host codex_cli --from-current-override --plan
 pwsh -NoProfile -File .\scripts\ai-route.ps1 project --plan <private-plan-path> --apply --token <plan-bound-token>
 ```
 

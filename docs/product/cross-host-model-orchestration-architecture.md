@@ -95,7 +95,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 ```json
 {
   "schema_version": 1,
-  "scope": {"host": "codex", "identity_selector": "redacted-current"},
+  "scope": {"host": "codex_cli", "identity_selector": "redacted-current"},
   "host_default": {
     "selection_plane": "host_default",
     "route_map_id": "gpt56_sol_only",
@@ -129,7 +129,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 {
   "schema_version": 1,
   "request_id": "uuid",
-  "scope": {"host": "codex", "identity_selector": "redacted-current"},
+  "scope": {"host": "codex_cli", "identity_selector": "redacted-current"},
   "requested": {
     "workload": "routine_maintenance",
     "risk_level": "normal",
@@ -304,7 +304,7 @@ PlanNativeProjection(selection_plane, route_map_id) -> ProjectionPlan | ManualSe
 ```json
 {
   "plan_id": "uuid",
-  "scope": {"host": "codex", "identity_selector": "redacted-current"},
+  "scope": {"host": "codex_cli", "identity_selector": "redacted-current"},
   "selection_plane": "operator_override",
   "override_id": "uuid",
   "policy_revision": "sha256:...",
