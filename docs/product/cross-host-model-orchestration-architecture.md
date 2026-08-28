@@ -82,9 +82,9 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 
 | plane | owner | 位置 | 何时变化 | 内容 |
 | --- | --- | --- | --- | --- |
-| `policy_source` | maintainer / 用户 | tracked runtime repo | reviewed patch | workload/risk、静态 Adapter allowlist、preset、emergency approval |
-| `host_default` | 当前用户 | private user-local root | 明确设定 | 一组 host/identity 日常 route map |
-| `operator_override` | 当前用户 / 当前宿主 AI | 同一 private root | 用户明确声明 | 当前 scope 的替代 route map |
+| `policy_source` | maintainer / 用户 | tracked runtime repo | reviewed patch | workload/risk、静态 Adapter allowlist、完整 preset/custom route map、emergency approval |
+| `host_default` | 当前用户 | private user-local root | 明确设定 | 指向 policy source 中已审查 route map 的选择引用 |
+| `operator_override` | 当前用户 / 当前宿主 AI | 同一 private root | 用户明确声明 | 当前 scope 的替代选择引用；不保存 route map 副本 |
 | `resolved_route` | resolver | append-only private receipt | 每次显式 Resolve | requested/resolved/observed 三段 + fallback/clamp 记录 |
 | `host_projection` | projection transaction | 已验证 native target + private receipt | plan/token/授权齐备 | 可表达的 model/effort/profile 字段 |
 
@@ -98,6 +98,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   "scope": {"host": "codex_cli", "identity_selector": "redacted-current"},
   "host_default": {
     "selection_plane": "host_default",
+    "selection_kind": "named_preset",
     "route_map_id": "gpt56_sol_only",
     "policy_revision": "sha256:...",
     "updated_at": "UTC timestamp",
@@ -107,12 +108,8 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
     "override_id": "uuid",
     "source": "operator_declared_unverified",
     "selection_plane": "operator_override",
+    "selection_kind": "named_preset",
     "route_map_id": "gpt56_terra_only",
-    "route_keys": {
-      "light": {"model": "gpt-5.6-terra", "effort": "medium"},
-      "standard": {"model": "gpt-5.6-terra", "effort": "high"},
-      "deep": {"model": "gpt-5.6-terra", "effort": "xhigh"}
-    },
     "declared_at": "UTC timestamp",
     "requires_reconfirm_after": null,
     "policy_revision": "sha256:...",
@@ -120,6 +117,8 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   }
 }
 ```
+
+私有 state **不得**保存 `route_keys`、`model_family` 或任一 model/effort 副本。resolver 必须以 `route_map_id + policy_revision` 从同 revision 的 `policy_source` 解引用完整 map；引用不存在、revision 不匹配、选择种类未知或 map 不能通过同族/完整性校验均 fail closed。`selection_kind=named_preset` 只允许三个 `gpt56_*_only` id；将来经 reviewed patch 加入的 `selection_kind=reviewed_custom_single_family_map` 也只能引用 policy source 的版本化 map，不能存入 private state。
 
 每次 persistent write 必须执行：`canonical scope check -> single-writer lock -> target recheck -> before-hash -> backup -> atomic replace -> after-hash -> private receipt`。lock 必须先于 before-hash，hash 在锁内重验；lock 是本 runtime 的协作写者语义，其范围、stale-lock 崩溃检测与释放机制由 MOR-140 定义，不约束非协作外部写者，防漂移由锁内 before-hash 重验兜底。未知字段、scope 不匹配、并发、reparse escape、hash 漂移或无 backup 均 fail closed。恢复默认只删除当前 scope 的 `operator_override`，不变更 `host_default`，不触及任何其他 host/identity。
 
@@ -210,7 +209,7 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
   gpt56_luna_only:    [medium, high, xhigh]
 ```
 
-`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前三个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
+`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前三个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
@@ -307,11 +306,13 @@ Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 ex
 
 ```text
 1. Validate request schema, exact host/identity scope, workload, operation, workspace policy and risk.
-2. Load the exact scoped host_default.
-3. If one-task manual_override exists, validate it first.
-4. Else if exact scoped operator_override exists, check `requires_reconfirm_after` first: if expired（`requires_reconfirm_after <= now`），return `manual_mapping_required` with reason `override_reconfirmation_required`——不自动切换、不静默续期；未过期才选择其 route map.
-5. Else select host_default route map.
-6. Validate the chosen model/effort against static Adapter allowlist, allowed data class,
+2. Load the exact scoped host_default selection reference.
+3. If one-task manual_override exists, validate its one exact candidate first; it applies only to this request,
+   cannot define a route map or persist into host_default/operator_override, and expires with the request.
+4. Else if exact scoped operator_override exists, check `requires_reconfirm_after` first: if expired（`requires_reconfirm_after <= now`），return `manual_mapping_required` with reason `override_reconfirmation_required`——不自动切换、不静默续期；未过期才 select its policy map reference.
+5. Else select the host_default policy map reference.
+6. Dereference the selected `(selection_kind, route_map_id, policy_revision)` only from policy_source;
+   validate complete keys, one exact model family, static Adapter allowlist, allowed data class,
    operation, maximum risk and any required emergency approval.
 7. Return selected, blocked, manual_host_selection_required or manual_mapping_required.
 8. Freeze the candidate fingerprint; launch/projection cannot re-resolve or mutate it.
@@ -378,7 +379,7 @@ Apply 顺序固定：`canonical target containment -> single-writer lock -> targ
 | --- | --- | --- | --- |
 | “当前 Codex 只有 Terra 可用，切换 Terra-only 并落盘。” | `reconcile --preset gpt56_terra_only` | current Codex/current identity | scoped override；条件具备才投影 |
 | “当前 Codex 只有 Luna 可用，按默认模板更新。” | `reconcile --preset gpt56_luna_only` | current Codex/current identity | scoped override |
-| “当前 ZCode 可用 GLM-5.3-Flash/max，按默认模板更新。” | `reconcile --declare-available <map> --optimize-from-default` | current ZCode/current identity | scoped override；声明集未被静态合同覆盖的档位保持 `manual_mapping_required` |
+| “当前 ZCode 可用 GLM-5.3-Flash/max，按默认模板更新。” | `reconcile --declare-available <map> --optimize-from-default` | current ZCode/current identity | 只生成 `manual_mapping_required` plan；不得把未审查 map 写入 override，需由 reviewed policy patch 先创建可引用 map |
 | “当前 Codex 恢复默认模型编排。” | `reconcile --restore-default` | current Codex/current identity | 只删除该 override |
 
 问句、转述日志、未指定 host、混合多个身份、未知 model/effort，或“所有环境都切”而没有逐 host map 时，Parser 必须零写入并返回 `clarify_required` 或 `manual_mapping_required`。成功 receipt 必须说明：当前 route 是人工声明、未读取认证/网关、未启动验证、未影响其他宿主，以及是否只写了 private override、仅生成投影 plan 或已完成投影事务。

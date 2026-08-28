@@ -16,7 +16,7 @@
   -> 用户说“恢复默认”：只删除该 scope 的 override
 ```
 
-Codex 的日常 default 为 `gpt56_sol_only`；用户可以随时切换到 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
+`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/xhigh 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
 ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
@@ -45,14 +45,14 @@ ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effor
 | AI coding agent | 根据用户声明启动下一项任务 | 只消费 resolved route；不猜模型、不改 provider |
 
 - **workload**：结构化工作类型，固定落入 `quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation` 或 `deep_investigation_or_implementation` 之一。
-- **基础 route key**：日常用于模型/effort 切换的当前三档：`light`、`standard`、`deep`。它们是当前预设的便捷层，不是 schema 上限；未来可新增 `review`、`max_depth` 等 key。
+- **基础 route key**：日常用于模型/effort 切换的当前三档：`light`、`standard`、`deep`。它们是当前命名 preset 的便捷层，不是 schema 上限；未来只能通过版本化的新 preset/map revision 新增 `review`、`max_depth` 等 key。
 - **执行槽位**：policy 依据 workload、risk 与 operation 派生出的稳定语义类别（semantic workload slot），不是可调度的并发槽位，也不是 effort 的同义词。首版目录固定提供五项：`quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation`、`deep_investigation_or_implementation`；多个 slot 可复用同一 route key。workload 是调用方声明的任务意图，slot 是 policy 派生结果；首版两者共用相同五个 identifier，属 1:1 实现细节，不是同一领域对象。并发/队列/超时等宿主容量语义不在本控制面（它是明确的非目标），未来如需要走独立 host-specific capacity contract，不改 slot 枚举。
 - **风险 gate**：`high_risk_adjudication` 覆盖任何 workload 的垂直风险 gate，不是第四个常用 route key。
 - **constrained**：policy 输出的决策属性，不是 effort 标签，也不是裸布尔——启用时必须携带冻结形状的约束对象（`constraint_reasons`/`max_risk_level`/`allowed_operations`/`required_verifiers`，形状见架构 §4.2），并进入 MOR-020 contracts、resolver 输出与 receipt verifier。
 - **capability profile**：独立概念已删除；如需展示别名，必须由 execution slot/route key 唯一派生并在 schema 注明派生规则，不参与 Resolve、Adapter 或 receipt 合同。
 - **candidate**：一个 `(host, identity, model, effort, operation/risk bound)` 组合；gateway route 只能作为脱敏 fingerprint 成分，不能被控制面读取或修改。
-- **host_default**：一个 `(host, identity)` 的稳定日常 route map。
-- **operator_override**：用户明确声明当前可用集合后，为相同 scope 写入的持久替代 route map。
+- **host_default**：一个 `(host, identity)` 的稳定日常 route-map 选择引用，而非 route map 副本。
+- **operator_override**：用户明确声明后，为相同 scope 写入的持久替代选择引用；完整 route map 不存入私有 state。
 - **resolved_route**：一次显式 resolve 的 `selected`、`blocked` 或 `manual` 结果；它只写 private receipt。旧名 `effective_route` 已废弃——控制面选择不等于宿主生效事实，宿主生效必须由独立观察证据另行记录（见 `MOR-FR-036`）。
 - **静态 Adapter contract**：人工复核、版本化的宿主 model/effort/field/target 能力表；不是自动发现结果。
 - **Preset Review**：只读审查。它只输出 `keep/promote/demote/block/insufficient_evidence` 建议，不直接写配置。
@@ -100,7 +100,7 @@ workload + risk + exact host/identity
 | 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/xhigh | Terra/xhigh | Luna/xhigh，`constrained` |
 | 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/xhigh + high-risk policy | Terra/xhigh + 当前 emergency approval | `blocked` |
 
-`gpt56_sol_only` 是 Codex 的默认 host default；它采用用户提出的 `Sol/xhigh`、`Sol/medium`、`Sol/low` 三档，删除原有单独的 `Terra/xhigh` 日常槽位。
+`gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/xhigh`、`Sol/medium`、`Sol/low` 三档，删除原有单独的 `Terra/xhigh` 日常槽位。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
 
 `gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `xhigh/high/medium`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
 
@@ -199,7 +199,7 @@ preset_used_efforts:
 当前 Codex 恢复默认模型编排。
 ```
 
-前三句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用 host default（通常是 `gpt56_sol_only`）。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
+前三句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Sol-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
 
 ## 6. 功能需求
 
@@ -222,10 +222,10 @@ preset_used_efforts:
 
 ### 6.3 人工声明与“运行时有效路由”
 
-- `MOR-FR-020`：`host_default` 是每个 `(host, identity)` 的私有日常 route map；没有 override 时，resolver 直接使用它，不要求任何环境事实。
-- `MOR-FR-021`：人工声明可选择命名 GPT preset，或声明对应宿主可用的 model/effort 集合后“按 default workload template 优化”。命名 GPT preset 必须完整采用其 `preset_route_maps` 的同族三 key；后者只允许使用静态 allowlist 中的候选，且必须明确 model family 与每个 key 的精确映射。
-- `MOR-FR-022`：model/effort 集合不能无歧义覆盖当前 slot 所需的 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
-- `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override`，并随下一次显式 resolve 产生新的 `resolved_route` receipt；不广播到 peer host。
+- `MOR-FR-020`：`host_default` 是每个 `(host, identity)` 的私有日常**选择引用**；它只保存 `selection_kind`、`route_map_id` 与 `policy_revision`，完整 route map 只能从该 revision 的 tracked policy source 解引用。没有 override 时，resolver 使用这个引用，不要求任何环境事实。
+- `MOR-FR-021`：人工声明可选择命名 GPT preset，或选择已由 reviewed patch 加入 policy source 的 `reviewed_custom_single_family_map`。两类 map 均须完整覆盖 `light|standard|deep`，每一 key 的 exact model 必须等于同一个 model family，且每个 tuple 都在静态 allowlist 中；private state 不得保存其 `route_keys` 副本。用户临时提出未审查的模型/effort 集合时，只能生成 `manual_mapping_required` 计划，不能落盘为 default/override。
+- `MOR-FR-022`：`manual_override` 仅为当前 RouteRequest 的一条 exact model/effort 候选，必须通过同一 static allowlist、operation/risk/constraint 校验；它不能定义五槽位 map、不能持久化、不能成为 preset 或 host default。model/effort 集合不能无歧义覆盖当前 slot 所需 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
+- `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override` **选择引用**，并随下一次显式 resolve 产生新的 `resolved_route` receipt；不广播到 peer host。
 - `MOR-FR-024`：用户说“恢复默认”时，只删除相同 scope 的 override；任务结果、错误、时间流逝或 assistant 建议都不能自动恢复默认。
 - `MOR-FR-025`：成功 action receipt 必须标 `verification=operator_declared_unverified`，说明控制面没有检测任何 runtime/provider/gateway/auth 状态。
 - `MOR-FR-026`：持久 override 必须支持可选 `requires_reconfirm_after`；只在下一次显式 resolve 时检查（无 watcher），过期返回 `manual_mapping_required` 并要求用户重申，不自动切换或恢复默认。
@@ -253,7 +253,7 @@ preset_used_efforts:
 
 | host / identity | 日常 default | 人工变化动作 | 隔离边界 |
 | --- | --- | --- | --- |
-| Codex / 当前 API gateway 或 OAuth identity | `gpt56_sol_only` 三档 | 切 Sol-only、Terra-only、Luna-only；或声明新 map | 仅当前 Codex identity |
+| Codex / 当前 API gateway 或 OAuth identity | `gpt56_sol_only` intended policy default；三项 config tuple 证实前无实际 default | 切 Sol-only、Terra-only、Luna-only；未审查新 map 只生成 manual plan | 仅当前 Codex identity |
 | ZCode / 当前 identity | 无已证实 default（GLM 模板为 candidate） | MOR-090 钉定 exact model/effort 后按 ZCode 模板生成 default | 不影响 Codex/Claude |
 | Claude Code / 当前 identity | 无已证实 default（DeepSeek 模板为 candidate） | Claude host adapter 与 DeepSeek provider dialect 双合同取证后启用 | 不影响 Codex/ZCode |
 
