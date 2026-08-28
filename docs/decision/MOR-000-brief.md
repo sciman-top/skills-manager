@@ -10,6 +10,7 @@
 | 决议项 | 内容 |
 | --- | --- |
 | 首期 host | `codex_cli`（唯一首期宿主；ZCode/Claude 等各自静态合同取证后再接入） |
+| GPT preset invariant | 每次仅选择一个 `gpt56_sol_only` / `gpt56_terra_only` / `gpt56_luna_only`；该 preset 恰含 `light/standard/deep` 三个同族 route key，五个 execution slot 可复用三 key，禁止跨 Sol/Terra/Luna 混搭；high-risk 是额外 gate，不是第四档 |
 | 首期 default preset | `gpt56_sol_only`（Sol/low、Sol/medium、Sol/xhigh；高风险=Sol/xhigh + policy），以用户明确偏好选定，非测量最优 |
 | identity binding | 必须使用不可伪造、可审计的绑定来源；无法绑定时状态 `identity_unbound`，禁止持久 override 与 projection，仅允许 offline resolve 与 dry-run/manual handoff |
 | native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 优先于通用 route resolver 且完全排除在其外**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |

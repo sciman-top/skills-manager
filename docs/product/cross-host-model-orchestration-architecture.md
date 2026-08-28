@@ -210,6 +210,8 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
   gpt56_luna_only:    [medium, high, xhigh]
 ```
 
+`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前三个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
+
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
 模型支持但预设不使用的 effort（如 Sol/Terra 的 `high`），以及不属于当前 surface 词表的值（如 config 面的 `max`），保持候选状态，不自动加进路由。新增某档必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch；不能仅因为数字更大或营销名称更强。
@@ -226,11 +228,11 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
 这三档是**基础 route key**，并非宣称跨模型的同 effort 能力等价。它有四个设计目的：
 
 1. Sol 正常可用时，默认只需认识 `xhigh / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/xhigh 承接深度实现或获批高风险工作。
-2. Terra-only 与 Luna-only 保持相同三个基础 route key，切换时只更换 model family；为降低单一替代模型的不确定性，轻量/有界写入使用 `medium/high`，而不使用 `low`。
+2. Terra-only 与 Luna-only 保持相同三个基础 route key，但每个 preset 同时更换**完整的同族 model/effort map**；为降低单一替代模型的不确定性，轻量/有界写入使用 `medium/high`，而不使用 `low`。
 3. 原先独立的 Terra/xhigh 日常槽位删除；深度实现转入 Sol/xhigh。Terra/xhigh 仍作为 Terra-only 的深度 route 以及未来人工 override 的候选。
 4. Luna/xhigh 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/xhigh 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。
 
-当前三条 route key 不是 schema 上限：若未来静态 Adapter contract 与同类 verifier 同时证明必要性，policy 可为一个 exact host/identity 新增 `review`、`max_depth` 等第四/第五 key。该变更不会重命名 slot，也不会改变自然语言 intent、receipt 或 projection transaction；它只是 route-key 到 model/effort 的 reviewed mapping patch。
+route-key 命名空间不是 schema 上限；但当前 `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这三个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
 
 ### 5.3 固定五个 execution slot、可扩展 route key
 
@@ -254,15 +256,41 @@ execution_slots:                 # 五个语义 slot 稳定；未来新模型不
   bounded_implementation: { route_key: standard, operation: workspace_write }
   deep_investigation_or_implementation: { route_key: deep, operation: workspace_write }
 
-route_keys:                      # 当前 GPT 预设使用三条
-  light:    { model: gpt-5.6-sol, effort: low }
-  standard: { model: gpt-5.6-sol, effort: medium }
-  deep:     { model: gpt-5.6-sol, effort: xhigh }
+preset_route_maps:               # Resolve 只读取 selected preset 的完整同族 map
+  gpt56_sol_only:
+    model_family: gpt-5.6-sol
+    route_keys:
+      light:    { model: gpt-5.6-sol, effort: low }
+      standard: { model: gpt-5.6-sol, effort: medium }
+      deep:     { model: gpt-5.6-sol, effort: xhigh }
+  gpt56_terra_only:
+    model_family: gpt-5.6-terra
+    route_keys:
+      light:    { model: gpt-5.6-terra, effort: medium }
+      standard: { model: gpt-5.6-terra, effort: high }
+      deep:     { model: gpt-5.6-terra, effort: xhigh }
+  gpt56_luna_only:
+    model_family: gpt-5.6-luna
+    route_keys:
+      light:
+        { model: gpt-5.6-luna, effort: medium, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, independent_verifier_required],
+          allowed_operations: [read_only], required_verifiers: [independent_review], max_risk_level: normal }
+      standard:
+        { model: gpt-5.6-luna, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
-# 后续经过审查，可新增 review/max_depth，而不改变上方五个 execution_slots。
+# 后续经过审查的新 preset/map revision 可新增 review/max_depth，而不改变五个 execution_slots。
 # max_depth 是 route-key 命名空间；其宿主表达须经 surface adapter 显式映射，
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
+
+Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/xhigh，绝不能混入 Terra/Luna。high-risk 是该结果之上的 policy gate，不创建第四个 route key，也不能借机换用另一 preset。
 
 ### 5.4 ZCode 与 Claude 的静态三 route-key 映射
 

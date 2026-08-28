@@ -110,10 +110,10 @@ MOR-060 -> MOR-850
 
 ### MOR-030：Policy loader 与 execution-slot classifier
 
-- **Goal**：解析结构化 workload 到固定 execution slot，再解析 slot 到 route key；禁止从 prompt/model 名/历史任务猜测。
+- **Goal**：解析结构化 workload 到固定 execution slot，再解析 slot 到 route key；禁止从 prompt/model 名/历史任务猜测。选定 preset 后，resolver 只能从该 preset 的三条同族 route key 取 exact model/effort。
 - **Exact write set**：`src/Policy.ps1`、`tests/Unit/Policy.Tests.ps1`、`tests/fixtures/policy/*.yaml`。
 - **默认 slot 模板**：`quick_triage -> light`；`routine_maintenance/standard_review/bounded_implementation -> standard`；`deep_investigation_or_implementation -> deep`；任何 slot 叠加 high-risk 条件即进入 risk gate。
-- **必测**：unknown workload；slot 没有 operation/verification；五个固定 slot；多个 slot 复用 route key；未来 fourth/fifth route key fixture 不改变 slot resolution；低风险 simple diff 可走 light、标准 review 不得误走 light；workspace/data-class disallow；risk override；无审批 Terra critical；Luna critical block；`--workload` 常规入口与 `--execution-slot` fixture 直通的一致性校验（不一致拒绝）；请求 operation 超出 slot operation 时 blocked；`risk_level` 仅 `normal | high`。
+- **必测**：unknown workload；slot 没有 operation/verification；五个固定 slot；多个 slot 复用 route key；未来版本化 preset/map 的 fourth/fifth route-key fixture 不改变 slot resolution；低风险 simple diff 可走 light、标准 review 不得误走 light；workspace/data-class disallow；risk override；无审批 Terra critical；Luna critical block；`--workload` 常规入口与 `--execution-slot` fixture 直通的一致性校验（不一致拒绝）；请求 operation 超出 slot operation 时 blocked；`risk_level` 仅 `normal | high`；当前三命名 preset 恰有 light/standard/deep 三 key；混入另一 family slug、缺/多 key、或 slot route 不等于 selected preset 的 exact mapping 一律拒绝。
 - **Minimum proof**：focused tests + fixture-based `ai-route resolve --offline`。
 - **Stop / rollback**：若实现需要读取用户 prompt、会话或模型 catalog 才能分类，停止；revert。
 - **Truth boundary**：`repo_verified`。
@@ -131,7 +131,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：离线得到 deterministic route，不接触 host/network。
 - **Exact write set**：`src/Resolver.ps1`、`src/Receipt.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Resolver.Tests.ps1`、`tests/Contract/Receipt.Tests.ps1`。
-- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 tuple-matrix JSON 逐项，仅 verified，宿主×provider 交集）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段 + `route_events` 跨字段一致性（布尔与事件互斥规则、risk vs `max_risk_level`）；host alias 归一化（`codex`→`codex_cli`，state/receipt 只存 canonical）；constrained 运行时一致性（操作/risk/verifier 与约束对象不符 fail closed）。
+- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 tuple-matrix JSON 逐项，仅 verified，宿主×provider 交集）；slot/route-key mapping；五 slot 三 key fixture；版本化 future preset 的五 key fixture；all three GPT preset；每套 preset 五 slot 的 model family 全量一致；cross-preset model/effort injection、自动借用其他 preset key、未知/缺/多 key 均 `blocked`；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段 + `route_events` 跨字段一致性（布尔与事件互斥规则、risk vs `max_risk_level`）；host alias 归一化（`codex`→`codex_cli`，state/receipt 只存 canonical）；constrained 运行时一致性（操作/risk/verifier 与约束对象不符 fail closed）。
 - **Minimum proof**：所有 fixture 的 `resolve --offline` 和 focused tests；零 network/process/host write。
 - **Stop / rollback**：CLI 试图访问 gateway、读取 OAuth、执行 child 或改 host config 时停止；revert。
 - **Truth boundary**：`repo_verified`。
@@ -140,7 +140,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：实现 current host/current identity 的 persistent override，只通过用户声明更新；identity 必须有可审计绑定来源，未绑定时 `identity_unbound` 并拒绝持久写入。
 - **Exact write set**：`src/Defaults.ps1`、`src/PrivateState.ps1`、`src/Resolver.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Defaults.Tests.ps1`、`tests/Contract/OperatorOverrideReceipt.Tests.ps1`。
-- **必测**：Sol/Terra/Luna preset switch；Codex override 不影响 ZCode/Claude；新 map 基于该 host template；无法映射时 `manual_mapping_required`；restore 只删 exact override；task outcome 不变更 state；receipt 为 `operator_declared_unverified`；`identity_unbound` 拒绝持久写入；`requires_reconfirm_after` 到期重确认。
+- **必测**：Sol/Terra/Luna preset switch；每次切换替换完整的同族三 key map 而非修改单个 slot；Codex override 不影响 ZCode/Claude；新 map 基于该 host template；无法映射时 `manual_mapping_required`；restore 只删 exact override；task outcome 不变更 state；receipt 为 `operator_declared_unverified`；`identity_unbound` 拒绝持久写入；`requires_reconfirm_after` 到期重确认。
 - **Minimum proof**：offline fixture state root、schema/resolver tests；zero host config write。
 - **Stop /rollback**：override 修改 provider/auth/base URL，污染 tracked policy，跨 host 广播，或缺 receipt/backup 时 stop；精确 rollback state。
 - **Truth boundary**：`repo_verified`。
@@ -201,9 +201,9 @@ MOR-060 -> MOR-850
 
 ### MOR-210：GPT 三预设与 execution-slot contract
 
-- **Goal**：实现 Sol-only、Terra-only、Luna-only 的当前三 route-key policy，并用固定五个 execution slot 验证 route-key 复用和风险覆盖。
+- **Goal**：实现 Sol-only、Terra-only、Luna-only 的当前三 route-key policy，并用固定五个 execution slot 验证 route-key 复用、单 preset 单模型族和风险覆盖。
 - **Exact write set**：policy defaults、fixtures、resolver/adapter tests、slot catalog docs。
-- **必测**：`quick_triage` light；`routine_maintenance`、`standard_review`、`bounded_implementation` standard；`deep_investigation_or_implementation` deep；Terra critical emergency；Luna critical block；Sol/low absent -> manual/block；unused max not auto-added；Luna preset 各组合在 codex_config_surface fixture 证实前按 candidate/manual 解析（不因 preset 存在而视为可用）。
+- **必测**：`quick_triage` light；`routine_maintenance`、`standard_review`、`bounded_implementation` standard；`deep_investigation_or_implementation` deep；Sol-only 仅 Sol/low|medium|xhigh，Terra-only 仅 Terra/medium|high|xhigh，Luna-only 仅 Luna/medium|high|xhigh；每 preset 的五 slot 可重复三档；混用 Sol/Terra/Luna、缺/多基础 key、或高风险借另一 preset 路由均 block；Terra critical emergency；Luna critical block；Sol/low absent -> manual/block；unused max not auto-added；Luna preset 各组合在 codex_config_surface fixture 证实前按 candidate/manual 解析（不因 preset 存在而视为可用）。
 - **Minimum proof**：focused resolver/adapter tests；零实时 API。
 - **Stop / rollback**：将 Luna/Flash 自动升为 high-risk，把模型多一档误当作新增 slot 的理由，或在无迁移兼容/rollback 的情况下改五 slot 目录时 stop；revert policy/tests。
 - **Truth boundary**：`repo_verified`。

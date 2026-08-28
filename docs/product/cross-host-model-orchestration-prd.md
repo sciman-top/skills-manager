@@ -120,7 +120,7 @@ Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/xhigh 可以�
 
 任何 slot 一旦涉及安全、迁移、发布、公开契约或高扇出变更，都叠加 high-risk gate，而不是仅因原本映射到 standard/deep route key 就允许执行。五个 slot 不会随着模型档位数量变化而增删；若确需增删、改名或拆分，必须走 policy major change，包含迁移规则、跨宿主兼容评估、fixture/receipt compatibility tests 和 rollback。不得以“模型多一个档位”作为修改 slot 的理由。
 
-路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状：
+路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前三个命名 preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
 
 ```yaml
 execution_slots:
@@ -130,18 +130,44 @@ execution_slots:
   bounded_implementation: { route_key: standard, operation: workspace_write }
   deep_investigation_or_implementation: { route_key: deep, operation: workspace_write }
 
-# 当前 GPT 常用预设：5 slot 复用 3 条 route key
-route_keys:
-  light:    { model: gpt-5.6-sol, effort: low }
-  standard: { model: gpt-5.6-sol, effort: medium }
-  deep:     { model: gpt-5.6-sol, effort: xhigh }
+# 当前 GPT 常用预设：5 slot 复用 selected preset 的 3 条 route key
+preset_route_maps:
+  gpt56_sol_only:
+    model_family: gpt-5.6-sol
+    route_keys:
+      light:    { model: gpt-5.6-sol, effort: low }
+      standard: { model: gpt-5.6-sol, effort: medium }
+      deep:     { model: gpt-5.6-sol, effort: xhigh }
+  gpt56_terra_only:
+    model_family: gpt-5.6-terra
+    route_keys:
+      light:    { model: gpt-5.6-terra, effort: medium }
+      standard: { model: gpt-5.6-terra, effort: high }
+      deep:     { model: gpt-5.6-terra, effort: xhigh }
+  gpt56_luna_only:
+    model_family: gpt-5.6-luna
+    route_keys:
+      light:
+        { model: gpt-5.6-luna, effort: medium, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, independent_verifier_required],
+          allowed_operations: [read_only], required_verifiers: [independent_review], max_risk_level: normal }
+      standard:
+        { model: gpt-5.6-luna, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
-# 将来的经审查扩展可以增加 review/max_depth，而不重写 slot 目录
+# 将来的经审查新 preset/map revision 可以增加 review/max_depth，而不重写 slot 目录
 # route_keys.review:    { model: <approved>, effort: high }
 # route_keys.max_depth: { model: <approved>, control: <surface-specific> }
 # 注意：max_depth 是 route-key 命名空间；其宿主表达必须经 surface adapter 显式映射，
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
+
+Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的三个档位；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这三个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
@@ -162,7 +188,7 @@ preset_used_efforts:
   gpt56_luna_only:  [medium, high, xhigh]
 ```
 
-若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/high 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。未使用的档位与未证实 surface（含 `max`）保持候选，不自动加入日常路由或 config 面合同。未来模型档位数增减只改变 route-key map；五个 execution slot 保持不变。
+若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/high 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。未使用的档位与未证实 surface（含 `max`）保持候选，不自动加入日常路由或 config 面合同。未来模型档位数增减只能创建版本化的新 preset/map revision；五个 execution slot 保持不变。
 
 ### 5.4 人工切换语句
 
@@ -197,7 +223,7 @@ preset_used_efforts:
 ### 6.3 人工声明与“运行时有效路由”
 
 - `MOR-FR-020`：`host_default` 是每个 `(host, identity)` 的私有日常 route map；没有 override 时，resolver 直接使用它，不要求任何环境事实。
-- `MOR-FR-021`：人工声明可选择命名 GPT preset，或声明对应宿主可用的 model/effort 集合后“按 default workload template 优化”。后者只允许使用静态 allowlist 中的候选。
+- `MOR-FR-021`：人工声明可选择命名 GPT preset，或声明对应宿主可用的 model/effort 集合后“按 default workload template 优化”。命名 GPT preset 必须完整采用其 `preset_route_maps` 的同族三 key；后者只允许使用静态 allowlist 中的候选，且必须明确 model family 与每个 key 的精确映射。
 - `MOR-FR-022`：model/effort 集合不能无歧义覆盖当前 slot 所需的 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
 - `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override`，并随下一次显式 resolve 产生新的 `resolved_route` receipt；不广播到 peer host。
 - `MOR-FR-024`：用户说“恢复默认”时，只删除相同 scope 的 override；任务结果、错误、时间流逝或 assistant 建议都不能自动恢复默认。

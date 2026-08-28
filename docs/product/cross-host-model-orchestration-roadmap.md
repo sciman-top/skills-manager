@@ -27,7 +27,7 @@
 | R1 | 离线 policy/default/override/resolver | R0 | schema + fixture + resolver tests | 网络、宿主启动 |
 | R2 | Codex 静态 Adapter 与 dry-run | R1 + 可复核本机静态事实 | contract/command plan tests | 读取/写入 `~/.codex` |
 | R3 | Codex scoped state 与受控投影 POC | R2 + 目标 ownership/授权 | plan/backup/hash/rollback transaction tests | 自动更新或运行期改配置 |
-| R4 | 三套 GPT-5.6 三档 preset | R1 | Sol-only/Terra-only/Luna-only policy tests | 任意 effort 都自动可用 |
+| R4 | 三套 GPT-5.6 三档 preset | R1 | Sol-only/Terra-only/Luna-only policy tests；每 preset 单模型族、五 slot 只复用其三 key | 任意 effort 自动可用、跨 preset 混搭 |
 | R4.5 | 只读 Preset Review | R4 + route/adapter receipt | keep/promote/demote/block 建议 | 自动推广或写配置 |
 | R5 | ZCode 静态 Adapter/default | R1 + ZCode static facts | dry-run/contract tests | 从 Codex 推导 ZCode 能力 |
 | R6 | Claude Code 静态 Adapter/default | R1 + Claude static facts | dry-run/contract tests | 从 ZCode/Codex 推导 Claude 能力 |
@@ -55,7 +55,7 @@
 
 - policy 对未知字段、未知 candidate、effort 不在静态 allowlist、scope 不匹配、风险越界、过期 emergency approval、损坏 private state 均 fail closed；
 - precedence 可稳定得到 `manual_override -> operator_override -> host_default`；
-- `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 都按相同三条基础 route key 解析，并固定映射到五个 execution slot；未来 route-key 数量可以演进，但 slot 不随模型档位变化；
+- `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 都按相同三条基础 route key 解析，并固定映射到五个 execution slot；当前三个命名 preset 各自固定为三 key，未来 route-key 数量只能通过版本化新 preset/map 演进，slot 不随模型档位变化；
 - Sol-only 为 `Sol/xhigh / Sol/medium / Sol/low`；Terra/Luna-only 为 `xhigh / high / medium`；Luna high-risk 必须 block；
 - “当前 Codex 只有 Terra 可用，切 Terra-only 并落盘”只更新 current Codex/current identity 的 override；“恢复默认”只移除该 override；
 - 任何问句、模糊命令、无 host、未知 model/effort、跨 host 泛化均零写入；
