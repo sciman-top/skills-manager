@@ -329,7 +329,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         Need (-not [string]::IsNullOrWhiteSpace($options.version)) '默认交付路径需要 --version <version>，以便四类交付物位于同一版本目录'
         $deliveryKind = if ($options.mode -eq 'private-all') { 'private-snapshot' } else { 'rescan' }
         $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path (Join-Path (Join-Path 'deliveries' $options.version) $deliveryKind) $stamp)
-        Join-Path $migrationRunRoot ("migration-{0}-{1}.zip" -f $options.mode, $stamp)
+        Join-Path $migrationRunRoot ("skills-manager-{0}-{1}-{2}.zip" -f $options.version, $options.mode, $stamp)
     } else { [IO.Path]::GetFullPath($options.out_path) }
     $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $Root 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if ($outPath.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
@@ -360,12 +360,14 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
     $work = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-migration-{0}" -f ([guid]::NewGuid().ToString('N')))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     try {
-        $packageRoot = Join-Path $work ("skills-manager-migration-{0}" -f $options.mode)
+        $packageFolder = if ([string]::IsNullOrWhiteSpace($options.version)) { "skills-manager-migration-{0}" -f $options.mode } else { "skills-manager-{0}-{1}" -f $options.version, $options.mode }
+        $packageRoot = Join-Path $work $packageFolder
         New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
         $manifest = [ordered]@{
             schema_version = 1
             product = 'skills-manager'
             kind = 'migration'
+            delivery_version = if ([string]::IsNullOrWhiteSpace($options.version)) { $null } else { $options.version }
             mode = $options.mode
             created_at = (Get-Date).ToUniversalTime().ToString('o')
             skills = @($skillNames)

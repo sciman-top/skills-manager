@@ -7,7 +7,7 @@
 | `standard-install/` | `bootstrap.zip` | 不携带 | 联网标准安装；在新电脑扫描目标仓后再选择安装。 |
 | `portable/` | `portable.zip` | 不携带 | 绿色使用；同样先扫描、再安装自己的 skills/MCP。 |
 | `source/` | `source.zip` | 不携带 | 公共源码开发快照；完整 Git 历史仍以 clone/fork/tag 为准。 |
-| `private-snapshot/` | `private-all` ZIP | 携带当前完整状态 | 私用、明文、无口令的整机恢复快照；不得进入公共 Release。 |
+| `private-snapshot/` | `skills-manager-<version>-private-all-<run-id>.zip` | 携带当前完整状态 | 私用、明文、无口令的整机恢复快照；不得进入公共 Release。 |
 
 `rescan` 只是辅助清单，不是第五种交付物。它可临时输出到版本目录的 `rescan/<run-id>/`，用于在新电脑重新发现目标仓、生成画像，再由用户确认安装 skills/MCP。
 

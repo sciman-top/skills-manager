@@ -16,11 +16,12 @@ Describe 'Migration bundles' {
         Mock Read-Host { throw 'private snapshot must not prompt for a passphrase' }
         $version = 'test.snapshot'
         $result = Invoke-MigrationCommand @('--mode', 'private-all', '--version', $version, '--json') | ConvertFrom-Json
-        $result.path | Should -Match '\\artifacts\\deliveries\\test\.snapshot\\private-snapshot\\[^\\]+\\migration-private-all-[^\\]+\.zip$'
+        $result.path | Should -Match '\\artifacts\\deliveries\\test\.snapshot\\private-snapshot\\[^\\]+\\skills-manager-test\.snapshot-private-all-[^\\]+\.zip$'
         $extract = Join-Path $TestDrive 'private-extract'
         Expand-Archive -LiteralPath $result.path -DestinationPath $extract
-        $root = Join-Path $extract 'skills-manager-migration-private-all'
+        $root = Join-Path $extract 'skills-manager-test.snapshot-private-all'
         $manifest = Get-Content -LiteralPath (Join-Path $root 'MIGRATION-MANIFEST.json') -Raw | ConvertFrom-Json
+        $manifest.delivery_version | Should -Be $version
         $manifest.private_use_only | Should -BeTrue
         $manifest.includes_credentials | Should -BeTrue
         $manifest.credentials_encrypted | Should -BeFalse
