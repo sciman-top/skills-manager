@@ -66,39 +66,6 @@ function Read-MigrationPassphrase([string]$Prompt, [switch]$Confirm) {
     return $firstSecure
 }
 
-function Protect-MigrationCredentialPayload($Payload, [System.Security.SecureString]$Passphrase) {
-    $pass = ConvertFrom-MigrationSecureString $Passphrase
-    $plainBytes = [Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 30 -Compress))
-    $salt = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Fill($salt)
-    $nonce = New-Object byte[] 12; [Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
-    $key = New-Object byte[] 32
-    $iterations = 600000
-    $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($pass, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
-    $cipherBytes = New-Object byte[] $plainBytes.Length
-    $tag = New-Object byte[] 16
-    $aad = [Text.Encoding]::UTF8.GetBytes('skills-manager:migration:mcp:v1')
-    try {
-        [Array]::Copy($kdf.GetBytes($key.Length), $key, $key.Length)
-        $aes = [Security.Cryptography.AesGcm]::new($key, $tag.Length)
-        try { $aes.Encrypt($nonce, $plainBytes, $cipherBytes, $tag, $aad) }
-        finally { $aes.Dispose() }
-        return [ordered]@{
-            schema_version = 1
-            algorithm = 'AES-256-GCM'
-            kdf = 'PBKDF2-SHA256'
-            iterations = $iterations
-            salt = [Convert]::ToBase64String($salt)
-            nonce = [Convert]::ToBase64String($nonce)
-            tag = [Convert]::ToBase64String($tag)
-            ciphertext = [Convert]::ToBase64String($cipherBytes)
-        }
-    }
-    finally {
-        [Array]::Clear($plainBytes, 0, $plainBytes.Length); [Array]::Clear($key, 0, $key.Length)
-        [Array]::Clear($salt, 0, $salt.Length); [Array]::Clear($nonce, 0, $nonce.Length); [Array]::Clear($tag, 0, $tag.Length)
-    }
-}
-
 function Unprotect-MigrationCredentialPayload($Encrypted, [System.Security.SecureString]$Passphrase) {
     Need ([int]$Encrypted.schema_version -eq 1) '迁移凭据文件 schema_version 不支持'
     Need ([string]$Encrypted.algorithm -eq 'AES-256-GCM' -and [string]$Encrypted.kdf -eq 'PBKDF2-SHA256') '迁移凭据文件加密算法不支持'

@@ -78,9 +78,9 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 迁移 --mode rescan --version <version>
 ```
 
-迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；`all`/`general` 仅保留可重建的 MCP 声明和脱敏后的凭据引用名称。`private-general` 和 `private-all` 是仅限私用的例外：默认把 MCP `env`/`headers` 写入明文 companion file `MIGRATION-MCP-CREDENTIALS.json`，不询问口令；显式加 `--encrypt` 时改为 `MIGRATION-MCP-CREDENTIALS.enc.json`，使用 AES-256-GCM 保护。所有非 `rescan` 模式都会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`all`/`general`/`private-*` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
+迁移包默认不会包含宿主登录态、插件缓存、`reports/` 或目录链接；当前生成器只生成携带完整 skills/MCP 状态的 `private-all` 明文快照，凭据写入 `MIGRATION-MCP-CREDENTIALS.json`，不询问口令。`all`、`general`、`private-general` 和 `--encrypt` 不再是生成选项；为兼容历史包，`migration-unlock` 仍可读取 manifest 指向的旧 `MIGRATION-MCP-CREDENTIALS.enc.json`。所有非 `rescan` 模式都会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`private-all` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
 
-`private-general` 和 `private-all` 是允许携带 MCP `env`/`headers` 值的私用模式。默认快照为明文，不需要口令；如果使用 `--encrypt`，打包时和恢复时才会交互输入口令，口令不进入命令行、日志或 manifest。明文包只应通过你控制的本地或私有介质传输，绝不要上传公共 GitHub、公共 Release 或公共网盘。新电脑解压后可直接运行：
+`private-all` 是允许携带 MCP `env`/`headers` 值的私用模式。当前生成的快照为明文，不需要口令；它只应通过你控制的本地或私有介质传输，绝不要上传公共 GitHub、公共 Release 或公共网盘。历史加密快照在 `migration-unlock` 时才会询问口令，口令不进入命令行、日志或 manifest。新电脑解压后可直接运行：
 
 ```powershell
 .\skills.ps1 migration-apply
@@ -88,7 +88,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 migration-apply --skip-mcp
 ```
 
-等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`；明文包的 `migration-unlock` 不会询问口令，加密包才会询问。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，但携带全部技能和 MCP。迁移完成后建议轮换长期或高权限 token。
+等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`；当前明文包的 `migration-unlock` 不会询问口令，历史加密包才会询问。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，携带全部技能和 MCP。迁移完成后建议轮换长期或高权限 token。
 - `skill_projection`：技能来源、domain catalog、native placement 与按宿主的 projection profiles；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
