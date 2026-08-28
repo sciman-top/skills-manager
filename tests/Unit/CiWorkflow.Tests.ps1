@@ -4,8 +4,9 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github\workflows\ci.yml') -Raw
     }
 
-    It 'pins checkout and the Pester package bytes and bounds job runtime' {
-        $script:workflow | Should -Match 'timeout-minutes:\s*20'
+    It 'pins checkout and the Pester package bytes and gives full tests a realistic bounded budget' {
+        $script:workflow | Should -Match '(?ms)^  test:\s*\r?\n    runs-on: windows-latest\s*\r?\n    timeout-minutes:\s*45'
+        $script:workflow | Should -Match '(?ms)^  release:.*?runs-on: windows-latest\s*\r?\n    timeout-minutes:\s*30'
         $script:workflow | Should -Match 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         $script:workflow | Should -Match 'ensure-test-runtime\.ps1 -CacheRoot \$env:RUNNER_TEMP -ExportToGitHubEnv'
         $bootstrap = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\ensure-test-runtime.ps1') -Raw
