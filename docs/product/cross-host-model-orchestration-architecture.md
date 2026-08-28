@@ -233,6 +233,8 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
 
 route-key 命名空间不是 schema 上限；但当前 `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这三个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
 
+三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
+
 ### 5.3 固定五个 execution slot、可扩展 route key
 
 执行槽位与 route key 是不同对象。**首版固定维护以下五个执行槽位**，以保持所有宿主、自然语言指令、receipt 和 verifier 的语义一致。workload 是调用方声明的任务意图，execution slot 是 policy 依 workload、risk 与 operation 派生的稳定语义类别；首版两者共用相同五个 identifier，属 1:1 实现细节，不是同一领域对象。slot 有自己的 operation、写集和验证语义，并引用一个 route key。多个 slot 可复用同一个 model/effort mapping：
@@ -243,17 +245,19 @@ route-key 命名空间不是 schema 上限；但当前 `gpt56_sol_only`、`gpt56
 | `routine_maintenance` | standard | 单目标、小写集日常修复 | 有写入和受影响 gate |
 | `standard_review` | standard | 多文件常规 review | 有 finding/复核语义，不应被当作轻量摘要 |
 | `bounded_implementation` | standard | 可回滚、边界明确的实现 | 有 build/test/contract 验证 |
-| `deep_investigation_or_implementation` | deep | 复杂调试、跨模块重构、隔离复杂实现 | 要求计划、深度证据和明确 rollback |
+| `deep_investigation_or_implementation` | deep | 复杂调试与调查、跨模块重构、隔离复杂实现 | 只读分支要求计划、深度证据和可定位结论；写入分支另需明确 rollback |
 
-这五个是稳定骨架而非当前模型档位的镜像。修改 slot（包括新增、删除、改名或拆分）属于 policy major change，必须有迁移规则、跨宿主兼容评估、fixture/receipt 兼容测试和 rollback；普通“模型多一个档位”不应触发 slot 变更。新增 route key 则必须有静态 contract + 可比较 verifier 说明 model/effort 的额外区分有净收益。`high_risk_adjudication` 是覆盖任何 slot 的垂直 gate，不计入五个执行槽位。
+这五个是稳定骨架而非当前模型档位的镜像。修改 slot（包括新增、删除、改名或拆分）属于 policy major change，必须有迁移规则、跨宿主兼容评估、fixture/receipt 兼容测试和 rollback；普通“模型多一个档位”不应触发 slot 变更。新增 route key 则必须有静态 contract + 可比较 verifier 说明 model/effort 的额外区分有净收益。`high_risk_adjudication` 是覆盖任何 slot 的垂直 gate；gate 通过后 `risk_level=high` 强制使用 `route_key=deep`，不计入五个执行槽位。
+
+规范化规则固定为：`risk_level=high -> route_key=deep`；它只在 high-risk gate 通过后成立，Luna-only 的 high-risk block 和自动故障切换的更严格阻断不被该规则绕过。
 
 ```yaml
 execution_slots:                 # 五个语义 slot 稳定；未来新模型不必改它们
-  quick_triage: { route_key: light, operation: read_only }
-  routine_maintenance: { route_key: standard, operation: workspace_write }
-  standard_review: { route_key: standard, operation: read_only }
-  bounded_implementation: { route_key: standard, operation: workspace_write }
-  deep_investigation_or_implementation: { route_key: deep, operation: workspace_write }
+  quick_triage: { route_key: light, operations: [read_only] }
+  routine_maintenance: { route_key: standard, operations: [workspace_write] }
+  standard_review: { route_key: standard, operations: [read_only] }
+  bounded_implementation: { route_key: standard, operations: [workspace_write] }
+  deep_investigation_or_implementation: { route_key: deep, operations: [read_only, workspace_write] }
 
 preset_route_maps:               # Resolve 只读取 selected preset 的完整同族 map
   gpt56_sol_only:
@@ -289,7 +293,7 @@ preset_route_maps:               # Resolve 只读取 selected preset 的完整�
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
-Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/xhigh，绝不能混入 Terra/Luna。high-risk 是该结果之上的 policy gate，不创建第四个 route key，也不能借机换用另一 preset。
+Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/xhigh，绝不能混入 Terra/Luna。`risk_level=high` 必须在 high-risk gate 通过后使用 `route_key=deep`；如果 selected preset 的 deep route 不允许当前 operation，直接 `blocked`。这不创建第四个 route key，也不能借机换用另一 preset。
 
 ### 5.4 ZCode 与 Claude 的静态三 route-key 映射
 

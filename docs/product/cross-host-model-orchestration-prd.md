@@ -106,6 +106,8 @@ workload + risk + exact host/identity
 
 Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/xhigh 可以执行有明确写集、独立验证和回滚入口的深度任务；它不能自动解锁安全裁决、迁移、发布、公开契约或高扇出变更。
 
+三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
+
 ### 5.2 固定五个 execution slot、可扩展 route key
 
 当前三个 route key 不是 future route-key 数量的上限。首版 policy 固定维护以下五个 slot；其中 `standard` 被有意复用，既避免把常规写入降到 light，也避免仅为了名称差异制造第四个 effort：
@@ -116,19 +118,21 @@ Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/xhigh 可以�
 | `routine_maintenance` | standard | 单目标、小写集的日常修复/配置调整 | 受影响 gate 或明确 N/A |
 | `standard_review` | standard | 多文件常规 review、非高风险语义判断 | finding 定位、独立复核或受影响测试 |
 | `bounded_implementation` | standard | 写集、回滚和验收边界清楚的实现 | 受影响 build/test/contract |
-| `deep_investigation_or_implementation` | deep | 复杂调试、跨模块重构、隔离复杂实现 | 计划、最小充分 gate、明确 rollback |
+| `deep_investigation_or_implementation` | deep | 复杂调试与调查、跨模块重构、隔离复杂实现 | 只读分支要求计划、深度证据和可定位结论；写入分支另需最小充分 gate 与明确 rollback |
 
-任何 slot 一旦涉及安全、迁移、发布、公开契约或高扇出变更，都叠加 high-risk gate，而不是仅因原本映射到 standard/deep route key 就允许执行。五个 slot 不会随着模型档位数量变化而增删；若确需增删、改名或拆分，必须走 policy major change，包含迁移规则、跨宿主兼容评估、fixture/receipt compatibility tests 和 rollback。不得以“模型多一个档位”作为修改 slot 的理由。
+任何 slot 一旦涉及安全、迁移、发布、公开契约或高扇出变更，都先通过 high-risk gate；gate 通过后必须使用 `route_key=deep`，再按该 route 的 operation、写集和 verifier 约束执行，无法表达或不满足约束时 `blocked`。五个 slot 不会随着模型档位数量变化而增删；若确需增删、改名或拆分，必须走 policy major change，包含迁移规则、跨宿主兼容评估、fixture/receipt compatibility tests 和 rollback。不得以“模型多一个档位”作为修改 slot 的理由。
+
+规范化规则固定为：`risk_level=high -> route_key=deep`；它只在 high-risk gate 通过后成立，Luna-only 的 high-risk block 和自动故障切换的更严格阻断不被该规则绕过。
 
 路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前三个命名 preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
 
 ```yaml
 execution_slots:
-  quick_triage: { route_key: light, operation: read_only }
-  routine_maintenance: { route_key: standard, operation: workspace_write }
-  standard_review: { route_key: standard, operation: read_only }
-  bounded_implementation: { route_key: standard, operation: workspace_write }
-  deep_investigation_or_implementation: { route_key: deep, operation: workspace_write }
+  quick_triage: { route_key: light, operations: [read_only] }
+  routine_maintenance: { route_key: standard, operations: [workspace_write] }
+  standard_review: { route_key: standard, operations: [read_only] }
+  bounded_implementation: { route_key: standard, operations: [workspace_write] }
+  deep_investigation_or_implementation: { route_key: deep, operations: [read_only, workspace_write] }
 
 # 当前 GPT 常用预设：5 slot 复用 selected preset 的 3 条 route key
 preset_route_maps:
@@ -167,7 +171,7 @@ preset_route_maps:
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
-Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的三个档位；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这三个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
+Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的三个档位；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。`risk_level=high` 在 high-risk gate 通过后强制把 route key 提升为 `deep`；若该 preset/宿主的 deep route 不允许当前 operation，仍然 `blocked`。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这三个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
@@ -206,7 +210,7 @@ preset_used_efforts:
 ### 6.1 Resolve 与风险门禁
 
 - `MOR-FR-001`：常规入口必须接受 exact `host`、`identity_selector`、`workload`、`risk_level`、`operation`、`workspace_root` 和可选的一次性 `manual_override`；不得从 prompt、目录名、模型名或上次任务猜复杂度。canonical host identifier 为 `codex_cli | zcode | claude_code`（`codex` 为输入别名，归一化后使用；state/receipt/Adapter 只存 canonical 值）。`--execution-slot` 只作为 fixture/dry-run 直通入口，且必须校验与 workload 派生结果一致；缺 `risk_level`/`operation`/`workspace_root` 一律拒绝。
-- `MOR-FR-002`：workload/operation/risk/slot/route-key 映射只能来自 versioned policy；未知 workload、slot 或 route key fail closed；`risk_level` 枚举固定为 `normal | high`（`high` 必须通过 high-risk gate）；请求 `operation` 超出 slot 允许 operation（如 read_only slot 收到 workspace_write）时 `blocked`，不得自动改派 slot。
+- `MOR-FR-002`：workload/operation/risk/slot/route-key 映射只能来自 versioned policy；未知 workload、slot 或 route key fail closed；`risk_level` 枚举固定为 `normal | high`（`high` 必须通过 high-risk gate，gate 通过后强制使用 `route_key=deep`）；请求 `operation` 超出 slot 允许 operation（如 read_only slot 收到 workspace_write）时 `blocked`，不得自动改派 slot。
 - `MOR-FR-003`：选择 precedence 固定为 `manual_override -> operator_override -> host_default`；每项都必须再经过静态 Adapter、工作区、数据分级、operation 和风险校验。
 - `MOR-FR-004`：无安全 mapping、参数不在 allowlist、缺少 risk approval、或宿主选择面未知时，返回 `blocked`、`manual_host_selection_required` 或 `manual_mapping_required`；不得启用隐式 fallback。
 - `MOR-FR-005`：`high_risk_adjudication` 的 Terra substitute 必须同时有 current emergency approval 的 `owner/reason/expires_at` 与 policy 许可；Luna-only 固定 block。
