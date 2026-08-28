@@ -1,53 +1,80 @@
-# MOR-090 §5.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
+# MOR-090 tuple matrix（生成视图，勿手改）
 
-**规则**：每行是唯一 tuple；只有 `tuple_status=verified` 的行可进 Adapter allowlist；`fact_ids` 仅指向上文证据行，不作为 allowlist 依据；任何跨 surface 外推（如 `openai_api` 的 `max` → `codex_config_surface`）一律禁止。`partial`/`candidate`/`operator_declared`/`unknown` 行在对应 fixture 取证并升级为 `verified` 前，一律按 `manual_mapping_required` 解析。
+canonical source 为同目录 MOR-090-tuple-matrix.json；本文件由其生成。校验：pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1。
 
-| surface | exact_model | exact_effort | tuple_status | fact_ids |
-| --- | --- | --- | --- | --- |
-| openai_api | gpt-5.6-sol | none | verified | C6 |
-| openai_api | gpt-5.6-sol | low | verified | C6 |
-| openai_api | gpt-5.6-sol | medium | verified | C6 |
-| openai_api | gpt-5.6-sol | high | verified | C6 |
-| openai_api | gpt-5.6-sol | xhigh | verified | C6 |
-| openai_api | gpt-5.6-sol | max | verified | C6 |
-| openai_api | gpt-5.6-terra | none | verified | C6 |
-| openai_api | gpt-5.6-terra | low | verified | C6 |
-| openai_api | gpt-5.6-terra | medium | verified | C6 |
-| openai_api | gpt-5.6-terra | high | verified | C6 |
-| openai_api | gpt-5.6-terra | xhigh | verified | C6 |
-| openai_api | gpt-5.6-terra | max | verified | C6 |
-| openai_api | gpt-5.6-luna | none | verified | C6 |
-| openai_api | gpt-5.6-luna | low | verified | C6 |
-| openai_api | gpt-5.6-luna | medium | verified | C6 |
-| openai_api | gpt-5.6-luna | high | verified | C6 |
-| openai_api | gpt-5.6-luna | xhigh | verified | C6 |
-| openai_api | gpt-5.6-luna | max | verified | C6 |
-| codex_config_surface | gpt-5.6-sol | low | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-sol | medium | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-sol | high | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-sol | xhigh | partial（model-dependent，待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-terra | low | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-terra | medium | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-terra | high | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-terra | xhigh | partial（model-dependent，待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-luna | low | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-luna | medium | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-luna | high | partial（待 MOR-100 fixture） | C1 |
-| codex_config_surface | gpt-5.6-luna | xhigh | partial（model-dependent，待 MOR-100 fixture） | C1 |
-| codex_security_cli_surface | gpt-5.6-sol | max | candidate | C2 |
-| zcode_ui | glm-5.3-flash | low | operator_declared（UI 截图） | Z3 |
-| zcode_ui | glm-5.3-flash | high | operator_declared（UI 截图） | Z3 |
-| zcode_ui | glm-5.3-flash | max | operator_declared（UI 截图） | Z3 |
-| claude_host | <exact model 待 MOR-400 钉定> | low | unknown（按 model 分列，MOR-400 fixture） | A2a |
-| claude_host | <exact model 待 MOR-400 钉定> | medium | unknown（按 model 分列，MOR-400 fixture） | A2a |
-| claude_host | <exact model 待 MOR-400 钉定> | high | unknown（按 model 分列，MOR-400 fixture） | A2a |
-| claude_host | <exact model 待 MOR-400 钉定> | xhigh | unknown（按 model 分列，MOR-400 fixture） | A2a |
-| claude_host | <exact model 待 MOR-400 钉定> | max | unknown（按 model 分列，MOR-400 fixture；持久化面见 A2b） | A2a/A2b |
-| deepseek_provider | deepseek-v4-flash | low | verified | D3/D4 |
-| deepseek_provider | deepseek-v4-flash | high | verified | D3/D4 |
-| deepseek_provider | deepseek-v4-flash | max | verified | D3/D4 |
-| deepseek_provider | deepseek-v4-pro | low | verified | D3/D4 |
-| deepseek_provider | deepseek-v4-pro | high | verified | D3/D4 |
-| deepseek_provider | deepseek-v4-pro | max | verified | D3/D4 |
+规则：每行唯一 tuple；只有 status=verified 的行可进 Adapter allowlist，最终 route 候选还须宿主侧与 provider 侧同时 verified（交集）；禁止跨 surface 外推；非 verified 行解析时一律 manual_mapping_required。claude_host tuples 尚未生成（exact model 未钉定，MOR-400 生成，见 JSON _meta.pending_surfaces）。
 
-**allowlist 初始集**（= `tuple_status=verified` 行，共 24 行）：openai_api 3 模型 × 6 档（18）+ deepseek_provider 2 模型 × 3 档（6）。在目标 runtime Adapter 落地前仅作为合同底稿，不构成任何宿主可用性断言。`zcode_ui` 3 行为 operator_declared、`claude_host` 5 行为 unknown、codex_config 12 行为 partial、security 面 1 行为 candidate——均不进 allowlist，解析时 `manual_mapping_required`。
+| surface | layer | exact_model | exact_effort | field_path | status | facts | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| openai_responses | provider_dialect | gpt-5.6-sol | none | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-sol | low | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-sol | medium | reasoning.effort | verified | C6 | 官方默认 |
+| openai_responses | provider_dialect | gpt-5.6-sol | high | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-sol | xhigh | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-sol | max | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | none | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | low | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | medium | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | high | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | xhigh | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-terra | max | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-luna | none | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-luna | low | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-luna | medium | reasoning.effort | verified | C6 | 官方默认 |
+| openai_responses | provider_dialect | gpt-5.6-luna | high | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-luna | xhigh | reasoning.effort | verified | C6 |  |
+| openai_responses | provider_dialect | gpt-5.6-luna | max | reasoning.effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | none | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | low | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | medium | reasoning_effort | verified | C6 | 官方默认 |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | high | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | xhigh | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-sol | max | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | none | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | low | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | medium | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | high | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | xhigh | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-terra | max | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | none | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | low | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | medium | reasoning_effort | verified | C6 | 官方默认 |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | high | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | xhigh | reasoning_effort | verified | C6 |  |
+| openai_chat_completions | provider_dialect | gpt-5.6-luna | max | reasoning_effort | verified | C6 |  |
+| codex_config_surface | host_adapter | gpt-5.6-sol | low | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-sol | medium | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-sol | high | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-sol | xhigh | model_reasoning_effort | partial | C1 | model-dependent，待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-terra | low | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-terra | medium | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-terra | high | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-terra | xhigh | model_reasoning_effort | partial | C1 | model-dependent，待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-luna | low | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-luna | medium | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-luna | high | model_reasoning_effort | partial | C1 | 待 MOR-100 fixture |
+| codex_config_surface | host_adapter | gpt-5.6-luna | xhigh | model_reasoning_effort | partial | C1 | model-dependent，待 MOR-100 fixture |
+| codex_security_cli_surface | host_adapter | gpt-5.6-sol | max | security-scan effort selector | candidate | C2 | 独立 surface，单列候选 |
+| zcode_ui | host_adapter | glm-5.3-flash | low | UI effort 选择（低） | operator_declared | Z3 | UI 截图 artifact，附件留存前不升级 |
+| zcode_ui | host_adapter | glm-5.3-flash | high | UI effort 选择（高） | operator_declared | Z3 | UI 截图 artifact，附件留存前不升级 |
+| zcode_ui | host_adapter | glm-5.3-flash | max | UI effort 选择（最高） | operator_declared | Z3 | UI 截图 artifact，附件留存前不升级 |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-flash | low | output_config.effort | verified | D3 |  |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-flash | high | output_config.effort | verified | D3 |  |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-flash | max | output_config.effort | verified | D3 |  |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-pro | low | output_config.effort | verified | D3 |  |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-pro | high | output_config.effort | verified | D3 |  |
+| deepseek_anthropic_messages | provider_dialect | deepseek-v4-pro | max | output_config.effort | verified | D3 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-flash | low | reasoning_effort | verified | D4 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-flash | high | reasoning_effort | verified | D4 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-flash | max | reasoning_effort | verified | D4 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-pro | low | reasoning_effort | verified | D4 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-pro | high | reasoning_effort | verified | D4 |  |
+| deepseek_chat_completions | provider_dialect | deepseek-v4-pro | max | reasoning_effort | verified | D4 |  |
+| deepseek_responses | provider_dialect | deepseek-v4-flash | low | reasoning.effort | unknown |  | 无直接一手页面 |
+| deepseek_responses | provider_dialect | deepseek-v4-flash | high | reasoning.effort | unknown |  | 无直接一手页面 |
+| deepseek_responses | provider_dialect | deepseek-v4-flash | max | reasoning.effort | unknown |  | 无直接一手页面 |
+| deepseek_responses | provider_dialect | deepseek-v4-pro | low | reasoning.effort | unknown |  | 无直接一手页面 |
+| deepseek_responses | provider_dialect | deepseek-v4-pro | high | reasoning.effort | unknown |  | 无直接一手页面 |
+| deepseek_responses | provider_dialect | deepseek-v4-pro | max | reasoning.effort | unknown |  | 无直接一手页面 |
+
+tuple_status 枚举：verified | partial | candidate | operator_declared | unknown。

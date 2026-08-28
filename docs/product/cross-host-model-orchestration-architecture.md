@@ -169,7 +169,25 @@ receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱�
 }
 ```
 
-规则：`constrained=false` 时**四个限制字段全部禁止出现**；`constrained=true` 时 `constraint_reasons`/`max_risk_level`/`allowed_operations`/`required_verifiers` 四个字段**都必须存在、非空且取值合法**（`max_risk_level` 须为合法 risk 枚举，且不得低于请求 `risk_level` 所需上限）；route 的 risk/operation/写集/verifier 与约束对象不一致即 fail closed。四字段校验属 MOR-010 schema tests（缺失/为空/非法枚举/`max_risk_level` 缺失或与请求 `risk_level` 不一致均拒绝），MOR-050 另覆盖运行时一致性。receipt verifier 必须覆盖该约束。`fallback_applied`/`clamp_applied` 布尔为兼容字段：置 true 时必须另附结构化事件（`source/reason/from/to/observed_at`）。除非另有独立 host 证据，所有用户声明 route 都保持 `operator_declared_unverified`。
+规则与 canonical 枚举：`constraint_reasons` 枚举 = `no_high_risk_adjudication | bounded_write_set_only | independent_verifier_required | provider_dialect_limit | host_surface_limit`；`allowed_operations` ⊆ 操作枚举 = `read_only | workspace_write`；`required_verifiers` 枚举 = `contract | focused_test | independent_review`；`max_risk_level` ∈ risk 枚举 `normal | high`，比较关系固定 `normal < high`，请求 `risk_level` 不得高于 `max_risk_level`。`constrained=false` 时**四个限制字段全部禁止出现**；`constrained=true` 时四字段必须存在、非空且取值合法；route 的 risk/operation/写集/verifier 与约束对象不一致即 fail closed。JSON Schema 层只做类型/枚举/存在性校验（MOR-010 schema tests）；跨字段一致性（请求 risk vs `max_risk_level`、operations vs slot）由 resolver 校验（MOR-050）。receipt verifier 必须覆盖该约束。
+
+**route_events（结构化 fallback/clamp 事件，frozen shape）**：
+
+```json
+"route_events": [
+  {
+    "kind": "fallback | clamp",
+    "source": "host_native | org_policy | provider",
+    "reason": "<stable reason code>",
+    "from": {"model": "...", "effort": "..."},
+    "to": {"model": "...", "effort": "..."},
+    "observed_at": "UTC timestamp",
+    "observed_by": "<observer id>"
+  }
+]
+```
+
+规则：`fallback_applied`/`clamp_applied` 布尔为兼容字段；置 `true` 时 `route_events` 必须含至少一条对应 `kind` 的完整事件（七字段齐备，`observed_at` 与 `observed_by` 必须同时存在）；置 `false` 时 `route_events` 中禁止出现对应 `kind` 的事件；未知 `source`/`kind`、缺字段、`true-without-event`、`false-with-event` 均拒绝。
 
 ## 5. 静态 effort 合同与三档模板
 

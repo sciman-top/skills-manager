@@ -57,12 +57,12 @@
 
 ### 5.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
 
-**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。
+**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。**协议面按 wire contract 分列**（`output_config.effort` / `reasoning_effort` / `reasoning.effort` 是三个不同字段，不合并）。
 
-逐项 tuple 矩阵（45 行，每行唯一 tuple，含 tuple_status 与 fact_ids）独立维护于 **[MOR-090-tuple-matrix.md](MOR-090-tuple-matrix.md)**——它是 allowlist 的唯一机械依据：只有 `tuple_status=verified` 的行（当前 24 行）可进 Adapter allowlist；`partial/candidate/operator_declared/unknown` 行一律 `manual_mapping_required`；任何跨 surface 外推（如 `openai_api` 的 `max` → `codex_config_surface`）禁止。
+canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）；[MOR-090-tuple-matrix.md](MOR-090-tuple-matrix.md) 为其生成视图。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 70 tuples，verified 48（openai_responses 18 + openai_chat_completions 18 + deepseek_anthropic_messages 6 + deepseek_chat_completions 6）。`claude_host` tuples 尚未生成（exact model 未钉定，MOR-400 生成）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
 
-- Adapter allowlist = [tuple-matrix](MOR-090-tuple-matrix.md) 中 `tuple_status=verified` 的行（当前 24 行：openai_api 18 + deepseek_provider 6）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
-- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 12 行 partial（MOR-100 fixture 逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、claude_host unknown（MOR-400 钉定）、Z5/A×D 交叉项。
+- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 48 行；由 validate 脚本计算，不人工写死）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 12 行 partial（MOR-100 fixture 逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
 
 ## 6. 来源 URL 清单（全部抓取于 2026-08-28）
 
@@ -82,6 +82,7 @@
 - Claude Code environment variables：https://code.claude.com/docs/en/env-vars
 - Claude Code LLM gateway connect：https://code.claude.com/docs/en/llm-gateway-connect
 - DeepSeek Anthropic API：https://api-docs.deepseek.com/guides/anthropic_api/
+- DeepSeek Thinking Mode：https://api-docs.deepseek.com/guides/thinking_mode/
 - DeepSeek Claude Code 集成：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/
 - DeepSeek 更新日志：https://api-docs.deepseek.com/updates/
 - claude-code issue #65782（fallbackModel）：https://github.com/anthropics/claude-code/issues/65782

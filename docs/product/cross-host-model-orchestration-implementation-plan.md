@@ -94,7 +94,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：定义 versioned schema，分别表达 `RouteKey`、固定五项 `ExecutionSlot`、risk gate、static Adapter contract、host default、operator override、projection plan 和 receipt。
 - **Exact write set**：`config/model-orchestration.schema.json`、`config/model-orchestration.defaults.yaml`、`tests/Contract/PolicySchema.Tests.ps1`。
-- **必测**：unknown property；重复 id；未定义引用；空/secret-like 值；unknown model/effort；错误 host scope；缺 `owner/reason/expires_at` 的 Terra emergency；Luna high-risk 非 block；illegal provider/auth/base URL field；constrained 约束对象 schema 校验（四限制字段缺失/为空/非法枚举拒绝；`max_risk_level` 缺失、非法值、与请求 `risk_level` 不一致拒绝；`constrained=false` 时出现限制字段拒绝）。
+- **必测**：unknown property；重复 id；未定义引用；空/secret-like 值；unknown model/effort；错误 host scope；缺 `owner/reason/expires_at` 的 Terra emergency；Luna high-risk 非 block；illegal provider/auth/base URL field；constrained 约束对象 schema 校验（至少一个合法 fixture；四限制字段缺失/为空/超出 canonical 枚举拒绝——`constraint_reasons`/`allowed_operations`/`required_verifiers`/`max_risk_level` 枚举见架构 §4.2；`constrained=false` 时出现限制字段拒绝）；route_events 形状校验（true-without-event、false-with-event、缺字段、未知 source/kind、`observed_at` 无 `observed_by` 均拒绝）。
 - **Minimum proof**：schema validator 与 focused tests；样例无 secret。
 - **Stop / rollback**：schema 被要求接收自由 URL/token 或运行时 catalog 时 stop；revert 三文件。
 - **Truth boundary**：`repo_verified`。
@@ -131,7 +131,7 @@ MOR-060 -> MOR-850
 
 - **Goal**：离线得到 deterministic route，不接触 host/network。
 - **Exact write set**：`src/Resolver.ps1`、`src/Receipt.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Resolver.Tests.ps1`、`tests/Contract/Receipt.Tests.ps1`。
-- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 §5.1 矩阵逐项，仅 verified tuple）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段；host alias 归一化（`codex`→`codex_cli`，state/receipt 只存 canonical）；constrained 约束对象（false 无限制字段 / true 限制字段非空 / 不一致 fail closed）。
+- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 tuple-matrix JSON 逐项，仅 verified，宿主×provider 交集）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段 + `route_events` 跨字段一致性（布尔与事件互斥规则、risk vs `max_risk_level`）；host alias 归一化（`codex`→`codex_cli`，state/receipt 只存 canonical）；constrained 运行时一致性（操作/risk/verifier 与约束对象不符 fail closed）。
 - **Minimum proof**：所有 fixture 的 `resolve --offline` 和 focused tests；零 network/process/host write。
 - **Stop / rollback**：CLI 试图访问 gateway、读取 OAuth、执行 child 或改 host config 时停止；revert。
 - **Truth boundary**：`repo_verified`。
