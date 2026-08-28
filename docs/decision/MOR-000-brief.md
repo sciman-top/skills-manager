@@ -19,17 +19,40 @@
 | 授权模型 | 控制面零网络、零 OAuth 读取、零 gateway 扫描、零模型调用（PRD `MOR-FR-014`）；host write、fresh task、外部模型调用是独立授权域 |
 | 投影目标原则 | Codex 投影优先评估 additive per-profile 文件（`$CODEX_HOME/<name>.config.toml` + `--profile`）而非改写用户级顶层键；仅到 `filesystem_projected`，`host_loaded` 另验 |
 
-## 2. blocked 项（等待 owner 决定）
+## 2. blocked 范围与归宿选项
 
-| 项 | 阻塞内容 | 解除条件 |
-| --- | --- | --- |
-| `<runtime-root>` | 独立 host-local runtime 的 Git root 路径；不得放在 skills-manager 内 | 用户显式指定路径 |
-| owner | runtime 维护者身份 | 同上 |
-| native projection target / rollback entry | 仅记录为待证实事实（MOR-090/后续任务采集） | root 选定后按 MOR-090 采集 |
+**blocked 的精确范围**：`<runtime-root>`/owner 未定时，被阻塞的仅是 **MOR runtime 的持久化实现**（schema、resolver、fixture、CLI 的创建与写入）。不受阻塞的工作车道：只读事实采集（MOR-090）、文档审查与修订、evidence 包维护、设计讨论。
 
-`<runtime-root>` 未选定期间：实施计划中 MOR-010 及之后的全部任务保持 `blocked`；本仓仅维护设计/决议/证据文档。
+**归宿三选项**（roadmap §2）：① 已有的 host-local runtime；② 受控的 Cockpit 扩展；③ 另一个已存在、具备治理边界的 runtime。只有 skills-manager 本身不得作为归宿。当前机器 `D:\CODE` 下未发现此前提过的 `local-ai-dev-orchestrator`，不能当作现成候选。
 
-## 3. 与既有资产的边界
+## 3. 推荐决策基线（待 owner 确认，非创建授权）
+
+| 项 | 推荐值 |
+| --- | --- |
+| `runtime_root` | `D:\CODE\model-orchestration`（新建；三归宿选项中的新 host-local runtime） |
+| `owner` | `<待 owner 填写明确个人/团队标识>` |
+| first-host | `codex_cli` |
+| state-root / receipt-root | `<runtime_root>\.ai\state` / `<runtime_root>\.ai\receipts` |
+| 首期 projection | `none`（仅 offline resolve + dry-run launch；`~/.codex`、Claude、ZCode、provider、gateway 均不触碰） |
+| identity binding | manual binding required；未完成可审计绑定前禁止持久 override |
+| native bridge | `design-griller`/`cold-capability-runner` 继续 `gpt-5.6-terra/high`，排除于通用 preset 覆盖外 |
+
+**决策输入句模板**（填入 owner 后即构成 MOR-000 正式决议）：
+
+> 批准将跨宿主模型编排 runtime 放在 `D:\CODE\model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high 并排除在通用 route 覆盖之外。
+
+**同等合法的替代决定**：暂不选择 runtime-root，继续保持 design-only；不进入 MOR-010 实现，但保留只读 MOR-090 事实审查车道。
+
+## 4. 未决字段（root 选定时一并钉定）
+
+| 项 | 状态 |
+| --- | --- |
+| `<runtime-root>` / owner | `blocked: awaiting owner decision`（见 §3 基线） |
+| native projection target / rollback entry | 仅记录为待证实事实；首期 projection=none 使其不阻断 R1 |
+| 首期授权边界 | 随决议句一并生效：零网络、零 OAuth、零模型调用；host write 为独立授权域 |
+
+## 5. 与既有资产的边界
 
 - 本决议不修改 `skills.json`、`skills.ps1`、`build.ps1` 主链，不读取凭据，不调用模型，不改 provider/auth/gateway。
 - bridge pin 的现值（`gpt-5.6-terra/high`）继续按既有共识运行；本决议只钉其**优先级与排除规则**，不改其值。
+- §3 基线本身**不构成创建目录的授权**；目录创建只在 owner 给出正式决议句后随 MOR-010 切片执行。

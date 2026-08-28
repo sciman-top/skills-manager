@@ -13,7 +13,7 @@
 | C3 | launch 面：`codex exec -m <MODEL>`、`-c <key=value>`（dotted path 覆盖 config.toml 值） | 本机 `codex exec --help`（0.150.1），2026-08-28 | verified（本机只读 help） |
 | C4 | profile 机制：`$CODEX_HOME/profile-name.config.toml` 独立文件 + `--profile` 选择；project-scoped config 不可覆盖 provider/auth/profile selection | Configuration Reference，2026-08-28 | verified；additive profile 为投影 POC 首选候选 |
 | C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
-| C6 | `gpt-5.6-sol` 模型 slug 真实（官方安全扫描推荐 "gpt-5.6-sol with xhigh reasoning effort"） | Codex Security workbench 文档，2026-08-28 | verified；Terra/Luna slug 未见官方页直证，进 MOR-100 fixture 前须补证 |
+| C6 | `gpt-5.6-sol` 模型 slug 真实（官方安全扫描推荐 "gpt-5.6-sol with xhigh reasoning effort"）；GPT-5.6 官方公告确认 Sol/Terra/Luna 三档横跨 ChatGPT/Codex/API，`gpt-5.6-terra` 有官方模型页（developers.openai.com/api/docs/models/gpt-5.6-terra）；Luna 为最便宜档，存在 Luna Pro 变体命名 | Codex Security workbench + openai.com/index/gpt-5-6 + 官方模型页，2026-08-28 | verified（公告/模型页级）；`gpt-5.6-luna` 精确 slug 推断自公告命名，进 MOR-100 fixture 时按本机 help 最终确认 |
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
@@ -38,6 +38,7 @@
 | A3 | **clamp 行为**：不支持的档位静默向下降档（"xhigh runs as high on Opus 4.6"） | 同上 | verified；fixture 必须留痕，请求≠观察不得标 `host_loaded` |
 | A4 | **fallback 行为**：`fallbackModel` 链上限 3 个模型（去重），529 过载触发，subagents 继承 | 同上 + claude-code issue #65782，2026-08-28 | verified；同上纪律 |
 | A5 | 自定义模型串经 flag/env/settings 不做前缀校验；`ANTHROPIC_CUSTOM_MODEL_OPTION`、`ANTHROPIC_DEFAULT_*_MODEL` 可重指向别名 | 同上 | verified |
+| A6 | 第三方 provider（自定义 base URL）上**自动模型 fallback 被禁用**；桌面应用路由读其自身 third-party inference 配置而**不是** `ANTHROPIC_BASE_URL`/settings.json（CLI 与桌面投影面必须分列） | code.claude.com/docs/en/env-vars + /llm-gateway-connect，2026-08-28 | verified；对 DeepSeek 场景利好（fallback 面收窄），但桌面宿主的投影/表达面未取证 |
 
 ## 4. deepseek_provider_dialect（provider 面）
 
@@ -48,11 +49,11 @@
 | D3 | effort 透传：`output_config` "Only effort is supported"；`thinking` 支持但 `budget_tokens` 被忽略；`redacted_thinking` 不支持 | 同上 | verified |
 | D4 | 原生 API `reasoning_effort` 词表 `low / high / max`（legacy `deepseek-chat`/`deepseek-reasoner` 名 2026-07-24 停用） | api-docs.deepseek.com updates + V4 公告，2026-08-28 | verified |
 
-**未决**：Claude Code `effortLevel` 是否向自定义 base URL 透传为 `output_config.effort`（A2×D3 的端到端链路）——两合同交叉验证项；组织策略 clamp（无法静态取证，归入 observed 证据纪律）。
+**未决**：Claude Code `effortLevel` 是否向自定义 base URL 透传为 `output_config.effort`（A2×D3 的端到端链路，官方无明文）——维持"集成时 fixture 验证"，不得按"应当透传"写合同；组织策略 clamp（无法静态取证，归入 observed 证据纪律）；Claude 桌面应用（非 CLI）的模型选择/投影面（A6）。
 
 ## 5. 采纳决定
 
-- 进入 Adapter allowlist 的最小集：C1/C3/C4、Z2/Z3、A1/A2、D1/D2/D3/D4。
-- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、C6 的 Terra/Luna slug（补证后进 fixture）、Z5/A×D 交叉项（取证后评审）。
+- 进入 Adapter allowlist 的最小集：C1/C3/C4/C6、Z2/Z3、A1/A2/A6、D1/D2/D3/D4。
+- 保持候选（不进 allowlist）：C2 的 `max`（security 面单列）、`gpt-5.6-luna` 精确 slug（fixture 时确认）、Z5/A×D 交叉项（取证后评审）。
 - 拒绝：GLM-3.5-Flash 旧名；把 provider 方言可表达性当作宿主生效证明；以社区配置补齐任何 token。
 - fixtures（`tests/fixtures/<host>-static/`）待 `<runtime-root>` 选定后随 MOR-100/300/400 创建；本证据包为其唯一输入底稿。
