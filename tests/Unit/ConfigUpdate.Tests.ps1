@@ -3,9 +3,6 @@ BeforeAll {
 
 }
 Describe "Config And Update Enhancements" {
-    BeforeEach {
-        . $PSScriptRoot\..\..\skills.ps1
-    }
     Context "UTF-8 config reads" {
         It "Loads skills.json through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
             $oldCfgPath = $CfgPath

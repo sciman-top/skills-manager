@@ -4,9 +4,6 @@ BeforeAll {
 
 }
 Describe "Core Functions" {
-    BeforeEach {
-        . $PSScriptRoot\..\..\skills.ps1
-    }
     Context "Normalize-Name" {
         It "Normalizes typical names" {
             Normalize-Name " My Skill " | Should -Be "my-skill"
