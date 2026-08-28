@@ -16,7 +16,7 @@
   -> 用户说“恢复默认”：只删除该 scope 的 override
 ```
 
-Codex 的日常 default 为 `gpt56_sol_only`；用户可以随时切换到 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，但 execution slot 是可扩展的 workload policy：五个稳定槽位可复用一个 route key，未来也可在有证据时增加第四、第五条 route key；切换只改变模型族和 route map，不要求用户重学一套任务分类。
+Codex 的日常 default 为 `gpt56_sol_only`；用户可以随时切换到 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
 ZCode、Claude Code 各自维护独立 `host_default`，例如用户确认的 GLM-3.5-Flash 与 DeepSeek V4 Flash 模板。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
