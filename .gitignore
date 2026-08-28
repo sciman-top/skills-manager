@@ -20,7 +20,7 @@
 !/artifacts/deliveries/migration/README.md
 # Version roots are local staging only. Keep the deliveries README tracked,
 # but never allow generated public ZIPs or private snapshots into Git.
-!/artifacts/deliveries/*/
+/artifacts/deliveries/*/
 /artifacts/deliveries/*/*
 !/artifacts/history/
 !/artifacts/history/README.md
