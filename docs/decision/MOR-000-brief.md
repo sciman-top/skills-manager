@@ -1,6 +1,6 @@
 # MOR-000：runtime 归属与控制面边界决议（草案）
 
-**状态**：draft；除 `<runtime-root>` 外的全部决议项已钉定，`<runtime-root>`/owner 为 `blocked: awaiting owner decision`
+**状态**：decided（2026-08-28）：**暂不实现，保持 design-only**——§3 替代决定生效；不创建 `D:\CODE\model-orchestration`，不填充未经确认的 owner，不进入 MOR-010 runtime 写入。MOR-090 static-fact 基线保留；只读审查与文档修订车道持续开放。当 owner 明确指定已有 runtime 或新的独立项目根、以及真实人类/团队 owner 后，再依 §3 基线启动 MOR-010。
 **依据**：[PRD](../product/cross-host-model-orchestration-prd.md) §9 · [实施计划](../product/cross-host-model-orchestration-implementation-plan.md) MOR-000
 **回滚**：删除本文件即回滚本决议；不影响任何已提交设计文档或宿主状态
 **Truth boundary**：human design decision（draft）；不证明任何 host/模型事实
@@ -25,7 +25,7 @@
 
 **归宿三选项**（roadmap §2）：① 已有的 host-local runtime；② 受控的 Cockpit 扩展；③ 另一个已存在、具备治理边界的 runtime。只有 skills-manager 本身不得作为归宿。当前机器 `D:\CODE` 下未发现此前提过的 `local-ai-dev-orchestrator`，不能当作现成候选。
 
-## 3. 推荐决策基线（待 owner 确认，非创建授权）
+## 3. 推荐决策基线（已搁置：2026-08-28 决定暂不实现；未来启动时作为现成输入，非创建授权）
 
 | 项 | 推荐值 |
 | --- | --- |
