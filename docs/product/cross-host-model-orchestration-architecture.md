@@ -1,7 +1,7 @@
 # 跨宿主模型编排控制面架构
 
 **状态**：design-only；目标为独立的 host-local runtime，不修改 skills-manager runtime
-**关联**：[PRD](cross-host-model-orchestration-prd.md) · [路线图](cross-host-model-orchestration-roadmap.md) · [实施计划](cross-host-model-orchestration-implementation-plan.md) · [验收 Runbook](../runbooks/cross-host-model-orchestration-acceptance.md)
+**关联**：[PRD](cross-host-model-orchestration-prd.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
 ## 1. 架构结论
 

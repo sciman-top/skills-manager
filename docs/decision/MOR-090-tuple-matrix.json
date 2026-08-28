@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "MOR-090 \u00a75.1 canonical tuple matrix. This JSON is the single edit source; MOR-090-tuple-matrix.md is a generated view. Validate: pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1",
+    "description": "MOR-090 \u00a75.1 canonical tuple matrix. This JSON is the single edit source. Validate: pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1",
     "status_enum": ["verified", "partial", "candidate", "operator_declared", "unknown"],
     "contract_layers": ["host_adapter", "provider_dialect"],
     "allowlist_rule": "status==verified; final route candidate additionally requires host_adapter AND provider_dialect sides verified (intersection). No cross-surface extrapolation (e.g. openai_* max -> codex_config_surface).",

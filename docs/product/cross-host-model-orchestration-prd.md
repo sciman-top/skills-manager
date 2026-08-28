@@ -2,7 +2,7 @@
 
 **状态**：design-only；未进入 skills-manager runtime 范围
 **目标实现归属**：待用户选择独立 host-local runtime 根目录；可作为受控 Cockpit 扩展或既有治理 runtime 的独立模块，不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链
-**关联**：[架构](cross-host-model-orchestration-architecture.md) · [路线图](cross-host-model-orchestration-roadmap.md) · [实施计划](cross-host-model-orchestration-implementation-plan.md) · [验收 Runbook](../runbooks/cross-host-model-orchestration-acceptance.md)
+**关联**：[架构](cross-host-model-orchestration-architecture.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
 ## 1. 产品决策
 
