@@ -13,7 +13,15 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Hermes roadmap](skills-manager-hermes-roadmap.md)：阶段、进入/退出条件、风险与 go/no-go 决策。
 - [Hermes implementation plan and backlog](skills-manager-hermes-implementation-plan.md)：可直接交给 AI 或工程师执行的原子任务、预期 write set、验证与停止条件。
 
-这些计划文档是 versioned design input，不是 Hermes、Codex、CI 或人工验收的运行状态。它们不会授权安装软件、修改 `~/.codex` / `~/.hermes`、创建计划任务、投影技能、合并分支或执行线上操作。
+跨宿主模型编排是一个**独立 runtime** 的 design-only 产品线，不改变 skills-manager 的模型/provider/auth 边界：
+
+- [Cross-host model orchestration PRD](cross-host-model-orchestration-prd.md)：日常 Codex、Claude Code、ZCode 的人工声明编排、五执行槽位、route key、风险与用户价值。
+- [Cross-host model orchestration architecture](cross-host-model-orchestration-architecture.md)：唯一深模块、静态宿主 Adapter、private default/override、五 slot/可扩展 route key 与 receipt 合同。
+- [Cross-host model orchestration roadmap](cross-host-model-orchestration-roadmap.md)：从离线策略到受控投影、各宿主采纳和只读 Preset Review 的阶段门禁。
+- [Cross-host model orchestration implementation plan](cross-host-model-orchestration-implementation-plan.md)：MOR-000 至 MOR-850 的原子任务、目标 write set、验证、回滚与停止条件。
+- [Cross-host model orchestration acceptance runbook](../runbooks/cross-host-model-orchestration-acceptance.md)：离线解析、人工声明、受控投影、fresh host 采纳和按宿主验收的 receipt 要求。
+
+这些计划文档是 versioned design input，不是 Hermes、Codex、CI 或人工验收的运行状态。它们不会授权安装软件、修改 `~/.codex` / `~/.hermes`、创建计划任务、投影技能、合并分支或执行线上操作。跨宿主模型编排文档同样不授权读取 OAuth/API 凭据、扫描网关/模型列表、发送模型探测请求，或改写 OAuth/API 凭据、网关、宿主配置、会话或插件缓存；只有独立 runtime 在当前授权、静态 Adapter contract 和受控投影事务均满足时，才可变更已验证的非秘密宿主模型选择字段。
 
 动态 HSM 执行状态、运行模式、commit 与 receipt 必须保存在相应 POC 仓的任务 brief/receipt 中；本目录只保留稳定的目标、边界、进入条件和最低证明，不复制阶段快照。
 
