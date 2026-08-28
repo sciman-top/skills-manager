@@ -15855,13 +15855,13 @@ function 同步MCP {
 }
 
 function Get-MigrationTokens([string[]]$Tokens) {
-    $result = [ordered]@{ mode = 'all'; out_path = ''; force = $false; json = $false; encrypt = $false }
+    $result = [ordered]@{ mode = 'private-all'; out_path = ''; force = $false; json = $false; version = '' }
     $items = @($Tokens)
     for ($i = 0; $i -lt $items.Count; $i++) {
         $token = [string]$items[$i]
         switch -Regex ($token.ToLowerInvariant()) {
             '^(--mode|-m)$' {
-                Need ($i + 1 -lt $items.Count) '迁移 --mode 需要 all、general、private-general、private-all 或 rescan'
+                Need ($i + 1 -lt $items.Count) '迁移 --mode 需要 private-all 或 rescan'
                 $result.mode = [string]$items[++$i]
                 continue
             }
@@ -15878,14 +15878,23 @@ function Get-MigrationTokens([string[]]$Tokens) {
                 $result.out_path = $token.Substring(6)
                 continue
             }
+            '^--version$' {
+                Need ($i + 1 -lt $items.Count) '迁移 --version 需要交付版本号'
+                $result.version = [string]$items[++$i]
+                continue
+            }
+            '^--version=' {
+                $result.version = $token.Substring(10)
+                continue
+            }
             '^--force$' { $result.force = $true; continue }
             '^--json$' { $result.json = $true; continue }
-            '^--encrypt$' { $result.encrypt = $true; continue }
             default { throw ("迁移不支持参数：{0}" -f $token) }
         }
     }
     $result.mode = ([string]$result.mode).Trim().ToLowerInvariant()
-    Need (@('all','general','private-general','private-all','rescan') -contains $result.mode) '迁移模式必须是 all、general、private-general、private-all 或 rescan'
+    Need (@('private-all','rescan') -contains $result.mode) '迁移模式必须是 private-all 或 rescan'
+    if (-not [string]::IsNullOrWhiteSpace($result.version)) { Need ($result.version -match '^[0-9A-Za-z][0-9A-Za-z._-]*$') '迁移 --version 格式非法' }
     return [pscustomobject]$result
 }
 
@@ -16173,15 +16182,17 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
     $cfg = LoadCfg
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $outPath = if ([string]::IsNullOrWhiteSpace($options.out_path)) {
-        $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path 'deliveries\migration' $stamp)
+        Need (-not [string]::IsNullOrWhiteSpace($options.version)) '默认交付路径需要 --version <version>，以便四类交付物位于同一版本目录'
+        $deliveryKind = if ($options.mode -eq 'private-all') { 'private-snapshot' } else { 'rescan' }
+        $migrationRunRoot = Join-Path (Join-Path $Root 'artifacts') (Join-Path (Join-Path (Join-Path 'deliveries' $options.version) $deliveryKind) $stamp)
         Join-Path $migrationRunRoot ("migration-{0}-{1}.zip" -f $options.mode, $stamp)
     } else { [IO.Path]::GetFullPath($options.out_path) }
     $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $Root 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if ($outPath.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
         $outPath.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         $relativeArtifactPath = [IO.Path]::GetRelativePath($artifactsRoot, $outPath).Replace('\', '/')
-        if ($relativeArtifactPath -notmatch '^deliveries/migration/[^/]+/[^/]+\.zip$') {
-            throw 'Migration output under artifacts must be artifacts\deliveries\migration\<run-id>\<file>.zip; use an external temporary path only for isolated tests.'
+        if ($relativeArtifactPath -notmatch '^deliveries/[^/]+/(private-snapshot|rescan)/[^/]+/[^/]+\.zip$') {
+            throw 'Migration output under artifacts must be artifacts\deliveries\<version>\{private-snapshot,rescan}\<run-id>\<file>.zip; use an external temporary path only for isolated tests.'
         }
     }
     $outParent = Split-Path -Parent $outPath
@@ -16189,28 +16200,17 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
     Need ($options.force -or -not (Test-Path -LiteralPath $outPath)) ("迁移输出已存在：{0}；如需覆盖请使用 --force" -f $outPath)
 
     $skillNames = @()
-    if ($options.mode -in @('general','private-general')) {
-        $profiles = $cfg.skill_projection.projection_profiles.profiles
-        $skillNames = @($profiles.core.include | ForEach-Object { [string]$_ } | Sort-Object -Unique)
-    }
-    elseif ($options.mode -in @('all','private-all')) {
+    if ($options.mode -eq 'private-all') {
         $skillNames = @(Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object Name | Sort-Object)
     }
-    $mcpNames = if ($options.mode -in @('general','private-general')) { @($cfg.mcp_profiles.profiles.default.enabled | ForEach-Object { [string]$_ }) } elseif ($options.mode -in @('all','private-all')) { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
+    $mcpNames = if ($options.mode -eq 'private-all') { @($cfg.mcp_servers | ForEach-Object Name) } else { @() }
     $credentialPayload = $null
     $credentialFileName = $null
-    $privateMode = $options.mode -in @('private-general','private-all')
+    $privateMode = $options.mode -eq 'private-all'
     if ($privateMode) {
         $privatePayload = Get-MigrationCredentialPayload $cfg $mcpNames
-        if ($options.encrypt) {
-            $passphrase = Read-MigrationPassphrase '请输入私用迁移包加密口令（不会保存）' -Confirm
-            $credentialPayload = Protect-MigrationCredentialPayload $privatePayload $passphrase
-            $credentialFileName = 'MIGRATION-MCP-CREDENTIALS.enc.json'
-        } else {
-            # Explicit private modes may carry plaintext credentials for local-only use.
-            $credentialPayload = $privatePayload
-            $credentialFileName = 'MIGRATION-MCP-CREDENTIALS.json'
-        }
+        $credentialPayload = $privatePayload
+        $credentialFileName = 'MIGRATION-MCP-CREDENTIALS.json'
     }
 
     $work = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-migration-{0}" -f ([guid]::NewGuid().ToString('N')))
@@ -16228,18 +16228,16 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             mcp_servers = @($mcpNames)
             private_use_only = $privateMode
             includes_credentials = $privateMode
-            credentials_encrypted = ($privateMode -and $options.encrypt)
+            credentials_encrypted = $false
             includes_materialized_sources = ($options.mode -ne 'rescan')
             development_ready = $false
             restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
-            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','overrides','vendor','imports','agent','references','.github') } else { @() }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','rules','overrides','vendor','imports','agent','references','.github') } else { @() }
             credential_file = $credentialFileName
             apply = if ($options.mode -eq 'rescan') {
                 @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP')
-            } elseif ($privateMode -and $options.encrypt) {
-                @('解压后运行 migration-apply（输入同一加密口令）', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证')
             } elseif ($privateMode) {
                 @('解压后运行 migration-apply（本包为明文私用快照，不需要口令）', '不要上传公共 GitHub、公共 Release 或公共网盘', '公共 Git clone/fork/tag 才是持续开发真值；本快照不含 Git 历史', '在新电脑开启全新宿主会话验证')
             } else {
@@ -16257,7 +16255,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 $source = Join-Path $Root $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
-            foreach ($directory in @('src','config','tests','scripts','docs')) {
+            foreach ($directory in @('src','config','tests','scripts','docs','rules')) {
                 $source = Join-Path $Root $directory
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
             }
@@ -16266,15 +16264,13 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
             }
             if (Test-Path -LiteralPath (Join-Path $Root 'overrides') -PathType Container) { Copy-MigrationTree (Join-Path $Root 'overrides') (Join-Path $packageRoot 'overrides') | Out-Null }
-            $sourceRoots = if ($options.mode -in @('all','private-all')) { @('vendor','imports') } else {
-                @($migrationCfg.vendors | ForEach-Object { "vendor\$($_.name)" }) + @($migrationCfg.imports | ForEach-Object { "imports\$($_.name)" })
-            }
+            $sourceRoots = @('vendor','imports')
             foreach ($relativeSource in @($sourceRoots | Sort-Object -Unique)) {
                 $source = Join-Path $Root $relativeSource
                 $destination = Join-Path $packageRoot $relativeSource
                 if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source $destination | Out-Null }
             }
-            if ($options.mode -in @('all','private-all')) {
+            if ($options.mode -eq 'private-all') {
                 if (Test-Path -LiteralPath $AgentDir -PathType Container) { Copy-MigrationTree $AgentDir (Join-Path $packageRoot 'agent') | Out-Null }
             }
             else {
@@ -23976,7 +23972,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
-  - 项目迁移：按 all/general/private-general/private-all/rescan 生成可审计迁移包；private-* 默认生成明文私用快照，可用 --encrypt 生成加密 companion file
+  - 项目迁移：生成 private-all 私用全量快照或 rescan 辅助清单；private-all 是明文、无口令的私用快照
   - 发行更新：仅对未修改的 GitHub Release 安装版校验、备份并更新本体；源码开发版仍通过 Git 更新
 
 易混点：
@@ -24003,8 +23999,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
-  .\skills.ps1 迁移 --mode all|general|private-general|private-all|rescan [--out <迁移包.zip>] [--force]
-  .\skills.ps1 迁移 --mode private-general|private-all [--encrypt] [--out <迁移包.zip>] [--force]
+  .\skills.ps1 迁移 --mode private-all|rescan [--version <version>] [--out <迁移包.zip>] [--force]
   .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]

@@ -114,16 +114,16 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: |
-            artifacts/deliveries/release/${{ github.ref_name }}/*.zip
-            artifacts/deliveries/release/${{ github.ref_name }}/*-SHA256SUMS.txt
+            artifacts/deliveries/${{ github.ref_name }}/**/*.zip
+            artifacts/deliveries/${{ github.ref_name }}/skills-manager-${{ github.ref_name }}-SHA256SUMS.txt
 
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $releaseRoot = Join-Path (Join-Path (Get-Location) 'artifacts\deliveries\release') '${{ github.ref_name }}'
-          $assets = @(Get-ChildItem -LiteralPath $releaseRoot -File | Where-Object { $_.Name -match '\.(zip|txt)$' })
-          if ($assets.Count -ne 3) { throw "Expected 3 release assets, found $($assets.Count)." }
+          $releaseRoot = Join-Path (Join-Path (Get-Location) 'artifacts\deliveries') '${{ github.ref_name }}'
+          $assets = @(Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | Where-Object { $_.Name -match '\.(zip|txt)$' })
+          if ($assets.Count -ne 4) { throw "Expected 4 public release assets, found $($assets.Count)." }
           gh release create '${{ github.ref_name }}' @($assets.FullName) --verify-tag --generate-notes --title '${{ github.ref_name }}'
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }

@@ -4,9 +4,9 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[0-9A-Za-z][0-9A-Za-z._-]*$')]
     [string]$Version,
-    [ValidateSet('Bootstrap', 'Portable', 'Both')]
+    [ValidateSet('Bootstrap', 'Portable', 'Source', 'Both')]
     [string]$Package = 'Both',
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\deliveries\release'),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\deliveries'),
     [switch]$AllowDirtyWorktree
 )
 
@@ -19,11 +19,11 @@ $workRoot = Join-Path $outputRoot '.release-work'
 
 function Assert-ReleaseOutputContract {
     $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar)
-    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'deliveries\release')).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $artifactsRoot 'deliveries')).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if ($outputParent.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or
         ($outputParent.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -and
          -not $outputParent.Equals($releaseRoot, [StringComparison]::OrdinalIgnoreCase))) {
-        throw "Release output directory must be artifacts\deliveries\release (the version subdirectory is added automatically): $outputParent"
+        throw "Release output directory must be artifacts\deliveries (the version subdirectory is added automatically): $outputParent"
     }
 }
 
@@ -48,8 +48,28 @@ function Copy-ReleaseFile([string]$RelativePath, [string]$DestinationRoot) {
     Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
-function Get-TrackedReleaseFiles {
-    $roots = @('config', 'overrides', 'src')
+function Write-PublicReleaseConfig([string]$PackageRoot) {
+    $path = Join-Path $PackageRoot 'skills.json'
+    $config = Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json
+    # A public delivery is a tool and source baseline, not a copy of this
+    # maintainer's installed skills, target repositories, or MCP inventory.
+    foreach ($name in @('vendors', 'imports', 'mappings', 'mcp_servers', 'targets')) { $config.$name = @() }
+    if ($null -ne $config.mcp_profiles) {
+        foreach ($profile in @($config.mcp_profiles.profiles.PSObject.Properties)) { $profile.Value.enabled = @() }
+    }
+    if ($null -ne $config.skill_projection -and $null -ne $config.skill_projection.projection_profiles) {
+        foreach ($profile in @($config.skill_projection.projection_profiles.profiles.PSObject.Properties)) {
+            if ($profile.Value.PSObject.Properties.Name -contains 'include') { $profile.Value.include = @() }
+            if ($profile.Value.PSObject.Properties.Name -contains 'exclude') { $profile.Value.exclude = @() }
+            if ($profile.Value.PSObject.Properties.Name -contains 'include_all') { $profile.Value.include_all = $false }
+        }
+    }
+    $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $path -Encoding utf8
+}
+
+function Get-TrackedReleaseFiles([string]$Kind) {
+    $roots = @('config', 'src')
+    if ($Kind -eq 'Source') { $roots += @('tests', 'scripts', 'docs', '.github', 'references', 'rules') }
     $tracked = @(& git -C $repoRoot ls-files -- @roots)
     if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed while collecting release inputs.' }
     return @($tracked | Where-Object {
@@ -250,16 +270,20 @@ function New-ReleasePackage([string]$Kind) {
 
     $rootFiles = @(
         'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
-        'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.lock.json', 'skills.ps1',
+        'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.ps1',
         'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1',
         'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1',
         'references\README.md', 'references\reference-shelf.manifest.json', 'references\updates\README.md'
     )
-    foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles)) {
+    if ($Kind -eq 'Source') { $rootFiles += 'AGENTS.md' }
+    foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles $Kind)) {
         Copy-ReleaseFile $file $packageRoot
     }
+    Write-PublicReleaseConfig $packageRoot
 
-    $includesAgent = $Kind -eq 'Portable'
+    # Public packages deliberately exclude skills, MCP declarations, and other
+    # machine state. A destination scan chooses the user's own installation.
+    $includesAgent = $false
     if ($includesAgent) {
         $agentSource = Join-Path $repoRoot 'agent'
         if (-not (Test-Path -LiteralPath $agentSource -PathType Container)) {
@@ -317,17 +341,24 @@ function New-ReleasePackage([string]$Kind) {
             os = 'Windows'
             powershell = '7+'
             git_for_green_run = $false
-            git_for_install = ($Kind -eq 'Bootstrap')
-            git_for_update = ($Kind -eq 'Bootstrap')
+            git_for_install = $true
+            git_for_update = $true
         }
         includes_prebuilt_agent = $includesAgent
-        green_run = if ($includesAgent) { '.\skills.cmd' } else { $null }
+        green_run = '.\skills.cmd'
         install = '.\setup.cmd'
         files = $fileEntries
     }
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE-MANIFEST.json') -Encoding utf8
 
-    $zipPath = Join-Path $outputRoot "$slug.zip"
+    $deliveryFolder = switch ($Kind) {
+        'Bootstrap' { 'standard-install' }
+        'Portable' { 'portable' }
+        default { 'source' }
+    }
+    $packageOutput = Join-Path $outputRoot $deliveryFolder
+    if (-not (Test-Path -LiteralPath $packageOutput)) { New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null }
+    $zipPath = Join-Path $packageOutput "$slug.zip"
     $archive = New-VerifiedPackageArchive $packageRoot $zipPath
     return [pscustomobject]@{
         package = $Kind.ToLowerInvariant()
@@ -350,7 +381,7 @@ if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recu
 New-Item -ItemType Directory -Path $workRoot -Force | Out-Null
 
 try {
-    $kinds = if ($Package -eq 'Both') { @('Bootstrap', 'Portable') } else { @($Package) }
+    $kinds = if ($Package -eq 'Both') { @('Bootstrap', 'Portable', 'Source') } else { @($Package) }
     $results = @($kinds | ForEach-Object { New-ReleasePackage $_ })
     $checksumsPath = Join-Path $outputRoot "skills-manager-$Version-SHA256SUMS.txt"
     @($results | ForEach-Object { '{0} *{1}' -f $_.sha256, [IO.Path]::GetFileName($_.path) }) |

@@ -1,68 +1,31 @@
 # 发布指南
 
-## 推荐发布模型
+每个版本的本机 staging 根目录是 `artifacts/deliveries/<version>/`，固定交付树如下：
 
-最佳方式是 GitHub Release + 两个版本化 ZIP + SHA-256 清单：
+```text
+artifacts/deliveries/<version>/
+├─ standard-install/  # bootstrap.zip：公共、无 skills/MCP
+├─ portable/          # portable.zip：公共、无 skills/MCP
+├─ source/            # source.zip：公共源码开发快照、无 skills/MCP
+├─ private-snapshot/  # private-all.zip：仅私用、完整 skills/MCP 状态
+└─ SHA256SUMS.txt     # 三项公共 ZIP 的校验清单
+```
 
-- `bootstrap` 是默认推荐下载：小、可复现，按 `skills.lock.json` 拉取锁定来源并安装，需要 Git 与网络。
-- `portable` 是完整绿色包：内置当前构建好的 `agent/`，适合 U 盘、离线浏览、演示和网络受限的机器；联网型 skill 与外部工具仍取决于各自环境。
-- 两个公开 ZIP 都含本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不含 `.git` 历史或测试集，不是完整开发 checkout。源码开发、分支、测试与贡献归 Git clone/fork/tag；ZIP 是便利交付物，不替代仓库历史。
-- 公共 `general` 安装版可通过包内 Release 更新器检查最新正式 Release；更新器只接受未修改的 Release 安装目录，校验 `SHA256SUMS.txt`，保留同级 backup，并由独立进程切换目录。Git 源码开发版必须走 Git 更新。
-
-公共 GitHub 只发布公共 `general` 安装制品和公共源码/tag。`private-all` 与任何 `private-*` 迁移包（无论明文还是加密）不属于 Release 资产、不得提交到公共仓库或上传到公共网盘；`artifacts/` 默认被 Git 忽略只是防呆，不是公开发布授权。
-
-发布后可用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 核对 artifact attestation；同时应在仓库启用 immutable releases、保护 `main` 与 `v*` tag。Release ZIP 的 manifest `publishable=true` 只表示构建时来自 clean tracked worktree，不代表宿主 `host_loaded` 或 `live_accepted`。
-
-项目自身代码采用根目录 [MIT License](../LICENSE)。发布包必须包含该文件；引入的第三方技能、源码和依赖仍保留各自许可证，MIT 不会覆盖或重许可第三方内容。
-
-## 本地一键打包
-
-先冻结并验证源码、配置、锁文件和生成物，再运行：
+前三项由以下命令生成，均包含公共工具源码；`source.zip` 额外包含开发测试、工作流和 `rules/global/` 源。三个公共包都不含 `agent/`、MCP 声明、目标仓画像、`vendor/`、`imports/` 或宿主目录状态。
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
 ```
 
-输出到 ignored `artifacts/deliveries/release/<version>/`（每个版本独立目录；该目录不是公共下载源，完整目录规则见 [`artifacts/README.md`](../artifacts/README.md)）：
-
-```text
-artifacts/deliveries/release/<version>/
-├─ skills-manager-<version>-bootstrap.zip
-├─ skills-manager-<version>-portable.zip
-└─ skills-manager-<version>-SHA256SUMS.txt
-```
-
-当前已验证公共 Release 为 `v2026.08.27.1`。发布完成后，清理 `artifacts/work/<kind>/<run-id>/` 下的 smoke 解压和其他临时副产物；迁移包写入 `artifacts/deliveries/migration/<run-id>/`，历史留存只能显式放到 `artifacts/history/<kind>/<version-or-date>/`。正式下载统一指向 GitHub Release 页面，禁止从 `artifacts/` 根目录或历史目录取包。
-
-脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。Release 包还包括受控的 update worker 与可选的 Windows Task Scheduler runner；它们不会在安装时自行创建计划任务，用户必须显式运行 `release-update-schedule --enable`。
-
-`portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证证据路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；若 pinned commit 没有这些文件，仅当同一 commit 根 `README.md` 明确包含 License section 和 SPDX 名称时，才按原始字节物化该 README 作为可追溯证据。同一来源的多个技能共享一份证据，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树 frontmatter 或远端口头声明不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
-
-`-OutputDirectory` 表示 release staging 的父目录；当它指向本仓 `artifacts` 时，脚本只接受 `artifacts/deliveries/release`，并自动追加 `<version>`。仓库内不允许通过参数把公共 ZIP 写回根层或其他分类目录；测试可使用外部临时目录。
-
-只构建一种包：
+随后只在本机生成第四项：
 
 ```powershell
-.\scripts\release\build-release.ps1 -Version <version> -Package Bootstrap
-.\scripts\release\build-release.ps1 -Version <version> -Package Portable
+.\skills.ps1 迁移 --mode private-all --version <version>
 ```
 
-## Tag 自动发布
+私用快照不得上传到 GitHub Release、公共仓库或公共网盘。它携带仓库规则源 `rules/global/`，但不携带也不自动覆盖各宿主已经生效的用户级规则。任何全局规则恢复仍应按 `global-rules-plan`、`global-rules-apply` 与 rollback receipt 的受控流程执行。
 
-CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，为三个资产签发 GitHub artifact build provenance attestation，再创建 GitHub Release。attestation 通过 GitHub OIDC 把资产摘要绑定到当前仓库、workflow 与 tag 构建；它补充而不替代 ZIP 内 `RELEASE-MANIFEST.json` 和 `SHA256SUMS.txt`。建议版本使用 `vYYYY.MM.DD`，同日修订追加 `.N`。
+公共 Release 资产只上传 `standard-install/`、`portable/`、`source/` 中的 ZIP 和根部 `SHA256SUMS.txt`。公共源码的持续开发真值仍是 Git clone/fork/tag；`source.zip` 不含 `.git` 历史。构建、checksum、attestation 成功只证明 `repo_verified` 和制品来源，不证明宿主已经 `host_loaded` 或得到 `live_accepted`。
 
-发布顺序：
-
-1. 确认 `main` 干净且与 `origin/main` 一致。
-2. 运行 full gate；检查 `build.ps1` 未产生生成物漂移。
-3. 在本地实际构建并抽查两个 ZIP。
-4. 确认 MIT `LICENSE` 已进入制品，检查 `THIRD-PARTY-NOTICES.json`，并复核第三方来源、所有 `unknown_review_required`、许可证与 release notes。
-5. 创建并推送 annotated tag，例如 `git tag -a vYYYY.MM.DD -m "vYYYY.MM.DD"`、`git push origin vYYYY.MM.DD`。
-6. 等待 GitHub Actions 成功，再使用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 验证三个资产的 provenance，并从 Release 页面下载制品复核 SHA-256 与安装烟测。
-
-GitHub Actions 与 attestation 成功只证明 `repo_verified`、制品生成和构建来源；不证明技能已被宿主加载。至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude/ZCode 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。
-
-## 回滚
-
-不要覆盖既有 Release 资产。若制品错误，保留原 tag/Release 以便审计，标记为有问题并发布递增版本。若只是 GitHub 发布步骤失败，可在相同 commit 修复 workflow 后使用新 tag；不要强推或移动已公开 tag。
+如制品有误，使用新的递增版本；不要覆盖已公开的 Release 资产或移动既有 tag。

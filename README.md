@@ -56,34 +56,26 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
 
-### 三条交付渠道，四种交付形态
+### 同一版本下的四类交付物
 
 | 形态 | 获取方式 | 内容与边界 |
 | --- | --- | --- |
-| 公共 `general` 标准安装版 | GitHub Releases 的 `bootstrap.zip` | 默认推荐；按锁文件安装通用 skills/MCP 意图，需要 Git 与网络，可显式启用经过校验的 Release 更新。 |
-| 公共 `general` 完整绿色版 | GitHub Releases 的 `portable.zip` | 内置当前构建好的 `agent/`，适合 U 盘、离线浏览、演示和网络受限的机器；联网型 skill 与外部工具仍取决于各自环境。 |
-| 公共源码开发版 | GitHub 仓库、tag 或 fork | 完整 Git 历史和开发文件；长期开发、定制和贡献一律走 Git，不由 Release 更新器覆盖。 |
-| 私用 `private-all` 迁移快照 | 本机 `迁移 --mode private-all` | 全量已构建 skills、MCP 和恢复所需源码快照；默认携带明文 MCP `env`/`headers`，可用 `--encrypt` 改为 AES-256-GCM 加密；不含 Git 历史，不是第二个开发真值，不得 push 到公共 GitHub 仓库、公共 Release 或公共网盘。 |
+| 标准安装版 | `<version>/standard-install/bootstrap.zip` | 公共工具与源码；不带 skills/MCP，首次扫描新电脑的目标仓后再选择安装。 |
+| 完整绿色版 | `<version>/portable/portable.zip` | 公共工具与源码；不带 skills/MCP，不自动写宿主目录。 |
+| 公共源码开发版 | `<version>/source/source.zip` 或 Git clone/fork/tag | 无 skills/MCP；ZIP 含开发文件，完整 Git 历史仍以 clone/fork/tag 为准。 |
+| 私用全量快照 | `<version>/private-snapshot/private-all.zip` | 唯一携带全部现有 skills/MCP 的明文、无口令恢复包；不含 Git 历史，不得公开分发。 |
 
-两个公共 `general` ZIP 都携带本项目的 MIT `src/` 源码快照，便于审阅和重建；它们不是完整源码开发包，不含 `.git` 历史或测试集。需要持续开发、分支、测试、贡献或通过 Git 更新时，请 clone/fork 公共源码仓库。`rescan` 是一种不携带 skills/MCP 内容的辅助迁移清单，不属于上述对外发行形态。
+同一版本的四类交付物统一位于 `artifacts/deliveries/<version>/`。三个公共包都不携带 `agent/`、MCP 清单、目标仓状态、`vendor/` 或 `imports/`；`rules/global/` 只随源码开发版和私用快照作为规则源携带，绝不自动覆盖宿主已生效的全局规则。`rescan` 只是辅助扫描清单，不是第五种交付物。
 
 ### 项目迁移
 
-可用 `迁移` 命令生成跨电脑 ZIP，默认写入 `artifacts\deliveries\migration\<run-id>\`，按需选择范围：
+可用 `迁移` 命令生成私用全量快照。默认交付路径必须提供版本号，因此它与三个公共包同处一个版本根目录。
 
 ```powershell
-# all：携带当前已构建的全部 skills 与 MCP 配置意图
-.\skills.ps1 迁移 --mode all
-# general：仅携带 core 通用 skills 与 default MCP
-.\skills.ps1 迁移 --mode general
-# private-general：通用 skills + default MCP；私用明文快照，不需要口令
-.\skills.ps1 迁移 --mode private-general
-# private-all：全部 skills + MCP；私用明文快照，不需要口令
-.\skills.ps1 迁移 --mode private-all
-# 如需在传输介质上保护 MCP env/header，再显式加密
-.\skills.ps1 迁移 --mode private-all --encrypt
-# rescan：不携带 skills/MCP，仅带新电脑重新发现、安装的指引
-.\skills.ps1 迁移 --mode rescan
+# 唯一的私用状态交付物：全部当前 skills + MCP，明文、无口令
+.\skills.ps1 迁移 --mode private-all --version <version>
+# 可选辅助清单，不是第五种交付物
+.\skills.ps1 迁移 --mode rescan --version <version>
 ```
 
 迁移包默认不会包含 token、MCP header/env 值、宿主登录态、插件缓存、`reports/` 或目录链接；`all`/`general` 仅保留可重建的 MCP 声明和脱敏后的凭据引用名称。`private-general` 和 `private-all` 是仅限私用的例外：默认把 MCP `env`/`headers` 写入明文 companion file `MIGRATION-MCP-CREDENTIALS.json`，不询问口令；显式加 `--encrypt` 时改为 `MIGRATION-MCP-CREDENTIALS.enc.json`，使用 AES-256-GCM 保护。所有非 `rescan` 模式都会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`all`/`general`/`private-*` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。

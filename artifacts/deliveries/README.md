@@ -1,8 +1,3 @@
 # 当前交付物
 
-本目录只保留当前可交付物，按用途继续分为：
-
-- `release/<version>/`：公共 bootstrap、portable ZIP 和 SHA-256 清单。
-- `migration/<run-id>/`：一次迁移运行生成的 general、private-all 或 rescan 包。
-
-公共下载以 GitHub Release 为准；`private-*` 迁移包不得提交、不得上传公共 Release。
+每个版本只有一个目录：`<version>/`。其中固定存在 `standard-install/`、`portable/`、`source/` 和 `private-snapshot/` 四个交付类别；根部 `SHA256SUMS.txt` 仅覆盖三个公共 ZIP。私用快照不得提交或上传公共 Release。
