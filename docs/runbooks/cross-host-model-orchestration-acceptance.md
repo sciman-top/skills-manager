@@ -33,8 +33,10 @@ receipt root 建议为 `<runtime-state-root>/receipts/<yyyy-mm-dd>/<run-id>/`，
 在 fixture/state root 上执行，不访问网络或宿主用户配置：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex --identity current-redacted-identity --execution-slot standard_review --operation read_only --offline
+pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex --identity current-redacted-identity --workload standard_review --risk-level normal --operation read_only --workspace-root <root> --offline
 ```
+
+`--workload` 是常规入口；`--execution-slot` 仅为 fixture/dry-run 直通参数，必须与 `--workload` 派生结果一致，且不能替代完整字段（缺 `--risk-level`/`--operation`/`--workspace-root` 一律拒绝）。
 
 验收项目：
 
@@ -65,7 +67,7 @@ pwsh -NoProfile -File .\scripts\ai-route.ps1 resolve --host codex --identity cur
 
 1. scope 必须是 current Codex/current identity；不得广播给 Claude/ZCode 或另一个 Codex identity。
 2. 前三句写一个 scoped `operator_override`，并按五个 slot 解析当前 preset 的 route-key map；第四句仅删除该 scope override。
-3. 每份 receipt 写明 `route_source`、execution slot map、静态 Adapter revision、`verification=operator_declared_unverified`、是否生成/应用 projection plan，以及未触及的 provider/auth/base URL/session/plugin cache。
+3. 每份 receipt 写明 `selection_plane`/`route_map_id`、requested/resolved/observed 三段 route、execution slot map、静态 Adapter revision、`verification=operator_declared_unverified`、是否生成/应用 projection plan，以及未触及的 provider/auth/base URL/session/plugin cache。
 4. “落盘”默认授权 private override 写入；只有 Adapter 已证明 target ownership、允许字段、rollback entry，且 standing projection authorization 与 plan token 都有效时，才可继续 native projection。
 5. “Terra 可用吗？”、“都切 Terra”、无目标 host、未知 model/effort 或多 host 未逐一声明 map 的句子必须零写入，返回 answer、`clarify_required` 或 `manual_mapping_required`。
 
@@ -90,7 +92,7 @@ pwsh -NoProfile -File .\scripts\ai-route.ps1 project --plan <private-plan-path> 
 验收顺序：
 
 1. plan 显示 canonical target、route source、五 slot -> route key mapping、allowed fields、before/after hash、backup、policy/Adapter revision 与 rollback entry；
-2. Apply 前重验 containment、before hash、single-writer lock 和 confirmation token；
+2. Apply 前按序重验：canonical containment -> single-writer lock -> target recheck -> before hash -> confirmation token；
 3. 依次完成 `backup -> atomic apply -> after hash -> private receipt`；中断只允许同 plan resume 或按 receipt 精确 rollback；
 4. 任何 drift、unknown ownership、UI-only surface、running-session 风险、路径逃逸、secret/provider/auth/session 字段都返回 `manual_host_selection_required` 或 block；
 5. Apply 成功只到 `filesystem_projected`，不会声明 host 已加载。
@@ -132,19 +134,31 @@ Review 要回答：
     "identity_selector": "redacted-current"
   },
   "request": {
+    "workload": "standard_review",
     "execution_slot": "standard_review",
     "route_key": "standard",
     "operation": "read_only",
+    "risk_level": "normal",
     "risk_gate": "none"
   },
-  "route_source": "operator_override:gpt56_terra_only",
+  "selection_plane": "operator_override",
+  "route_map_id": "gpt56_terra_only",
   "verification": "operator_declared_unverified",
-  "decision": {
-    "status": "selected",
+  "requested_route": {
     "model": "gpt-5.6-terra",
     "effort": "high",
     "constrained": false
   },
+  "resolved_route": {
+    "model": "gpt-5.6-terra",
+    "effort": "high",
+    "constrained": false
+  },
+  "fallback_applied": false,
+  "clamp_applied": false,
+  "observed_host_route": null,
+  "observed_by": null,
+  "observation_status": "not_observable",
   "policy_revision": "sha256:...",
   "adapter_revision": "sha256:...",
   "projection_receipt_ref": null,
@@ -153,7 +167,7 @@ Review 要回答：
 }
 ```
 
-receipt verifier 至少拒绝：secret-like value、未知 slot/key、route-key 与 actual model/effort 不匹配、scope 混用、Luna high-risk 非 block、Terra high-risk 缺 emergency、无授权 projection apply、`host_loaded` 无 host evidence、未知字段。
+receipt verifier 至少拒绝：secret-like value、未知 slot/key、route-key 与 actual model/effort 不匹配、scope 混用、Luna high-risk 非 block、Terra high-risk 缺 emergency、无授权 projection apply、`host_loaded`/`observed_host_route` 无独立 host evidence、缺失 fallback/clamp 字段、未知字段。
 
 ## 9. 停止、恢复和回滚
 

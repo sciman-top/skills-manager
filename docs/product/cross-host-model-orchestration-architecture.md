@@ -85,10 +85,10 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 | `policy_source` | maintainer / 用户 | tracked runtime repo | reviewed patch | workload/risk、静态 Adapter allowlist、preset、emergency approval |
 | `host_default` | 当前用户 | private user-local root | 明确设定 | 一组 host/identity 日常 route map |
 | `operator_override` | 当前用户 / 当前宿主 AI | 同一 private root | 用户明确声明 | 当前 scope 的替代 route map |
-| `effective_route` | resolver | append-only private receipt | 每次显式 Resolve | selected/blocked/manual 结果 |
+| `resolved_route` | resolver | append-only private receipt | 每次显式 Resolve | requested/resolved/observed 三段 + fallback/clamp 记录 |
 | `host_projection` | projection transaction | 已验证 native target + private receipt | plan/token/授权齐备 | 可表达的 model/effort/profile 字段 |
 
-`effective_route` 的“自动更新”只指每次显式 Resolve 按 precedence 重新计算并写 receipt；不后台运行，不根据环境或 task result 改持久化 state。
+`resolved_route` 的“自动更新”只指每次显式 Resolve 按 precedence 重新计算并写 receipt；不后台运行，不根据环境或 task result 改持久化 state。控制面 resolved 不等于宿主生效：宿主可能自行 clamp 或 fallback（Claude Code effort clamp 与 `fallbackModel` 链、DeepSeek 未知名回落 flash、组织策略静默限制），必须由独立观察证据记入 `observed_host_route`，不得以 resolved 充当宿主事实。
 
 ### 4.1 Private host state
 
@@ -97,7 +97,8 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   "schema_version": 1,
   "scope": {"host": "codex", "identity_selector": "redacted-current"},
   "host_default": {
-    "route_source": "gpt56_sol_only",
+    "selection_plane": "host_default",
+    "route_map_id": "gpt56_sol_only",
     "policy_revision": "sha256:...",
     "updated_at": "UTC timestamp",
     "rollback_reference": "private receipt id"
@@ -105,7 +106,8 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   "operator_override": {
     "override_id": "uuid",
     "source": "operator_declared_unverified",
-    "route_source": "gpt56_terra_only",
+    "selection_plane": "operator_override",
+    "route_map_id": "gpt56_terra_only",
     "route_keys": {
       "light": {"model": "gpt-5.6-terra", "effort": "medium"},
       "standard": {"model": "gpt-5.6-terra", "effort": "high"},
@@ -118,7 +120,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 }
 ```
 
-每次 persistent write 必须执行：`canonical scope check -> single-writer lock -> before-hash recheck -> backup -> atomic replace -> after-hash -> private receipt`。未知字段、scope 不匹配、并发、reparse escape、hash 漂移或无 backup 均 fail closed。恢复默认只删除当前 scope 的 `operator_override`，不变更 `host_default`，不触及任何其他 host/identity。
+每次 persistent write 必须执行：`canonical scope check -> single-writer lock -> target recheck -> before-hash -> backup -> atomic replace -> after-hash -> private receipt`。lock 必须先于 before-hash，hash 在锁内重验；lock 是本 runtime 的协作写者语义，其范围、stale-lock 崩溃检测与释放机制由 MOR-140 定义，不约束非协作外部写者，防漂移由锁内 before-hash 重验兜底。未知字段、scope 不匹配、并发、reparse escape、hash 漂移或无 backup 均 fail closed。恢复默认只删除当前 scope 的 `operator_override`，不变更 `host_default`，不触及任何其他 host/identity。
 
 ### 4.2 Route receipt
 
@@ -128,14 +130,22 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
   "request_id": "uuid",
   "scope": {"host": "codex", "identity_selector": "redacted-current"},
   "requested": {
-    "execution_slot": "routine_maintenance",
-    "route_key": "standard",
-    "profile": "standard",
+    "workload": "routine_maintenance",
+    "risk_level": "normal",
     "operation": "workspace_write"
   },
-  "route_source": "operator_override",
+  "execution_slot": "routine_maintenance",
+  "route_key": "standard",
+  "selection_plane": "operator_override",
+  "route_map_id": "gpt56_terra_only",
   "verification": "operator_declared_unverified",
-  "decision": {"status": "selected", "model": "gpt-5.6-terra", "effort": "medium", "constrained": false},
+  "requested_route": {"model": "gpt-5.6-terra", "effort": "high", "constrained": false},
+  "resolved_route": {"model": "gpt-5.6-terra", "effort": "high", "constrained": false},
+  "fallback_applied": false,
+  "clamp_applied": false,
+  "observed_host_route": null,
+  "observed_by": null,
+  "observation_status": "not_observable",
   "policy_revision": "sha256:...",
   "adapter_revision": "sha256:...",
   "truth_boundary": "repo_verified",
@@ -153,10 +163,13 @@ receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱�
 `low/medium/high/xhigh/max` 是某模型**可被 Adapter 表达的可能 effort 标签**，不是预设必须逐一使用的等级。静态合同和日常 preset 分开：
 
 ```yaml
-adapter_supported_efforts:          # 人工复核、版本化；不是运行期枚举
-  gpt-5.6-sol:   [low, medium, high, xhigh, max]
-  gpt-5.6-terra: [low, medium, high, xhigh, max]
-  gpt-5.6-luna:  [low, medium, high, xhigh, max]
+adapter_supported_efforts:          # 人工复核、按 surface 分列、版本化；不是运行期枚举
+  codex_config_surface:             # model_reasoning_effort / profile / -c：官方词表 minimal..xhigh
+    gpt-5.6-sol:   [low, medium, high, xhigh]   # xhigh model-dependent
+    gpt-5.6-terra: [low, medium, high, xhigh]
+    gpt-5.6-luna:  [low, medium, high, xhigh]
+  codex_security_cli_surface:       # 独立 surface；max 为 candidate，MOR-090 取证后单列
+    max: candidate
 
 preset_used_efforts:               # 当前日常方案只选实际需要的三档
   gpt56_sol_only:      [low, medium, xhigh]
@@ -166,7 +179,7 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
-模型支持但预设不使用的 effort（如 `max`，或 Sol/Terra 的 `high`）保持候选状态，不自动加进路由。新增某档必须有明确 workload、operation/risk 限制、静态 Adapter 合同和 reviewed policy patch；不能仅因为数字更大或营销名称更强。
+模型支持但预设不使用的 effort（如 Sol/Terra 的 `high`），以及不属于当前 surface 词表的值（如 config 面的 `max`），保持候选状态，不自动加进路由。新增某档必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch；不能仅因为数字更大或营销名称更强。
 
 ### 5.2 最终推荐：当前三条基础 route key
 
@@ -188,7 +201,7 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
 
 ### 5.3 固定五个 execution slot、可扩展 route key
 
-执行槽位与 route key 是不同对象。**首版固定维护以下五个执行槽位**，以保持所有宿主、自然语言指令、receipt 和 verifier 的语义一致；slot 有自己的 operation、写集和验证语义，并引用一个 route key。多个 slot 可复用同一个 model/effort mapping：
+执行槽位与 route key 是不同对象。**首版固定维护以下五个执行槽位**，以保持所有宿主、自然语言指令、receipt 和 verifier 的语义一致。workload 是调用方声明的任务意图，execution slot 是 policy 依 workload、risk 与 operation 派生的稳定语义类别；首版两者共用相同五个 identifier，属 1:1 实现细节，不是同一领域对象。slot 有自己的 operation、写集和验证语义，并引用一个 route key。多个 slot 可复用同一个 model/effort mapping：
 
 | execution slot | 默认 route key | 用途 | 不可简化的区别 |
 | --- | --- | --- | --- |
@@ -214,18 +227,20 @@ route_keys:                      # 当前 GPT 预设使用三条
   deep:     { model: gpt-5.6-sol, effort: xhigh }
 
 # 后续经过审查，可新增 review/max_depth，而不改变上方五个 execution_slots。
+# max_depth 是 route-key 命名空间；其宿主表达须经 surface adapter 显式映射，
+# 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
 ### 5.4 ZCode 与 Claude 的静态三 route-key 映射
 
 这两套默认与 GPT preset 同样是 policy 中的静态 route map；它们不读取当前网关、OAuth 或模型列表：
 
-| host default | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
+| host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm35_flash_default` | GLM-3.5-Flash/low | GLM-3.5-Flash/high，`constrained` | GLM-3.5-Flash/max，`constrained` | `blocked` |
-| `claude_deepseek_v4_default` | DeepSeek V4 Flash/high | DeepSeek V4 Flash/max，`constrained` | DeepSeek V4 Pro/max | DeepSeek V4 Pro/max + high-risk policy |
+| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`，low/high 未证实） | candidate | candidate，`constrained` | candidate，`constrained` | `blocked` |
+| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate | candidate，`constrained` | candidate | candidate + high-risk policy |
 
-每个精确 model/effort token 都必须同时出现在该 host/identity 的 Adapter allowlist 中。`DeepSeek V4 Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权；它并非模型名称带 `Pro`/`max` 就自然获得的权限。
+每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。`DeepSeek V4 Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权；它并非模型名称带 `Pro`/`max` 就自然获得的权限。
 
 ## 6. 确定性 Resolve 算法
 
@@ -257,14 +272,15 @@ GetStaticCapabilities() -> StaticAdapterContract
 ValidateCandidate(candidate) -> valid | incompatible | unknown
 BuildLaunch(decision, request) -> LaunchPlan | ManualSelection
 ParseLaunchOutcome(events) -> Outcome | not_observable
-PlanNativeProjection(route_source) -> ProjectionPlan | ManualSelection
+PlanNativeProjection(selection_plane, route_map_id) -> ProjectionPlan | ManualSelection
 ```
 
 | Adapter | 负责的事实 | 明确不证明 |
 | --- | --- | --- |
-| `codex_cli` | 经本机 help/schema/源码复核后可表达的 model/effort 参数、dry-run 命令形状、已验证 native target | 正在运行 Codex Desktop 可热切换，或 `~/.codex` 任意文件可安全修改 |
-| `zcode` | 经本机静态证据复核的 GLM/model/effort field contract | skills/MCP 投影等同模型选择权 |
-| `claude_code` | 经本机静态证据复核的 DeepSeek/model/effort field contract | Claude 结论可推广到 Codex/ZCode 或另一身份 |
+| `codex_cli` | 按 surface 分列的 static contract：config/profile/`-c` 面词表（`minimal..xhigh`）、launch 面（`-m`/`-c model_reasoning_effort`）、其他 surface（如 security 扫描面的 `max`）单列候选、dry-run 命令形状、已验证 native target | 把不同 surface 词表合并成一个 allowlist；正在运行 Codex Desktop 可热切换；`~/.codex` 任意文件可安全修改 |
+| `zcode` | 经本机静态证据复核的 ZCode 宿主 model/effort field contract（GLM 模板现为 candidate，见 PRD §7） | skills/MCP 投影等同模型选择权 |
+| `claude_code` | ClaudeCodeHostAdapter：宿主 model 选择、`effortLevel`、`fallbackModel` 链、组织 clamp、fresh-session 可观察性 | 以 provider 方言可表达字段推断宿主当前环境生效 |
+| `deepseek_provider_dialect` | DeepSeekProviderDialect：exact 模型名（`deepseek-v4-flash`/`deepseek-v4-pro`）、未知名回落 flash、`output_config` effort 透传、thinking budget 不可设 | 宿主侧结论；跨 provider 复用 |
 
 实施顺序只能是“收集一次可复核静态事实 -> 提交 contract/fixture -> 测试 contract -> 允许 resolver 消费”。运行时不从宿主、网关或认证面读取候选，不将 task error 变成 route state。
 
@@ -274,7 +290,8 @@ PlanNativeProjection(route_source) -> ProjectionPlan | ManualSelection
 {
   "plan_id": "uuid",
   "scope": {"host": "codex", "identity_selector": "redacted-current"},
-  "route_source": "operator_override:uuid",
+  "selection_plane": "operator_override",
+  "override_id": "uuid",
   "policy_revision": "sha256:...",
   "adapter_revision": "sha256:...",
   "actions": [{
@@ -288,7 +305,7 @@ PlanNativeProjection(route_source) -> ProjectionPlan | ManualSelection
 }
 ```
 
-Apply 顺序固定：`canonical target -> containment -> before hash -> lock -> backup -> atomic apply -> after hash -> receipt`。任何失败立即停止；已完成 action 只能按 receipt 精确 rollback。 `filesystem_projected` 只证明文件事务完成，不证明 fresh host 已采用配置或模型已完成任务。
+Apply 顺序固定：`canonical target containment -> single-writer lock -> target recheck -> before hash -> backup -> atomic apply -> after hash -> receipt`；lock 必须先于 before-hash，hash 在锁内重验。任何失败立即停止；已完成 action 只能按 receipt 精确 rollback。 `filesystem_projected` 只证明文件事务完成，不证明 fresh host 已采用配置或模型已完成任务。
 
 “更新并落盘”可授权当前 scope 的 private override；只有 Adapter 已证明 target/allowed field/rollback entry、当前有 standing projection authorization 且确认 token 匹配时，才可继续 Apply。否则只输出 projection plan 或 `manual_host_selection_required`。投影永不写 provider、OAuth、token、base URL、session、plugin cache、sandbox 或 approval。
 
@@ -300,7 +317,7 @@ Apply 顺序固定：`canonical target -> containment -> before hash -> lock -> 
 | --- | --- | --- | --- |
 | “当前 Codex 只有 Terra 可用，切换 Terra-only 并落盘。” | `reconcile --preset gpt56_terra_only` | current Codex/current identity | scoped override；条件具备才投影 |
 | “当前 Codex 只有 Luna 可用，按默认模板更新。” | `reconcile --preset gpt56_luna_only` | current Codex/current identity | scoped override |
-| “当前 ZCode 可用 GLM-3.5-Flash/high/max，按默认模板更新。” | `reconcile --declare-available <map> --optimize-from-default` | current ZCode/current identity | scoped override |
+| “当前 ZCode 可用 GLM-5.3-Flash/max，按默认模板更新。” | `reconcile --declare-available <map> --optimize-from-default` | current ZCode/current identity | scoped override；声明集未被静态合同覆盖的档位保持 `manual_mapping_required` |
 | “当前 Codex 恢复默认模型编排。” | `reconcile --restore-default` | current Codex/current identity | 只删除该 override |
 
 问句、转述日志、未指定 host、混合多个身份、未知 model/effort，或“所有环境都切”而没有逐 host map 时，Parser 必须零写入并返回 `clarify_required` 或 `manual_mapping_required`。成功 receipt 必须说明：当前 route 是人工声明、未读取认证/网关、未启动验证、未影响其他宿主，以及是否只写了 private override、仅生成投影 plan 或已完成投影事务。
@@ -309,6 +326,7 @@ Apply 顺序固定：`canonical target -> containment -> before hash -> lock -> 
 
 - route 只影响新任务，不能热切换运行中的会话；跨身份续做只能生成 handover summary，`continuity=not_proven`。
 - identity 是 candidate fingerprint 的一部分；个人/团队、OAuth/API、region、gateway 或 data classification 不同的结果不能混用。
+- identity 必须有不可伪造、可审计的绑定来源（MOR-000 钉定）；无法绑定时状态为 `identity_unbound`，禁止持久 override 与 projection，只允许 offline resolve 与 dry-run/manual handoff。
 - 不因认证、限流、可见性或失败结果重启/kill 应用、gateway 或代理，也不改共享 provider。
 - policy/state/receipt 对未知属性 fail closed；secret-like value 出现即拒绝写入。
 - Preset Review 是只读工序，输入为静态合同、用户声明、route/outcome receipt、同类 verifier 与风险矩阵；输出 `keep/promote/demote/block/insufficient_evidence`，不会自行修改任何 plane。

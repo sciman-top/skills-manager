@@ -73,7 +73,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 ### MOR-000：选择 runtime root、owner 与首期 host
 
-- **Goal**：记录 `<runtime-root>`、owner、首期 host、private state/receipt root、初期三套 GPT preset、授权模型和本次回滚入口。
+- **Goal**：记录 `<runtime-root>`、owner、首期 host、private state/receipt root、初期三套 GPT preset、授权模型和本次回滚入口；并一次钉死：identity binding 来源（不可伪造/可审计；无法绑定时 `identity_unbound`，禁止持久 override 与 projection）、native bridge role pin 的优先级与排除规则（`overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`；preset 不得静默覆盖，改档需配对实测）、普通任务结构化 ingress 合同。
 - **Exact write set**：目标 runtime 的 `docs/decision/MOR-000-brief.md`；不得创建 source/config/secret。
 - **Minimum proof**：目标为 Git root；host/identity/owner 无歧义；目标的 target ownership/rollback 仅记录为待证实事实。
 - **Stop / rollback**：未指定 root，或需要读取 token/config 才能决定时 stop；删除 brief 即回滚。
@@ -110,16 +110,16 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 - **Goal**：解析结构化 workload 到固定 execution slot，再解析 slot 到 route key；禁止从 prompt/model 名/历史任务猜测。
 - **Exact write set**：`src/Policy.ps1`、`tests/Unit/Policy.Tests.ps1`、`tests/fixtures/policy/*.yaml`。
 - **默认 slot 模板**：`quick_triage -> light`；`routine_maintenance/standard_review/bounded_implementation -> standard`；`deep_investigation_or_implementation -> deep`；任何 slot 叠加 high-risk 条件即进入 risk gate。
-- **必测**：unknown workload；slot 没有 operation/verification；五个固定 slot；多个 slot 复用 route key；未来 fourth/fifth route key fixture 不改变 slot resolution；低风险 simple diff 可走 light、标准 review 不得误走 light；workspace/data-class disallow；risk override；无审批 Terra critical；Luna critical block。
+- **必测**：unknown workload；slot 没有 operation/verification；五个固定 slot；多个 slot 复用 route key；未来 fourth/fifth route key fixture 不改变 slot resolution；低风险 simple diff 可走 light、标准 review 不得误走 light；workspace/data-class disallow；risk override；无审批 Terra critical；Luna critical block；`--workload` 常规入口与 `--execution-slot` fixture 直通的一致性校验（不一致拒绝）；请求 operation 超出 slot operation 时 blocked；`risk_level` 仅 `normal | high`。
 - **Minimum proof**：focused tests + fixture-based `ai-route resolve --offline`。
 - **Stop / rollback**：若实现需要读取用户 prompt、会话或模型 catalog 才能分类，停止；revert。
 - **Truth boundary**：`repo_verified`。
 
 ### MOR-040：private default/override/receipt state
 
-- **Goal**：实现私有 `host_default`、`operator_override`、effective route/outcome receipt 与 rollback reference；不保存任何外部执行状态或自动恢复状态。
+- **Goal**：实现私有 `host_default`、`operator_override`、resolved route/outcome receipt 与 rollback reference；不保存任何外部执行状态或自动恢复状态。
 - **Exact write set**：`src/PrivateState.ps1`、`src/Receipt.ps1`、`tests/Unit/PrivateState.Tests.ps1`、runtime 的 `.gitignore`（仅已有时）。
-- **必测**：canonical scope containment；atomic interruption；lock collision；before-hash drift；backup；unknown property；scope isolation；restore-default 精确删除；secret rejection；receipt append-only。
+- **必测**：canonical scope containment；atomic interruption；lock collision；before-hash drift；backup；unknown property；scope isolation；restore-default 精确删除；secret rejection；receipt append-only；override `requires_reconfirm_after` 过期后下一次显式 resolve 返回 `manual_mapping_required` 且不自动切换。
 - **Minimum proof**：临时 state root tests；结束后 `git status` 无 private state 文件。
 - **Stop / rollback**：需要 SQLite、daemon、跨机同步、TTL、health、retry 或从 task error 改写 state 时 stop；revert。
 - **Truth boundary**：`repo_verified`。
@@ -128,16 +128,16 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 - **Goal**：离线得到 deterministic route，不接触 host/network。
 - **Exact write set**：`src/Resolver.ps1`、`src/Receipt.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Resolver.Tests.ps1`、`tests/Contract/Receipt.Tests.ps1`。
-- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture；missing model/effort -> manual/block；no auto fallback；redaction。
+- **必测**：`manual_override -> operator_override -> host_default`；Adapter allowlist（按 surface 分列）；slot/route-key mapping；五 slot 三 key fixture；五 slot 五 key future fixture；all three GPT preset；risk gate；GLM/DeepSeek static fixture（candidate 未取证 -> manual/block）；missing model/effort -> manual/block；no auto fallback；redaction；receipt 三段式（requested/resolved/observed）与 fallback/clamp 字段。
 - **Minimum proof**：所有 fixture 的 `resolve --offline` 和 focused tests；零 network/process/host write。
 - **Stop / rollback**：CLI 试图访问 gateway、读取 OAuth、执行 child 或改 host config 时停止；revert。
 - **Truth boundary**：`repo_verified`。
 
 ### MOR-055：人工声明 override 与恢复默认
 
-- **Goal**：实现 current host/current identity 的 persistent override，只通过用户声明更新。
+- **Goal**：实现 current host/current identity 的 persistent override，只通过用户声明更新；identity 必须有可审计绑定来源，未绑定时 `identity_unbound` 并拒绝持久写入。
 - **Exact write set**：`src/Defaults.ps1`、`src/PrivateState.ps1`、`src/Resolver.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Defaults.Tests.ps1`、`tests/Contract/OperatorOverrideReceipt.Tests.ps1`。
-- **必测**：Sol/Terra/Luna preset switch；Codex override 不影响 ZCode/Claude；新 map 基于该 host template；无法映射时 `manual_mapping_required`；restore 只删 exact override；task outcome 不变更 state；receipt 为 `operator_declared_unverified`。
+- **必测**：Sol/Terra/Luna preset switch；Codex override 不影响 ZCode/Claude；新 map 基于该 host template；无法映射时 `manual_mapping_required`；restore 只删 exact override；task outcome 不变更 state；receipt 为 `operator_declared_unverified`；`identity_unbound` 拒绝持久写入；`requires_reconfirm_after` 到期重确认。
 - **Minimum proof**：offline fixture state root、schema/resolver tests；zero host config write。
 - **Stop /rollback**：override 修改 provider/auth/base URL，污染 tracked policy，跨 host 广播，或缺 receipt/backup 时 stop；精确 rollback state。
 - **Truth boundary**：`repo_verified`。
@@ -146,7 +146,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 - **Goal**：让薄 Skill 把明确用户指令映射到同一 CLI/module transaction。
 - **Exact write set**：`src/Intent.ps1`、`scripts/ai-route.ps1`、`skills/model-orchestration/SKILL.md`（或 runtime 已有受管 Skill source）、`tests/Unit/Intent.Tests.ps1`、`tests/Contract/NaturalLanguageAction.Tests.ps1`。
-- **必测**：三种 Codex preset；ZCode GLM low/high/max；Claude Flash/high、Flash/max、Pro/max；restore default；问句/转述/无 host/未知 effort/“所有环境”零写入；“落盘”仅满足 projection capability+authorization 时生成 plan。
+- **必测**：三种 Codex preset；ZCode GLM candidate（未取证零写入/manual）；Claude Flash/high、Flash/max、Pro/max candidate；restore default；问句/转述/无 host/未知 effort/“所有环境”零写入；“落盘”仅满足 projection capability+authorization 时生成 plan；普通任务 ingress：AI 分类建议须用户确认后才成结构化 RouteRequest，从 prompt 直推即拒绝。
 - **Minimum proof**：parser fixture + offline receipt；断言无 `--execute` 时零 child 和零 host write。
 - **Stop / rollback**：若需要 LLM 分类、prompt 猜测、绕开 CLI 或直接编辑 config，停止；revert。
 - **Truth boundary**：`repo_verified`。
@@ -157,7 +157,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 - **Goal**：消费 MOR-090 的官方/本机一手事实及被批准的结构参考，建立 Codex static contract/fixture；运行时不 discovery。
 - **Exact write set**：`src/Adapters/CodexCli.ps1`、`tests/fixtures/codex-static/*.txt`、`tests/Unit/CodexCliAdapter.Tests.ps1`、policy contract entry。
-- **必测**：Sol/low、medium、xhigh 的精确 token；Terra/Luna medium/high/xhigh；未知参数拒绝；capability=false 即 launch/manual；无 private user-dir read。
+- **必测**：Sol/low、medium、xhigh 的精确 token（config 面）；Terra/Luna medium/high/xhigh；`max` 不得进入 config 面合同（security 等 surface 单列 candidate）；未知参数拒绝；capability=false 即 launch/manual；无 private user-dir read。
 - **Minimum proof**：fixture parser/contract tests；真机事实采集若有仅是 read-only maintenance evidence。
 - **Stop / rollback**：需要修改 `~/.codex`、login、重启 Desktop 或执行模型任务才能“确认”时停止；revert。
 - **Truth boundary**：`repo_verified` + static-fact evidence，非 live。
@@ -175,7 +175,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 - **Goal**：实现通用 plan/apply/rollback；仅当 Adapter 已证实 exact native model target/ownership 时可实际使用。
 - **Exact write set**：`src/Projection.ps1`、`src/Adapters/CodexCli.ps1`、`scripts/ai-route.ps1`、`tests/Unit/Projection.Tests.ps1`、`tests/Contract/ProjectionReceipt.Tests.ps1`。
-- **必测**：canonical containment、before hash drift、lock、backup、atomic failure、resume、per-action rollback、allowed-field allowlist、provider/auth/session rejection、dry-run no write。
+- **必测**：canonical containment、single-writer lock（先于 before-hash；范围与 stale-lock 崩溃恢复）、锁内 before-hash drift、backup、atomic failure、resume、per-action rollback、allowed-field allowlist（按 surface）、provider/auth/session rejection、dry-run no write。
 - **Minimum proof**：mock filesystem + temporary fake host root；不写真实 `~/.codex`。
 - **Stop / rollback**：无 schema/ownership/rollback contract 时返回 `launch_only`；revert source/tests。
 - **Truth boundary**：`repo_verified`。
@@ -219,7 +219,7 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 ### MOR-300：ZCode GLM static Adapter 与 default
 
-- **Goal**：消费 MOR-090 的一手事实，建立 `zcode_glm35_flash_default`：quick=GLM-3.5-Flash/low，routine/review/bounded=Flash/high constrained，deep=Flash/max constrained，high-risk=blocked。
+- **Goal**：消费 MOR-090 的一手事实后，才可把 GLM 模板从 candidate 升为 default。`GLM-3.5-Flash` 未见于当前官方阵容（2026-08-28 检索），退出 static default；当前候选 slug 为 `glm-5.3-flash`（GLM Coding Plan 在列），但其 `thinking.type` 仅支持 `enabled`、官方仅证实 `reasoning_effort: max`，low/high 未证实，且不得把其他 GLM 模型的 effort 词表套给 Flash。取证前任何 GLM route 解析为 `manual_mapping_required`。
 - **Exact write set**：`src/Adapters/ZCode.ps1`、ZCode static fixture、policy default、`tests/Unit/ZCodeAdapter.Tests.ps1`、launch-plan tests。
 - **Minimum proof**：fixture parser + offline resolution；每个精确 token 必在 static allowlist；未知 target -> manual。
 - **Stop / rollback**：不得以 skills/MCP config 当 model target，不读/写 `.zcode` 用户配置或认证资产；revert。
@@ -235,9 +235,9 @@ MOR-DOC-001 -> MOR-000 -> MOR-010 -> MOR-020 -> MOR-030 -> MOR-040
 
 ### MOR-400：Claude DeepSeek static Adapter 与 default
 
-- **Goal**：消费 MOR-090 的一手事实，建立 `claude_deepseek_v4_default`：quick=DeepSeek V4 Flash/high，routine/review/bounded=V4 Flash/max constrained，deep=V4 Pro/max，high-risk=V4 Pro/max + policy。
+- **Goal**：消费 MOR-090 的一手事实，分别建立 `ClaudeCodeHostAdapter`（宿主 model 选择、`effortLevel`、`fallbackModel` 链、组织 clamp、fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名 `deepseek-v4-flash`/`deepseek-v4-pro`、未知名回落 flash、`output_config` effort 透传）两份合同；两合同各自取证并交叉验证前，`claude_deepseek_candidate` 保持 candidate：quick=Flash/high，routine/review/bounded=Flash/max constrained，deep=Pro/max，high-risk=Pro/max + policy。
 - **Exact write set**：`src/Adapters/ClaudeCode.ps1`、Claude static fixture、policy default、`tests/Unit/ClaudeCodeAdapter.Tests.ps1`、launch-plan tests。
-- **Minimum proof**：fixture parser + offline resolution；精确 V4 Pro/Flash 名称和 effort token 被原样保留；unknown target -> manual。
+- **必测**：fixture parser + offline resolution；精确 V4 Pro/Flash 名称和 effort token 被原样保留；Claude effort clamp fixture（不支持档位静默降档必须留痕，不一致不得 host_loaded）；`fallbackModel` 链（≤3、529 触发）fixture；DeepSeek 未知名回落 flash fixture；unknown target -> manual。
 - **Stop / rollback**：不得复制/修改 `CLAUDE_CONFIG_DIR`、登录或借 Pro/max 名称绕过 high-risk gate；revert。
 - **Truth boundary**：`repo_verified` + static-fact evidence。
 

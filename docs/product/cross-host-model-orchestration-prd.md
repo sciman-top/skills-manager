@@ -18,7 +18,7 @@
 
 Codex 的日常 default 为 `gpt56_sol_only`；用户可以随时切换到 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
-ZCode、Claude Code 各自维护独立 `host_default`，例如用户确认的 GLM-3.5-Flash 与 DeepSeek V4 Flash 模板。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
+ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo），且 `glm-5.3-flash` 官方文档写明 `thinking.type` 仅支持 `enabled`（思考不可关闭）、推荐 `reasoning_effort: max`，low/high 未在该 Flash 模型文档枚举，也不得把其他 GLM 模型的 effort 词表套给 Flash；DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
 ## 2. 问题、目标与成功定义
 
@@ -46,13 +46,14 @@ ZCode、Claude Code 各自维护独立 `host_default`，例如用户确认的 GL
 
 - **workload**：结构化工作类型，固定落入 `quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation` 或 `deep_investigation_or_implementation` 之一。
 - **基础 route key**：日常用于模型/effort 切换的当前三档：`light`、`standard`、`deep`。它们是当前预设的便捷层，不是 schema 上限；未来可新增 `review`、`max_depth` 等 key。
-- **执行槽位**：一个 host default 的具名 workload slot。首版目录固定提供五项：`quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation`、`deep_investigation_or_implementation`；槽位不是 effort 的同义词，也不要求一一对应。
+- **执行槽位**：policy 依据 workload、risk 与 operation 派生出的稳定语义类别（semantic workload slot），不是可调度的并发槽位，也不是 effort 的同义词。首版目录固定提供五项：`quick_triage`、`routine_maintenance`、`standard_review`、`bounded_implementation`、`deep_investigation_or_implementation`；多个 slot 可复用同一 route key。workload 是调用方声明的任务意图，slot 是 policy 派生结果；首版两者共用相同五个 identifier，属 1:1 实现细节，不是同一领域对象。并发/队列/超时等宿主容量语义不在本控制面（它是明确的非目标），未来如需要走独立 host-specific capacity contract，不改 slot 枚举。
 - **风险 gate**：`high_risk_adjudication` 覆盖任何 workload 的垂直风险 gate，不是第四个常用 route key。
-- **capability profile**：`fast`、`standard`、`deep`、`critical`；它不是厂商 effort 标签或跨模型质量排名。
+- **constrained**：policy 输出的决策属性，不是 effort 标签；启用时必须携带 `constraint_reasons` 与可执行含义（风险上限、写集限制、必需 verifier、禁止进入高风险门），并进入 MOR-020 contracts、resolver 输出与 receipt。
+- **capability profile**：独立概念已删除；如需展示别名，必须由 execution slot/route key 唯一派生并在 schema 注明派生规则，不参与 Resolve、Adapter 或 receipt 合同。
 - **candidate**：一个 `(host, identity, model, effort, operation/risk bound)` 组合；gateway route 只能作为脱敏 fingerprint 成分，不能被控制面读取或修改。
 - **host_default**：一个 `(host, identity)` 的稳定日常 route map。
 - **operator_override**：用户明确声明当前可用集合后，为相同 scope 写入的持久替代 route map。
-- **effective_route**：一次显式 resolve 的 `selected`、`blocked` 或 `manual` 结果；它只写 private receipt。
+- **resolved_route**：一次显式 resolve 的 `selected`、`blocked` 或 `manual` 结果；它只写 private receipt。旧名 `effective_route` 已废弃——控制面选择不等于宿主生效事实，宿主生效必须由独立观察证据另行记录（见 `MOR-FR-036`）。
 - **静态 Adapter contract**：人工复核、版本化的宿主 model/effort/field/target 能力表；不是自动发现结果。
 - **Preset Review**：只读审查。它只输出 `keep/promote/demote/block/insufficient_evidence` 建议，不直接写配置。
 
@@ -90,7 +91,7 @@ workload + risk + exact host/identity
 
 ## 5. GPT-5.6 三套三档预设
 
-### 5.1 推荐基础 route-key 矩阵
+### 5.1 基础 route-key 矩阵（用户选定的初始 baseline，非性能最优结论）
 
 | 基础 route key | `gpt56_sol_only` | `gpt56_terra_only` | `gpt56_luna_only` |
 | --- | --- | --- | --- |
@@ -137,18 +138,23 @@ route_keys:
 
 # 将来的经审查扩展可以增加 review/max_depth，而不重写 slot 目录
 # route_keys.review:    { model: <approved>, effort: high }
-# route_keys.max_depth: { model: <approved>, effort: max }
+# route_keys.max_depth: { model: <approved>, control: <surface-specific> }
+# 注意：max_depth 是 route-key 命名空间；其宿主表达必须经 surface adapter 显式映射，
+# 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
-静态 Adapter contract 可记录模型能够表达的 `low/medium/high/xhigh/max` 任意子集。但一个 preset 只应使用工作真正需要的 2–4 个 effort；本版日常 GPT 预设固定只用三档。
+静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。Codex 的 `model_reasoning_effort` config/profile/`-c` 字段官方词表是 `minimal | low | medium | high | xhigh`（xhigh 为 model-dependent）；`max` 不属于该字段词表，只能作为 surface-specific candidate（例如 security 扫描面）由 MOR-090/MOR-100 单独记录，不得倒灌进 config 面合同。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版日常 GPT 预设固定只用三档。
 
 ```yaml
-adapter_supported_efforts:           # 人工维护的静态事实；示例，不是运行期发现
-  gpt-5.6-sol:   [low, medium, high, xhigh, max]
-  gpt-5.6-terra: [low, medium, high, xhigh, max]
-  gpt-5.6-luna:  [low, medium, high, xhigh, max]
+adapter_supported_efforts:           # 人工维护、按 surface 分列的静态事实；示例，不是运行期发现
+  codex_config_surface:              # model_reasoning_effort / profile / -c 覆盖共用
+    gpt-5.6-sol:   [low, medium, high, xhigh]   # xhigh model-dependent
+    gpt-5.6-terra: [low, medium, high, xhigh]
+    gpt-5.6-luna:  [low, medium, high, xhigh]
+  codex_security_cli_surface:        # 独立 surface；candidate，MOR-090 取证后单列
+    max: candidate
 
 preset_used_efforts:
   gpt56_sol_only:   [low, medium, xhigh]
@@ -156,7 +162,7 @@ preset_used_efforts:
   gpt56_luna_only:  [medium, high, xhigh]
 ```
 
-若当前 `(host, identity)` 的 static contract 没有 `Sol/low`、Terra/high 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。未使用的 `max`/其他档位保持候选，不自动加入日常路由。未来模型档位数增减只改变 route-key map；五个 execution slot 保持不变。
+若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/high 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。未使用的档位与未证实 surface（含 `max`）保持候选，不自动加入日常路由或 config 面合同。未来模型档位数增减只改变 route-key map；五个 execution slot 保持不变。
 
 ### 5.4 人工切换语句
 
@@ -173,8 +179,8 @@ preset_used_efforts:
 
 ### 6.1 Resolve 与风险门禁
 
-- `MOR-FR-001`：入口必须接受 exact `host`、`identity_selector`、`workload`、`risk_level`、`operation`、`workspace_root` 和可选的一次性 `manual_override`；不得从 prompt、目录名、模型名或上次任务猜复杂度。
-- `MOR-FR-002`：workload/profile/operation/risk/slot/route-key 映射只能来自 versioned policy；未知 workload、slot 或 route key fail closed。
+- `MOR-FR-001`：常规入口必须接受 exact `host`、`identity_selector`、`workload`、`risk_level`、`operation`、`workspace_root` 和可选的一次性 `manual_override`；不得从 prompt、目录名、模型名或上次任务猜复杂度。`--execution-slot` 只作为 fixture/dry-run 直通入口，且必须校验与 workload 派生结果一致；缺 `risk_level`/`operation`/`workspace_root` 一律拒绝。
+- `MOR-FR-002`：workload/operation/risk/slot/route-key 映射只能来自 versioned policy；未知 workload、slot 或 route key fail closed；`risk_level` 枚举固定为 `normal | high`（`high` 必须通过 high-risk gate）；请求 `operation` 超出 slot 允许 operation（如 read_only slot 收到 workspace_write）时 `blocked`，不得自动改派 slot。
 - `MOR-FR-003`：选择 precedence 固定为 `manual_override -> operator_override -> host_default`；每项都必须再经过静态 Adapter、工作区、数据分级、operation 和风险校验。
 - `MOR-FR-004`：无安全 mapping、参数不在 allowlist、缺少 risk approval、或宿主选择面未知时，返回 `blocked`、`manual_host_selection_required` 或 `manual_mapping_required`；不得启用隐式 fallback。
 - `MOR-FR-005`：`high_risk_adjudication` 的 Terra substitute 必须同时有 current emergency approval 的 `owner/reason/expires_at` 与 policy 许可；Luna-only 固定 block。
@@ -193,9 +199,10 @@ preset_used_efforts:
 - `MOR-FR-020`：`host_default` 是每个 `(host, identity)` 的私有日常 route map；没有 override 时，resolver 直接使用它，不要求任何环境事实。
 - `MOR-FR-021`：人工声明可选择命名 GPT preset，或声明对应宿主可用的 model/effort 集合后“按 default workload template 优化”。后者只允许使用静态 allowlist 中的候选。
 - `MOR-FR-022`：model/effort 集合不能无歧义覆盖当前 slot 所需的 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
-- `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override`，并随下一次显式 resolve 产生新的 `effective_route` receipt；不广播到 peer host。
+- `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override`，并随下一次显式 resolve 产生新的 `resolved_route` receipt；不广播到 peer host。
 - `MOR-FR-024`：用户说“恢复默认”时，只删除相同 scope 的 override；任务结果、错误、时间流逝或 assistant 建议都不能自动恢复默认。
 - `MOR-FR-025`：成功 action receipt 必须标 `verification=operator_declared_unverified`，说明控制面没有检测任何 runtime/provider/gateway/auth 状态。
+- `MOR-FR-026`：持久 override 必须支持可选 `requires_reconfirm_after`；只在下一次显式 resolve 时检查（无 watcher），过期返回 `manual_mapping_required` 并要求用户重申，不自动切换或恢复默认。
 
 ### 6.4 受控投影与安全
 
@@ -205,6 +212,7 @@ preset_used_efforts:
 - `MOR-FR-033`：正在运行会话、unknown target ownership、schema 不明、target hash drift、路径逃逸、无 backup、并发 lock 或 UI-only surface 均 fail closed。
 - `MOR-FR-034`：默认 `PrepareLaunch` 只生成 dry-run。没有明确当前执行授权时不得启动 child/task。
 - `MOR-FR-035`：日志、receipt、错误和 hash input 不得出现 secret、完整 command、prompt、未脱敏环境变量或 cookie。
+- `MOR-FR-036`：route receipt 必须分列 `requested_route`（调用方请求）、`resolved_route`（控制面按 policy 选中）与 `observed_host_route`（仅当存在独立 host 证据时填写），并记录 `fallback_applied`/`clamp_applied` 与 `observed_by`/`observed_at`/`observation_status`；请求与观察不一致时 `host_loaded=not_observable`，不得以控制面选择充当宿主事实。宿主自身 fallback/clamp（如 Claude Code effort clamp 与 `fallbackModel` 链、DeepSeek 未知名回落 flash）不是控制面失败，但必须留痕。
 
 ### 6.5 宿主 AI 一句话操作
 
@@ -213,23 +221,24 @@ preset_used_efforts:
 - `MOR-FR-042`：一句话路径必须复用 CLI/module 的同一 schema、risk gate、projection transaction 和 verifier；不得按 prompt 直接编辑用户 config。
 - `MOR-FR-043`：没有 CLI/Adapter/权限时返回 `control_plane_not_available`、plan 或 handoff；禁止用自然语言伪称已生效。
 - `MOR-FR-044`：无论输入来自人还是宿主 AI，均不触发模型发现、探测、重试、自动 fallback、provider/auth 修改或网关调用。
+- `MOR-FR-045`：普通任务的编排入口是上游调用方/用户确认产生的结构化 RouteRequest；宿主 AI 不得私自从 prompt 推断 workload/operation/risk。AI 提出的分类只能标记为建议，并需父任务/用户确认后才写入请求。
 
 ## 7. 各宿主默认配置
 
 | host / identity | 日常 default | 人工变化动作 | 隔离边界 |
 | --- | --- | --- | --- |
 | Codex / 当前 API gateway 或 OAuth identity | `gpt56_sol_only` 三档 | 切 Sol-only、Terra-only、Luna-only；或声明新 map | 仅当前 Codex identity |
-| ZCode / 当前 identity | 用户确认的 GLM default | 声明 GLM model/effort；按 ZCode 模板生成 override | 不影响 Codex/Claude |
-| Claude Code / 当前 identity | 用户确认的 DeepSeek default | 声明 DeepSeek model/effort；按 Claude 模板生成 override | 不影响 Codex/ZCode |
+| ZCode / 当前 identity | 无已证实 default（GLM 模板为 candidate） | MOR-090 钉定 exact model/effort 后按 ZCode 模板生成 default | 不影响 Codex/Claude |
+| Claude Code / 当前 identity | 无已证实 default（DeepSeek 模板为 candidate） | Claude host adapter 与 DeepSeek provider dialect 双合同取证后启用 | 不影响 Codex/ZCode |
 
-推荐将另两宿主也配置为同一“三槽位 + 风险门”形状；这是静态映射，不是当前网关可用性断言：
+建议将另两宿主也配置为同一“三槽位 + 风险门”形状；这是静态骨架与用户选定的初始 baseline，不是当前网关可用性断言，更不是性能最优结论：
 
-| host default | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
+| host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm35_flash_default` | GLM-3.5-Flash/low | GLM-3.5-Flash/high，`constrained` | GLM-3.5-Flash/max，`constrained` | `blocked` |
-| `claude_deepseek_v4_default` | DeepSeek V4 Flash/high | DeepSeek V4 Flash/max，`constrained` | DeepSeek V4 Pro/max | DeepSeek V4 Pro/max + high-risk policy |
+| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`，low/high 未证实） | candidate | candidate，`constrained` | candidate，`constrained` | `blocked` |
+| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（DeepSeek 词表含 `high`） | candidate（`max` 在词表内），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
 
-实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。尤其 DeepSeek V4 Pro/max 进入高风险门并不表示“Pro/max 自动安全”；仍需当前 policy、明确 operation/写集和独立验证。GLM/Flash 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。
+实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。Claude 侧必须分别取证 `ClaudeCodeHostAdapter`（宿主 model/effortLevel/fallback/clamp 面与 fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名、未知名回落、effort 透传）；provider 方言可表达不等于宿主当前环境生效。尤其 DeepSeek V4 Pro/max 进入高风险门并不表示“Pro/max 自动安全”；仍需当前 policy、明确 operation/写集和独立验证。GLM 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。
 
 ## 8. Preset Review 和提升门槛
 

@@ -70,8 +70,8 @@ R2 只把已经人工复核的 Codex help/schema/source 事实编成 `StaticAdap
 R3 先验证是否存在一个可拥有、可恢复、只含 model/profile/effort 的 native target。若无，Adapter 返回 `launch_only` 或 `manual_host_selection_required`，不以“可以传 CLI 参数”推断持久配置可写。若有，才能建立：
 
 ```text
-plan -> token -> canonical target -> before hash -> backup
-     -> atomic apply -> after hash -> receipt -> exact rollback
+plan -> token -> canonical containment -> single-writer lock -> target recheck
+     -> before hash -> backup -> atomic apply -> after hash -> receipt -> exact rollback
 ```
 
 R4 将三个日常 GPT 预设加入 policy/fixture：
@@ -96,7 +96,7 @@ review 至少检查：
 4. evidence 是否混用了不同 host/identity/gateway/context；
 5. 推荐是 `keep`、`promote`、`demote`、`block` 或 `insufficient_evidence`，最小补证和 rollback 是什么。
 
-R4.5 不请求模型、不验证网关、不写任何 plane。对当前基线，保守结论是：Sol-only keep；Terra critical keep_emergency；Luna critical block；GLM/DeepSeek Flash 的高 effort 至少保持 constrained，除非有该宿主内的可比较 verifier 证据。
+R4.5 不请求模型、不验证网关、不写任何 plane。对当前基线，保守结论是：Sol-only keep；Terra critical keep_emergency；Luna critical block；GLM/DeepSeek 模板整行为 candidate（host adapter 与 provider dialect 双合同取证前输出 `insufficient_evidence`/`manual_mapping_required`），除非该宿主内同类可比较 verifier 证据齐备。
 
 ## 6. R5-R6：ZCode 和 Claude 的独立接入
 
@@ -104,7 +104,7 @@ R4.5 不请求模型、不验证网关、不写任何 plane。对当前基线，
 
 | host | 静态三槽位 default | R5/R6 最小验收 | 不可推导 |
 | --- | --- | --- | --- |
-| ZCode | GLM-3.5-Flash/low（轻量）；high（有界/标准 review）；max（深度 constrained）；high-risk block | offline plan + contract tests | Flash/max 等于 critical |
+| ZCode | GLM 模板整行为 candidate（当前候选 slug `glm-5.3-flash`；`thinking` 不可关闭，官方仅证实 `reasoning_effort: max`），MOR-090 取证前 manual | offline plan + contract tests | Flash/max 等于 critical；把其他 GLM 模型词表套给 Flash |
 | Claude Code | DeepSeek V4 Flash/high（轻量）；Flash/max（有界 constrained）；V4 Pro/max（深度）；Pro/max + policy（高风险） | offline plan + contract tests | Claude 成功代表 ZCode/Codex，或 Pro/max 自动获批 |
 
 若 target ownership、schema 或模型选择面不能被验证，返回 handoff/manual，不能编辑 `.zcode`、Claude 用户配置或认证资产。
