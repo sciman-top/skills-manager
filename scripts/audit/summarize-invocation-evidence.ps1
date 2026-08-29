@@ -23,6 +23,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ($RolloutRoots.Count -eq 0) { $RolloutRoots = @((Join-Path $HOME '.zcode\cli\rollout')) }
+. (Join-Path $PSScriptRoot 'invocation-evidence-lib.ps1')
 
 $skillCalls = @{}
 $mcpCalls = @{}
@@ -39,18 +40,29 @@ foreach ($root in $RolloutRoots) {
         $lineReader = [IO.StreamReader]::new($file.FullName)
         try {
             while ($null -ne ($line = $lineReader.ReadLine())) {
-                if ($line -notmatch '"type":"tool-call"') { continue }
-                foreach ($match in [regex]::Matches($line, '"type":"tool-call","toolCallId":"[^"]*","toolName":"Skill","input":\{[^{}]*?"skill"\s*:\s*"([^"]+)"')) {
-                    $skill = [string]$match.Groups[1].Value
-                    if (-not $skillCalls.ContainsKey($skill)) { $skillCalls[$skill] = 0 }
-                    $skillCalls[$skill]++
-                    $fileHadEvidence = $true
-                }
-                foreach ($match in [regex]::Matches($line, '"type":"tool-call","toolCallId":"[^"]*","toolName":"mcp__([a-zA-Z0-9_-]+)__[a-zA-Z0-9_-]+"')) {
-                    $server = [string]$match.Groups[1].Value
-                    if (-not $mcpCalls.ContainsKey($server)) { $mcpCalls[$server] = 0 }
-                    $mcpCalls[$server]++
-                    $fileHadEvidence = $true
+                if ($line -notmatch 'tool-call') { continue }
+                $parsed = $null
+                try { $parsed = $line | ConvertFrom-Json -Depth 1024 } catch { continue }
+                $found = [System.Collections.Generic.List[object]]::new()
+                Find-InvocationToolCalls -Node $parsed -Found $found
+                foreach ($record in $found) {
+                    $toolNameProp = $record.PSObject.Properties['toolName']
+                    if ($null -eq $toolNameProp) { continue }
+                    $toolName = [string]$toolNameProp.Value
+                    if ($toolName -eq 'Skill') {
+                        $skill = Get-InvocationSkillName $record
+                        if ([string]::IsNullOrWhiteSpace($skill)) { continue }
+                        if (-not $skillCalls.ContainsKey($skill)) { $skillCalls[$skill] = 0 }
+                        $skillCalls[$skill]++
+                        $fileHadEvidence = $true
+                    }
+                    elseif ($toolName -like 'mcp__*') {
+                        $server = Get-InvocationServerFromToolName $toolName
+                        if ([string]::IsNullOrWhiteSpace($server)) { continue }
+                        if (-not $mcpCalls.ContainsKey($server)) { $mcpCalls[$server] = 0 }
+                        $mcpCalls[$server]++
+                        $fileHadEvidence = $true
+                    }
                 }
             }
         }

@@ -1130,7 +1130,7 @@ function Test-AuditScannerSelfFile([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     return [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Commands\\AuditTargets(\.[^\\]+)?\.ps1$') -or
         [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Application\\CapabilityInventory\.ps1$') -or
-        [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets|SkillAudit|CapabilityInventory)\.Tests\.ps1$')
+        [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets[^\\]*|SkillAudit[^\\]*|CapabilityInventory[^\\]*|ReadOnlyCli[^\\]*)\.Tests\.ps1$')
 }
 
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
@@ -2084,7 +2084,7 @@ function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills) {
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
                 covered_by = @($matched.ToArray() | Sort-Object -Unique)
-                coverage = if (@($matched).Count -gt 0) { "covered_by_installed_profile" } else { "unmatched_by_installed_profile" }
+                coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
             })
     }
     return @($statement)

@@ -22,7 +22,10 @@
       "skill-creator"
     ],
     "host_skill_roots": [
-      "~/.zcode/skills"
+      {
+        "path": "~/.zcode/skills",
+        "host": "zcode"
+      }
     ],
     "projection_profiles": {
       "schema_version": 1,

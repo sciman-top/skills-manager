@@ -179,7 +179,11 @@ function New-SkillSurfaceView {
     # invisible on purpose so that only intentional roots are audited.
     $hostRootNames = @()
     if (Test-OperationObjectProperty $projection 'host_skill_roots') {
-        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        # Entries are either plain paths or { path, host } records; only the path
+        # matters for surface accounting, the host label drives doctor routing.
+        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object {
+                if ($null -ne $_ -and $_ -is [pscustomobject] -and (Test-OperationObjectProperty $_ 'path')) { [string]$_.path } else { [string]$_ }
+            } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     $hostRootItems = [Collections.Generic.List[object]]::new()
     foreach ($hostRootName in $hostRootNames) {

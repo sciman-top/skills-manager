@@ -3777,7 +3777,11 @@ function New-SkillSurfaceView {
     # invisible on purpose so that only intentional roots are audited.
     $hostRootNames = @()
     if (Test-OperationObjectProperty $projection 'host_skill_roots') {
-        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        # Entries are either plain paths or { path, host } records; only the path
+        # matters for surface accounting, the host label drives doctor routing.
+        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object {
+                if ($null -ne $_ -and $_ -is [pscustomobject] -and (Test-OperationObjectProperty $_ 'path')) { [string]$_.path } else { [string]$_ }
+            } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     $hostRootItems = [Collections.Generic.List[object]]::new()
     foreach ($hostRootName in $hostRootNames) {
@@ -9592,8 +9596,10 @@ function Get-McpTransportDiagnostics($cfg) {
 }
 
 function Get-DoctorSkillProjectionConsistency {
-    # Configuration/profile declaration drift silently changes what the host
-    # actually projects; surface it before audit reasoning inherits it.
+    # Configuration/profile declaration drift silently changes what each host
+    # actually projects; check every declared host, not just the Codex surface.
+    # Boundary: this compares declared config against projected directories
+    # (filesystem_projected); it does not prove host_loaded or invocation.
     $result = [ordered]@{ ok = $true; warnings = @(); detail = "" }
     try {
         $cfg = LoadCfg
@@ -9602,49 +9608,84 @@ function Get-DoctorSkillProjectionConsistency {
             $result.detail = "skill_projection not configured"
             return $result
         }
-        try {
-            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName 'codex'
-        }
-        catch {
-            $result.ok = $false
-            $result.warnings += ("projection_selection_invalid: {0}" -f $_.Exception.Message)
-            return $result
-        }
-        if ([bool]$selection.uses_profiles) {
-            $legacyIncludes = @()
-            if (Test-OperationObjectProperty $projection 'managed_link_includes') {
-                $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })
-            }
-            $profileIncludes = @($selection.included_names | ForEach-Object { [string]$_ })
-            $profileOnly = @($profileIncludes | Where-Object { $legacyIncludes -notcontains $_ } | Sort-Object)
-            $legacyOnly = @($legacyIncludes | Where-Object { $profileIncludes -notcontains $_ } | Sort-Object)
-            if ($profileOnly.Count -gt 0 -or $legacyOnly.Count -gt 0) {
-                $result.warnings += ("managed_link_includes 与 profiles.{0}.include 漂移：profiles 独有=[{1}] legacy 独有=[{2}]（profiles 优先生效，建议同步 legacy 字段）" -f [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
-            }
-        }
-        $userRoot = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
-        $expectedNames = @()
-        if ([bool]$selection.include_all) {
-            $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
-            if (Test-Path -LiteralPath $managedSource -PathType Container) {
-                $expectedNames = @(Get-ChildItem -LiteralPath $managedSource -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+
+        # Host routing: user_skill_root belongs to codex; host_skill_roots entries
+        # (plain path or { path, host }) map additional roots to declared hosts.
+        $rootByHost = @{}
+        $rootByHost['codex'] = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
+        $declaredHosts = @('codex')
+        if (Test-OperationObjectProperty $projection 'host_skill_roots') {
+            foreach ($entry in @((Get-OperationObjectProperty $projection 'host_skill_roots'))) {
+                $pathText = ""; $hostName = ""
+                if ($null -ne $entry -and $entry -is [pscustomobject] -and (Test-OperationObjectProperty $entry 'path')) {
+                    $pathText = [string]$entry.path
+                    if (Test-OperationObjectProperty $entry 'host') { $hostName = ([string]$entry.host).Trim().ToLowerInvariant() }
+                }
+                else { $pathText = [string]$entry }
+                if ([string]::IsNullOrWhiteSpace($pathText)) { continue }
+                if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
+                $rootByHost[$hostName] = Resolve-SkillProjectionPath $pathText $Root
+                if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
             }
         }
-        else {
-            $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
+        if (Test-OperationObjectProperty $projection 'projection_profiles') {
+            $profilesConfig = Get-OperationObjectProperty $projection 'projection_profiles'
+            $hostsConfig = Get-OperationObjectProperty $profilesConfig 'hosts'
+            if ($null -ne $hostsConfig) {
+                foreach ($configuredHost in @($hostsConfig.PSObject.Properties.Name)) {
+                    if ($configuredHost -notin $declaredHosts) { $declaredHosts += $configuredHost }
+                    if (-not $rootByHost.ContainsKey($configuredHost)) { $rootByHost[$configuredHost] = $rootByHost['codex'] }
+                }
+            }
         }
-        $actualNames = @()
-        if (Test-Path -LiteralPath $userRoot -PathType Container) {
-            $actualNames = @(Get-ChildItem -LiteralPath $userRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+
+        $details = @()
+        foreach ($hostName in $declaredHosts) {
+            try {
+                $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName $hostName
+            }
+            catch {
+                $result.ok = $false
+                $result.warnings += ("{0}: projection_selection_invalid: {1}" -f $hostName, $_.Exception.Message)
+                continue
+            }
+            if ([bool]$selection.uses_profiles) {
+                $legacyIncludes = @()
+                if (Test-OperationObjectProperty $projection 'managed_link_includes') {
+                    $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })
+                }
+                $profileIncludes = @($selection.included_names | ForEach-Object { [string]$_ })
+                $profileOnly = @($profileIncludes | Where-Object { $legacyIncludes -notcontains $_ } | Sort-Object)
+                $legacyOnly = @($legacyIncludes | Where-Object { $profileIncludes -notcontains $_ } | Sort-Object)
+                if ($profileOnly.Count -gt 0 -or $legacyOnly.Count -gt 0) {
+                    $result.warnings += ("{0}: managed_link_includes 与 profiles.{1}.include 漂移：profiles 独有=[{2}] legacy 独有=[{3}]（profiles 优先生效，建议同步 legacy 字段）" -f $hostName, [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
+                }
+            }
+            $expectedNames = @()
+            if ([bool]$selection.include_all) {
+                $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
+                if (Test-Path -LiteralPath $managedSource -PathType Container) {
+                    $expectedNames = @(Get-ChildItem -LiteralPath $managedSource -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+                }
+            }
+            else {
+                $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
+            }
+            $hostRoot = $rootByHost[$hostName]
+            $actualNames = @()
+            if (Test-Path -LiteralPath $hostRoot -PathType Container) {
+                $actualNames = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+            }
+            else {
+                $result.warnings += ("{0}: 宿主技能根缺失: {1}" -f $hostName, $hostRoot)
+            }
+            $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
+            $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+            if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}]" -f $hostName, ($missing -join ',')) }
+            if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}]" -f $hostName, ($extra -join ',')) }
+            $details += ("{0} declared={1} projected={2}" -f $hostName, @($expectedNames).Count, @($actualNames).Count)
         }
-        else {
-            $result.warnings += ("user_skill_root 缺失: {0}" -f $userRoot)
-        }
-        $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
-        $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
-        if ($missing.Count -gt 0) { $result.warnings += ("声明未投影: [{0}]" -f ($missing -join ',')) }
-        if ($extra.Count -gt 0) { $result.warnings += ("投影未声明: [{0}]" -f ($extra -join ',')) }
-        $result.detail = ("profile={0} declared={1} projected={2}" -f [string]$selection.profile, @($expectedNames).Count, @($actualNames).Count)
+        $result.detail = ($details -join '; ')
         if ($result.warnings.Count -gt 0) { $result.ok = $false }
     }
     catch {
@@ -18380,7 +18421,7 @@ function Test-AuditScannerSelfFile([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     return [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Commands\\AuditTargets(\.[^\\]+)?\.ps1$') -or
         [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Application\\CapabilityInventory\.ps1$') -or
-        [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets|SkillAudit|CapabilityInventory)\.Tests\.ps1$')
+        [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets[^\\]*|SkillAudit[^\\]*|CapabilityInventory[^\\]*|ReadOnlyCli[^\\]*)\.Tests\.ps1$')
 }
 
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
@@ -19334,7 +19375,7 @@ function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills) {
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
                 covered_by = @($matched.ToArray() | Sort-Object -Unique)
-                coverage = if (@($matched).Count -gt 0) { "covered_by_installed_profile" } else { "unmatched_by_installed_profile" }
+                coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
             })
     }
     return @($statement)

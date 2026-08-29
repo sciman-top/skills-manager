@@ -1174,17 +1174,24 @@ def run_migration(plan):
         It "Excludes the scanner's own sources and fixtures from target evidence" {
             $repo = Join-Path $TestDrive "target-repo-is-scanner"
             New-Item -ItemType Directory -Path (Join-Path $repo "src\Commands") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "tests\Unit") -Force | Out-Null
             Set-ContentUtf8 (Join-Path $repo "src\Commands\AuditTargets.Copy.ps1") @"
 # A scanner look-alike inside the scanned target.  Its vocabulary describes the
 # scanner, not a capability of this repository.
 $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_processing" })
+"@
+            Set-ContentUtf8 (Join-Path $repo "tests\Unit\AuditTargetsHardening.Tests.ps1") @"
+# Hardening fixtures recommend/remove/MCP vocabulary; it must not become user need.
+[pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process" }
+[pscustomobject]@{ artifact = "pptx"; actions = @("read", "generate") }
 "@
 
             $scan = New-AuditRepoScan "skills-manager" $repo "..\target-repo-is-scanner"
 
             @($scan.detected.requirement_signals | Where-Object { $_.subject -eq "document_processing" }).Count | Should -Be 0
             @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" }).Count | Should -Be 0
-            $scan.scan_coverage.self_referential_count | Should -Be 1
+            @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "pptx" }).Count | Should -Be 0
+            $scan.scan_coverage.self_referential_count | Should -Be 2
         }
 
         It "Highlights source-backed product workflows without letting raw file volume promote technical context" {
@@ -1270,7 +1277,7 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $statement.Count | Should -Be (@($profile.prioritized_needs.primary_needs).Count + @($profile.prioritized_needs.secondary_needs).Count + @($profile.prioritized_needs.supporting_artifacts).Count)
             $pdfNeed = @($statement | Where-Object need -eq "pdf" | Where-Object { $_.covered_by -contains "pdf" })
             $pdfNeed.Count | Should -Be 1
-            $pdfNeed[0].coverage | Should -Be "covered_by_installed_profile"
+            $pdfNeed[0].coverage | Should -Be "keyword_plausibly_covered_by_profile"
             $gardenMatch = @($statement | Where-Object { $_.covered_by -contains "unrelated-skill" })
             $gardenMatch.Count | Should -Be 0
             # Without a current-profile skill list the statement stays empty rather than guessing.
