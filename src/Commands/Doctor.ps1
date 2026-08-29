@@ -182,6 +182,69 @@ function Get-McpTransportDiagnostics($cfg) {
     return @($diagnostics.ToArray())
 }
 
+function Get-DoctorSkillProjectionConsistency {
+    # Configuration/profile declaration drift silently changes what the host
+    # actually projects; surface it before audit reasoning inherits it.
+    $result = [ordered]@{ ok = $true; warnings = @(); detail = "" }
+    try {
+        $cfg = LoadCfg
+        $projection = if ($cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
+        if ($null -eq $projection) {
+            $result.detail = "skill_projection not configured"
+            return $result
+        }
+        try {
+            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName 'codex'
+        }
+        catch {
+            $result.ok = $false
+            $result.warnings += ("projection_selection_invalid: {0}" -f $_.Exception.Message)
+            return $result
+        }
+        if ([bool]$selection.uses_profiles) {
+            $legacyIncludes = @()
+            if (Test-OperationObjectProperty $projection 'managed_link_includes') {
+                $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })
+            }
+            $profileIncludes = @($selection.included_names | ForEach-Object { [string]$_ })
+            $profileOnly = @($profileIncludes | Where-Object { $legacyIncludes -notcontains $_ } | Sort-Object)
+            $legacyOnly = @($legacyIncludes | Where-Object { $profileIncludes -notcontains $_ } | Sort-Object)
+            if ($profileOnly.Count -gt 0 -or $legacyOnly.Count -gt 0) {
+                $result.warnings += ("managed_link_includes 与 profiles.{0}.include 漂移：profiles 独有=[{1}] legacy 独有=[{2}]（profiles 优先生效，建议同步 legacy 字段）" -f [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
+            }
+        }
+        $userRoot = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
+        $expectedNames = @()
+        if ([bool]$selection.include_all) {
+            $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
+            if (Test-Path -LiteralPath $managedSource -PathType Container) {
+                $expectedNames = @(Get-ChildItem -LiteralPath $managedSource -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+            }
+        }
+        else {
+            $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
+        }
+        $actualNames = @()
+        if (Test-Path -LiteralPath $userRoot -PathType Container) {
+            $actualNames = @(Get-ChildItem -LiteralPath $userRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+        }
+        else {
+            $result.warnings += ("user_skill_root 缺失: {0}" -f $userRoot)
+        }
+        $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
+        $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+        if ($missing.Count -gt 0) { $result.warnings += ("声明未投影: [{0}]" -f ($missing -join ',')) }
+        if ($extra.Count -gt 0) { $result.warnings += ("投影未声明: [{0}]" -f ($extra -join ',')) }
+        $result.detail = ("profile={0} declared={1} projected={2}" -f [string]$selection.profile, @($expectedNames).Count, @($actualNames).Count)
+        if ($result.warnings.Count -gt 0) { $result.ok = $false }
+    }
+    catch {
+        $result.ok = $false
+        $result.warnings += ("skill_projection_check_failed: {0}" -f $_.Exception.Message)
+    }
+    return $result
+}
+
 function Get-DoctorConfigRisks($cfg) {
     $risks = @()
     if ($null -eq $cfg) { return @() }
@@ -314,6 +377,40 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         $report.checks.git = [ordered]@{ ok = $false; value = "" }
         if (-not $opts.json) { Write-Host "❌ Git: Not found or error" -ForegroundColor Red }
         $pass = $false
+    }
+
+    # 2.5 Skill Projection Consistency
+    try {
+        $projectionCheck = Get-DoctorSkillProjectionConsistency
+        $report.checks.skill_projection = $projectionCheck
+        if (-not $projectionCheck.ok) {
+            if (-not $opts.json) {
+                Write-Host "❌ Skill projection: 投影与声明不一致" -ForegroundColor Red
+                foreach ($warning in @($projectionCheck.warnings)) { Write-Host ("   - {0}" -f $warning) -ForegroundColor Yellow }
+            }
+            $pass = $false
+        }
+        elseif (-not $opts.json) {
+            Write-Host ("✅ Skill projection: {0}" -f $projectionCheck.detail) -ForegroundColor Green
+        }
+    }
+    catch {
+        $report.checks.skill_projection = [ordered]@{ ok = $false; warnings = @([string]$_.Exception.Message); detail = "" }
+        if (-not $opts.json) { Write-Host "❌ Skill projection: 检查失败" -ForegroundColor Red }
+        $pass = $false
+    }
+
+    # 2.6 Working tree snapshot (report-vs-reality anchor for delegated runs)
+    try {
+        $dirtyLines = @(& git -C $Root status --porcelain 2>$null | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $report.checks.working_tree = [ordered]@{ dirty_count = @($dirtyLines).Count; files = @($dirtyLines | Select-Object -First 10) }
+        if (-not $opts.json) {
+            if (@($dirtyLines).Count -gt 0) { Write-Host ("⚠️ Working tree: {0} 个未提交改动" -f @($dirtyLines).Count) -ForegroundColor Yellow }
+            else { Write-Host "✅ Working tree: clean" -ForegroundColor Green }
+        }
+    }
+    catch {
+        $report.checks.working_tree = [ordered]@{ dirty_count = -1 }
     }
 
     # 3. Robocopy Check

@@ -173,6 +173,39 @@ function New-SkillSurfaceView {
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
 
+    # Hosts other than the projection owner may read additional skill roots
+    # (e.g. ZCode reads ~/.zcode/skills while Codex reads ~/.agents/skills).
+    # Declared roots get the same ownership accounting; undeclared roots stay
+    # invisible on purpose so that only intentional roots are audited.
+    $hostRootNames = @()
+    if (Test-OperationObjectProperty $projection 'host_skill_roots') {
+        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    $hostRootItems = [Collections.Generic.List[object]]::new()
+    foreach ($hostRootName in $hostRootNames) {
+        $hostRoot = Resolve-CapabilitySurfacePath $hostRootName $root
+        $hostRootExists = $hostRoot -and (Test-Path -LiteralPath $hostRoot -PathType Container)
+        if (-not $hostRootExists) {
+            $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared host skill root is missing on this machine: {0}' -f $hostRootName) }) | Out-Null
+            continue
+        }
+        foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
+            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
+            $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'host_root_link_ownership_drift'; severity = 'warning'; surface = 'host_skill_roots'; path = $directory.FullName; message = ('Declared host root entry {0} is not a junction to its expected managed source directory.' -f $directory.Name) }) | Out-Null
+            }
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootNames.Count) { $hostRootNames -join ', ' } else { 'skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootNames.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootNames.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
+
     $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
     $systemRoot = Join-Path $codexHome 'skills\.system'
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }

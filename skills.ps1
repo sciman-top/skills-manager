@@ -3771,6 +3771,39 @@ function New-SkillSurfaceView {
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
 
+    # Hosts other than the projection owner may read additional skill roots
+    # (e.g. ZCode reads ~/.zcode/skills while Codex reads ~/.agents/skills).
+    # Declared roots get the same ownership accounting; undeclared roots stay
+    # invisible on purpose so that only intentional roots are audited.
+    $hostRootNames = @()
+    if (Test-OperationObjectProperty $projection 'host_skill_roots') {
+        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    $hostRootItems = [Collections.Generic.List[object]]::new()
+    foreach ($hostRootName in $hostRootNames) {
+        $hostRoot = Resolve-CapabilitySurfacePath $hostRootName $root
+        $hostRootExists = $hostRoot -and (Test-Path -LiteralPath $hostRoot -PathType Container)
+        if (-not $hostRootExists) {
+            $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared host skill root is missing on this machine: {0}' -f $hostRootName) }) | Out-Null
+            continue
+        }
+        foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
+            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
+            $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'host_root_link_ownership_drift'; severity = 'warning'; surface = 'host_skill_roots'; path = $directory.FullName; message = ('Declared host root entry {0} is not a junction to its expected managed source directory.' -f $directory.Name) }) | Out-Null
+            }
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootNames.Count) { $hostRootNames -join ', ' } else { 'skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootNames.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootNames.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
+
     $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
     $systemRoot = Join-Path $codexHome 'skills\.system'
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
@@ -9558,6 +9591,69 @@ function Get-McpTransportDiagnostics($cfg) {
     return @($diagnostics.ToArray())
 }
 
+function Get-DoctorSkillProjectionConsistency {
+    # Configuration/profile declaration drift silently changes what the host
+    # actually projects; surface it before audit reasoning inherits it.
+    $result = [ordered]@{ ok = $true; warnings = @(); detail = "" }
+    try {
+        $cfg = LoadCfg
+        $projection = if ($cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
+        if ($null -eq $projection) {
+            $result.detail = "skill_projection not configured"
+            return $result
+        }
+        try {
+            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName 'codex'
+        }
+        catch {
+            $result.ok = $false
+            $result.warnings += ("projection_selection_invalid: {0}" -f $_.Exception.Message)
+            return $result
+        }
+        if ([bool]$selection.uses_profiles) {
+            $legacyIncludes = @()
+            if (Test-OperationObjectProperty $projection 'managed_link_includes') {
+                $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })
+            }
+            $profileIncludes = @($selection.included_names | ForEach-Object { [string]$_ })
+            $profileOnly = @($profileIncludes | Where-Object { $legacyIncludes -notcontains $_ } | Sort-Object)
+            $legacyOnly = @($legacyIncludes | Where-Object { $profileIncludes -notcontains $_ } | Sort-Object)
+            if ($profileOnly.Count -gt 0 -or $legacyOnly.Count -gt 0) {
+                $result.warnings += ("managed_link_includes 与 profiles.{0}.include 漂移：profiles 独有=[{1}] legacy 独有=[{2}]（profiles 优先生效，建议同步 legacy 字段）" -f [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
+            }
+        }
+        $userRoot = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
+        $expectedNames = @()
+        if ([bool]$selection.include_all) {
+            $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
+            if (Test-Path -LiteralPath $managedSource -PathType Container) {
+                $expectedNames = @(Get-ChildItem -LiteralPath $managedSource -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+            }
+        }
+        else {
+            $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
+        }
+        $actualNames = @()
+        if (Test-Path -LiteralPath $userRoot -PathType Container) {
+            $actualNames = @(Get-ChildItem -LiteralPath $userRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+        }
+        else {
+            $result.warnings += ("user_skill_root 缺失: {0}" -f $userRoot)
+        }
+        $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
+        $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+        if ($missing.Count -gt 0) { $result.warnings += ("声明未投影: [{0}]" -f ($missing -join ',')) }
+        if ($extra.Count -gt 0) { $result.warnings += ("投影未声明: [{0}]" -f ($extra -join ',')) }
+        $result.detail = ("profile={0} declared={1} projected={2}" -f [string]$selection.profile, @($expectedNames).Count, @($actualNames).Count)
+        if ($result.warnings.Count -gt 0) { $result.ok = $false }
+    }
+    catch {
+        $result.ok = $false
+        $result.warnings += ("skill_projection_check_failed: {0}" -f $_.Exception.Message)
+    }
+    return $result
+}
+
 function Get-DoctorConfigRisks($cfg) {
     $risks = @()
     if ($null -eq $cfg) { return @() }
@@ -9690,6 +9786,40 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         $report.checks.git = [ordered]@{ ok = $false; value = "" }
         if (-not $opts.json) { Write-Host "❌ Git: Not found or error" -ForegroundColor Red }
         $pass = $false
+    }
+
+    # 2.5 Skill Projection Consistency
+    try {
+        $projectionCheck = Get-DoctorSkillProjectionConsistency
+        $report.checks.skill_projection = $projectionCheck
+        if (-not $projectionCheck.ok) {
+            if (-not $opts.json) {
+                Write-Host "❌ Skill projection: 投影与声明不一致" -ForegroundColor Red
+                foreach ($warning in @($projectionCheck.warnings)) { Write-Host ("   - {0}" -f $warning) -ForegroundColor Yellow }
+            }
+            $pass = $false
+        }
+        elseif (-not $opts.json) {
+            Write-Host ("✅ Skill projection: {0}" -f $projectionCheck.detail) -ForegroundColor Green
+        }
+    }
+    catch {
+        $report.checks.skill_projection = [ordered]@{ ok = $false; warnings = @([string]$_.Exception.Message); detail = "" }
+        if (-not $opts.json) { Write-Host "❌ Skill projection: 检查失败" -ForegroundColor Red }
+        $pass = $false
+    }
+
+    # 2.6 Working tree snapshot (report-vs-reality anchor for delegated runs)
+    try {
+        $dirtyLines = @(& git -C $Root status --porcelain 2>$null | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $report.checks.working_tree = [ordered]@{ dirty_count = @($dirtyLines).Count; files = @($dirtyLines | Select-Object -First 10) }
+        if (-not $opts.json) {
+            if (@($dirtyLines).Count -gt 0) { Write-Host ("⚠️ Working tree: {0} 个未提交改动" -f @($dirtyLines).Count) -ForegroundColor Yellow }
+            else { Write-Host "✅ Working tree: clean" -ForegroundColor Green }
+        }
+    }
+    catch {
+        $report.checks.working_tree = [ordered]@{ dirty_count = -1 }
     }
 
     # 3. Robocopy Check

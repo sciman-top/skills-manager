@@ -13,12 +13,16 @@
       "code-review-and-quality",
       "custom-powerpoint-accessibility",
       "custom-powershell-windows-automation",
+      "grill-me",
       "research",
       "systematic-debugging",
       "verification-before-completion"
     ],
     "managed_link_excludes": [
       "skill-creator"
+    ],
+    "host_skill_roots": [
+      "~/.zcode/skills"
     ],
     "projection_profiles": {
       "schema_version": 1,

@@ -28,7 +28,7 @@ BeforeAll {
     }
 }
 Describe 'Read-only skill surface inventory' {
-    It 'reports six explained skill surfaces even when their counts differ' {
+    It 'reports seven explained skill surfaces even when their counts differ' {
         $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
         $oldCodexHome = $env:CODEX_HOME
         try {
@@ -43,10 +43,10 @@ Describe 'Read-only skill surface inventory' {
             $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @('managed-current'); external_skill_inventory = [pscustomobject]@{ enabled = $true }; projection_profiles = [pscustomobject]@{ schema_version = 1; default_profile = 'core'; profiles = [pscustomobject]@{ core = [pscustomobject]@{ include = @('managed-current'); exclude = @() }; 'full-compatible' = [pscustomobject]@{ include_all = $true; exclude = @() } }; hosts = [pscustomobject]@{ codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() } } } }; mcp_servers = @() }
             $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath -HostProbe
             $view.pass | Should -BeTrue
-            $view.surface_count | Should -Be 6
+            $view.surface_count | Should -Be 7
             $view.host_observation.truth_boundary | Should -Be 'read_only_cli_observation_not_host_loaded'
             $view.host_observation.writes | Should -Be 0
-            @($view.surfaces.name) | Should -Be @('repo_supply', 'canonical_projection', 'user_skill_root', 'system', 'plugins', 'host_visible')
+            @($view.surfaces.name) | Should -Be @('repo_supply', 'canonical_projection', 'user_skill_root', 'host_skill_roots', 'system', 'plugins', 'host_visible')
             foreach ($surface in $view.surfaces) { $surface.authority | Should -Not -BeNullOrEmpty; $surface.source | Should -Not -BeNullOrEmpty; $surface.fingerprint | Should -Match '^[a-f0-9]{64}$'; $surface.freshness | Should -Not -BeNullOrEmpty; $surface.coverage | Should -Not -BeNullOrEmpty }
             @($view.stale_links.projection_state) | Should -Contain 'managed_stale'
             @($view.stale_links.projection_state) | Should -Contain 'external_owned'
@@ -123,6 +123,43 @@ Describe 'Read-only skill surface inventory' {
             $surface.count | Should -Be 0
             $surface.freshness | Should -Be 'not_observed'
             $surface.coverage | Should -Be 'not_materialized'
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'audits declared host skill roots: healthy junctions pass, missing roots warn' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+            $env:CODEX_HOME = Join-Path $fixture 'codex'
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $managed = Join-Path $fixture 'agent\alpha'
+            New-Item -ItemType Directory -Force -Path $managed | Out-Null
+            Set-Content -Path (Join-Path $managed 'SKILL.md') -Value "---`nname: alpha`ndescription: alpha fixture.`n---`nUse when testing alpha."
+            $hostRoot = Join-Path $fixture 'zcode-skills'
+            New-Item -ItemType Directory -Force -Path $hostRoot | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $hostRoot 'alpha') -Target $managed | Out-Null
+            $config = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{
+                    manifest_path = 'reports/current.json'
+                    managed_source_path = 'agent'
+                    user_skill_root = 'missing-user-skills'
+                    managed_link_includes = @('alpha')
+                    host_skill_roots = @('zcode-skills', 'missing-host-root')
+                    sources = @()
+                }
+                mcp_servers = @()
+            }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $surface = $view.surfaces | Where-Object name -eq 'host_skill_roots'
+            $codes = @($view.findings | ForEach-Object code)
+
+            $surface.count | Should -Be 1
+            @($surface.items | Where-Object projection_state -eq 'managed_current').Count | Should -Be 1
+            $codes | Should -Contain 'declared_host_root_missing'
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
