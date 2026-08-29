@@ -6691,7 +6691,7 @@ function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
-        $allFiles = Invoke-GitCaptureLines @($gitDirArg, "ls-tree", "-r", "--name-only", $ref)
+        $allFiles = Invoke-GitCaptureLines @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref)
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         $candidates = @()
         foreach ($f in $allFiles) {
@@ -7474,7 +7474,9 @@ function Remove-GitSparseCheckoutResiduals([string[]]$sparsePaths) {
     catch {
         return
     }
-    $trackedPaths = @(Invoke-GitCaptureLines @("ls-files"))
+    # quotepath=false keeps non-ASCII paths literal; the default C-escapes
+    # them, which silently breaks every line-based path consumer below.
+    $trackedPaths = @(Invoke-GitCaptureLines @("-c", "core.quotepath=false", "ls-files"))
     $candidates = @(Get-GitSparsePruneCandidates $trackedPaths $normalizedSparsePaths)
     foreach ($candidate in $candidates) {
         $candidatePath = $candidate -replace "/", "\"
@@ -15986,7 +15988,22 @@ function Assert-MigrationContentIntegrity([string]$PackageRoot, $Manifest) {
     Need ([int]$content.schema_version -eq 1 -and $null -ne $content.files) 'MIGRATION-CONTENT.json schema 无效'
     $expected = @($content.files)
     $actual = @(Get-PackageFileEntries $PackageRoot | Where-Object { $_.path -ne 'MIGRATION-CONTENT.json' })
-    Need ($expected.Count -eq $actual.Count) '迁移包内容文件数量不匹配'
+    # One-to-one closure: reject duplicate paths on either side and any actual
+    # file the content manifest does not claim (count equality alone lets an
+    # attacker swap in an extra file and pad the expected list).
+    $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $expected) {
+        $path = [string]$entry.path
+        Need (-not [string]::IsNullOrWhiteSpace($path)) 'MIGRATION-CONTENT.json 包含空路径'
+        Need ($expectedPaths.Add($path)) ("MIGRATION-CONTENT.json 包含重复路径：{0}" -f $path)
+    }
+    $actualPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $actual) {
+        $path = [string]$entry.path
+        Need ($actualPaths.Add($path)) ("迁移包存在重复路径：{0}" -f $path)
+        Need ($expectedPaths.Contains($path)) ("迁移包包含 MIGRATION-CONTENT.json 未声明的文件：{0}" -f $path)
+    }
+    Need ($expectedPaths.Count -eq $actualPaths.Count) '迁移包内容文件数量不匹配'
     $byPath = @{}; foreach ($entry in $actual) { $byPath[[string]$entry.path] = $entry }
     foreach ($entry in $expected) {
         $path = [string]$entry.path
@@ -16388,6 +16405,24 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     Need ([string]$manifest.version -eq $ExpectedVersion -and [string]$manifest.package -eq $ExpectedPackage -and [bool]$manifest.publishable) '下载的 Release 包版本、类型或发布状态不匹配'
     foreach ($required in @('install.ps1','build.ps1','skills.ps1','skills.json','LICENSE')) {
         Need (Test-Path -LiteralPath (Join-Path $PackageRoot $required) -PathType Leaf) ("下载的 Release 包缺少：{0}" -f $required)
+    }
+    # Manifest↔payload closure: the package must contain exactly the manifest
+    # file set plus the manifest itself, so unmanifested payload cannot ride
+    # along inside the release ZIP and reach the install directory.
+    $entries = @($manifest.files)
+    Need ($entries.Count -gt 0) 'RELEASE-MANIFEST.json 缺少文件清单'
+    $manifestPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $entries) { [void]$manifestPaths.Add((([string]$entry.path)).Replace('\','/')) }
+    [void]$manifestPaths.Add('RELEASE-MANIFEST.json')
+    $actualPaths = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -File -Force | ForEach-Object { [IO.Path]::GetRelativePath(( [IO.Path]::GetFullPath($PackageRoot)), $_.FullName).Replace('\','/') })
+    $actualSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rel in $actualPaths) {
+        [void]$actualSet.Add($rel)
+        Need ($manifestPaths.Contains($rel)) ("Release 包含未在 RELEASE-MANIFEST 声明的文件：{0}" -f $rel)
+    }
+    foreach ($entry in $entries) {
+        $rel = ([string]$entry.path).Replace('\','/')
+        Need ($actualSet.Contains($rel)) ("Release 包缺少 RELEASE-MANIFEST 声明的文件：{0}" -f $rel)
     }
     return $manifest
 }

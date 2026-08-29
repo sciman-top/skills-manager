@@ -181,7 +181,7 @@ function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
-        $allFiles = Invoke-GitCaptureLines @($gitDirArg, "ls-tree", "-r", "--name-only", $ref)
+        $allFiles = Invoke-GitCaptureLines @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref)
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         $candidates = @()
         foreach ($f in $allFiles) {
@@ -964,7 +964,9 @@ function Remove-GitSparseCheckoutResiduals([string[]]$sparsePaths) {
     catch {
         return
     }
-    $trackedPaths = @(Invoke-GitCaptureLines @("ls-files"))
+    # quotepath=false keeps non-ASCII paths literal; the default C-escapes
+    # them, which silently breaks every line-based path consumer below.
+    $trackedPaths = @(Invoke-GitCaptureLines @("-c", "core.quotepath=false", "ls-files"))
     $candidates = @(Get-GitSparsePruneCandidates $trackedPaths $normalizedSparsePaths)
     foreach ($candidate in $candidates) {
         $candidatePath = $candidate -replace "/", "\"

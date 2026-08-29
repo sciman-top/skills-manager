@@ -275,7 +275,10 @@ function New-ReleasePackage([string]$Kind) {
         'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1',
         'references\README.md', 'references\reference-shelf.manifest.json', 'references\updates\README.md'
     )
-    if ($Kind -eq 'Source') { $rootFiles += 'AGENTS.md' }
+    # All three host rule wrappers travel together: a Source package without
+    # CLAUDE.md/GEMINI.md loses the multi-host project rule entrypoints that
+    # AGENTS.md alone cannot replace (hosts read their own root file).
+    if ($Kind -eq 'Source') { $rootFiles += @('AGENTS.md', 'CLAUDE.md', 'GEMINI.md') }
     foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles $Kind)) {
         Copy-ReleaseFile $file $packageRoot
     }

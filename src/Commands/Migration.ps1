@@ -120,7 +120,22 @@ function Assert-MigrationContentIntegrity([string]$PackageRoot, $Manifest) {
     Need ([int]$content.schema_version -eq 1 -and $null -ne $content.files) 'MIGRATION-CONTENT.json schema 无效'
     $expected = @($content.files)
     $actual = @(Get-PackageFileEntries $PackageRoot | Where-Object { $_.path -ne 'MIGRATION-CONTENT.json' })
-    Need ($expected.Count -eq $actual.Count) '迁移包内容文件数量不匹配'
+    # One-to-one closure: reject duplicate paths on either side and any actual
+    # file the content manifest does not claim (count equality alone lets an
+    # attacker swap in an extra file and pad the expected list).
+    $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $expected) {
+        $path = [string]$entry.path
+        Need (-not [string]::IsNullOrWhiteSpace($path)) 'MIGRATION-CONTENT.json 包含空路径'
+        Need ($expectedPaths.Add($path)) ("MIGRATION-CONTENT.json 包含重复路径：{0}" -f $path)
+    }
+    $actualPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $actual) {
+        $path = [string]$entry.path
+        Need ($actualPaths.Add($path)) ("迁移包存在重复路径：{0}" -f $path)
+        Need ($expectedPaths.Contains($path)) ("迁移包包含 MIGRATION-CONTENT.json 未声明的文件：{0}" -f $path)
+    }
+    Need ($expectedPaths.Count -eq $actualPaths.Count) '迁移包内容文件数量不匹配'
     $byPath = @{}; foreach ($entry in $actual) { $byPath[[string]$entry.path] = $entry }
     foreach ($entry in $expected) {
         $path = [string]$entry.path

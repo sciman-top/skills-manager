@@ -112,6 +112,24 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     foreach ($required in @('install.ps1','build.ps1','skills.ps1','skills.json','LICENSE')) {
         Need (Test-Path -LiteralPath (Join-Path $PackageRoot $required) -PathType Leaf) ("下载的 Release 包缺少：{0}" -f $required)
     }
+    # Manifest↔payload closure: the package must contain exactly the manifest
+    # file set plus the manifest itself, so unmanifested payload cannot ride
+    # along inside the release ZIP and reach the install directory.
+    $entries = @($manifest.files)
+    Need ($entries.Count -gt 0) 'RELEASE-MANIFEST.json 缺少文件清单'
+    $manifestPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $entries) { [void]$manifestPaths.Add((([string]$entry.path)).Replace('\','/')) }
+    [void]$manifestPaths.Add('RELEASE-MANIFEST.json')
+    $actualPaths = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -File -Force | ForEach-Object { [IO.Path]::GetRelativePath(( [IO.Path]::GetFullPath($PackageRoot)), $_.FullName).Replace('\','/') })
+    $actualSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rel in $actualPaths) {
+        [void]$actualSet.Add($rel)
+        Need ($manifestPaths.Contains($rel)) ("Release 包含未在 RELEASE-MANIFEST 声明的文件：{0}" -f $rel)
+    }
+    foreach ($entry in $entries) {
+        $rel = ([string]$entry.path).Replace('\','/')
+        Need ($actualSet.Contains($rel)) ("Release 包缺少 RELEASE-MANIFEST 声明的文件：{0}" -f $rel)
+    }
     return $manifest
 }
 
