@@ -1256,6 +1256,27 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $singleSourceWorkflow[0].evidence_coverage.source_code_target_count | Should -Be 1
         }
 
+        It "Emits a positive coverage statement mapping needs to current-profile skills" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-statement"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "main.py") "import fitz  # pdf render via pymupdf"
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-coverage-statement"
+            $profile = New-AuditTargetProfile @($scan) @(
+                [pscustomobject]@{ name = "pdf"; description = "PDF toolkit for reading and generating Portable Document Format files."; trigger_summary = "Use when the user asks to create, parse, merge, or render pdf documents."; content_hash = "x" },
+                [pscustomobject]@{ name = "unrelated-skill"; description = "Garden planning assistant."; trigger_summary = "Use for garden planning."; content_hash = "y" }
+            )
+
+            $statement = @($profile.coverage_statement)
+            $statement.Count | Should -Be (@($profile.prioritized_needs.primary_needs).Count + @($profile.prioritized_needs.secondary_needs).Count + @($profile.prioritized_needs.supporting_artifacts).Count)
+            $pdfNeed = @($statement | Where-Object need -eq "pdf" | Where-Object { $_.covered_by -contains "pdf" })
+            $pdfNeed.Count | Should -Be 1
+            $pdfNeed[0].coverage | Should -Be "covered_by_installed_profile"
+            $gardenMatch = @($statement | Where-Object { $_.covered_by -contains "unrelated-skill" })
+            $gardenMatch.Count | Should -Be 0
+            # Without a current-profile skill list the statement stays empty rather than guessing.
+            (New-AuditTargetProfile @($scan)).coverage_statement.Count | Should -Be 0
+        }
+
         It "Emits repository scope and source scan coverage for a single target" {
             $repo = Join-Path $TestDrive "target-repo-coverage"
             New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null

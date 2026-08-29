@@ -19305,7 +19305,42 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function New-AuditTargetProfile($scans) {
+function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills) {
+    # A positive coverage assertion: for each prioritized need, which current-profile
+    # skills plausibly cover it.  Keyword plausibility only — never a proof of host
+    # loading or successful invocation — so that "no add needed" becomes checkable.
+    $skills = @(Convert-AuditObjectArray $ProfileSelectedSkills)
+    if ($skills.Count -eq 0) { return @() }
+    $statement = @()
+    $needs = @()
+    foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "primary_needs"))) { $needs += $need }
+    foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "secondary_needs"))) { $needs += $need }
+    foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "supporting_artifacts"))) { $needs += $need }
+    foreach ($need in @($needs)) {
+        $needTokens = @(Merge-AuditKeywordSets @(
+                @([string](Get-CfgObjectProperty $need "domain")),
+                @([string](Get-CfgObjectProperty $need "subject")),
+                @(Convert-AuditStringArray (Get-CfgObjectProperty $need "actions"))
+            ) 40)
+        $matched = New-Object System.Collections.Generic.List[string]
+        foreach ($skill in @($skills)) {
+            $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($hay)) { continue }
+            foreach ($token in @($needTokens)) {
+                if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
+            }
+        }
+        $statement += [pscustomobject]([ordered]@{
+                need = [string](Get-CfgObjectProperty $need "key")
+                priority_band = [string](Get-CfgObjectProperty $need "priority_band")
+                covered_by = @($matched.ToArray() | Sort-Object -Unique)
+                coverage = if (@($matched).Count -gt 0) { "covered_by_installed_profile" } else { "unmatched_by_installed_profile" }
+            })
+    }
+    return @($statement)
+}
+
+function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
@@ -19340,6 +19375,7 @@ function New-AuditTargetProfile($scans) {
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
+    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
@@ -21522,7 +21558,7 @@ function Write-AuditThreeFileBundle {
     Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $targetProfile = New-AuditTargetProfile $Scans
+    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
