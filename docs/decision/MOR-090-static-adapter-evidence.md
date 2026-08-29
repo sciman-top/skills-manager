@@ -18,6 +18,8 @@
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
+**Fixture 优先级（2026-08-29 修订）**：MOR-100 逐项 fixture 以 **`gpt-5.6-sol` + `model_reasoning_effort=xhigh`（codex_config_surface）为第一优先验证项**。理由：三个命名 preset 的 deep 档与 high-risk 提升路径（`risk_level=high -> route_key=deep`）全部单点依赖 xhigh，而它是 config 面唯一 model-dependent 且当前仅 `partial` 的档位；Sol-only 是 intended policy default，其可用性悬于此项。若该项 fixture 失败，预案是创建 versioned map revision 将 Sol `deep` 改钉 `high`（config 词表内、已直证可表达），不扩展新概念、不静默降级、不改 slot 目录。
+
 ## 2. zcode（GLM / bigmodel）
 
 | # | 事实 | 来源 | 状态 |
@@ -39,6 +41,7 @@
 | A2b | effort_persistence_surface：`max` 默认仅作用于当前 session，持久化方式与 low/medium/high/xhigh 不同；settings `"effortLevel"`/env/flag 的持久化语义须逐档记录 | 同上 | verified（行为级）；逐档持久化细节进 MOR-400 fixture，不得把 max 假设为可持久化 settings 值 |
 | A3 | **clamp 行为**：不支持的档位静默向下降档（"xhigh runs as high on Opus 4.6"） | 同上 | verified；fixture 必须留痕，请求≠观察不得标 `host_loaded` |
 | A4 | **fallback 触发矩阵**：`fallbackModel` 链上限 3 个模型（去重），subagents 继承；触发限于 overload/unavailable/non-retryable server error——auth、billing、rate-limit、request-size、transport 等错误**不**触发 fallback | Claude model-config 官方文档，2026-08-28（issue #65782 仅作 secondary corroboration，不参与 verified 证明） | verified；fixture 须按错误类别记录 fallback 触发原因矩阵 |
+| A4a | **fallback receipt 归属规则（2026-08-29 修订，供 MOR-400 合同采纳）**：若宿主配置了 fallback 链，单 turn 内宿主可能静默换模型执行；route receipt 记录的是 **requested model**，宿主层 fallback 属宿主行为，**不算 route 违规**，receipt verifier 不得据此判 violated；但 applied-model 留痕（如宿主日志可取）应作为 observed 侧辅助证据分列，不并入 route 合同判据 | 官方 model-config 文档（fallback 只持续当前 turn、subagent 继承、触发矩阵见 A4），2026-08-29 复核一致 | verified（行为级）；逐项落地进 MOR-400 fixture |
 | A5 | 自定义模型串经 flag/env/settings 不做前缀校验；`ANTHROPIC_CUSTOM_MODEL_OPTION`、`ANTHROPIC_DEFAULT_*_MODEL` 可重指向别名 | 同上 | verified |
 | A6 | 第三方 provider（自定义 base URL）上**自动模型 fallback 被禁用**；桌面应用路由读其自身 third-party inference 配置而**不是** `ANTHROPIC_BASE_URL`/settings.json（CLI 与桌面投影面必须分列） | code.claude.com/docs/en/env-vars + /llm-gateway-connect，2026-08-28 | verified；对 DeepSeek 场景利好（fallback 面收窄），但桌面宿主的投影/表达面未取证 |
 
