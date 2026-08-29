@@ -12,6 +12,7 @@ $ManualDir = Join-Path $Root "manual"
 $ImportDir = Join-Path $Root "imports"
 $script:ActiveLogPath = $null
 $script:LogPathFallbackWarned = $false
+$script:LogWriteCount = 0
 
 function Resolve-ActiveLogPath {
     if (-not [string]::IsNullOrWhiteSpace($script:ActiveLogPath)) { return $script:ActiveLogPath }
@@ -141,7 +142,9 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
     $targetPath = Resolve-ActiveLogPath
     if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
-    Rotate-LogIfNeeded $targetPath
+    # 轮转检查按写入计数门控（每 64 条一次），避免每条日志一次 Get-Item。
+    $script:LogWriteCount++
+    if (($script:LogWriteCount % 64) -eq 1) { Rotate-LogIfNeeded $targetPath }
     $safeMessage = Protect-SensitiveText $Message
     $safeData = Protect-SensitiveLogValue $Data
     $record = [ordered]@{
@@ -309,20 +312,18 @@ function Expand-RelativeSkillPlaceholders([string]$rootPath) {
     }
     return $count
 }
-function Test-YamlFrontmatterSkillFile([string]$skillFile) {
-    if ([string]::IsNullOrWhiteSpace($skillFile)) { return $false }
-    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $false }
-    $raw = Get-ContentUtf8 $skillFile
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
-    $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
-    return ($normalized -match "^---(\r?\n|$)")
-}
-function Normalize-SkillMarkdownFiles([string]$rootPath) {
+# 构建 agent/ 的 SKILL.md 单遍修复：枚举一次、每文件读一次，同时完成
+# BOM 归一化与无效 frontmatter 清理（原先两遍独立枚举+各读一遍）。
+# 空文件/无 frontmatter 文件按原 Test-YamlFrontmatterSkillFile 语义删除；
+# frontmatter 判定先剥离 BOM，与原两遍顺序（先归一化后清理）终态等价。
+function Repair-AgentSkillMarkdownFiles([string]$rootPath) {
     $result = [ordered]@{
         normalized = 0
         failed = 0
+        removed = 0
         normalized_paths = @()
         failed_paths = @()
+        removed_paths = @()
     }
     if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
     if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
@@ -330,41 +331,23 @@ function Normalize-SkillMarkdownFiles([string]$rootPath) {
     foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
         try {
             $raw = Get-ContentUtf8 $skillFile.FullName
-            if ([string]::IsNullOrEmpty($raw)) { continue }
-            if (-not $raw.StartsWith([char]0xFEFF)) { continue }
-            $normalized = $raw.TrimStart([char]0xFEFF)
-            Set-ContentUtf8 $skillFile.FullName $normalized
-            $result.normalized++
-            $result.normalized_paths += $skillFile.FullName
-        }
-        catch {
-            $result.failed++
-            $result.failed_paths += $skillFile.FullName
-        }
-    }
-    return [pscustomobject]$result
-}
-function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
-    $result = [ordered]@{
-        removed = 0
-        failed = 0
-        removed_paths = @()
-        failed_paths = @()
-    }
-    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
-    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
-
-    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
-        if (Test-YamlFrontmatterSkillFile $skillFile.FullName) { continue }
-        try {
-            $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
-            if ($ok) {
-                $result.removed++
-                $result.removed_paths += $skillFile.FullName
+            $normalized = "$raw".TrimStart([char]0xFEFF)
+            if (-not ($normalized -match "^---(\r?\n|$)")) {
+                $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
+                if ($ok) {
+                    $result.removed++
+                    $result.removed_paths += $skillFile.FullName
+                }
+                else {
+                    $result.failed++
+                    $result.failed_paths += $skillFile.FullName
+                }
+                continue
             }
-            else {
-                $result.failed++
-                $result.failed_paths += $skillFile.FullName
+            if (-not [string]::Equals($normalized, $raw, [System.StringComparison]::Ordinal)) {
+                Set-ContentUtf8 $skillFile.FullName $normalized
+                $result.normalized++
+                $result.normalized_paths += $skillFile.FullName
             }
         }
         catch {

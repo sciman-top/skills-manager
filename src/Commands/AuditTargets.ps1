@@ -1494,11 +1494,22 @@ function Get-AuditGitChangedPaths {
 }
 
 function Get-AuditGitPathStatePairs($paths) {
-    $pairs = @()
+    # 单次全量 ls-files 取代逐路径派生进程（脏路径多时每路径一个 git 进程是扫描
+    # 的主要耗时）；pathspec 的目录前缀语义用前缀过滤等价复现。
+    $pathList = @($paths)
+    if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
-    foreach ($path in @($paths)) {
+    $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
+    $pairs = @()
+    foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)
-        $indexState = @(& git -c core.quotepath=false ls-files --stage -- $path 2>$null)
+        $prefix = "{0}/" -f [string]$path
+        $indexState = @($allIndexLines | Where-Object {
+                $tab = $_.IndexOf("`t")
+                if ($tab -lt 0) { return $false }
+                $indexed = $_.Substring($tab + 1)
+                ([string]$indexed -eq [string]$path) -or ([string]$indexed).StartsWith($prefix, [System.StringComparison]::Ordinal)
+            })
         $indexFingerprint = Get-AuditFingerprintFromVendorFromPairs $indexState $true
         $worktreeState = "missing"
         if (Test-Path -LiteralPath $fullPath -PathType Leaf) {

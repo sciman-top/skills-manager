@@ -30,15 +30,18 @@ BeforeAll {
         EnsureDir $ImportDir
     }
 
-    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
+    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath, [string]$RunId = 'r-test') {
         $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
         $state = Get-AuditWorkflowInputState $resolved
+        $snapshotPath = Join-Path (Split-Path -Parent $resolved) 'snapshot.json'
+        Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("fixture 依赖 snapshot.json 先于 receipt 存在：{0}" -f $snapshotPath)
         $receipt = [pscustomobject][ordered]@{
             schema_version = 1
             workflow = 'recommendations_validate_dry_run'
             generated_at = [datetimeoffset]::UtcNow.ToString('o')
             success = $true
             persisted = $false
+            run_id = $RunId
             recommendations_path = $resolved
             recommendations_sha256 = Get-FileContentHash $resolved
             stages = [pscustomobject]@{
@@ -47,6 +50,7 @@ BeforeAll {
                 dry_run = [pscustomobject]@{ status = 'passed' }
                 input_stability = [pscustomobject]@{ status = 'passed' }
             }
+            scan = [pscustomobject]@{ snapshot_sha256 = Get-FileContentHash $snapshotPath }
             input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
         }
         Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
@@ -210,7 +214,7 @@ Describe "Skill Audit E2E" {
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
             New-E2EAuditSnapshot (Join-Path $root "snapshot.json") "r1"
-            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
+            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath -RunId "r1"
 
             Mock 构建生效 {}
             Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
@@ -299,7 +303,7 @@ Describe "Skill Audit E2E" {
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
             New-E2EAuditSnapshot (Join-Path $root "snapshot.json") "r-mcp"
-            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
+            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath -RunId "r-mcp"
 
             Mock 同步MCP {}
             Mock 构建生效 {}

@@ -2105,23 +2105,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
-        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
-        if ($normalizedSkillMd.normalized -gt 0) {
-            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        $skillMdRepair = Repair-AgentSkillMarkdownFiles $AgentDir
+        if ($skillMdRepair.normalized -gt 0) {
+            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $skillMdRepair.normalized)
         }
-        if ($normalizedSkillMd.failed -gt 0) {
-            foreach ($path in $normalizedSkillMd.failed_paths) {
-                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
-            }
+        if ($skillMdRepair.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $skillMdRepair.removed) "WARN"
         }
-
-        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
-        if ($invalidSkillCleanup.removed -gt 0) {
-            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
-        }
-        if ($invalidSkillCleanup.failed -gt 0) {
-            foreach ($path in $invalidSkillCleanup.failed_paths) {
-                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
+        if ($skillMdRepair.failed -gt 0) {
+            foreach ($path in $skillMdRepair.failed_paths) {
+                $failures.Add(("build-skill-md-repair:{0}" -f $path)) | Out-Null
             }
         }
 
@@ -2323,6 +2316,7 @@ function 构建生效(
         $txn = $null
         $needRollback = $false
         $promotionBlocked = $false
+        $hostProjectionAttempted = $false
 
         # Optimization/Migration check
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
@@ -2374,6 +2368,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
+                    $hostProjectionAttempted = $true
                     $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile
                     if ($syncFailures) { $failures += $syncFailures }
                 }
@@ -2400,6 +2395,22 @@ function 构建生效(
         if ($needRollback) {
             if ($null -ne $txn) { Rollback-BuildTransaction $txn }
             Write-Host "⚠️ 已回滚本次构建产物（agent/）。同步目标可能仍需手动重建。" -ForegroundColor Yellow
+            # 部分宿主目标可能已写入本次构建产物；对已尝试宿主投影的路径，按回滚后的
+            # agent/ 状态补偿重建。补偿 restores 的是构建前已投影过的状态，且工作树
+            # 此刻必然 dirty，因此走 unverified 晋级；补偿自身失败只显式报告，不再回滚。
+            if ($hostProjectionAttempted -and -not $DryRun) {
+                try {
+                    $restoreContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$true
+                    $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile
+                    if (@($restoreFailures).Count -gt 0) {
+                        throw ("补偿投影仍失败 {0} 项：{1}" -f @($restoreFailures).Count, [string]@($restoreFailures)[0])
+                    }
+                    Log "补偿投影完成：宿主目标已按回滚后的 agent/ 状态重建。" "WARN"
+                }
+                catch {
+                    Log ("补偿投影失败，宿主目标可能残留本次构建产物，需手动重建：{0}" -f $_.Exception.Message) "ERROR"
+                }
+            }
         }
         else {
             if ($null -ne $txn) { Complete-BuildTransaction $txn }

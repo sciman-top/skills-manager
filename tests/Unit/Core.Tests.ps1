@@ -3470,3 +3470,50 @@ Describe "Audit regression gates" {
         }
     }
 }
+
+Describe "构建生效 rollback compensation" {
+    It "Re-projects hosts to the rolled-back agent state after partial sync failure" {
+        $oldDryRun = $DryRun
+        $oldCfgPath = $CfgPath
+        $oldRoot = $Root
+        try {
+            $DryRun = $false
+            # 密封：构建生效会经 Optimize-Imports/SaveCfg 读写 $CfgPath，
+            # 必须重定向到 TestDrive 并 mock 掉 SaveCfg，禁止触碰仓库真值。
+            $Root = Join-Path $TestDrive "ws-build-compensation"
+            New-Item -ItemType Directory -Path $Root -Force | Out-Null
+            $CfgPath = Join-Path $Root "skills.json"
+            $cfg = [pscustomobject]@{
+                vendors = @(); targets = @(); mappings = @(); imports = @()
+                mcp_servers = @(); mcp_targets = @(); sync_mode = "link"; update_force = $true
+            }
+            Mock Preflight {}
+            Mock LoadCfg { $cfg }
+            Mock SaveCfg {}
+            Mock Optimize-Imports {}
+            Mock Write-BuildSummary {}
+            Mock Start-BuildTransaction { [pscustomobject]@{ id = "txn" } }
+            Mock 构建Agent { @() }
+            Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ required = $false; promotion_mode = "local_only" } } -ParameterFilter { -not $AllowUnverified }
+            Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ required = $true; promotion_mode = "unverified_override" } } -ParameterFilter { [bool]$AllowUnverified }
+            Mock 应用到ClaudeCodex { @("target:x => simulated failure") } -ParameterFilter { -not $PromotionContext -or $PromotionContext.promotion_mode -ne "unverified_override" }
+            Mock 应用到ClaudeCodex { @() } -ParameterFilter { $PromotionContext -and $PromotionContext.promotion_mode -eq "unverified_override" }
+            Mock Rollback-BuildTransaction {}
+            Mock Complete-BuildTransaction {}
+            Mock Sync-SkillDiscoveryCatalog {}
+            Mock Sync-NativeAgentBridge {}
+
+            { 构建生效 } | Should -Throw '*构建生效失败*'
+
+            Should -Invoke Rollback-BuildTransaction -Times 1 -Exactly
+            Should -Invoke Complete-BuildTransaction -Times 0 -Exactly
+            Should -Invoke Get-HostProjectionPromotionContext -Times 1 -Exactly -ParameterFilter { [bool]$AllowUnverified }
+            Should -Invoke 应用到ClaudeCodex -Times 1 -Exactly -ParameterFilter { $PromotionContext -and $PromotionContext.promotion_mode -eq "unverified_override" }
+        }
+        finally {
+            $DryRun = $oldDryRun
+            $CfgPath = $oldCfgPath
+            $Root = $oldRoot
+        }
+    }
+}

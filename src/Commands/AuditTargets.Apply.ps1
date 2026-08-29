@@ -851,15 +851,20 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json is missing from the run bundle.'; path=$workflowPath }
     }
     $receiptRunId = if ($receipt.PSObject.Properties.Match('run_id').Count -gt 0) { [string]$receipt.run_id } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($receiptRunId)) {
-        $snapshotRunId = [string](Read-AuditSnapshot (Split-Path -Parent $resolved)).run_id
-        if ($snapshotRunId -ne $receiptRunId) {
-            return [pscustomobject]@{ pass=$false; code='run_mismatch'; message=('snapshot.run_id {0} does not match receipt.run_id {1}.' -f $snapshotRunId, $receiptRunId); path=$workflowPath }
-        }
+    # run/snapshot 绑定缺失同样 fail closed：没有绑定的 receipt 无法证明它扫描的是本 bundle。
+    if ([string]::IsNullOrWhiteSpace($receiptRunId)) {
+        return [pscustomobject]@{ pass=$false; code='run_mismatch'; message='workflow receipt is missing the run_id binding.'; path=$workflowPath }
+    }
+    $snapshotRunId = [string](Read-AuditSnapshot (Split-Path -Parent $resolved)).run_id
+    if ($snapshotRunId -ne $receiptRunId) {
+        return [pscustomobject]@{ pass=$false; code='run_mismatch'; message=('snapshot.run_id {0} does not match receipt.run_id {1}.' -f $snapshotRunId, $receiptRunId); path=$workflowPath }
     }
     $scan = $receipt.scan
     $receiptSnapshotSha = if ($null -ne $scan -and $scan.PSObject.Properties.Match('snapshot_sha256').Count -gt 0) { [string]$scan.snapshot_sha256 } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($receiptSnapshotSha) -and $receiptSnapshotSha -ne [string](Get-FileContentHash $snapshotPath)) {
+    if ([string]::IsNullOrWhiteSpace($receiptSnapshotSha)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='workflow receipt is missing the scan.snapshot_sha256 binding.'; path=$workflowPath }
+    }
+    if ($receiptSnapshotSha -ne [string](Get-FileContentHash $snapshotPath)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json changed after the validated dry-run.'; path=$workflowPath }
     }
     $current = Get-AuditWorkflowInputState $resolved
@@ -886,7 +891,9 @@ function Restore-AuditApplyTransaction {
     catch { $errors.Add(('config_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     $configRestoreFailed = @($errors | Where-Object { $_.StartsWith('config_restore_failed:',[StringComparison]::Ordinal) }).Count -gt 0
     if (-not $configRestoreFailed -and $SkillProjectionAttempted) {
-        try { 构建生效 }
+        # 补偿恢复的是 apply 前已投影过的状态，且 receipt 还原必然造成工作树 dirty；
+        # promotion gate 会阻断普通构建生效，这里显式走 unverified 晋级完成补偿。
+        try { 构建生效 -AllowUnverifiedProjection }
         catch { $errors.Add(('skill_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     }
     if (-not $configRestoreFailed -and $McpProjectionAttempted) {

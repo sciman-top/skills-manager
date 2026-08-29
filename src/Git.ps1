@@ -1041,7 +1041,8 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
 function Set-GitSparseCheckout([string[]]$sparsePaths) {
     $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
     if ($normalizedSparsePaths.Count -eq 0) {
-        try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+        try { Invoke-Git @("sparse-checkout", "disable") }
+        catch { Log ("sparse-checkout disable 失败，仓库可能保留陈旧 sparse 路径：{0}" -f $_.Exception.Message) "WARN" }
         return
     }
     Remove-GitSparseCheckoutResiduals $normalizedSparsePaths

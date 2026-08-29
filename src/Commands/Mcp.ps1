@@ -2553,7 +2553,7 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             if(-not (Test-Path -LiteralPath $root -PathType Container)){[IO.Directory]::CreateDirectory($root)|Out-Null;$createdRoots.Add($root)|Out-Null}
             Need (-not (Test-McpTargetReparsePath $root $root)) ("MCP target_reparse_forbidden：{0}" -f $root)
             $lockPath=Join-Path $root '.skills-manager-mcp-sync.lock'
-            $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $stream=Request-McpSyncLock $lockPath
             $lockEntries.Add([pscustomobject]@{path=$lockPath;stream=$stream})|Out-Null
         }
         Assert-McpDesiredStateFresh $DesiredState $ExpectedConfigRevision
@@ -2591,6 +2591,24 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
     }finally{
         foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}
         if(-not $transactionSucceeded){foreach($root in @($createdRoots.ToArray())|Sort-Object Length -Descending){Remove-McpCreatedRootIfEmpty $root}}
+    }
+}
+
+function Request-McpSyncLock([string]$LockPath) {
+    # CreateNew 独占锁：进程硬杀后锁文件会残留并永久阻塞后续同步。
+    # 超过 15 分钟的陈锁视为硬杀残留做接管；新近锁仍 fail closed（可能存在并发同步）。
+    try {
+        return [IO.File]::Open($LockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    }
+    catch [IO.IOException] {
+        $staleAfterMinutes = 15
+        $lockItem = Get-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $lockItem -and $lockItem.LastWriteTimeUtc -lt (Get-Date).ToUniversalTime().AddMinutes(-$staleAfterMinutes)) {
+            Log ("检测到陈旧 MCP 同步锁（超过 {0} 分钟，疑似进程硬杀残留），已接管：{1}" -f $staleAfterMinutes, $LockPath) "WARN"
+            Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+            return [IO.File]::Open($LockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        }
+        throw ("MCP 同步锁不可用（存在并发同步或新近残留锁；确认无并发后可删除锁文件重试）：{0}；原因：{1}" -f $LockPath, $_.Exception.Message)
     }
 }
 

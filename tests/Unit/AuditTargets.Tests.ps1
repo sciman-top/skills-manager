@@ -44,15 +44,18 @@ BeforeAll {
         throw "Failed to extract function body for $FunctionName"
     }
 
-    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
+    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath, [string]$RunId = 'r-test') {
         $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
         $state = Get-AuditWorkflowInputState $resolved
+        $snapshotPath = Join-Path (Split-Path -Parent $resolved) 'snapshot.json'
+        Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("fixture 依赖 snapshot.json 先于 receipt 存在：{0}" -f $snapshotPath)
         $receipt = [pscustomobject][ordered]@{
             schema_version = 1
             workflow = 'recommendations_validate_dry_run'
             generated_at = [datetimeoffset]::UtcNow.ToString('o')
             success = $true
             persisted = $false
+            run_id = $RunId
             recommendations_path = $resolved
             recommendations_sha256 = Get-FileContentHash $resolved
             stages = [pscustomobject]@{
@@ -61,6 +64,7 @@ BeforeAll {
                 dry_run = [pscustomobject]@{ status = 'passed' }
                 input_stability = [pscustomobject]@{ status = 'passed' }
             }
+            scan = [pscustomobject]@{ snapshot_sha256 = Get-FileContentHash $snapshotPath }
             input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
         }
         Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
@@ -2286,7 +2290,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 }
                 Mock 构建生效 { }
                 Mock Invoke-Doctor { return [pscustomobject]@{ pass = $true } }
-                New-AuditValidatedWorkflowReceiptFixture $path
+                New-AuditValidatedWorkflowReceiptFixture $path -RunId "r-apply"
 
                 $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes
 
@@ -2457,7 +2461,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $path = Join-Path $script:Root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":3,"run_id":"r-transaction","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_target_profile":"u","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_target_profile":"u","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
                 New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-transaction"
-                New-AuditValidatedWorkflowReceiptFixture $path
+                New-AuditValidatedWorkflowReceiptFixture $path -RunId "r-transaction"
 
                 Mock LoadCfg { return [pscustomobject]@{ imports=@(); mappings=@(); vendors=@(); mcp_servers=@() } }
                 Mock Add-ImportFromArgs { Set-ContentUtf8 $fixtureCfgPath '{"mutated":"skill"}'; return $true }
@@ -2675,5 +2679,44 @@ Describe "Legacy manual import uninstall idempotency" {
         [int]$result.deleted_manual_imports | Should -Be 1
         @($script:savedCfg.imports | Where-Object { $null -ne $_ -and [string]$_.name -eq "legacy-skill" }).Count | Should -Be 0
         @($script:savedCfg.imports | Where-Object { $null -ne $_ -and [string]$_.name -eq "vendor-import" }).Count | Should -Be 1
+    }
+}
+
+Describe "Workflow receipt binding fail-closed" {
+    It "Rejects a receipt without run_id or snapshot binding" {
+        $root = Join-Path $TestDrive "ws-receipt-binding"
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $recPath = Join-Path $root "recommendations.json"
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-bind","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-bind"
+        $state = Get-AuditWorkflowInputState $recPath
+
+        $noRunId = [pscustomobject][ordered]@{
+            schema_version = 1; workflow = 'recommendations_validate_dry_run'
+            generated_at = [datetimeoffset]::UtcNow.ToString('o'); success = $true; persisted = $false
+            recommendations_path = [IO.Path]::GetFullPath($recPath)
+            recommendations_sha256 = Get-FileContentHash $recPath
+            stages = [pscustomobject]@{ recommendations_validation = [pscustomobject]@{ status = 'passed' }; preflight = [pscustomobject]@{ status = 'passed' }; dry_run = [pscustomobject]@{ status = 'passed' }; input_stability = [pscustomobject]@{ status = 'passed' } }
+            scan = [pscustomobject]@{ snapshot_sha256 = Get-FileContentHash (Join-Path $root "snapshot.json") }
+            input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+        }
+        Write-AuditReceiptSection $recPath "workflow" $noRunId | Out-Null
+        $result = Test-AuditApplyWorkflowReceipt $recPath
+        $result.pass | Should -Be $false
+        $result.code | Should -Be 'run_mismatch'
+
+        $noSnapshotSha = [pscustomobject][ordered]@{
+            schema_version = 1; workflow = 'recommendations_validate_dry_run'
+            generated_at = [datetimeoffset]::UtcNow.ToString('o'); success = $true; persisted = $false
+            run_id = "r-bind"
+            recommendations_path = [IO.Path]::GetFullPath($recPath)
+            recommendations_sha256 = Get-FileContentHash $recPath
+            stages = [pscustomobject]@{ recommendations_validation = [pscustomobject]@{ status = 'passed' }; preflight = [pscustomobject]@{ status = 'passed' }; dry_run = [pscustomobject]@{ status = 'passed' }; input_stability = [pscustomobject]@{ status = 'passed' } }
+            input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+        }
+        Write-AuditReceiptSection $recPath "workflow" $noSnapshotSha | Out-Null
+        $result = Test-AuditApplyWorkflowReceipt $recPath
+        $result.pass | Should -Be $false
+        $result.code | Should -Be 'validated_dry_run_stale'
     }
 }

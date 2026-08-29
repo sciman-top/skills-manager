@@ -170,3 +170,24 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         $versionSource | Should -Not -Match '(?i)\[string\]\$Out'
     }
 }
+
+Describe 'MCP sync lock' {
+    It 'Takes over a stale lock left by a hard-killed process' {
+        $lockPath = Join-Path $TestDrive 'stale.skills-manager-mcp-sync.lock'
+        Set-ContentUtf8 $lockPath 'stale'
+        (Get-Item -LiteralPath $lockPath).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-20)
+
+        $stream = Request-McpSyncLock $lockPath
+        try {
+            $stream | Should -Not -Be $null
+            Test-Path -LiteralPath $lockPath -PathType Leaf | Should -BeTrue
+        }
+        finally { $stream.Dispose() }
+    }
+
+    It 'Fails closed against a fresh lock held by a possible concurrent sync' {
+        $lockPath = Join-Path $TestDrive 'fresh.skills-manager-mcp-sync.lock'
+        Set-ContentUtf8 $lockPath 'active'
+        { Request-McpSyncLock $lockPath } | Should -Throw '*MCP 同步锁不可用*'
+    }
+}

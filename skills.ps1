@@ -468,6 +468,7 @@ $ManualDir = Join-Path $Root "manual"
 $ImportDir = Join-Path $Root "imports"
 $script:ActiveLogPath = $null
 $script:LogPathFallbackWarned = $false
+$script:LogWriteCount = 0
 
 function Resolve-ActiveLogPath {
     if (-not [string]::IsNullOrWhiteSpace($script:ActiveLogPath)) { return $script:ActiveLogPath }
@@ -597,7 +598,9 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
     $targetPath = Resolve-ActiveLogPath
     if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
-    Rotate-LogIfNeeded $targetPath
+    # 轮转检查按写入计数门控（每 64 条一次），避免每条日志一次 Get-Item。
+    $script:LogWriteCount++
+    if (($script:LogWriteCount % 64) -eq 1) { Rotate-LogIfNeeded $targetPath }
     $safeMessage = Protect-SensitiveText $Message
     $safeData = Protect-SensitiveLogValue $Data
     $record = [ordered]@{
@@ -765,20 +768,18 @@ function Expand-RelativeSkillPlaceholders([string]$rootPath) {
     }
     return $count
 }
-function Test-YamlFrontmatterSkillFile([string]$skillFile) {
-    if ([string]::IsNullOrWhiteSpace($skillFile)) { return $false }
-    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $false }
-    $raw = Get-ContentUtf8 $skillFile
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
-    $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
-    return ($normalized -match "^---(\r?\n|$)")
-}
-function Normalize-SkillMarkdownFiles([string]$rootPath) {
+# 构建 agent/ 的 SKILL.md 单遍修复：枚举一次、每文件读一次，同时完成
+# BOM 归一化与无效 frontmatter 清理（原先两遍独立枚举+各读一遍）。
+# 空文件/无 frontmatter 文件按原 Test-YamlFrontmatterSkillFile 语义删除；
+# frontmatter 判定先剥离 BOM，与原两遍顺序（先归一化后清理）终态等价。
+function Repair-AgentSkillMarkdownFiles([string]$rootPath) {
     $result = [ordered]@{
         normalized = 0
         failed = 0
+        removed = 0
         normalized_paths = @()
         failed_paths = @()
+        removed_paths = @()
     }
     if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
     if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
@@ -786,41 +787,23 @@ function Normalize-SkillMarkdownFiles([string]$rootPath) {
     foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
         try {
             $raw = Get-ContentUtf8 $skillFile.FullName
-            if ([string]::IsNullOrEmpty($raw)) { continue }
-            if (-not $raw.StartsWith([char]0xFEFF)) { continue }
-            $normalized = $raw.TrimStart([char]0xFEFF)
-            Set-ContentUtf8 $skillFile.FullName $normalized
-            $result.normalized++
-            $result.normalized_paths += $skillFile.FullName
-        }
-        catch {
-            $result.failed++
-            $result.failed_paths += $skillFile.FullName
-        }
-    }
-    return [pscustomobject]$result
-}
-function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
-    $result = [ordered]@{
-        removed = 0
-        failed = 0
-        removed_paths = @()
-        failed_paths = @()
-    }
-    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
-    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
-
-    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
-        if (Test-YamlFrontmatterSkillFile $skillFile.FullName) { continue }
-        try {
-            $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
-            if ($ok) {
-                $result.removed++
-                $result.removed_paths += $skillFile.FullName
+            $normalized = "$raw".TrimStart([char]0xFEFF)
+            if (-not ($normalized -match "^---(\r?\n|$)")) {
+                $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
+                if ($ok) {
+                    $result.removed++
+                    $result.removed_paths += $skillFile.FullName
+                }
+                else {
+                    $result.failed++
+                    $result.failed_paths += $skillFile.FullName
+                }
+                continue
             }
-            else {
-                $result.failed++
-                $result.failed_paths += $skillFile.FullName
+            if (-not [string]::Equals($normalized, $raw, [System.StringComparison]::Ordinal)) {
+                Set-ContentUtf8 $skillFile.FullName $normalized
+                $result.normalized++
+                $result.normalized_paths += $skillFile.FullName
             }
         }
         catch {
@@ -7689,7 +7672,8 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
 function Set-GitSparseCheckout([string[]]$sparsePaths) {
     $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
     if ($normalizedSparsePaths.Count -eq 0) {
-        try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+        try { Invoke-Git @("sparse-checkout", "disable") }
+        catch { Log ("sparse-checkout disable 失败，仓库可能保留陈旧 sparse 路径：{0}" -f $_.Exception.Message) "WARN" }
         return
     }
     Remove-GitSparseCheckoutResiduals $normalizedSparsePaths
@@ -12248,23 +12232,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
-        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
-        if ($normalizedSkillMd.normalized -gt 0) {
-            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        $skillMdRepair = Repair-AgentSkillMarkdownFiles $AgentDir
+        if ($skillMdRepair.normalized -gt 0) {
+            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $skillMdRepair.normalized)
         }
-        if ($normalizedSkillMd.failed -gt 0) {
-            foreach ($path in $normalizedSkillMd.failed_paths) {
-                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
-            }
+        if ($skillMdRepair.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $skillMdRepair.removed) "WARN"
         }
-
-        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
-        if ($invalidSkillCleanup.removed -gt 0) {
-            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
-        }
-        if ($invalidSkillCleanup.failed -gt 0) {
-            foreach ($path in $invalidSkillCleanup.failed_paths) {
-                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
+        if ($skillMdRepair.failed -gt 0) {
+            foreach ($path in $skillMdRepair.failed_paths) {
+                $failures.Add(("build-skill-md-repair:{0}" -f $path)) | Out-Null
             }
         }
 
@@ -12466,6 +12443,7 @@ function 构建生效(
         $txn = $null
         $needRollback = $false
         $promotionBlocked = $false
+        $hostProjectionAttempted = $false
 
         # Optimization/Migration check
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
@@ -12517,6 +12495,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
+                    $hostProjectionAttempted = $true
                     $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile
                     if ($syncFailures) { $failures += $syncFailures }
                 }
@@ -12543,6 +12522,22 @@ function 构建生效(
         if ($needRollback) {
             if ($null -ne $txn) { Rollback-BuildTransaction $txn }
             Write-Host "⚠️ 已回滚本次构建产物（agent/）。同步目标可能仍需手动重建。" -ForegroundColor Yellow
+            # 部分宿主目标可能已写入本次构建产物；对已尝试宿主投影的路径，按回滚后的
+            # agent/ 状态补偿重建。补偿 restores 的是构建前已投影过的状态，且工作树
+            # 此刻必然 dirty，因此走 unverified 晋级；补偿自身失败只显式报告，不再回滚。
+            if ($hostProjectionAttempted -and -not $DryRun) {
+                try {
+                    $restoreContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$true
+                    $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile
+                    if (@($restoreFailures).Count -gt 0) {
+                        throw ("补偿投影仍失败 {0} 项：{1}" -f @($restoreFailures).Count, [string]@($restoreFailures)[0])
+                    }
+                    Log "补偿投影完成：宿主目标已按回滚后的 agent/ 状态重建。" "WARN"
+                }
+                catch {
+                    Log ("补偿投影失败，宿主目标可能残留本次构建产物，需手动重建：{0}" -f $_.Exception.Message) "ERROR"
+                }
+            }
         }
         else {
             if ($null -ne $txn) { Complete-BuildTransaction $txn }
@@ -16200,7 +16195,7 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             if(-not (Test-Path -LiteralPath $root -PathType Container)){[IO.Directory]::CreateDirectory($root)|Out-Null;$createdRoots.Add($root)|Out-Null}
             Need (-not (Test-McpTargetReparsePath $root $root)) ("MCP target_reparse_forbidden：{0}" -f $root)
             $lockPath=Join-Path $root '.skills-manager-mcp-sync.lock'
-            $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $stream=Request-McpSyncLock $lockPath
             $lockEntries.Add([pscustomobject]@{path=$lockPath;stream=$stream})|Out-Null
         }
         Assert-McpDesiredStateFresh $DesiredState $ExpectedConfigRevision
@@ -16238,6 +16233,24 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
     }finally{
         foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}
         if(-not $transactionSucceeded){foreach($root in @($createdRoots.ToArray())|Sort-Object Length -Descending){Remove-McpCreatedRootIfEmpty $root}}
+    }
+}
+
+function Request-McpSyncLock([string]$LockPath) {
+    # CreateNew 独占锁：进程硬杀后锁文件会残留并永久阻塞后续同步。
+    # 超过 15 分钟的陈锁视为硬杀残留做接管；新近锁仍 fail closed（可能存在并发同步）。
+    try {
+        return [IO.File]::Open($LockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    }
+    catch [IO.IOException] {
+        $staleAfterMinutes = 15
+        $lockItem = Get-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $lockItem -and $lockItem.LastWriteTimeUtc -lt (Get-Date).ToUniversalTime().AddMinutes(-$staleAfterMinutes)) {
+            Log ("检测到陈旧 MCP 同步锁（超过 {0} 分钟，疑似进程硬杀残留），已接管：{1}" -f $staleAfterMinutes, $LockPath) "WARN"
+            Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+            return [IO.File]::Open($LockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        }
+        throw ("MCP 同步锁不可用（存在并发同步或新近残留锁；确认无并发后可删除锁文件重试）：{0}；原因：{1}" -f $LockPath, $_.Exception.Message)
     }
 }
 
@@ -18860,11 +18873,22 @@ function Get-AuditGitChangedPaths {
 }
 
 function Get-AuditGitPathStatePairs($paths) {
-    $pairs = @()
+    # 单次全量 ls-files 取代逐路径派生进程（脏路径多时每路径一个 git 进程是扫描
+    # 的主要耗时）；pathspec 的目录前缀语义用前缀过滤等价复现。
+    $pathList = @($paths)
+    if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
-    foreach ($path in @($paths)) {
+    $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
+    $pairs = @()
+    foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)
-        $indexState = @(& git -c core.quotepath=false ls-files --stage -- $path 2>$null)
+        $prefix = "{0}/" -f [string]$path
+        $indexState = @($allIndexLines | Where-Object {
+                $tab = $_.IndexOf("`t")
+                if ($tab -lt 0) { return $false }
+                $indexed = $_.Substring($tab + 1)
+                ([string]$indexed -eq [string]$path) -or ([string]$indexed).StartsWith($prefix, [System.StringComparison]::Ordinal)
+            })
         $indexFingerprint = Get-AuditFingerprintFromVendorFromPairs $indexState $true
         $worktreeState = "missing"
         if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
@@ -22668,15 +22692,20 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json is missing from the run bundle.'; path=$workflowPath }
     }
     $receiptRunId = if ($receipt.PSObject.Properties.Match('run_id').Count -gt 0) { [string]$receipt.run_id } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($receiptRunId)) {
-        $snapshotRunId = [string](Read-AuditSnapshot (Split-Path -Parent $resolved)).run_id
-        if ($snapshotRunId -ne $receiptRunId) {
-            return [pscustomobject]@{ pass=$false; code='run_mismatch'; message=('snapshot.run_id {0} does not match receipt.run_id {1}.' -f $snapshotRunId, $receiptRunId); path=$workflowPath }
-        }
+    # run/snapshot 绑定缺失同样 fail closed：没有绑定的 receipt 无法证明它扫描的是本 bundle。
+    if ([string]::IsNullOrWhiteSpace($receiptRunId)) {
+        return [pscustomobject]@{ pass=$false; code='run_mismatch'; message='workflow receipt is missing the run_id binding.'; path=$workflowPath }
+    }
+    $snapshotRunId = [string](Read-AuditSnapshot (Split-Path -Parent $resolved)).run_id
+    if ($snapshotRunId -ne $receiptRunId) {
+        return [pscustomobject]@{ pass=$false; code='run_mismatch'; message=('snapshot.run_id {0} does not match receipt.run_id {1}.' -f $snapshotRunId, $receiptRunId); path=$workflowPath }
     }
     $scan = $receipt.scan
     $receiptSnapshotSha = if ($null -ne $scan -and $scan.PSObject.Properties.Match('snapshot_sha256').Count -gt 0) { [string]$scan.snapshot_sha256 } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($receiptSnapshotSha) -and $receiptSnapshotSha -ne [string](Get-FileContentHash $snapshotPath)) {
+    if ([string]::IsNullOrWhiteSpace($receiptSnapshotSha)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='workflow receipt is missing the scan.snapshot_sha256 binding.'; path=$workflowPath }
+    }
+    if ($receiptSnapshotSha -ne [string](Get-FileContentHash $snapshotPath)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json changed after the validated dry-run.'; path=$workflowPath }
     }
     $current = Get-AuditWorkflowInputState $resolved
@@ -22703,7 +22732,9 @@ function Restore-AuditApplyTransaction {
     catch { $errors.Add(('config_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     $configRestoreFailed = @($errors | Where-Object { $_.StartsWith('config_restore_failed:',[StringComparison]::Ordinal) }).Count -gt 0
     if (-not $configRestoreFailed -and $SkillProjectionAttempted) {
-        try { 构建生效 }
+        # 补偿恢复的是 apply 前已投影过的状态，且 receipt 还原必然造成工作树 dirty；
+        # promotion gate 会阻断普通构建生效，这里显式走 unverified 晋级完成补偿。
+        try { 构建生效 -AllowUnverifiedProjection }
         catch { $errors.Add(('skill_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     }
     if (-not $configRestoreFailed -and $McpProjectionAttempted) {
