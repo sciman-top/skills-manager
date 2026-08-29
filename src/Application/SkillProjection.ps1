@@ -398,6 +398,47 @@ function Get-SkillProjectionTargetHost($TargetConfig) {
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }
 
+function Get-SkillProjectionHostRootDeclarations($Config) {
+    # A managed-link target is the authoritative declaration of a host skill
+    # root.  host_skill_roots is retained only as a compatibility input for
+    # roots that have no corresponding projection target.
+    $projection = Get-OperationObjectProperty $Config 'skill_projection'
+    if ($null -eq $projection) { return @() }
+
+    $declarations = [Collections.Generic.List[object]]::new()
+    foreach ($target in @((Get-OperationObjectProperty $Config 'targets'))) {
+        if ($null -eq $target -or -not [bool](Get-OperationObjectProperty $target 'managed_link_only')) { continue }
+        $path = ([string](Get-OperationObjectProperty $target 'path')).Trim()
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $declarations.Add([pscustomobject][ordered]@{
+                host = Get-SkillProjectionTargetHost $target
+                path = $path
+                source = 'managed_link_target'
+            }) | Out-Null
+    }
+
+    foreach ($entry in @((Get-OperationObjectProperty $projection 'host_skill_roots'))) {
+        $path = ''
+        $hostName = ''
+        if ($null -ne $entry -and $entry -is [pscustomobject] -and (Test-OperationObjectProperty $entry 'path')) {
+            $path = ([string]$entry.path).Trim()
+            if (Test-OperationObjectProperty $entry 'host') { $hostName = ([string]$entry.host).Trim().ToLowerInvariant() }
+        }
+        else {
+            $path = ([string]$entry).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
+        if ($hostName -notin @('codex', 'claude', 'zcode')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
+        $declarations.Add([pscustomobject][ordered]@{
+                host = $hostName
+                path = $path
+                source = 'compatibility_host_skill_roots'
+            }) | Out-Null
+    }
+    return @($declarations.ToArray())
+}
+
 function Resolve-SkillProjectionSelection {
     param(
         [Parameter(Mandatory = $true)]$ProjectionConfig,

@@ -173,24 +173,24 @@ function New-SkillSurfaceView {
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
 
-    # Hosts other than the projection owner may read additional skill roots
-    # (e.g. ZCode reads ~/.zcode/skills while Codex reads ~/.agents/skills).
-    # Declared roots get the same ownership accounting; undeclared roots stay
-    # invisible on purpose so that only intentional roots are audited.
-    $hostRootNames = @()
-    if (Test-OperationObjectProperty $projection 'host_skill_roots') {
-        # Entries are either plain paths or { path, host } records; only the path
-        # matters for surface accounting, the host label drives doctor routing.
-        $hostRootNames = @((Get-OperationObjectProperty $projection 'host_skill_roots') | ForEach-Object {
-                if ($null -ne $_ -and $_ -is [pscustomobject] -and (Test-OperationObjectProperty $_ 'path')) { [string]$_.path } else { [string]$_ }
-            } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    }
+    # Projection targets are the source of truth for host roots.  Preserve the
+    # compatibility declaration as an additive input, but do not require it to
+    # duplicate every managed-link target.
+    $hostRootDeclarations = @(Get-SkillProjectionHostRootDeclarations $Config)
+    $hostRootLabels = [Collections.Generic.List[string]]::new()
     $hostRootItems = [Collections.Generic.List[object]]::new()
-    foreach ($hostRootName in $hostRootNames) {
+    $seenHostRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($declaration in $hostRootDeclarations) {
+        $hostRootName = ([string]$declaration.path).Trim()
+        $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
+        $label = if ([string]::IsNullOrWhiteSpace($hostName)) { $hostRootName } else { '{0}:{1}' -f $hostName, $hostRootName }
+        $hostRootLabels.Add($label) | Out-Null
         $hostRoot = Resolve-CapabilitySurfacePath $hostRootName $root
+        $deduplicationKey = if ([string]::IsNullOrWhiteSpace($hostRoot)) { $label } else { $hostRoot }
+        if (-not $seenHostRoots.Add($deduplicationKey)) { continue }
         $hostRootExists = $hostRoot -and (Test-Path -LiteralPath $hostRoot -PathType Container)
         if (-not $hostRootExists) {
-            $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared host skill root is missing on this machine: {0}' -f $hostRootName) }) | Out-Null
+            $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared {0} host skill root is missing on this machine: {1}' -f $hostName, $hostRootName) }) | Out-Null
             continue
         }
         foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
@@ -208,7 +208,7 @@ function New-SkillSurfaceView {
             }
         }
     }
-    $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootNames.Count) { $hostRootNames -join ', ' } else { 'skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootNames.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootNames.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootLabels.Count) { $hostRootLabels -join ', ' } else { 'managed_link targets / skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootLabels.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootLabels.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
 
     $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
     $systemRoot = Join-Path $codexHome 'skills\.system'

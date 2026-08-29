@@ -21,12 +21,6 @@
     "managed_link_excludes": [
       "skill-creator"
     ],
-    "host_skill_roots": [
-      {
-        "path": "~/.zcode/skills",
-        "host": "zcode"
-      }
-    ],
     "projection_profiles": {
       "schema_version": 1,
       "default_profile": "core",

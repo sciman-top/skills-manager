@@ -196,24 +196,23 @@ function Get-DoctorSkillProjectionConsistency {
             return $result
         }
 
-        # Host routing: user_skill_root belongs to codex; host_skill_roots entries
-        # (plain path or { path, host }) map additional roots to declared hosts.
+        # Host routing: user_skill_root belongs to Codex.  Every other root
+        # comes from the same managed-link target declarations used to project
+        # skills; optional compatibility declarations are additive only.
         $rootByHost = @{}
         $rootByHost['codex'] = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
         $declaredHosts = @('codex')
-        if (Test-OperationObjectProperty $projection 'host_skill_roots') {
-            foreach ($entry in @((Get-OperationObjectProperty $projection 'host_skill_roots'))) {
-                $pathText = ""; $hostName = ""
-                if ($null -ne $entry -and $entry -is [pscustomobject] -and (Test-OperationObjectProperty $entry 'path')) {
-                    $pathText = [string]$entry.path
-                    if (Test-OperationObjectProperty $entry 'host') { $hostName = ([string]$entry.host).Trim().ToLowerInvariant() }
+        foreach ($declaration in @(Get-SkillProjectionHostRootDeclarations $cfg)) {
+            $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
+            $hostRoot = Resolve-SkillProjectionPath ([string]$declaration.path) $Root
+            if ($rootByHost.ContainsKey($hostName)) {
+                if (-not [string]::Equals([string]$rootByHost[$hostName], [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                    $result.warnings += ("{0}: host_root_declaration_conflict: {1} 与 {2} 指向不同目录。" -f $hostName, [string]$rootByHost[$hostName], [string]$hostRoot)
                 }
-                else { $pathText = [string]$entry }
-                if ([string]::IsNullOrWhiteSpace($pathText)) { continue }
-                if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
-                $rootByHost[$hostName] = Resolve-SkillProjectionPath $pathText $Root
-                if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
+                continue
             }
+            $rootByHost[$hostName] = $hostRoot
+            if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
         }
         if (Test-OperationObjectProperty $projection 'projection_profiles') {
             $profilesConfig = Get-OperationObjectProperty $projection 'projection_profiles'
@@ -221,7 +220,6 @@ function Get-DoctorSkillProjectionConsistency {
             if ($null -ne $hostsConfig) {
                 foreach ($configuredHost in @($hostsConfig.PSObject.Properties.Name)) {
                     if ($configuredHost -notin $declaredHosts) { $declaredHosts += $configuredHost }
-                    if (-not $rootByHost.ContainsKey($configuredHost)) { $rootByHost[$configuredHost] = $rootByHost['codex'] }
                 }
             }
         }
@@ -257,6 +255,11 @@ function Get-DoctorSkillProjectionConsistency {
             }
             else {
                 $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
+            }
+            if (-not $rootByHost.ContainsKey($hostName)) {
+                $result.warnings += ("{0}: host_root_not_declared: projection profile has no managed-link target or compatibility root declaration." -f $hostName)
+                $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
+                continue
             }
             $hostRoot = $rootByHost[$hostName]
             $actualNames = @()

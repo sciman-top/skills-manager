@@ -127,7 +127,7 @@ Describe 'Read-only skill surface inventory' {
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
 
-    It 'audits declared host skill roots: healthy junctions pass, missing roots warn' {
+    It 'audits declared managed-link host roots: healthy junctions pass, missing roots warn' {
         $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
         $oldCodexHome = $env:CODEX_HOME
         try {
@@ -147,9 +147,12 @@ Describe 'Read-only skill surface inventory' {
                     managed_source_path = 'agent'
                     user_skill_root = 'missing-user-skills'
                     managed_link_includes = @('alpha')
-                    host_skill_roots = @('zcode-skills', 'missing-host-root')
                     sources = @()
                 }
+                targets = @(
+                    [pscustomobject]@{ path = $hostRoot; host = 'claude'; managed_link_only = $true },
+                    [pscustomobject]@{ path = (Join-Path $fixture 'missing-host-root'); host = 'zcode'; managed_link_only = $true }
+                )
                 mcp_servers = @()
             }
 
@@ -159,6 +162,7 @@ Describe 'Read-only skill surface inventory' {
 
             $surface.count | Should -Be 1
             @($surface.items | Where-Object projection_state -eq 'managed_current').Count | Should -Be 1
+            $surface.source | Should -Match 'claude:'
             $codes | Should -Contain 'declared_host_root_missing'
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }

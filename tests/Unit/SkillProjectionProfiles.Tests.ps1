@@ -107,6 +107,24 @@ Describe 'Skill projection profiles' {
         { Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.other/skills'; managed_link_only = $true }) } | Should -Throw '*无法由 path 推导宿主*'
     }
 
+    It 'derives host root declarations from managed-link targets and retains compatibility roots' {
+        $config = [pscustomobject]@{
+            targets = @(
+                [pscustomobject]@{ path = '~/.claude/skills'; host = 'claude'; managed_link_only = $true }
+            )
+            skill_projection = [pscustomobject]@{
+                host_skill_roots = @(
+                    [pscustomobject]@{ path = '~/.zcode/skills'; host = 'zcode' }
+                )
+            }
+        }
+
+        $declarations = @(Get-SkillProjectionHostRootDeclarations $config)
+
+        @($declarations | Where-Object { $_.host -eq 'claude' -and $_.source -eq 'managed_link_target' } | ForEach-Object path) | Should -Be @('~/.claude/skills')
+        @($declarations | Where-Object { $_.host -eq 'zcode' -and $_.source -eq 'compatibility_host_skill_roots' } | ForEach-Object path) | Should -Be @('~/.zcode/skills')
+    }
+
     It 'includes the resolved profile in the projection fingerprint' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $plan = [pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }
