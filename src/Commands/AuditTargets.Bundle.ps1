@@ -5,22 +5,34 @@ function New-AuditInstalledStateSnapshot([string]$context) {
             Log ("{0}读取 skills.json 失败，已回退为空安装快照：{1}" -f $context, $_.Exception.Message) "WARN"
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
-        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $liveState = Get-AuditLiveInstalledState $liveCfg
+        $configuredSupplySkills = if ($liveState.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { @($liveState.configured_supply_skills) } else { @(Get-InstalledSkillFacts $liveCfg) }
+        $installedSkills = if ($liveState.PSObject.Properties.Match('profile_selected_skills').Count -gt 0) { @($liveState.profile_selected_skills) } else { @() }
         $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
-        $liveState = Get-AuditLiveInstalledState $liveCfg
         return [pscustomobject]([ordered]@{
             snapshot_kind = "audit_input"
-            source_of_truth = "live_mappings"
+            source_of_truth = "live_configuration_and_profile_selection"
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_configured_supply_skill_count = if ($liveState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$liveState.configured_supply_skill_count } else { @($configuredSupplySkills).Count }
+            live_configured_supply_fingerprint = if ($liveState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0) { [string]$liveState.configured_supply_fingerprint } else { Get-AuditFingerprintFromSkillFacts $configuredSupplySkills }
+            inventory_semantics = [pscustomobject]([ordered]@{
+                    skills = 'current_profile_selected_skills'
+                    configured_supply_skills = 'all configured mapping and override sources; not an assertion of current host visibility or invocation'
+                })
+            profile_selection = if ($liveState.PSObject.Properties.Match('profile_selection').Count -gt 0) { $liveState.profile_selection } else { $null }
+            profile_selection_status = if ($liveState.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { [string]$liveState.profile_selection_status } else { 'not_observed' }
+            profile_selection_unresolved_names = if ($liveState.PSObject.Properties.Match('profile_selection_unresolved_names').Count -gt 0) { @($liveState.profile_selection_unresolved_names) } else { @() }
+            invocation_evidence = if ($liveState.PSObject.Properties.Match('invocation_evidence').Count -gt 0) { $liveState.invocation_evidence } else { [pscustomobject]@{ state = 'not_observed'; scope = 'audit_scanner'; evidence = 'No invocation ledger was supplied.' } }
             live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
             live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
             skills = @($installedSkills)
+            configured_supply_skills = @($configuredSupplySkills)
             external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
@@ -42,7 +54,7 @@ function Write-AuditThreeFileBundle {
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
     $targetProfile = New-AuditTargetProfile $Scans
-    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
+    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
@@ -87,7 +99,9 @@ function Write-AuditThreeFileBundle {
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
+                    "installed_state.skills means current_profile_selected_skills, not all configured supply. Read configured_supply_skills only for source identity, rollback, and overlap analysis; it is not current host visibility or invocation evidence.",
                     "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
+                    "installed_state.invocation_evidence=not_observed is not non-use. A user statement of no successful use may indicate a reachability or matching failure and must not be converted directly into a removal candidate.",
                     "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                     "When scan_coverage.confidence_ceiling is representative_sample, sample-only signals cannot be treated as complete repository coverage."

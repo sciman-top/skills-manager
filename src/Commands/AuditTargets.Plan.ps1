@@ -692,7 +692,14 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     Write-Host "=== 审查建议摘要 ==="
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
     if ($null -ne $snapshotState -and $null -ne $liveState) {
-        Write-Host ("口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        $liveSupplyCount = if ($liveState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$liveState.configured_supply_skill_count } else { $null }
+        $snapshotSupplyCount = if ($snapshotState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$snapshotState.configured_supply_skill_count } else { $null }
+        if ($null -ne $liveSupplyCount -or $null -ne $snapshotSupplyCount) {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}; configured_supply_live={2}, snapshot={3}（供给不等于当前可调用或已调用）" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count, $liveSupplyCount, $snapshotSupplyCount)
+        }
+        else {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        }
         if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
             $liveMcpCount = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             $snapshotMcpCount = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }

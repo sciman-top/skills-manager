@@ -274,13 +274,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
         "This is a valid zero-change baseline, not an incomplete example file.",
-        "Keep lifecycle categories empty unless the current scan, installed inventory, and reviewed sources establish a specific change.",
+        "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
-        "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
+        "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
+        "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
     )
-    $basisSummary = "Scanner-only baseline: no skill or MCP lifecycle change is proposed until host AI verifies a scan-derived gap, reviewed source, and safe rollback path."
+    $basisSummary = "Dry-run decision: no skill or MCP lifecycle change is proposed. The current scan confirms a configured-supply/current-profile distinction, but no host invocation ledger exists; user-reported no successful use requires reachability or route-matching validation before any retirement decision."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -295,7 +296,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             summary = $basisSummary
         }
         source_observations = @()
-        empty_recommendation_reasons = @("scanner_only_no_lifecycle_change")
+        empty_recommendation_reasons = @("no_lifecycle_change_without_invocation_or_reachability_evidence")
         new_skills = @()
         overlap_findings = @()
         removal_candidates = @()

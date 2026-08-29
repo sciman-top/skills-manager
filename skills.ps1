@@ -16991,10 +16991,11 @@ function Get-DefaultAuditOuterAiPrompt {
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
 5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
-6. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、已安装清单与审阅来源共同形成明确缺口时，才替换 ``scanner_only_no_lifecycle_change`` 并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
-7. 执行：
+6. 用户报告“从未成功调用”时，必须写入 ``overlap_findings`` 的 report-only 观察：注明这是用户报告而非遥测，并将后续动作限定为核对 current profile 投影、宿主可见清单或任务路由。它不能转换为 ``observed_unused``、``removal_candidate`` 或 MCP 卸载结论。
+7. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、当前 profile 的有效能力、调用/可达性证据与审阅来源共同形成明确缺口时，才替换零变更理由并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+8. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-8. 预检通过后执行：
+9. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
 9. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
@@ -17254,7 +17255,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260829.1"
+    return "audit-prompt-v20260829.3"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -19061,7 +19062,7 @@ function New-AuditTargetProfile($scans) {
     return [pscustomobject]$profile
 }
 
-function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $installedMcpServers) {
+function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $installedMcpServers, $installedState = $null, $externalSkills = @()) {
     $repoKeywordSets = @()
     foreach ($scan in @($scans)) {
         $targetValue = Get-CfgObjectProperty $scan "target"
@@ -19089,7 +19090,17 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
             (Convert-AuditStringArray $targetProfile.notable_files),
             (Convert-AuditStringArray $targetProfile.risks)
         ) 220)
-    $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
+    $installedKeywords = @(Get-AuditInstalledStateKeywords @($installedSkills + $externalSkills) $installedMcpServers)
+    $configuredSupplyCount = 0
+    $profileSelectedCount = @($installedSkills).Count
+    $invocationEvidenceState = 'not_observed'
+    if ($null -ne $installedState) {
+        if ($installedState.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { $configuredSupplyCount = @($installedState.configured_supply_skills).Count }
+        if ($installedState.PSObject.Properties.Match('skills').Count -gt 0) { $profileSelectedCount = @($installedState.skills).Count }
+        if ($installedState.PSObject.Properties.Match('invocation_evidence').Count -gt 0 -and $null -ne $installedState.invocation_evidence -and $installedState.invocation_evidence.PSObject.Properties.Match('state').Count -gt 0) {
+            $invocationEvidenceState = [string]$installedState.invocation_evidence.state
+        }
+    }
     return [pscustomobject]([ordered]@{
             schema_version = 1
             generated_at = (Get-Date).ToString("o")
@@ -19100,7 +19111,11 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 secondary_need_count = @(Convert-AuditObjectArray (Get-CfgObjectProperty (Get-CfgObjectProperty $targetProfile "prioritized_needs") "secondary_needs")).Count
                 installed_state_keyword_count = @($installedKeywords).Count
                 installed_skill_count = @($installedSkills).Count
+                external_skill_count = @($externalSkills).Count
                 installed_mcp_server_count = @($installedMcpServers).Count
+                configured_supply_skill_count = $configuredSupplyCount
+                current_profile_selected_skill_count = $profileSelectedCount
+                invocation_evidence_state = $invocationEvidenceState
             }
             keywords = [ordered]@{
                 primary_target_profile = @($primaryFocusKeywords)
@@ -19116,6 +19131,8 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 "A host-AI promotion from secondary/context to primary requires inspected source evidence of a core user journey and a recorded uncertainty boundary.",
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
+                "installed_state.skills contains current-profile selections only; configured supply is source and rollback context, not a live callable inventory."
+                "not_observed invocation evidence cannot establish non-use or justify retirement without reachability or route validation."
                 "The aggregate profile is the only user-need decision surface; target_repo_by_target is evidence attribution, not a per-repository recommendation surface."
             )
         })
@@ -19454,13 +19471,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
         "This is a valid zero-change baseline, not an incomplete example file.",
-        "Keep lifecycle categories empty unless the current scan, installed inventory, and reviewed sources establish a specific change.",
+        "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
-        "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
+        "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
+        "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
     )
-    $basisSummary = "Scanner-only baseline: no skill or MCP lifecycle change is proposed until host AI verifies a scan-derived gap, reviewed source, and safe rollback path."
+    $basisSummary = "Dry-run decision: no skill or MCP lifecycle change is proposed. The current scan confirms a configured-supply/current-profile distinction, but no host invocation ledger exists; user-reported no successful use requires reachability or route-matching validation before any retirement decision."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -19475,7 +19493,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             summary = $basisSummary
         }
         source_observations = @()
-        empty_recommendation_reasons = @("scanner_only_no_lifecycle_change")
+        empty_recommendation_reasons = @("no_lifecycle_change_without_invocation_or_reachability_evidence")
         new_skills = @()
         overlap_findings = @()
         removal_candidates = @()
@@ -19586,6 +19604,104 @@ function Get-InstalledSkillFacts($cfg = $null) {
         })
     }
     return @($facts)
+}
+
+function Get-AuditCurrentProfileSkillState($cfg, $configuredSupplySkills = $null) {
+    # A mapping/import is a recoverable supply fact, not proof that the current
+    # Codex profile exposes the skill.  Keep both facts, but only pass the
+    # profile-selected subset to audit reasoning.
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match('skill_projection').Count -eq 0 -or $null -eq $cfg.skill_projection) {
+        return [pscustomobject]([ordered]@{
+                status = 'not_configured'
+                selection = $null
+                selected_skills = @()
+                selected_skill_count = 0
+                unresolved_selected_names = @()
+                fingerprint = (Get-AuditFingerprintFromVendorFromPairs @('profile_selection=not_configured') $true)
+            })
+    }
+    if ($null -eq $configuredSupplySkills) { $configuredSupplySkills = @(Get-InstalledSkillFacts $cfg) }
+
+    try {
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName 'codex'
+        $managedRoot = Resolve-SkillProjectionPath ([string]$cfg.skill_projection.managed_source_path)
+        if (-not (Test-Path -LiteralPath $managedRoot -PathType Container)) { throw ("managed skill root is unavailable: {0}" -f $managedRoot) }
+        $includedNames = @($selection.included_names | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $excludedNames = @($selection.excluded_names | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $effectiveNames = if ([bool]$selection.include_all) {
+            @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object {
+                    $_.Name -ne '.system' -and $_.Name -notin $excludedNames -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf)
+                } | ForEach-Object Name | Sort-Object -Unique)
+        }
+        else {
+            @($includedNames | Where-Object { $_ -notin $excludedNames } | Sort-Object -Unique)
+        }
+        $selected = New-Object System.Collections.Generic.List[object]
+        $matchedNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($outputName in @($effectiveNames)) {
+            $effectiveSkillFile = Join-Path (Join-Path $managedRoot $outputName) 'SKILL.md'
+            if (-not (Test-Path -LiteralPath $effectiveSkillFile -PathType Leaf)) { continue }
+            $effectiveHash = [string](Get-FileContentHash $effectiveSkillFile)
+            $effectiveMeta = Read-SkillMetadata $effectiveSkillFile -Observation
+            $sourceCandidates = @($configuredSupplySkills | Where-Object {
+                    if ($null -eq $_) { $false }
+                    else {
+                        $candidateName = ([string]$_.to).Trim()
+                        if ([string]::IsNullOrWhiteSpace($candidateName)) { $candidateName = ([string]$_.name).Trim() }
+                        $candidateName.Equals($outputName, [System.StringComparison]::OrdinalIgnoreCase)
+                    }
+                })
+            $sourceFact = @($sourceCandidates | Where-Object { ([string]$_.content_hash).Equals($effectiveHash, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -Last 1)
+            if ($sourceFact.Count -eq 0) { $sourceFact = @($sourceCandidates | Select-Object -Last 1) }
+            $selectedFact = if ($sourceFact.Count -gt 0) { $sourceFact[0].PSObject.Copy() } else {
+                [pscustomobject]([ordered]@{ name = $outputName; source_kind = 'generated'; vendor = ''; from = ''; to = $outputName; repo = ''; ref = ''; skill_path = $outputName; declared_name = ''; description = ''; trigger_summary = ''; content_hash = ''; local_path = '' })
+            }
+            $selectedFact.name = if ([string]::IsNullOrWhiteSpace([string]$effectiveMeta.declared_name)) { $outputName } else { [string]$effectiveMeta.declared_name }
+            $selectedFact.to = $outputName
+            $selectedFact.declared_name = [string]$effectiveMeta.declared_name
+            $selectedFact.description = [string]$effectiveMeta.description
+            $selectedFact.trigger_summary = [string]$effectiveMeta.trigger_summary
+            $selectedFact.content_hash = $effectiveHash
+            $selectedFact | Add-Member -NotePropertyName source_local_path -NotePropertyValue ([string]$selectedFact.local_path) -Force
+            $selectedFact.local_path = Split-Path -Parent $effectiveSkillFile
+            $selectedFact | Add-Member -NotePropertyName configured_source_candidates -NotePropertyValue @($sourceCandidates | ForEach-Object { [pscustomobject]@{ vendor = [string]$_.vendor; from = [string]$_.from } }) -Force
+            $selectedFact | Add-Member -NotePropertyName inventory_scope -NotePropertyValue 'current_profile_selected_effective' -Force
+            $selectedFact | Add-Member -NotePropertyName selection_host -NotePropertyValue ([string]$selection.host) -Force
+            $selectedFact | Add-Member -NotePropertyName selection_profile -NotePropertyValue ([string]$selection.profile) -Force
+            $selected.Add($selectedFact) | Out-Null
+            $matchedNames.Add($outputName) | Out-Null
+        }
+        $unresolved = if ([bool]$selection.include_all) { @() } else { @($effectiveNames | Where-Object { -not $matchedNames.Contains($_) } | Sort-Object -Unique) }
+        $selectionRecord = [ordered]@{
+            host = [string]$selection.host
+            profile = [string]$selection.profile
+            include_all = [bool]$selection.include_all
+            included_names = @($includedNames | Sort-Object -Unique)
+            excluded_names = @($excludedNames | Sort-Object -Unique)
+        }
+        $fingerprint = Get-AuditFingerprintFromVendorFromPairs @(
+            (($selectionRecord | ConvertTo-Json -Compress -Depth 8)),
+            (Get-AuditFingerprintFromSkillFacts @($selected.ToArray()))
+        ) $true
+        return [pscustomobject]([ordered]@{
+                status = if ($unresolved.Count -eq 0) { 'available' } else { 'selection_unresolved' }
+                selection = [pscustomobject]$selectionRecord
+                selected_skills = @($selected.ToArray())
+                selected_skill_count = $selected.Count
+                unresolved_selected_names = @($unresolved)
+                fingerprint = $fingerprint
+            })
+    }
+    catch {
+        return [pscustomobject]([ordered]@{
+                status = 'unavailable'
+                selection = $null
+                selected_skills = @()
+                selected_skill_count = 0
+                unresolved_selected_names = @()
+                fingerprint = ''
+            })
+    }
 }
 
 function Get-AuditExternalSkillFacts($cfg = $null) {
@@ -19834,22 +19950,34 @@ function Get-AuditHostProjectionState($cfg) {
 
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
-    $facts = @(Get-InstalledSkillFacts $cfg)
+    $configuredSupplySkills = @(Get-InstalledSkillFacts $cfg)
+    $profileState = Get-AuditCurrentProfileSkillState $cfg $configuredSupplySkills
+    $facts = @($profileState.selected_skills)
     $externalFacts = @(Get-AuditExternalSkillFacts $cfg)
-    $mcpServers = @()
-    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
-        $mcpServers = @($cfg.mcp_servers)
-    }
+    $mcpServers = @(Get-AuditMcpServerFacts $cfg)
     return [pscustomobject]([ordered]@{
-        source_of_truth = "live_mappings"
+        source_of_truth = "live_configuration_and_profile_selection"
         captured_at = (Get-Date).ToString("o")
         skill_count = @($facts).Count
-        fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+        fingerprint = [string]$profileState.fingerprint
+        configured_supply_skill_count = @($configuredSupplySkills).Count
+        configured_supply_fingerprint = (Get-AuditFingerprintFromSkillFacts $configuredSupplySkills)
+        profile_selection = $profileState.selection
+        profile_selection_status = [string]$profileState.status
+        profile_selection_unresolved_names = @($profileState.unresolved_selected_names)
+        configured_supply_skills = @($configuredSupplySkills)
+        profile_selected_skills = @($facts)
         external_skill_count = @($externalFacts).Count
         external_skill_fingerprint = (Get-AuditFingerprintFromExternalSkillFacts $externalFacts)
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
         host_projection = (Get-AuditHostProjectionState $cfg)
+        invocation_evidence = [pscustomobject]([ordered]@{
+                state = 'not_observed'
+                scope = 'audit_scanner'
+                evidence = 'This workflow does not have a host invocation ledger. Configuration, projected files, and read-only host observations cannot establish a successful skill or MCP invocation.'
+                retirement_gate = 'A user statement of no successful use is a risk signal, not removal proof; validate profile reachability or task-route matching before proposing retirement.'
+            })
     })
 }
 
@@ -19882,6 +20010,11 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (Test-AuditJsonProperty $data "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $snapshotPath)
     Need (Assert-IsArray $data.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
+    $configuredSupplySkills = @()
+    if (Test-AuditJsonProperty $data 'configured_supply_skills' -and $null -ne $data.configured_supply_skills) {
+        Need (Assert-IsArray $data.configured_supply_skills) ("snapshot.installed_state.configured_supply_skills 必须为数组：{0}" -f $snapshotPath)
+        $configuredSupplySkills = @($data.configured_supply_skills)
+    }
     $externalSkills = @()
     if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
         Need (Assert-IsArray $data.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $snapshotPath)
@@ -19898,6 +20031,13 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     }
     if ([string]::IsNullOrWhiteSpace($fingerprint)) {
         $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $configuredSupplyFingerprint = ''
+    if (Test-AuditJsonProperty $data 'live_configured_supply_fingerprint') {
+        $configuredSupplyFingerprint = ([string]$data.live_configured_supply_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($configuredSupplyFingerprint) -and $configuredSupplySkills.Count -gt 0) {
+        $configuredSupplyFingerprint = Get-AuditFingerprintFromSkillFacts $configuredSupplySkills
     }
     $externalSkillFingerprint = ''
     if (Test-AuditJsonProperty $data 'live_external_skill_fingerprint') {
@@ -19924,6 +20064,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         captured_at = $capturedAt
         skill_count = $skills.Count
         fingerprint = $fingerprint
+        configured_supply_skill_count = $configuredSupplySkills.Count
+        configured_supply_fingerprint = $configuredSupplyFingerprint
         external_skill_count = $externalSkills.Count
         external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
@@ -19934,6 +20076,10 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
 
 function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $configuredSupplyStale = $false
+    if ($snapshotState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.configured_supply_fingerprint)) {
+        $configuredSupplyStale = ([string]$snapshotState.configured_supply_fingerprint -ne [string]$liveState.configured_supply_fingerprint)
+    }
     $mcpStale = $false
     if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
         $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
@@ -19951,8 +20097,10 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
         }
     }
     return [pscustomobject]([ordered]@{
-            is_stale = ($skillStale -or $mcpStale -or $externalSkillStale -or $hostStale)
+            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $hostStale)
             skill_stale = $skillStale
+            configured_supply_stale = $configuredSupplyStale
+            profile_selection_stale = $skillStale
             mcp_stale = $mcpStale
             external_skill_stale = $externalSkillStale
             host_projection_stale = $hostStale
@@ -20790,7 +20938,14 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     Write-Host "=== 审查建议摘要 ==="
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
     if ($null -ne $snapshotState -and $null -ne $liveState) {
-        Write-Host ("口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        $liveSupplyCount = if ($liveState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$liveState.configured_supply_skill_count } else { $null }
+        $snapshotSupplyCount = if ($snapshotState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$snapshotState.configured_supply_skill_count } else { $null }
+        if ($null -ne $liveSupplyCount -or $null -ne $snapshotSupplyCount) {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}; configured_supply_live={2}, snapshot={3}（供给不等于当前可调用或已调用）" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count, $liveSupplyCount, $snapshotSupplyCount)
+        }
+        else {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        }
         if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
             $liveMcpCount = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             $snapshotMcpCount = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
@@ -20995,22 +21150,34 @@ function New-AuditInstalledStateSnapshot([string]$context) {
             Log ("{0}读取 skills.json 失败，已回退为空安装快照：{1}" -f $context, $_.Exception.Message) "WARN"
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
-        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $liveState = Get-AuditLiveInstalledState $liveCfg
+        $configuredSupplySkills = if ($liveState.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { @($liveState.configured_supply_skills) } else { @(Get-InstalledSkillFacts $liveCfg) }
+        $installedSkills = if ($liveState.PSObject.Properties.Match('profile_selected_skills').Count -gt 0) { @($liveState.profile_selected_skills) } else { @() }
         $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
-        $liveState = Get-AuditLiveInstalledState $liveCfg
         return [pscustomobject]([ordered]@{
             snapshot_kind = "audit_input"
-            source_of_truth = "live_mappings"
+            source_of_truth = "live_configuration_and_profile_selection"
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_configured_supply_skill_count = if ($liveState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$liveState.configured_supply_skill_count } else { @($configuredSupplySkills).Count }
+            live_configured_supply_fingerprint = if ($liveState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0) { [string]$liveState.configured_supply_fingerprint } else { Get-AuditFingerprintFromSkillFacts $configuredSupplySkills }
+            inventory_semantics = [pscustomobject]([ordered]@{
+                    skills = 'current_profile_selected_skills'
+                    configured_supply_skills = 'all configured mapping and override sources; not an assertion of current host visibility or invocation'
+                })
+            profile_selection = if ($liveState.PSObject.Properties.Match('profile_selection').Count -gt 0) { $liveState.profile_selection } else { $null }
+            profile_selection_status = if ($liveState.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { [string]$liveState.profile_selection_status } else { 'not_observed' }
+            profile_selection_unresolved_names = if ($liveState.PSObject.Properties.Match('profile_selection_unresolved_names').Count -gt 0) { @($liveState.profile_selection_unresolved_names) } else { @() }
+            invocation_evidence = if ($liveState.PSObject.Properties.Match('invocation_evidence').Count -gt 0) { $liveState.invocation_evidence } else { [pscustomobject]@{ state = 'not_observed'; scope = 'audit_scanner'; evidence = 'No invocation ledger was supplied.' } }
             live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
             live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
             skills = @($installedSkills)
+            configured_supply_skills = @($configuredSupplySkills)
             external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
@@ -21032,7 +21199,7 @@ function Write-AuditThreeFileBundle {
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
     $targetProfile = New-AuditTargetProfile $Scans
-    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers
+    $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
     $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
@@ -21077,7 +21244,9 @@ function Write-AuditThreeFileBundle {
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
+                    "installed_state.skills means current_profile_selected_skills, not all configured supply. Read configured_supply_skills only for source identity, rollback, and overlap analysis; it is not current host visibility or invocation evidence.",
                     "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
+                    "installed_state.invocation_evidence=not_observed is not non-use. A user statement of no successful use may indicate a reachability or matching failure and must not be converted directly into a removal candidate.",
                     "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                     "When scan_coverage.confidence_ceiling is representative_sample, sample-only signals cannot be treated as complete repository coverage."

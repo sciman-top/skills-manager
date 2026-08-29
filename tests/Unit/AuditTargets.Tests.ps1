@@ -104,10 +104,18 @@ Describe "Audit Targets" {
                 captured_at = '2026-08-03T00:00:00Z'
                 skill_count = 0
                 fingerprint = 'unit-empty-skills'
+                configured_supply_skill_count = 0
+                configured_supply_fingerprint = 'unit-empty-configured-supply'
+                configured_supply_skills = @()
+                profile_selected_skills = @()
+                profile_selection = $null
+                profile_selection_status = 'not_observed'
+                profile_selection_unresolved_names = @()
                 external_skill_count = 0
                 external_skill_fingerprint = 'unit-empty-external-skills'
                 mcp_server_count = 0
                 mcp_fingerprint = 'unit-empty-mcp'
+                invocation_evidence = [pscustomobject]@{ state = 'not_observed'; scope = 'test'; evidence = 'fixture' }
             })
         }
     }
@@ -1544,6 +1552,88 @@ $scan.detected.artifact_capabilities | Out-Null
             (Get-AuditFingerprintFromSkillFacts @($contentChanged)) | Should -Not -Be $baseFingerprint
         }
 
+        It "Separates configured supply from the current Codex profile selection" {
+            $oldOverridesDir = $script:OverridesDir
+            try {
+                $script:OverridesDir = Join-Path $TestDrive 'profile-selected-inventory'
+                $OverridesDir = $script:OverridesDir
+                foreach ($name in @('alpha', 'beta')) {
+                    $skillDir = Join-Path $script:OverridesDir $name
+                    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+                    Set-Content -Path (Join-Path $skillDir 'SKILL.md') -Value ("---`nname: {0}`ndescription: {0} fixture.`n---`nUse when testing {0}." -f $name)
+                }
+                $managedRoot = Join-Path $TestDrive 'agent'
+                foreach ($name in @('alpha', 'beta')) {
+                    $skillDir = Join-Path $managedRoot $name
+                    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+                    Set-Content -Path (Join-Path $skillDir 'SKILL.md') -Value ("---`nname: {0}`ndescription: {0} fixture.`n---`nUse when testing {0}." -f $name)
+                }
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @()
+                    mappings = @(
+                        [pscustomobject]@{ vendor = 'overrides'; from = 'alpha'; to = 'alpha' },
+                        [pscustomobject]@{ vendor = 'overrides'; from = 'beta'; to = 'beta' }
+                    )
+                    mcp_servers = @()
+                    skill_projection = [pscustomobject]@{
+                        managed_source_path = $managedRoot
+                        user_skill_root = (Join-Path $TestDrive 'user-skills')
+                        projection_profiles = [pscustomobject]@{
+                            schema_version = 1
+                            default_profile = 'core'
+                            profiles = [pscustomobject]@{
+                                core = [pscustomobject]@{ include = @('alpha'); exclude = @() }
+                            }
+                            hosts = [pscustomobject]@{
+                                codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() }
+                            }
+                        }
+                    }
+                }
+
+                $configuredSupply = @(Get-InstalledSkillFacts $cfg)
+                $upstreamDuplicate = $configuredSupply[0].PSObject.Copy()
+                $upstreamDuplicate.vendor = 'manual'
+                $upstreamDuplicate.from = 'upstream-alpha'
+                $upstreamDuplicate.content_hash = 'unmatched-upstream-content'
+                $coreState = Get-AuditCurrentProfileSkillState $cfg @($configuredSupply + $upstreamDuplicate)
+
+                $configuredSupply.Count | Should -Be 2
+                $coreState.selected_skill_count | Should -Be 1
+                @($coreState.selected_skills | ForEach-Object to) | Should -Be @('alpha')
+                $coreState.selected_skills[0].vendor | Should -Be 'overrides'
+                $coreState.selection.profile | Should -Be 'core'
+
+                $alternateCfg = $cfg | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+                $alternateCfg.skill_projection.projection_profiles.profiles.core.include = @('beta')
+                $alternateSupply = @(Get-InstalledSkillFacts $alternateCfg)
+                $alternate = Get-AuditCurrentProfileSkillState $alternateCfg $alternateSupply
+                $snapshotState = [pscustomobject]@{
+                    fingerprint = [string]$coreState.fingerprint
+                    configured_supply_fingerprint = (Get-AuditFingerprintFromSkillFacts $configuredSupply)
+                    mcp_fingerprint = ''
+                    external_skill_fingerprint = ''
+                    host_projection = $null
+                }
+                $alternateLiveState = [pscustomobject]@{
+                    fingerprint = [string]$alternate.fingerprint
+                    configured_supply_fingerprint = (Get-AuditFingerprintFromSkillFacts $alternateSupply)
+                    mcp_fingerprint = ''
+                    external_skill_fingerprint = ''
+                    host_projection = $null
+                }
+                $staleness = Get-AuditInstalledSnapshotStaleness $snapshotState $alternateLiveState
+
+                @($alternate.selected_skills | ForEach-Object to) | Should -Be @('beta')
+                $staleness.skill_stale | Should -BeTrue
+                $staleness.profile_selection_stale | Should -BeTrue
+            }
+            finally {
+                $script:OverridesDir = $oldOverridesDir
+            }
+        }
+
         It "Captures MCP activation fields in the installed audit snapshot" {
             $cfg = [pscustomobject]@{
                 mcp_servers = @([pscustomobject]@{
@@ -1690,7 +1780,7 @@ $scan.detected.artifact_capabilities | Out-Null
             @($rec.removal_candidates).Count | Should -Be 0
             @($rec.mcp_new_servers).Count | Should -Be 0
             @($rec.mcp_removal_candidates).Count | Should -Be 0
-            @($rec.empty_recommendation_reasons) | Should -Be @("scanner_only_no_lifecycle_change")
+            @($rec.empty_recommendation_reasons) | Should -Be @("no_lifecycle_change_without_invocation_or_reachability_evidence")
             (Test-AuditPlaceholderToken ($template | ConvertTo-Json -Depth 20)) | Should -BeFalse
         }
 

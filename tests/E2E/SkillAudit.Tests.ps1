@@ -58,9 +58,12 @@ BeforeAll {
         $installedState = [pscustomobject]@{
             snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
             live_fingerprint = [string]$live.fingerprint
+            live_configured_supply_fingerprint = if ($live.PSObject.Properties.Match("configured_supply_fingerprint").Count -gt 0) { [string]$live.configured_supply_fingerprint } else { '' }
             live_external_skill_fingerprint = if ($live.PSObject.Properties.Match("external_skill_fingerprint").Count -gt 0) { [string]$live.external_skill_fingerprint } else { "" }
             live_mcp_fingerprint = if ($live.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$live.mcp_fingerprint } else { "" }
-            skills=@(); external_skills=@(); mcp_servers=@(); host_projection=$null
+            skills = @(if ($live.PSObject.Properties.Match('profile_selected_skills').Count -gt 0) { @($live.profile_selected_skills) } else { @() })
+            configured_supply_skills = @(if ($live.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { @($live.configured_supply_skills) } else { @() })
+            external_skills=@(); mcp_servers=@(); host_projection=$null
         }
         Write-AuditJsonFile $Path ([pscustomobject]@{
             schema_version=2; run_id=$RunId; mode="target-repo"; prompt_contract_version=(Get-AuditPromptContractVersion)
