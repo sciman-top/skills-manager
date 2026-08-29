@@ -70,6 +70,9 @@ function Assert-StagedPayloadIntegrity([string]$StagedRoot, [string]$ExpectedMan
     foreach ($file in $actual) {
         $relative = [IO.Path]::GetRelativePath($rootFull, $file.FullName).Replace('\', '/')
         if (-not $manifestPaths.Contains($relative)) { throw "Staged payload contains an unmanifested file: $relative" }
+        # The manifest itself is not an entry of its own files list; its
+        # integrity is already pinned by the parent-supplied manifest hash.
+        if ($relative -eq 'RELEASE-MANIFEST.json') { continue }
         $entry = @($manifest.files | Where-Object { (([string]$_.path).Replace('\', '/')) -eq $relative })[0]
         $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($sha -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "Staged payload file was modified after handoff: $relative" }
