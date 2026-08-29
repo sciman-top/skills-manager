@@ -1180,6 +1180,31 @@ Describe "Core Functions" {
             $payload = Build-GeminiSettingsPayload "" $servers
             $payload.mcpServers.fetch.command | Should -Be "python"
         }
+
+        It "Throws on malformed existing settings instead of rebuilding a minimal payload" {
+            $servers = @(
+                [pscustomobject]@{ name = "fetch"; transport = "stdio"; command = "python" }
+            )
+            { Build-GeminiSettingsPayload '{ "tools": { broken' $servers } | Should -Throw '*拒绝最小化重建*'
+        }
+    }
+
+    Context "Build-GenericMcpPayload" {
+        It "Throws on malformed existing host config to protect non-MCP host settings" {
+            $servers = @(
+                [pscustomobject]@{ name = "fetch"; transport = "stdio"; command = "python" }
+            )
+            { Build-GenericMcpPayload '{ "mcpServers": { broken' $servers } | Should -Throw '*拒绝最小化重建*'
+        }
+    }
+
+    Context "Build-ZCodeMcpPayload" {
+        It "Throws on malformed existing host config to protect non-MCP host settings" {
+            $servers = @(
+                [pscustomobject]@{ name = "fetch"; transport = "stdio"; command = "python" }
+            )
+            { Build-ZCodeMcpPayload '{ "mcp": { broken' $servers } | Should -Throw '*拒绝最小化重建*'
+        }
     }
 
     Context "Ensure-GhAuthForGithubMcp" {
