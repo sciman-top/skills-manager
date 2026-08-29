@@ -174,8 +174,14 @@ function LoadCfg() {
             SaveCfgSafe $cfg $raw
         }
         catch {
-            # 目录已改名而配置回写失败会造成磁盘/配置名称分叉；把目录迁回原名保持一致。
-            Undo-DirectoryMigrations $dirMigrations
+            # 目录已改名而配置回写失败会造成磁盘/配置名称分叉；回退目录迁移，
+            # 任一回退失败时聚合暴露未复原路径，不得只留下原始保存错误。
+            $unrestored = Undo-DirectoryMigrations $dirMigrations
+            if (@($unrestored).Count -gt 0) {
+                $detail = (@($unrestored) | ForEach-Object { "{0}:{1}({2})" -f $_.label, $_.path, $_.reason }) -join "; "
+                Log ("skills.json 自动修复保存失败，且部分目录迁移未能回退：{0}" -f $detail) "ERROR"
+                throw ("skills.json 保存失败：{0}；目录迁移回退未完成，磁盘与配置可能分叉：{1}" -f $_.Exception.Message, $detail)
+            }
             throw
         }
     }
@@ -757,30 +763,37 @@ function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [
     $changed.Value = $true
 }
 function Undo-DirectoryMigrations($dirMigrations) {
-    if ($null -eq $dirMigrations) { return }
+    # 逐项尝试回退目录迁移，返回未能复原的条目列表（空数组=全部复原）。
+    # 调用方必须把非空结果聚合进抛出的错误，不得只记 warning 后吞掉。
+    $unrestored = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $dirMigrations) { return @() }
     foreach ($v in $dirMigrations.vendors) {
-        Undo-DirNameRename $VendorDir $v.new $v.old "vendor"
+        Undo-DirNameRename $VendorDir $v.new $v.old "vendor" $unrestored
     }
     foreach ($i in $dirMigrations.imports) {
-        Undo-DirNameRename $ImportDir $i.new $i.old "import 缓存"
+        Undo-DirNameRename $ImportDir $i.new $i.old "import 缓存" $unrestored
         if ($i.mode -eq "manual") {
-            Undo-DirNameRename $ManualDir $i.new $i.old "manual 技能"
+            Undo-DirNameRename $ManualDir $i.new $i.old "manual 技能" $unrestored
         }
     }
+    return @($unrestored.ToArray())
 }
-function Undo-DirNameRename([string]$baseDir, [string]$currentName, [string]$originalName, [string]$label) {
+function Undo-DirNameRename([string]$baseDir, [string]$currentName, [string]$originalName, [string]$label, [System.Collections.Generic.List[object]]$unrestored) {
     if ([string]::IsNullOrWhiteSpace($currentName) -or [string]::IsNullOrWhiteSpace($originalName)) { return }
     if ($currentName -eq $originalName) { return }
     $src = Join-Path $baseDir $currentName
     if (-not (Test-Path -LiteralPath $src)) { return }
     $dst = Join-Path $baseDir $originalName
-    if (Test-Path -LiteralPath $dst) { return }
+    if (Test-Path -LiteralPath $dst) {
+        $unrestored.Add([pscustomobject]@{ label = $label; path = $dst; reason = "original_target_exists" }) | Out-Null
+        return
+    }
     try {
         Invoke-MoveItem $src $dst
         Log ("{0} 目录迁移已回退：{1} -> {2}" -f $label, $currentName, $originalName) "WARN"
     }
     catch {
-        Log ("{0} 目录迁移回退失败：{1} -> {2}；原因：{3}" -f $label, $currentName, $originalName, $_.Exception.Message) "WARN"
+        $unrestored.Add([pscustomobject]@{ label = $label; path = $src; reason = $_.Exception.Message }) | Out-Null
     }
 }
 function Apply-DirectoryMigrations($dirMigrations, [ref]$changed) {

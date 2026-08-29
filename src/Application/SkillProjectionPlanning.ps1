@@ -83,7 +83,8 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
         # derived from skills.json, not authored skill content, and must not
         # affect package identity or the manifest would go stale on every sync.
         if ($relative -eq 'catalog.json') { continue }
-        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHashCached $file.FullName))) | Out-Null
+        # 计划侧 package_hash 会与 apply 阶段的漂移校验比对，必须用纯内容哈希。
+        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
     }
     return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")
 }

@@ -47,6 +47,22 @@ Describe "E2E Workflows" {
             $LASTEXITCODE | Should -Be 0
             ($output -join "`n") | Should -Match "skills\.ps1"
         }
+
+        It "Returns a non-zero exit code when add fails instead of reporting success" {
+            $entry = (Join-Path $repoRoot "skills.ps1").Replace("'", "''")
+            $cfgPath = Join-Path $repoRoot "skills.json"
+            $before = [IO.File]::ReadAllBytes($cfgPath)
+            try {
+                # invalid.invalid 为 RFC 保留 TLD，DNS 必然 NXDOMAIN：
+                # 走 Add-ImportFromArgs 的 catch -> return $false 路径（非解析抛错路径）。
+                $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command "& '$entry' add 'https://invalid.invalid/demo.git'; exit `$LASTEXITCODE" 2>&1)
+                $LASTEXITCODE | Should -Be 1
+            }
+            finally {
+                $after = [IO.File]::ReadAllBytes($cfgPath)
+            }
+            ([BitConverter]::ToString($before)) | Should -Be ([BitConverter]::ToString($after))
+        }
     }
 
     Context "构建生效 + 同步" {

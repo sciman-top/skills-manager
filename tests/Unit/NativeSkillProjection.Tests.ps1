@@ -2,7 +2,6 @@ BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
     . (Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1')
-    . (Join-Path $repoRoot 'src\Core.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillCatalogCompiler.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillEligibilityPolicy.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillProjection.ps1')
@@ -130,6 +129,24 @@ Describe 'Native skill projection' {
         [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Be $baseline
 
         Add-Content -LiteralPath (Join-Path $skillDir 'SKILL.md') -Value 'authored change'
+        [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Not -Be $baseline
+    }
+
+    It 'blocks apply-source drift when a packaged resource changes with identical length and restored mtime' {
+        $f = New-ProjectionFixture
+        $skillDir = Join-Path $f.source 'enabled'
+        $resource = Join-Path $skillDir 'resource.txt'
+        'AAAA' | Set-Content -LiteralPath $resource -NoNewline
+        $pinnedMtime = (Get-Item -LiteralPath $resource).LastWriteTimeUtc
+        $baseline = Get-NativeSkillProjectionPackageHash $skillDir
+        $baseline | Should -Match '^[a-f0-9]{64}$'
+
+        # 同长度 + 恢复 mtime 的内容替换对任何 stat 键缓存不可见：包哈希必须仍按
+        # 真实内容漂移，否则 apply 阶段的 package_hash 漂移校验会放过篡改。
+        'BBBB' | Set-Content -LiteralPath $resource -NoNewline
+        (Get-Item -LiteralPath $resource).LastWriteTimeUtc = $pinnedMtime
+
+        Get-NativeSkillProjectionPackageHash $skillDir | Should -Not -Be $baseline
         [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Not -Be $baseline
     }
 

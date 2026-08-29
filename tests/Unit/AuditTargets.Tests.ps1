@@ -2650,3 +2650,30 @@ $scan.detected.artifact_capabilities | Out-Null
         }
     }
 }
+
+Describe "Legacy manual import uninstall idempotency" {
+    It "Removes mode-less legacy imports so audit apply cannot resurrect them" {
+        Mock LoadCfg {
+            [pscustomobject]@{
+                mappings = @(
+                    [pscustomobject]@{ vendor = "manual"; from = "legacy-skill"; to = "legacy-skill" }
+                )
+                imports = @(
+                    [pscustomobject]@{ name = "legacy-skill"; repo = "https://example.invalid/legacy.git"; ref = "main"; skill = "."; sparse = $false }
+                    [pscustomobject]@{ name = "vendor-import"; mode = "vendor"; repo = "https://example.invalid/v.git"; ref = "main"; skill = "skills/a"; sparse = $false }
+                )
+            }
+        }
+        $script:savedCfg = $null
+        Mock SaveCfg { param($cfg) $script:savedCfg = $cfg }
+        Mock Clear-SkillsCache { }
+        Mock Get-UnmappedSkillOutputNames { @() }
+        Mock Remove-RetiredSkillProjectionReferences { [pscustomobject]@{ discovery_memberships = 0; profile_entries = 0 } }
+
+        $result = Remove-AuditSelectedInstalledSkills @([pscustomobject]@{ vendor = "manual"; from = "legacy-skill"; status = $null })
+
+        [int]$result.deleted_manual_imports | Should -Be 1
+        @($script:savedCfg.imports | Where-Object { $null -ne $_ -and [string]$_.name -eq "legacy-skill" }).Count | Should -Be 0
+        @($script:savedCfg.imports | Where-Object { $null -ne $_ -and [string]$_.name -eq "vendor-import" }).Count | Should -Be 1
+    }
+}

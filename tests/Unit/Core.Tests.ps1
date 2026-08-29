@@ -3424,3 +3424,49 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $report | Should -Match 'consumable revision：`[0-9a-f]{40}`'
     }
 }
+
+Describe "Audit regression gates" {
+    Context "Normalize-RepoUrl shorthand forms" {
+        It "Does not double-suffix a .git-terminated owner/repo shorthand" {
+            Normalize-RepoUrl "owner/repo.git" | Should -Be "https://github.com/owner/repo.git"
+            Normalize-RepoUrl "owner/repo" | Should -Be "https://github.com/owner/repo.git"
+            Normalize-RepoUrl "owner/repo_name.git" | Should -Be "https://github.com/owner/repo_name.git"
+            Normalize-RepoUrl "https://github.com/owner/repo.git" | Should -Be "https://github.com/owner/repo.git"
+        }
+    }
+
+    Context "Has-GitChanges fail-closed" {
+        It "Treats a failed git status as dirty instead of clean" {
+            $oldDryRun = $DryRun
+            try {
+                $DryRun = $false
+                Mock Invoke-GitCapture { $null }
+                Has-GitChanges | Should -Be $true
+                Mock Invoke-GitCapture { "" }
+                Has-GitChanges | Should -Be $false
+            }
+            finally {
+                $DryRun = $oldDryRun
+            }
+        }
+    }
+
+    Context "Normalize-Cfg null-element arrays" {
+        It "Keeps arrays containing null elements instead of wiping them" {
+            $cfg = [pscustomobject]@{
+                mappings  = @([pscustomobject]@{ vendor = "demo"; from = "a"; to = "a" }, $null)
+                imports   = @()
+                sync_mode = "link"
+            }
+            $normalized = Normalize-Cfg $cfg
+            @($normalized.mappings).Count | Should -Be 2
+        }
+
+        It "Fills genuinely null collections with empty arrays" {
+            $cfg = [pscustomobject]@{ mappings = $null; imports = $null; sync_mode = $null }
+            $normalized = Normalize-Cfg $cfg
+            @($normalized.mappings).Count | Should -Be 0
+            @($normalized.imports).Count | Should -Be 0
+        }
+    }
+}

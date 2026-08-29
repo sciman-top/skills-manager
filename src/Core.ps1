@@ -392,23 +392,6 @@ function Get-FileContentHash([string]$path) {
         $sha.Dispose()
     }
 }
-# Get-FileContentHash 的进程内记忆化变体，仅供投影链（catalog/plan/apply/fingerprint
-# 对同一棵 agent/ 树的 6-8 次重复哈希）使用。键为 (全路径|长度|LastWriteTimeUtc ticks)。
-# 锁文件、workspace 指纹（sha256-tree-v2）等 fail-closed 契约必须继续走纯函数
-# Get-FileContentHash：显式恢复 mtime 的内容篡改在 stat 键下不可见（见 Core.Tests
-# "Fingerprints local zip workspaces by content including hidden files"）。
-$script:FileContentHashCache = @{}
-function Get-FileContentHashCached([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    $stat = Get-Item -LiteralPath $path -Force
-    $key = '{0}|{1}|{2}' -f $stat.FullName, $stat.Length, $stat.LastWriteTimeUtc.Ticks
-    $cached = $script:FileContentHashCache[$key]
-    if ($cached) { return $cached }
-    $hex = Get-FileContentHash $path
-    if ($hex) { $script:FileContentHashCache[$key] = $hex }
-    return $hex
-}
 function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
     $baseDir = [System.IO.Path]::GetFullPath($dir)

@@ -1512,4 +1512,70 @@ Describe "Config And Update Enhancements" {
             }
         }
     }
+
+    Context "Directory migration compensation" {
+        It "Restores migrated directory names when skills.json save fails" {
+            $oldCfgPath = $CfgPath
+            $oldVendorDir = $VendorDir
+            $oldImportDir = $ImportDir
+            $oldManualDir = $ManualDir
+            try {
+                $root = Join-Path $TestDrive "mig-restore"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $CfgPath = Join-Path $root "skills.json"
+                $VendorDir = Join-Path $root "vendor"
+                $ImportDir = Join-Path $root "imports"
+                $ManualDir = Join-Path $root "manual"
+                # "Bad_Name" 会被 Fix-Cfg 规范化为 "bad-name" 并触发 vendor 目录迁移。
+                Set-ContentUtf8 $CfgPath '{"vendors":[{"name":"Bad_Name","repo":"https://example.invalid/demo.git"}],"targets":[],"mappings":[],"imports":[],"mcp_servers":[],"mcp_targets":[],"sync_mode":"link","update_force":true}'
+                New-Item -ItemType Directory -Path (Join-Path $VendorDir "Bad_Name") -Force | Out-Null
+                Mock SaveCfgSafe { throw "disk full" }
+
+                { LoadCfg } | Should -Throw '*disk full*'
+
+                Test-Path -LiteralPath (Join-Path $VendorDir "Bad_Name") -PathType Container | Should -BeTrue
+                Test-Path -LiteralPath (Join-Path $VendorDir "bad-name") | Should -BeFalse
+            }
+            finally {
+                $CfgPath = $oldCfgPath
+                $VendorDir = $oldVendorDir
+                $ImportDir = $oldImportDir
+                $ManualDir = $oldManualDir
+            }
+        }
+
+        It "Aggregates unrestored migration paths when rollback cannot complete" {
+            $oldCfgPath = $CfgPath
+            $oldVendorDir = $VendorDir
+            $oldImportDir = $ImportDir
+            $oldManualDir = $ManualDir
+            try {
+                $root = Join-Path $TestDrive "mig-blocked"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $CfgPath = Join-Path $root "skills.json"
+                $VendorDir = Join-Path $root "vendor"
+                $ImportDir = Join-Path $root "imports"
+                $ManualDir = Join-Path $root "manual"
+                Set-ContentUtf8 $CfgPath '{"vendors":[{"name":"Bad_Name","repo":"https://example.invalid/demo.git"}],"targets":[],"mappings":[],"imports":[],"mcp_servers":[],"mcp_targets":[],"sync_mode":"link","update_force":true}'
+                New-Item -ItemType Directory -Path (Join-Path $VendorDir "Bad_Name") -Force | Out-Null
+                # 目标名已被占用：迁移被跳过、回退也无法落位，补偿必须显式暴露分叉。
+                New-Item -ItemType Directory -Path (Join-Path $VendorDir "bad-name") -Force | Out-Null
+                Mock SaveCfgSafe { throw "disk full" }
+
+                $thrown = $null
+                try { LoadCfg } catch { $thrown = $_ }
+
+                $thrown | Should -Not -Be $null
+                $thrown.Exception.Message | Should -Match 'disk full'
+                $thrown.Exception.Message | Should -Match '回退未完成'
+                $thrown.Exception.Message | Should -Match 'original_target_exists'
+            }
+            finally {
+                $CfgPath = $oldCfgPath
+                $VendorDir = $oldVendorDir
+                $ImportDir = $oldImportDir
+                $ManualDir = $oldManualDir
+            }
+        }
+    }
 }
