@@ -454,7 +454,10 @@ function Read-SkillMetadata {
     return [pscustomobject]$result
 }
 
-$Root = (Resolve-Path ".").Path
+# Root must be the script's own location, not the caller's CWD: the CLI is
+# invoked through absolute-path shims (skills.cmd / install.ps1) from any
+# directory, and a CWD-bound root would read or mutate a foreign skills.json.
+$Root = $PSScriptRoot
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
 $VendorDir = Join-Path $Root "vendor"
@@ -714,7 +717,8 @@ function Get-ContentUtf8([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($path)
-    return ([System.Text.Encoding]::UTF8.GetString($bytes))
+    # Strip a leading UTF-8 BOM: ConvertFrom-Json rejects U+FEFF outright.
+    return ([System.Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xFEFF)
 }
 function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
     if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
@@ -7793,8 +7797,8 @@ function LoadCfg() {
     catch {
         throw ("skills.json 解析失败：{0}。请检查 JSON 格式；注释仅支持整行 //。" -f $_.Exception.Message)
     }
-    Need ($cfg.vendors -ne $null) "skills.json 缺少 vendors"
-    Need ($cfg.targets -ne $null) "skills.json 缺少 targets"
+    # vendors/targets 缺失或为 null/[] 由下方 Normalize-ArrayField 自动补空数组；
+    # 此处不再用 -ne $null 预检（数组过滤语义会把空数组误判为缺失并自锁）。
     $cfg = Normalize-Cfg $cfg
     $changed = $false
     $dirMigrations = [ordered]@{
@@ -10578,9 +10582,11 @@ function 删除技能库 {
             }
         }
 
-        $cfg.vendors = $cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) }
-        $cfg.mappings = $cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) }
-        $cfg.imports = $cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) }
+        # @() guards: an empty pipe result would assign $null and serialize
+        # the field as JSON null, which older LoadCfg builds then reject.
+        $cfg.vendors = @($cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) })
+        $cfg.mappings = @($cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) })
+        $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) })
         SaveCfgSafe $cfg $cfgRaw
         Clear-SkillsCache
         构建生效

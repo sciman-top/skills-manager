@@ -758,9 +758,11 @@ function 删除技能库 {
             }
         }
 
-        $cfg.vendors = $cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) }
-        $cfg.mappings = $cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) }
-        $cfg.imports = $cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) }
+        # @() guards: an empty pipe result would assign $null and serialize
+        # the field as JSON null, which older LoadCfg builds then reject.
+        $cfg.vendors = @($cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) })
+        $cfg.mappings = @($cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) })
+        $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) })
         SaveCfgSafe $cfg $cfgRaw
         Clear-SkillsCache
         构建生效

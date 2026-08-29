@@ -63,6 +63,19 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.exit_code | Should -Be 0
     }
 
+    It 'classifies pure MOR decision-doc changes as full, not docs' {
+        $repo = New-ResolveGateFixture
+        New-Item -ItemType Directory -Path (Join-Path $repo 'docs\decision') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value '# mor'
+        & git -C $repo add docs/decision/MOR-090-static-adapter-evidence.md
+        & git -C $repo commit -m 'add mor doc' *> $null
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value 'change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'risk_path'
+    }
+
     It 'classifies risk-path changes as full' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

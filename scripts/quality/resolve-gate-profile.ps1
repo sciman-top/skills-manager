@@ -111,15 +111,18 @@ if ($changedCount -eq 0) {
     exit 0
 }
 
-$docsOnly = ($changed | Where-Object { -not $docsRegex.IsMatch($_) }).Count -eq 0
-if ($docsOnly) {
-    $result = Get-GateProfileResult 'docs' 'docs_only' $baseShaValue $headShaValue $true @() $changedCount $untrackedCount
+# risk is evaluated before docs-only: the risk regex covers a subset of
+# docs/*.md (MOR decision and cross-host orchestration governance docs) that
+# must reach full regardless of the rest of the change set being docs-only.
+if (($changed | Where-Object { $riskRegex.IsMatch($_) }).Count -gt 0) {
+    $result = Get-GateProfileResult 'full' 'risk_path' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount
     if ($Json) { $result | ConvertTo-Json } else { $result }
     exit 0
 }
 
-if (($changed | Where-Object { $riskRegex.IsMatch($_) }).Count -gt 0) {
-    $result = Get-GateProfileResult 'full' 'risk_path' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount
+$docsOnly = ($changed | Where-Object { -not $docsRegex.IsMatch($_) }).Count -eq 0
+if ($docsOnly) {
+    $result = Get-GateProfileResult 'docs' 'docs_only' $baseShaValue $headShaValue $true @() $changedCount $untrackedCount
     if ($Json) { $result | ConvertTo-Json } else { $result }
     exit 0
 }

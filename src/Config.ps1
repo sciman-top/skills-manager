@@ -149,8 +149,8 @@ function LoadCfg() {
     catch {
         throw ("skills.json 解析失败：{0}。请检查 JSON 格式；注释仅支持整行 //。" -f $_.Exception.Message)
     }
-    Need ($cfg.vendors -ne $null) "skills.json 缺少 vendors"
-    Need ($cfg.targets -ne $null) "skills.json 缺少 targets"
+    # vendors/targets 缺失或为 null/[] 由下方 Normalize-ArrayField 自动补空数组；
+    # 此处不再用 -ne $null 预检（数组过滤语义会把空数组误判为缺失并自锁）。
     $cfg = Normalize-Cfg $cfg
     $changed = $false
     $dirMigrations = [ordered]@{

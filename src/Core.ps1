@@ -1,4 +1,7 @@
-$Root = (Resolve-Path ".").Path
+# Root must be the script's own location, not the caller's CWD: the CLI is
+# invoked through absolute-path shims (skills.cmd / install.ps1) from any
+# directory, and a CWD-bound root would read or mutate a foreign skills.json.
+$Root = $PSScriptRoot
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
 $VendorDir = Join-Path $Root "vendor"
@@ -258,7 +261,8 @@ function Get-ContentUtf8([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     $bytes = [System.IO.File]::ReadAllBytes($path)
-    return ([System.Text.Encoding]::UTF8.GetString($bytes))
+    # Strip a leading UTF-8 BOM: ConvertFrom-Json rejects U+FEFF outright.
+    return ([System.Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xFEFF)
 }
 function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
     if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
