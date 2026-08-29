@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Validates docs/decision/MOR-090-tuple-matrix.json (canonical MOR-090 tuple contract).
-# Static doc validator: zero network, zero host write. Not wired into run-local-quality-gates.
+# Static doc validator: zero network, zero host write. Wired into local/CI quality gates.
 # Usage: pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path

@@ -6,7 +6,7 @@ param(
     [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
     [string[]]$TestName = @(),
-    [ValidateSet('lock', 'integrity', 'config', 'scheduler')]
+    [ValidateSet('lock', 'integrity', 'config', 'scheduler', 'mor')]
     [string[]]$Verifier = @(),
     [string]$DiffBase = ''
 )
@@ -115,7 +115,7 @@ try {
         @()
     }
     else {
-        @('lock', 'integrity', 'config', 'scheduler')
+        @('lock', 'integrity', 'config', 'scheduler', 'mor')
     }
     foreach ($verifier in $selectedVerifiers) {
         switch ($verifier) {
@@ -123,6 +123,7 @@ try {
             'integrity' { Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 } }
             'config' { Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce } }
             'scheduler' { Invoke-QualityGate 'host-scheduler-ownership' { Assert-HostSchedulerOwnershipContract } }
+            'mor' { Invoke-QualityGate 'model-orchestration-contract' { & .\scripts\quality\validate-mor-tuple-matrix.ps1 } }
         }
     }
     Write-Host ("Local quality gates passed ({0})." -f $Profile)

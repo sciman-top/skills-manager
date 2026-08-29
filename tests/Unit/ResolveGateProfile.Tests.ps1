@@ -215,7 +215,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
 
     It 'keeps the canonical classification regexes verbatim in the script' {
         $content = Get-Content -LiteralPath $script:resolverPath -Raw
-        $content | Should -Match ([regex]::Escape('^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'))
+        $content | Should -Match ([regex]::Escape('^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$|docs/(product/cross-host-model-orchestration-.*\.md|decision/MOR-.*\.md)$)'))
         $content | Should -Match ([regex]::Escape('^(src/|tests/Unit/)'))
         $content | Should -Match ([regex]::Escape('^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'))
         $content | Should -Match ([regex]::Escape('tests/Unit/CiWorkflow.Tests.ps1'))
