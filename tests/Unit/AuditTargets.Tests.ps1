@@ -1186,6 +1186,7 @@ public string CreatePresentation() => "courseware.pptx";
             $primary = @($priority.primary_needs | Where-Object key -eq "workflow/document_processing")
             $primary.Count | Should -Be 1
             $primary[0].evidence_coverage.source_code_target_count | Should -Be 2
+            $priority.ranking_method | Should -Be "role_then_source_coverage_v2"
             @($priority.primary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 0
             @($priority.secondary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 1
             @($priority.observations | Where-Object key -eq "workflow/ocr").Count | Should -Be 1
@@ -1205,6 +1206,16 @@ public string CreatePresentation() => "courseware.pptx";
             ($insights.decision_checklist -join " ") | Should -Match "target_scans"
             $insights.target_repo_by_target[0].target | Should -Be "one"
             $insights.target_repo_by_target[0].keywords | Should -Contain "document_processing"
+
+            $singleSourceScanTwo = $scanTwo | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+            $singleSourceScanTwo.detected.requirement_signals = @(
+                [pscustomobject]@{ domain = "workflow"; subject = "ocr"; actions = @("recognize"); confidence = "low"; evidence_status = "documented"; targets = @(); evidence = $documentedOcr }
+            )
+            $singleSourceProfile = New-AuditTargetProfile @($scanOne, $singleSourceScanTwo)
+            @($singleSourceProfile.prioritized_needs.primary_needs | Where-Object key -eq "workflow/document_processing").Count | Should -Be 0
+            $singleSourceWorkflow = @($singleSourceProfile.prioritized_needs.secondary_needs | Where-Object key -eq "workflow/document_processing")
+            $singleSourceWorkflow.Count | Should -Be 1
+            $singleSourceWorkflow[0].evidence_coverage.source_code_target_count | Should -Be 1
         }
 
         It "Emits repository scope and source scan coverage for a single target" {
@@ -1664,21 +1675,23 @@ $scan.detected.artifact_capabilities | Out-Null
             $prompt | Should -Match ([regex]::Escape("--apply --yes"))
         }
 
-        It "Builds recommendations template with placeholder examples" {
+        It "Builds a loadable zero-change recommendations baseline" {
             $template = New-AuditRecommendationsTemplate "r1" "demo"
+            $path = Join-Path $TestDrive "recommendations-zero-change.json"
+            Write-AuditJsonFile $path $template
+            $rec = Load-AuditRecommendations $path
 
-            $template.schema_version | Should -Be 3
-            $template.recommendation_mode | Should -Be "target-repo"
-            $template.decision_basis.target_scan_used | Should -Be $true
-            $template.new_skills[0].install.repo | Should -Be "<owner/repo-or-local-path>"
-            $template.removal_candidates[0].semantic_review.decision_owner | Should -Be "host_ai"
-            $template.removal_candidates[0].semantic_review.independent_of_target_profile | Should -Be $true
-            $template.mcp_removal_candidates[0].semantic_review.requires_user_confirmation | Should -Be $true
-            $template.do_not_install[0].name | Should -Be "<skill-not-recommended>"
-            $template.overlap_findings[0].routing.decision_owner | Should -Be "host_ai"
-            $template.overlap_findings[0].routing.router | Should -BeNullOrEmpty
-            $template.mcp_new_servers[0].server.transport | Should -Be "stdio"
-            $template.mcp_removal_candidates[0].semantic_review.decision_owner | Should -Be "host_ai"
+            $rec.schema_version | Should -Be 3
+            $rec.recommendation_mode | Should -Be "target-repo"
+            $rec.decision_basis.target_scan_used | Should -Be $true
+            $rec.decision_basis.summary | Should -Match "no skill or MCP lifecycle change"
+            @($rec.source_observations).Count | Should -Be 0
+            @($rec.new_skills).Count | Should -Be 0
+            @($rec.removal_candidates).Count | Should -Be 0
+            @($rec.mcp_new_servers).Count | Should -Be 0
+            @($rec.mcp_removal_candidates).Count | Should -Be 0
+            @($rec.empty_recommendation_reasons) | Should -Be @("scanner_only_no_lifecycle_change")
+            (Test-AuditPlaceholderToken ($template | ConvertTo-Json -Depth 20)) | Should -BeFalse
         }
 
         It "Builds profile-only recommendations template with target_scan_used false" -Skip {

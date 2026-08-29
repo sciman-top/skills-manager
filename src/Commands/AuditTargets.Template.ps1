@@ -273,16 +273,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
-        "Replace placeholder values wrapped in <> before using this file.",
-        "Delete example entries that are not needed, but keep the schema shape unchanged.",
-        "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
+        "This is a valid zero-change baseline, not an incomplete example file.",
+        "Keep lifecycle categories empty unless the current scan, installed inventory, and reviewed sources establish a specific change.",
+        "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
         "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
     )
-    $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
-    $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
-    $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
+    $basisSummary = "Scanner-only baseline: no skill or MCP lifecycle change is proposed until host AI verifies a scan-derived gap, reviewed source, and safe rollback path."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -296,114 +294,13 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
-        source_observations = @(
-            [ordered]@{
-                source = "<same-source-url-or-local-path-used-by-a-change>"
-                summary = "<specific fact observed from this source and relevant to the recommendation>"
-            }
-        )
-        empty_recommendation_reasons = @("insufficient_reliable_evidence")
-        new_skills = @(
-            [ordered]@{
-                name = "<new-skill-name>"
-                reason_target_profile = $targetReasonInstall
-                install = [ordered]@{
-                    repo = "<owner/repo-or-local-path>"
-                    skill = "<relative-skill-path-or-.>"
-                    ref = "<branch-or-tag>"
-                    mode = "manual"
-                }
-                confidence = "medium"
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs", "skills.sh")
-            }
-        )
-        overlap_findings = @(
-            [ordered]@{
-                name = "<existing-skill-or-skill-pair>"
-                reason_target_profile = $targetReasonInstall
-                sources = @("<source-url-1>")
-                note = "<report-only observation; no automatic uninstall>"
-                source_preference = [ordered]@{
-                    plugin_installed = $true
-                    standalone_duplicate = $true
-                    native_source_preferred = $true
-                    action = "report_only_do_not_import_duplicate"
-                }
-                routing = [ordered]@{
-                    decision_owner = "host_ai"
-                    selection_policy = "<how to choose executors without invoking every overlapping skill>"
-                    members = @(
-                        [ordered]@{ name = "<primary-skill>"; role = "executor" }
-                        [ordered]@{ name = "<alternative-or-validator>"; role = "validator" }
-                    )
-                }
-            }
-        )
-        removal_candidates = @(
-            [ordered]@{
-                name = "<installed-skill-name>"
-                reason_target_profile = "<profile context only; not the retirement proof>"
-                sources = @("<installed-skill-path-or-reviewed-source>")
-                installed = [ordered]@{ vendor = "<installed-vendor>"; from = "<installed-from>" }
-                semantic_review = [ordered]@{
-                    decision_owner = "host_ai"
-                    verdict = "removal_candidate"
-                    capability_class = "specialized"
-                    independent_of_target_profile = $true
-                    installed_capability = "<what this installed skill uniquely does>"
-                    retirement_basis = "semantic_replacement"
-                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
-                    requires_user_confirmation = $true
-                    replacement = [ordered]@{ kind = "skill"; name = "<replacement-skill>"; coverage = "<reviewed behavior covered by replacement>"; limitations = "<remaining gap or none-known>" }
-                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore the retired source>" }
-                    uncertainty = "<remaining semantic or usage uncertainty>"
-                }
-            }
-        )
-        do_not_install = @(
-            [ordered]@{
-                name = "<skill-not-recommended>"
-                reason_target_profile = $targetReasonDoNotInstall
-                sources = @("<source-url-1>")
-                note = "<why it should not be added now>"
-            }
-        )
-        mcp_new_servers = @(
-            [ordered]@{
-                name = "<mcp-server-name>"
-                reason_target_profile = $targetReasonInstall
-                confidence = "medium"
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                server = [ordered]@{
-                    name = "<mcp-server-name>"
-                    transport = "stdio"
-                    command = "<command>"
-                    args = @("<arg1>")
-                }
-            }
-        )
-        mcp_removal_candidates = @(
-            [ordered]@{
-                name = "<installed-mcp-name>"
-                reason_target_profile = "<profile context only; not the retirement proof>"
-                sources = @("<installed-mcp-config-or-reviewed-source>")
-                installed = [ordered]@{ name = "<installed-mcp-name>" }
-                semantic_review = [ordered]@{
-                    decision_owner = "host_ai"
-                    verdict = "removal_candidate"
-                    capability_class = "specialized"
-                    independent_of_target_profile = $true
-                    installed_capability = "<what this MCP exposes>"
-                    retirement_basis = "semantic_replacement"
-                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
-                    requires_user_confirmation = $true
-                    replacement = [ordered]@{ kind = "host_native"; name = "<host-native-capability>"; coverage = "<reviewed behavior covered>"; limitations = "<remaining gap or none-known>" }
-                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore this MCP>" }
-                    uncertainty = "<remaining semantic or usage uncertainty>"
-                }
-            }
-        )
+        source_observations = @()
+        empty_recommendation_reasons = @("scanner_only_no_lifecycle_change")
+        new_skills = @()
+        overlap_findings = @()
+        removal_candidates = @()
+        do_not_install = @()
+        mcp_new_servers = @()
+        mcp_removal_candidates = @()
     })
 }

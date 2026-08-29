@@ -16991,12 +16991,12 @@ function Get-DefaultAuditOuterAiPrompt {
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
 5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
-6. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
-6. 执行：
+6. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、已安装清单与审阅来源共同形成明确缺口时，才替换 ``scanner_only_no_lifecycle_change`` 并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+7. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-7. 预检通过后执行：
+8. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-8. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
+9. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -17254,7 +17254,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260825.1"
+    return "audit-prompt-v20260829.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -18802,7 +18802,8 @@ function Get-AuditNeedRole([string]$Kind, [string]$Domain, [string]$Subject) {
 function New-AuditPrioritizedNeed {
     param(
         $Entry,
-        [ValidateSet("requirement", "artifact")][string]$Kind
+        [ValidateSet("requirement", "artifact")][string]$Kind,
+        [int]$MinimumProductWorkflowSourceTargetCount = 1
     )
     $domain = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "domain") } else { "artifact" }
     $subject = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "subject") } else { [string](Get-CfgObjectProperty $Entry "artifact") }
@@ -18830,7 +18831,7 @@ function New-AuditPrioritizedNeed {
     if ($role -in @("delivery_surface", "engineering_or_operations")) { $limitations.Add("technical_context_not_direct_product_intent") | Out-Null }
     $band = "observation"
     if ([int]$coverage.source_code_target_count -gt 0) {
-        if ($role -eq "product_workflow" -and $score -ge 63) { $band = "primary_candidate" }
+        if ($role -eq "product_workflow" -and [int]$coverage.source_code_target_count -ge $MinimumProductWorkflowSourceTargetCount -and $score -ge 63) { $band = "primary_candidate" }
         elseif ($role -eq "supporting_artifact" -and [int]$coverage.source_code_target_count -ge 2 -and $score -ge 65) { $band = "primary_candidate" }
         else { $band = "secondary" }
     }
@@ -18855,9 +18856,9 @@ function New-AuditPrioritizedNeed {
         })
 }
 
-function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
+function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities, [int]$MinimumProductWorkflowSourceTargetCount = 1) {
     $requirements = @(
-        foreach ($signal in @(Convert-AuditObjectArray $RequirementSignals)) { New-AuditPrioritizedNeed $signal "requirement" }
+        foreach ($signal in @(Convert-AuditObjectArray $RequirementSignals)) { New-AuditPrioritizedNeed $signal "requirement" $MinimumProductWorkflowSourceTargetCount }
     )
     $artifacts = @(
         foreach ($artifact in @(Convert-AuditObjectArray $ArtifactCapabilities)) { New-AuditPrioritizedNeed $artifact "artifact" }
@@ -18877,9 +18878,10 @@ function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
     $observations = @($requirements | Where-Object priority_band -eq "observation" | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
     return [pscustomobject]([ordered]@{
             schema_version = 1
-            ranking_method = "role_then_source_coverage_v1"
+            ranking_method = "role_then_source_coverage_v2"
             policy = @(
                 "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias.",
+                "A multi-target portfolio requires implemented source evidence from at least two targets before the scanner automatically promotes a product workflow to primary; a host-AI review may explicitly promote a single-target core user journey with recorded evidence and uncertainty.",
                 "Product workflows can become primary candidates; delivery, engineering, and operations signals remain context unless host AI verifies a core user journey.",
                 "Documentation-only evidence remains an observation and must not justify an install, removal, or MCP mutation."
             )
@@ -19045,7 +19047,8 @@ function New-AuditTargetProfile($scans) {
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
-    $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
+    $minimumProductWorkflowSourceTargetCount = if (@($scans).Count -gt 1) { 2 } else { 1 }
+    $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
@@ -19450,16 +19453,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
-        "Replace placeholder values wrapped in <> before using this file.",
-        "Delete example entries that are not needed, but keep the schema shape unchanged.",
-        "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
+        "This is a valid zero-change baseline, not an incomplete example file.",
+        "Keep lifecycle categories empty unless the current scan, installed inventory, and reviewed sources establish a specific change.",
+        "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "All install decisions must cite scan-derived target-profile reasons only.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
         "Every removal requires current user confirmation at apply time; unknown usage remains an uncertainty, never fabricated as non-use."
     )
-    $basisSummary = "<why these recommendations reflect the scan-derived target profile, installed inventory, and source strategy>"
-    $targetReasonInstall = "<which scan-derived target-profile facts justify this skill>"
-    $targetReasonDoNotInstall = "<why the scan-derived target profile does not justify it>"
+    $basisSummary = "Scanner-only baseline: no skill or MCP lifecycle change is proposed until host AI verifies a scan-derived gap, reviewed source, and safe rollback path."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -19473,115 +19474,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
-        source_observations = @(
-            [ordered]@{
-                source = "<same-source-url-or-local-path-used-by-a-change>"
-                summary = "<specific fact observed from this source and relevant to the recommendation>"
-            }
-        )
-        empty_recommendation_reasons = @("insufficient_reliable_evidence")
-        new_skills = @(
-            [ordered]@{
-                name = "<new-skill-name>"
-                reason_target_profile = $targetReasonInstall
-                install = [ordered]@{
-                    repo = "<owner/repo-or-local-path>"
-                    skill = "<relative-skill-path-or-.>"
-                    ref = "<branch-or-tag>"
-                    mode = "manual"
-                }
-                confidence = "medium"
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs", "skills.sh")
-            }
-        )
-        overlap_findings = @(
-            [ordered]@{
-                name = "<existing-skill-or-skill-pair>"
-                reason_target_profile = $targetReasonInstall
-                sources = @("<source-url-1>")
-                note = "<report-only observation; no automatic uninstall>"
-                source_preference = [ordered]@{
-                    plugin_installed = $true
-                    standalone_duplicate = $true
-                    native_source_preferred = $true
-                    action = "report_only_do_not_import_duplicate"
-                }
-                routing = [ordered]@{
-                    decision_owner = "host_ai"
-                    selection_policy = "<how to choose executors without invoking every overlapping skill>"
-                    members = @(
-                        [ordered]@{ name = "<primary-skill>"; role = "executor" }
-                        [ordered]@{ name = "<alternative-or-validator>"; role = "validator" }
-                    )
-                }
-            }
-        )
-        removal_candidates = @(
-            [ordered]@{
-                name = "<installed-skill-name>"
-                reason_target_profile = "<profile context only; not the retirement proof>"
-                sources = @("<installed-skill-path-or-reviewed-source>")
-                installed = [ordered]@{ vendor = "<installed-vendor>"; from = "<installed-from>" }
-                semantic_review = [ordered]@{
-                    decision_owner = "host_ai"
-                    verdict = "removal_candidate"
-                    capability_class = "specialized"
-                    independent_of_target_profile = $true
-                    installed_capability = "<what this installed skill uniquely does>"
-                    retirement_basis = "semantic_replacement"
-                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
-                    requires_user_confirmation = $true
-                    replacement = [ordered]@{ kind = "skill"; name = "<replacement-skill>"; coverage = "<reviewed behavior covered by replacement>"; limitations = "<remaining gap or none-known>" }
-                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore the retired source>" }
-                    uncertainty = "<remaining semantic or usage uncertainty>"
-                }
-            }
-        )
-        do_not_install = @(
-            [ordered]@{
-                name = "<skill-not-recommended>"
-                reason_target_profile = $targetReasonDoNotInstall
-                sources = @("<source-url-1>")
-                note = "<why it should not be added now>"
-            }
-        )
-        mcp_new_servers = @(
-            [ordered]@{
-                name = "<mcp-server-name>"
-                reason_target_profile = $targetReasonInstall
-                confidence = "medium"
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs")
-                server = [ordered]@{
-                    name = "<mcp-server-name>"
-                    transport = "stdio"
-                    command = "<command>"
-                    args = @("<arg1>")
-                }
-            }
-        )
-        mcp_removal_candidates = @(
-            [ordered]@{
-                name = "<installed-mcp-name>"
-                reason_target_profile = "<profile context only; not the retirement proof>"
-                sources = @("<installed-mcp-config-or-reviewed-source>")
-                installed = [ordered]@{ name = "<installed-mcp-name>" }
-                semantic_review = [ordered]@{
-                    decision_owner = "host_ai"
-                    verdict = "removal_candidate"
-                    capability_class = "specialized"
-                    independent_of_target_profile = $true
-                    installed_capability = "<what this MCP exposes>"
-                    retirement_basis = "semantic_replacement"
-                    usage_evidence = [ordered]@{ state = "unknown"; evidence = "<what is known and what static scan cannot know>" }
-                    requires_user_confirmation = $true
-                    replacement = [ordered]@{ kind = "host_native"; name = "<host-native-capability>"; coverage = "<reviewed behavior covered>"; limitations = "<remaining gap or none-known>" }
-                    migration = [ordered]@{ plan = "<safe migration steps>"; rollback = "<how to restore this MCP>" }
-                    uncertainty = "<remaining semantic or usage uncertainty>"
-                }
-            }
-        )
+        source_observations = @()
+        empty_recommendation_reasons = @("scanner_only_no_lifecycle_change")
+        new_skills = @()
+        overlap_findings = @()
+        removal_candidates = @()
+        do_not_install = @()
+        mcp_new_servers = @()
+        mcp_removal_candidates = @()
     })
 }
 

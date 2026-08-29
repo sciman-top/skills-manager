@@ -17,12 +17,12 @@ function Get-DefaultAuditOuterAiPrompt {
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
 5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
-6. 只编辑同目录 ``recommendations.json``：保持 schema v3，删除全部 ``<...>`` 示例占位符；每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
-6. 执行：
+6. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、已安装清单与审阅来源共同形成明确缺口时，才替换 ``scanner_only_no_lifecycle_change`` 并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+7. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-7. 预检通过后执行：
+8. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-8. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
+9. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -280,7 +280,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260825.1"
+    return "audit-prompt-v20260829.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -1828,7 +1828,8 @@ function Get-AuditNeedRole([string]$Kind, [string]$Domain, [string]$Subject) {
 function New-AuditPrioritizedNeed {
     param(
         $Entry,
-        [ValidateSet("requirement", "artifact")][string]$Kind
+        [ValidateSet("requirement", "artifact")][string]$Kind,
+        [int]$MinimumProductWorkflowSourceTargetCount = 1
     )
     $domain = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "domain") } else { "artifact" }
     $subject = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "subject") } else { [string](Get-CfgObjectProperty $Entry "artifact") }
@@ -1856,7 +1857,7 @@ function New-AuditPrioritizedNeed {
     if ($role -in @("delivery_surface", "engineering_or_operations")) { $limitations.Add("technical_context_not_direct_product_intent") | Out-Null }
     $band = "observation"
     if ([int]$coverage.source_code_target_count -gt 0) {
-        if ($role -eq "product_workflow" -and $score -ge 63) { $band = "primary_candidate" }
+        if ($role -eq "product_workflow" -and [int]$coverage.source_code_target_count -ge $MinimumProductWorkflowSourceTargetCount -and $score -ge 63) { $band = "primary_candidate" }
         elseif ($role -eq "supporting_artifact" -and [int]$coverage.source_code_target_count -ge 2 -and $score -ge 65) { $band = "primary_candidate" }
         else { $band = "secondary" }
     }
@@ -1881,9 +1882,9 @@ function New-AuditPrioritizedNeed {
         })
 }
 
-function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
+function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities, [int]$MinimumProductWorkflowSourceTargetCount = 1) {
     $requirements = @(
-        foreach ($signal in @(Convert-AuditObjectArray $RequirementSignals)) { New-AuditPrioritizedNeed $signal "requirement" }
+        foreach ($signal in @(Convert-AuditObjectArray $RequirementSignals)) { New-AuditPrioritizedNeed $signal "requirement" $MinimumProductWorkflowSourceTargetCount }
     )
     $artifacts = @(
         foreach ($artifact in @(Convert-AuditObjectArray $ArtifactCapabilities)) { New-AuditPrioritizedNeed $artifact "artifact" }
@@ -1903,9 +1904,10 @@ function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities) {
     $observations = @($requirements | Where-Object priority_band -eq "observation" | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
     return [pscustomobject]([ordered]@{
             schema_version = 1
-            ranking_method = "role_then_source_coverage_v1"
+            ranking_method = "role_then_source_coverage_v2"
             policy = @(
                 "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias.",
+                "A multi-target portfolio requires implemented source evidence from at least two targets before the scanner automatically promotes a product workflow to primary; a host-AI review may explicitly promote a single-target core user journey with recorded evidence and uncertainty.",
                 "Product workflows can become primary candidates; delivery, engineering, and operations signals remain context unless host AI verifies a core user journey.",
                 "Documentation-only evidence remains an observation and must not justify an install, removal, or MCP mutation."
             )
@@ -2071,7 +2073,8 @@ function New-AuditTargetProfile($scans) {
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
-    $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities
+    $minimumProductWorkflowSourceTargetCount = if (@($scans).Count -gt 1) { 2 } else { 1 }
+    $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
