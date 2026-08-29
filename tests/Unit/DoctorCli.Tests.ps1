@@ -28,7 +28,7 @@ Describe "Doctor CLI behavior" {
             Set-Content -Path $CfgPath -Value $cfg -Encoding UTF8
 
             Mock Get-CimInstance { [pscustomobject]@{ Caption = "Windows"; OSArchitecture = "64-bit" } }
-            Mock Test-NetConnection { $true }
+            Mock Test-DoctorTcpConnect { $true }
             Mock Invoke-GitCapture { "git version 2.50.0" }
             Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
 
@@ -63,7 +63,7 @@ Describe "Doctor CLI behavior" {
             Set-Content -Path $CfgPath -Value $cfg -Encoding UTF8
 
             Mock Get-CimInstance { [pscustomobject]@{ Caption = "Windows"; OSArchitecture = "64-bit" } }
-            Mock Test-NetConnection { $true }
+            Mock Test-DoctorTcpConnect { $true }
             Mock Invoke-GitCapture { "git version 2.50.0" }
             Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
 
@@ -97,7 +97,7 @@ Describe "Doctor CLI behavior" {
             Set-Content -Path $CfgPath -Value $cfg -Encoding UTF8
 
             Mock Get-CimInstance { throw "CIM unavailable" }
-            Mock Test-NetConnection { $true }
+            Mock Test-DoctorTcpConnect { $true }
             Mock Invoke-GitCapture { "git version 2.50.0" }
             Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
 
@@ -133,7 +133,7 @@ Describe "Doctor CLI behavior" {
             Set-Content -Path $CfgPath -Value $cfg -Encoding UTF8
 
             Mock Get-CimInstance { [pscustomobject]@{ Caption = "Windows"; OSArchitecture = "64-bit" } }
-            Mock Test-NetConnection { $true }
+            Mock Test-DoctorTcpConnect { $true }
             Mock Invoke-GitCapture { "git version 2.50.0" }
             Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
 
@@ -149,7 +149,7 @@ Describe "Doctor CLI behavior" {
     }
 
     It "Treats GitHub as reachable when TCP probe fails but git ls-remote succeeds" {
-        Mock Test-NetConnection { $false }
+        Mock Test-DoctorTcpConnect { $false }
         Mock Get-Command {
             param($Name)
             if ($Name -eq "gh") { return $null }

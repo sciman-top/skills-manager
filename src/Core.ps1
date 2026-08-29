@@ -392,6 +392,23 @@ function Get-FileContentHash([string]$path) {
         $sha.Dispose()
     }
 }
+# Get-FileContentHash 的进程内记忆化变体，仅供投影链（catalog/plan/apply/fingerprint
+# 对同一棵 agent/ 树的 6-8 次重复哈希）使用。键为 (全路径|长度|LastWriteTimeUtc ticks)。
+# 锁文件、workspace 指纹（sha256-tree-v2）等 fail-closed 契约必须继续走纯函数
+# Get-FileContentHash：显式恢复 mtime 的内容篡改在 stat 键下不可见（见 Core.Tests
+# "Fingerprints local zip workspaces by content including hidden files"）。
+$script:FileContentHashCache = @{}
+function Get-FileContentHashCached([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $stat = Get-Item -LiteralPath $path -Force
+    $key = '{0}|{1}|{2}' -f $stat.FullName, $stat.Length, $stat.LastWriteTimeUtc.Ticks
+    $cached = $script:FileContentHashCache[$key]
+    if ($cached) { return $cached }
+    $hex = Get-FileContentHash $path
+    if ($hex) { $script:FileContentHashCache[$key] = $hex }
+    return $hex
+}
 function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
     $baseDir = [System.IO.Path]::GetFullPath($dir)
@@ -637,7 +654,7 @@ function RoboMirror([string]$src, [string]$dst) {
         return
     }
     & robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1 |
-    Where-Object { $_ -and $_.Trim() } |
+    Where-Object { $_ -and ([string]$_).Trim() } |
     Out-Host
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
 }
@@ -889,7 +906,7 @@ function Get-SkillCandidatesByRelevance([object[]]$items, [string]$query) {
         }
 
         $relGit = ($rel -replace "\\", "/")
-        if ($relGit -match "^(\\.claude/skills|skills)(/|$)") { $score += 20 }
+        if ($relGit -match '^(\.claude/skills|skills)(/|$)') { $score += 20 }
 
         $scored += [pscustomobject]@{
             item  = $item
@@ -939,24 +956,24 @@ function Get-SkillCandidates([string]$base) {
     if ($script:SkillCandidatesCache.ContainsKey($base)) {
         return ,@($script:SkillCandidatesCache[$base])
     }
-    $items = @()
-    if (-not (Test-Path $base)) { return ,$items }
-  
+    $items = [Collections.Generic.List[object]]::new()
+    if (-not (Test-Path $base)) { return ,@() }
+
     # Find all potential marker files
-    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue | 
+    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
-    
+
     $seenDirs = New-Object System.Collections.Generic.HashSet[string]
     foreach ($f in $found) {
         $dir = $f.Directory.FullName
         if (-not $seenDirs.Add($dir)) { continue }
-    
+
         $rel = $dir.Substring($base.Length).TrimStart("\\")
         if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
-        $items += [pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }
+        $items.Add([pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }) | Out-Null
     }
     # Keep array shape for single-item results; callers rely on .Count.
-    $items = @($items | Sort-Object rel)
+    $items = @($items.ToArray() | Sort-Object rel)
     $script:SkillCandidatesCache[$base] = $items
     return ,$items
 }

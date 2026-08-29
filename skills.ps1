@@ -848,6 +848,23 @@ function Get-FileContentHash([string]$path) {
         $sha.Dispose()
     }
 }
+# Get-FileContentHash 的进程内记忆化变体，仅供投影链（catalog/plan/apply/fingerprint
+# 对同一棵 agent/ 树的 6-8 次重复哈希）使用。键为 (全路径|长度|LastWriteTimeUtc ticks)。
+# 锁文件、workspace 指纹（sha256-tree-v2）等 fail-closed 契约必须继续走纯函数
+# Get-FileContentHash：显式恢复 mtime 的内容篡改在 stat 键下不可见（见 Core.Tests
+# "Fingerprints local zip workspaces by content including hidden files"）。
+$script:FileContentHashCache = @{}
+function Get-FileContentHashCached([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $stat = Get-Item -LiteralPath $path -Force
+    $key = '{0}|{1}|{2}' -f $stat.FullName, $stat.Length, $stat.LastWriteTimeUtc.Ticks
+    $cached = $script:FileContentHashCache[$key]
+    if ($cached) { return $cached }
+    $hex = Get-FileContentHash $path
+    if ($hex) { $script:FileContentHashCache[$key] = $hex }
+    return $hex
+}
 function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
     $baseDir = [System.IO.Path]::GetFullPath($dir)
@@ -1093,7 +1110,7 @@ function RoboMirror([string]$src, [string]$dst) {
         return
     }
     & robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1 |
-    Where-Object { $_ -and $_.Trim() } |
+    Where-Object { $_ -and ([string]$_).Trim() } |
     Out-Host
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
 }
@@ -1345,7 +1362,7 @@ function Get-SkillCandidatesByRelevance([object[]]$items, [string]$query) {
         }
 
         $relGit = ($rel -replace "\\", "/")
-        if ($relGit -match "^(\\.claude/skills|skills)(/|$)") { $score += 20 }
+        if ($relGit -match '^(\.claude/skills|skills)(/|$)') { $score += 20 }
 
         $scored += [pscustomobject]@{
             item  = $item
@@ -1395,24 +1412,24 @@ function Get-SkillCandidates([string]$base) {
     if ($script:SkillCandidatesCache.ContainsKey($base)) {
         return ,@($script:SkillCandidatesCache[$base])
     }
-    $items = @()
-    if (-not (Test-Path $base)) { return ,$items }
-  
+    $items = [Collections.Generic.List[object]]::new()
+    if (-not (Test-Path $base)) { return ,@() }
+
     # Find all potential marker files
-    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue | 
+    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
-    
+
     $seenDirs = New-Object System.Collections.Generic.HashSet[string]
     foreach ($f in $found) {
         $dir = $f.Directory.FullName
         if (-not $seenDirs.Add($dir)) { continue }
-    
+
         $rel = $dir.Substring($base.Length).TrimStart("\\")
         if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
-        $items += [pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }
+        $items.Add([pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }) | Out-Null
     }
     # Keep array shape for single-item results; callers rely on .Count.
-    $items = @($items | Sort-Object rel)
+    $items = @($items.ToArray() | Sort-Object rel)
     $script:SkillCandidatesCache[$base] = $items
     return ,$items
 }
@@ -2419,10 +2436,6 @@ function Test-ExecutionAdmissionMultiTurnContract($Contract) {
     return Test-ExecutionAdmissionContractShape $Contract 'multi_turn_user_decision'
 }
 
-function Test-ExecutionAdmissionOneShotContract($Contract) {
-    return Test-ExecutionAdmissionContractShape $Contract 'one_shot'
-}
-
 function Get-ExecutionAdmissionContractMode($Contract) {
     $snapshot = Get-ExecutionAdmissionContractSnapshot $Contract
     if ($script:ExecutionAdmissionProfiles.Contains($snapshot.mode) -and (Test-ExecutionAdmissionContractShape $snapshot $snapshot.mode)) { return $snapshot.mode }
@@ -3340,15 +3353,13 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
         # derived from skills.json, not authored skill content, and must not
         # affect package identity or the manifest would go stale on every sync.
         if ($relative -eq 'catalog.json') { continue }
-        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
+        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHashCached $file.FullName))) | Out-Null
     }
     return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")
 }
 
 function Get-SkillProjectionTextHash([string]$Text) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
+    return (Get-OperationSha256 $Text)
 }
 
 function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {
@@ -4137,7 +4148,7 @@ function Get-NativeSkillProjectionPackageHash {
         # Package-root catalog.json is a generated projection artifact (see
         # Get-SkillPackageContentHash); it must not affect package identity.
         if ($relative -eq 'catalog.json') { continue }
-        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $hash = Get-FileContentHashCached $file.FullName
         $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
     }
     return Get-OperationSha256 ($parts.ToArray() -join "`n")
@@ -6665,6 +6676,7 @@ function Normalize-RepoUrl([string]$repo) {
         return $u
     }
     if ($r -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+        $r = $r -replace "\.git$", ""
         return ("https://github.com/{0}.git" -f $r)
     }
     return $r
@@ -6692,17 +6704,7 @@ function Guess-VendorName([string]$repo) {
 }
 function Mask-SensitiveGitText([string]$text) {
     if ([string]::IsNullOrWhiteSpace($text)) { return $text }
-    if ($null -ne (Get-Command Protect-SensitiveText -CommandType Function -ErrorAction SilentlyContinue)) {
-        return (Protect-SensitiveText $text)
-    }
-    $masked = [string]$text
-    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
-    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&\s]+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'']+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'']+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
-    return $masked
+    return (Protect-SensitiveText $text)
 }
 function Invoke-Git([string[]]$GitArgs) {
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
@@ -6760,38 +6762,14 @@ function Invoke-Git([string[]]$GitArgs) {
         throw ("git 失败：{0}；详情：{1}" -f $cmdText, $summary)
     }
 }
-function Invoke-GitCapture([string[]]$GitArgs) {
+# Invoke-GitCapture / Invoke-GitCaptureLines 的公共执行核：
+# $Ok.Value=false 表示 git 以非零退出码失败；DryRun 视为成功且无输出。
+function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok) {
+    $Ok.Value = $false
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
         Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
-        return ""
-    }
-    Log ("git {0}" -f ($safeArgs -join " "))
-    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
-    $prevNativeErrorPref = $null
-    $prevErrorActionPreference = $ErrorActionPreference
-    try {
-        if ($canTuneNativeErrPref) {
-            $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
-            $PSNativeCommandUseErrorActionPreference = $false
-        }
-        $ErrorActionPreference = "Continue"
-        $out = & git @GitArgs 2>$null
-        if ($LASTEXITCODE -ne 0) { return $null }
-    }
-    finally {
-        $ErrorActionPreference = $prevErrorActionPreference
-        if ($canTuneNativeErrPref) {
-            $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
-        }
-    }
-    if ($null -eq $out) { return "" }
-    return (($out | Select-Object -First 1).ToString().Trim())
-}
-function Invoke-GitCaptureLines([string[]]$GitArgs) {
-    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
-    if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
+        $Ok.Value = $true
         return @()
     }
     Log ("git {0}" -f ($safeArgs -join " "))
@@ -6813,12 +6791,26 @@ function Invoke-GitCaptureLines([string[]]$GitArgs) {
             $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
         }
     }
+    $Ok.Value = $true
     $lines = @()
     foreach ($line in @($out)) {
         $text = Convert-GitOutputLineToText $line
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
         $lines += $text
     }
+    return ,$lines
+}
+function Invoke-GitCapture([string[]]$GitArgs) {
+    $ok = $false
+    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
+    if (-not $ok) { return $null }
+    if (@($lines).Count -eq 0) { return "" }
+    return ([string]$lines[0]).Trim()
+}
+function Invoke-GitCaptureLines([string[]]$GitArgs) {
+    $ok = $false
+    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
+    if (-not $ok) { return @() }
     return ,$lines
 }
 function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
@@ -7245,6 +7237,7 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
 }
 function Has-GitChanges {
     $out = Invoke-GitCapture @("status", "--porcelain")
+    if ($null -eq $out) { return $true }
     return -not [string]::IsNullOrWhiteSpace($out)
 }
 function Get-GitLockPathFromOutputLine([string]$line) {
@@ -7867,7 +7860,9 @@ function Get-DirtyManualImportTargets($cfg) {
     if ($null -eq $cfg) { return @() }
 
     foreach ($i in @($cfg.imports)) {
-        if ($i.mode -ne "manual") { continue }
+        if ($null -eq $i) { continue }
+        $iMode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($iMode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
         if (-not (Test-Path $cache)) { continue }
         if (-not (Test-IsGitRepoRoot $cache)) { continue }
@@ -7959,7 +7954,14 @@ function LoadCfg() {
     Apply-DirectoryMigrations $dirMigrations ([ref]$changed)
     if ($changed) {
         Log "已自动修复 skills.json 中的无效项/重复项。" "WARN"
-        SaveCfgSafe $cfg $raw
+        try {
+            SaveCfgSafe $cfg $raw
+        }
+        catch {
+            # 目录已改名而配置回写失败会造成磁盘/配置名称分叉；把目录迁回原名保持一致。
+            Undo-DirectoryMigrations $dirMigrations
+            throw
+        }
     }
     return $cfg
 }
@@ -7969,11 +7971,13 @@ function Normalize-Cfg($cfg) {
     if (-not $cfg.PSObject.Properties.Match("mcp_servers").Count) { $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() }
     if (-not $cfg.PSObject.Properties.Match("mcp_targets").Count) { $cfg | Add-Member -NotePropertyName mcp_targets -NotePropertyValue @() }
     if (-not $cfg.PSObject.Properties.Match("update_force").Count) { $cfg | Add-Member -NotePropertyName update_force -NotePropertyValue $true }
-    if ($cfg.mappings -eq $null) { $cfg.mappings = @() }
-    if ($cfg.imports -eq $null) { $cfg.imports = @() }
-    if ($cfg.mcp_servers -eq $null) { $cfg.mcp_servers = @() }
-    if ($cfg.mcp_targets -eq $null) { $cfg.mcp_targets = @() }
-    if ($cfg.update_force -eq $null) { $cfg.update_force = $true }
+    # $null 必须放比较符左侧：右侧写法在数组含 null 元素时是集合过滤而非空值判断，
+    # 会把含 null 的有效数组整组误判为缺失并回写清空。
+    if ($null -eq $cfg.mappings) { $cfg.mappings = @() }
+    if ($null -eq $cfg.imports) { $cfg.imports = @() }
+    if ($null -eq $cfg.mcp_servers) { $cfg.mcp_servers = @() }
+    if ($null -eq $cfg.mcp_targets) { $cfg.mcp_targets = @() }
+    if ($null -eq $cfg.update_force) { $cfg.update_force = $true }
     if ([string]::IsNullOrWhiteSpace($cfg.sync_mode)) { $cfg.sync_mode = "link" }
     return $cfg
 }
@@ -8535,6 +8539,33 @@ function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [
     Invoke-MoveItem $src $dst
     Log ("{0} 目录已迁移：{1} -> {2}" -f $label, $oldName, $newName) "WARN"
     $changed.Value = $true
+}
+function Undo-DirectoryMigrations($dirMigrations) {
+    if ($null -eq $dirMigrations) { return }
+    foreach ($v in $dirMigrations.vendors) {
+        Undo-DirNameRename $VendorDir $v.new $v.old "vendor"
+    }
+    foreach ($i in $dirMigrations.imports) {
+        Undo-DirNameRename $ImportDir $i.new $i.old "import 缓存"
+        if ($i.mode -eq "manual") {
+            Undo-DirNameRename $ManualDir $i.new $i.old "manual 技能"
+        }
+    }
+}
+function Undo-DirNameRename([string]$baseDir, [string]$currentName, [string]$originalName, [string]$label) {
+    if ([string]::IsNullOrWhiteSpace($currentName) -or [string]::IsNullOrWhiteSpace($originalName)) { return }
+    if ($currentName -eq $originalName) { return }
+    $src = Join-Path $baseDir $currentName
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    $dst = Join-Path $baseDir $originalName
+    if (Test-Path -LiteralPath $dst) { return }
+    try {
+        Invoke-MoveItem $src $dst
+        Log ("{0} 目录迁移已回退：{1} -> {2}" -f $label, $currentName, $originalName) "WARN"
+    }
+    catch {
+        Log ("{0} 目录迁移回退失败：{1} -> {2}；原因：{3}" -f $label, $currentName, $originalName, $_.Exception.Message) "WARN"
+    }
 }
 function Apply-DirectoryMigrations($dirMigrations, [ref]$changed) {
     if ($null -eq $dirMigrations) { return }
@@ -9569,14 +9600,23 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
     return [pscustomobject]$result
 }
 
-function Test-DoctorGitHubConnection {
+function Test-DoctorTcpConnect([string]$HostName, [int]$Port) {
+    # TcpClient 直连替代 Test-NetConnection：后者先 ICMP+DNS 再 TCP，典型 1-8s；
+    # 2s 超时的 TCP 连接即为本探测的真实信号。独立成函数供测试 mock。
     try {
-        $tcpOk = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
-        if ($tcpOk) {
-            return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+        $client = [Net.Sockets.TcpClient]::new()
+        try {
+            $connect = $client.ConnectAsync($HostName, $Port)
+            return ($connect.Wait(2000) -and $client.Connected)
         }
+        finally { $client.Dispose() }
     }
-    catch {}
+    catch { return $false }
+}
+function Test-DoctorGitHubConnection {
+    if (Test-DoctorTcpConnect "github.com" 443) {
+        return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+    }
 
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         try {
@@ -10016,7 +10056,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             if ($fixResult.changed) {
                 if (-not $DryRun -and -not $opts.dry_run_fix) {
                     $json = $cfgObj | ConvertTo-Json -Depth 50
-                    Set-ContentUtf8 $CfgPath $json
+                    Write-Utf8FileAtomic -Path $CfgPath -Content $json
                 }
                 if (-not $opts.json) {
                     if ($opts.dry_run_fix) {
@@ -10997,13 +11037,15 @@ function Get-ManualDisplayVendorFromRepo([string]$repo) {
     return $leafNorm
 }
 
-function 收集ManualSkills($cfg = $null, [switch]$IncludeLegacyManualDir) {
+function 收集ManualSkills($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $items = @()
     $seen = New-Object System.Collections.Generic.HashSet[string]
 
     foreach ($i in $cfg.imports) {
-        if ($i.mode -ne "manual") { continue }
+        if ($null -eq $i) { continue }
+        $importMode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($importMode -ne "manual") { continue }
         if ([string]::IsNullOrWhiteSpace($i.name)) { continue }
         $src = Resolve-ManualImportSkillPath $cfg $i.name -AllowLegacyFallback
         if (-not $src) { continue }
@@ -11015,20 +11057,6 @@ function 收集ManualSkills($cfg = $null, [switch]$IncludeLegacyManualDir) {
                 from = $from
                 full = $src
                 source = if ((Join-Path $ManualDir $from) -eq $src) { "legacy-manual-dir" } else { "imports" }
-            }
-        }
-    }
-
-    if ($IncludeLegacyManualDir) {
-        foreach ($legacy in (Get-SkillsUnder $ManualDir "manual")) {
-            if ($seen.Add($legacy.from)) {
-                $items += [pscustomobject]@{
-                    vendor = "manual"
-                    display_vendor = "manual"
-                    from = $legacy.from
-                    full = $legacy.full
-                    source = "legacy-manual-dir"
-                }
             }
         }
     }
@@ -11811,7 +11839,11 @@ function 卸载([string[]]$tokens = @()) {
                 $removedOutputNames.Add([string]$mapping.to) | Out-Null
             }
             $before = @($cfg.imports).Count
-            $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $item.from) })
+            $cfg.imports = @($cfg.imports | Where-Object {
+                    if ($null -eq $_) { return $true }
+                    $importMode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                    -not ($importMode -eq "manual" -and $_.name -eq $item.from)
+                })
             $deletedManualImports += ($before - @($cfg.imports).Count)
 
             $legacyPath = Join-Path $ManualDir $item.from
@@ -21508,7 +21540,11 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         $from = [string]$item.from
         if ($vendor -eq "manual") {
             $before = @($cfg.imports).Count
-            $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $from) })
+            $cfg.imports = @($cfg.imports | Where-Object {
+                    if ($null -eq $_) { return $true }
+                    $importMode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                    -not ($importMode -eq "manual" -and $_.name -eq $from)
+                })
             $deletedManualImports += ($before - @($cfg.imports).Count)
 
             $legacyPath = Join-Path $ManualDir $from
@@ -23520,11 +23556,13 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
 
     if ($result.action -eq "add" -or $result.action -eq "update") {
         Need ($positional.Count -ge 2) "目标仓操作需要 name 和 path"
+        Need ($positional.Count -le 2) ("未知参数：{0}" -f (($positional | Select-Object -Skip 2) -join " "))
         $result.name = [string]$positional[0]
         $result.path = [string]$positional[1]
     }
     elseif ($result.action -eq "remove") {
         Need ($positional.Count -ge 1) "删除目标仓需要 name"
+        Need ($positional.Count -le 1) ("未知参数：{0}" -f (($positional | Select-Object -Skip 1) -join " "))
         $result.name = [string]$positional[0]
     }
     elseif ($positional.Count -gt 0) {
@@ -23601,12 +23639,7 @@ function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillN
 }
 
 function Get-CapabilityCatalogTextSha256([string]$Value) {
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
-        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
-    }
-    finally { $sha.Dispose() }
+    return (Get-OperationSha256 $Value)
 }
 
 function Get-SkillDiscoveryCatalogPath($projectionCfg) {
@@ -24917,8 +24950,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "删除技能库" { 删除技能库 }
             "发现" { 发现 }
             "命令导入安装" { 命令导入安装 }
-            "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
-            "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
+            "add" { if (-not (Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args))) { exit 1 } }
+            "npx" { if (-not (Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)))) { exit 1 } }
             "迁移" { Invoke-MigrationCommand $args }
             "migration" { Invoke-MigrationCommand $args }
             "迁移解锁" { Invoke-MigrationUnlockCommand $args }

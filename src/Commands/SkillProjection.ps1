@@ -7,12 +7,7 @@ function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillN
 }
 
 function Get-CapabilityCatalogTextSha256([string]$Value) {
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
-        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
-    }
-    finally { $sha.Dispose() }
+    return (Get-OperationSha256 $Value)
 }
 
 function Get-SkillDiscoveryCatalogPath($projectionCfg) {

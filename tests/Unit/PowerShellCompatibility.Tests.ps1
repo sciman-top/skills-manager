@@ -30,7 +30,6 @@ Describe 'PowerShell 7-only runtime contract' {
     It 'uses only pwsh in the single authoritative GitHub CI surface' {
         $github = Get-Content -LiteralPath (Join-Path $repoRoot '.github\workflows\ci.yml') -Raw
 
-        $github | Should -Match 'Verify PowerShell 7 runtime'
         $github | Should -Not -Match 'Windows PowerShell 5\.1'
         $github | Should -Not -Match 'shell:\s*powershell'
         Test-Path -LiteralPath (Join-Path $repoRoot 'azure-pipelines.yml') | Should -Be $false

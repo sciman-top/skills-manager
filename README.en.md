@@ -101,7 +101,7 @@ Release installations can check for a newer skills-manager release and, only aft
 
 Target-audit runtime bundles and receipts live under ignored `reports/skill-audit/<run-id>/`. Only explicit `--apply --yes` persists recommendations. Rule mutation additionally requires reviewed input, exact roots and hashes, a token, a receipt, and rollback data.
 
-`check-updates --json` reports only `current/target/changed/source`; it does not apply, build, project, or sync MCP. `构建生效` writes projected output outside the repository. For repository-only generated synchronization, run `build.ps1` instead. The repository no longer creates or manages Windows scheduled update tasks; `doctor` only reports a legacy task for manual host-side cleanup.
+`check-updates --json` reports only `current/target/changed/source`; it does not apply, build, project, or sync MCP. `构建生效` writes projected output outside the repository. For repository-only generated synchronization, run `build.ps1` instead. `scripts/weekly-skills-update.ps1` remains a skills-only runner that a host/operator may schedule, but the repository provides no entry to create, update, or delete that legacy Windows scheduled task; `doctor` only reports it read-only and cleanup is a host-side decision. In contrast, `release-update-schedule --enable` explicitly creates a non-elevated scheduled task under the current interactive user, and `--disable` removes it.
 
 ## Projection and explicit fallback
 

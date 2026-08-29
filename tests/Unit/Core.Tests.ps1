@@ -2781,7 +2781,7 @@ command = "npx"
                 Mock Write-Host {}
                 Mock Get-CimInstance { [pscustomobject]@{ Caption = "Windows"; OSArchitecture = "64-bit" } }
                 Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
-                Mock Test-NetConnection { $true }
+                Mock Test-DoctorTcpConnect { $true }
                 # Pin the scheduled-task branch hermetically: machines that
                 # really have the weekly task take the classification path,
                 # while clean runners (CI) throw and hit the catch branch's

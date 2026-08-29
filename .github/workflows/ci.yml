@@ -21,12 +21,6 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Verify PowerShell 7 runtime
-        shell: pwsh
-        run: |
-          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "PowerShell 7+ is required for authoritative gates." }
-          $PSVersionTable.PSVersion.ToString()
-
       - name: Ensure pinned Pester test runtime
         shell: pwsh
         run: .\scripts\quality\ensure-test-runtime.ps1 -CacheRoot $env:RUNNER_TEMP -ExportToGitHubEnv

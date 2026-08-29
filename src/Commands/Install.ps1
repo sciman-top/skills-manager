@@ -893,13 +893,15 @@ function Get-ManualDisplayVendorFromRepo([string]$repo) {
     return $leafNorm
 }
 
-function 收集ManualSkills($cfg = $null, [switch]$IncludeLegacyManualDir) {
+function 收集ManualSkills($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $items = @()
     $seen = New-Object System.Collections.Generic.HashSet[string]
 
     foreach ($i in $cfg.imports) {
-        if ($i.mode -ne "manual") { continue }
+        if ($null -eq $i) { continue }
+        $importMode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($importMode -ne "manual") { continue }
         if ([string]::IsNullOrWhiteSpace($i.name)) { continue }
         $src = Resolve-ManualImportSkillPath $cfg $i.name -AllowLegacyFallback
         if (-not $src) { continue }
@@ -911,20 +913,6 @@ function 收集ManualSkills($cfg = $null, [switch]$IncludeLegacyManualDir) {
                 from = $from
                 full = $src
                 source = if ((Join-Path $ManualDir $from) -eq $src) { "legacy-manual-dir" } else { "imports" }
-            }
-        }
-    }
-
-    if ($IncludeLegacyManualDir) {
-        foreach ($legacy in (Get-SkillsUnder $ManualDir "manual")) {
-            if ($seen.Add($legacy.from)) {
-                $items += [pscustomobject]@{
-                    vendor = "manual"
-                    display_vendor = "manual"
-                    from = $legacy.from
-                    full = $legacy.full
-                    source = "legacy-manual-dir"
-                }
             }
         }
     }
@@ -1707,7 +1695,11 @@ function 卸载([string[]]$tokens = @()) {
                 $removedOutputNames.Add([string]$mapping.to) | Out-Null
             }
             $before = @($cfg.imports).Count
-            $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $item.from) })
+            $cfg.imports = @($cfg.imports | Where-Object {
+                    if ($null -eq $_) { return $true }
+                    $importMode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                    -not ($importMode -eq "manual" -and $_.name -eq $item.from)
+                })
             $deletedManualImports += ($before - @($cfg.imports).Count)
 
             $legacyPath = Join-Path $ManualDir $item.from

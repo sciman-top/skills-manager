@@ -149,11 +149,13 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
 
     if ($result.action -eq "add" -or $result.action -eq "update") {
         Need ($positional.Count -ge 2) "目标仓操作需要 name 和 path"
+        Need ($positional.Count -le 2) ("未知参数：{0}" -f (($positional | Select-Object -Skip 2) -join " "))
         $result.name = [string]$positional[0]
         $result.path = [string]$positional[1]
     }
     elseif ($result.action -eq "remove") {
         Need ($positional.Count -ge 1) "删除目标仓需要 name"
+        Need ($positional.Count -le 1) ("未知参数：{0}" -f (($positional | Select-Object -Skip 1) -join " "))
         $result.name = [string]$positional[0]
     }
     elseif ($positional.Count -gt 0) {

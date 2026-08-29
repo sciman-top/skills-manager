@@ -83,15 +83,13 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
         # derived from skills.json, not authored skill content, and must not
         # affect package identity or the manifest would go stale on every sync.
         if ($relative -eq 'catalog.json') { continue }
-        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
+        $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHashCached $file.FullName))) | Out-Null
     }
     return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")
 }
 
 function Get-SkillProjectionTextHash([string]$Text) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
+    return (Get-OperationSha256 $Text)
 }
 
 function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {

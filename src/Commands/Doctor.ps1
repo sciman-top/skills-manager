@@ -115,14 +115,23 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
     return [pscustomobject]$result
 }
 
-function Test-DoctorGitHubConnection {
+function Test-DoctorTcpConnect([string]$HostName, [int]$Port) {
+    # TcpClient 直连替代 Test-NetConnection：后者先 ICMP+DNS 再 TCP，典型 1-8s；
+    # 2s 超时的 TCP 连接即为本探测的真实信号。独立成函数供测试 mock。
     try {
-        $tcpOk = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
-        if ($tcpOk) {
-            return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+        $client = [Net.Sockets.TcpClient]::new()
+        try {
+            $connect = $client.ConnectAsync($HostName, $Port)
+            return ($connect.Wait(2000) -and $client.Connected)
         }
+        finally { $client.Dispose() }
     }
-    catch {}
+    catch { return $false }
+}
+function Test-DoctorGitHubConnection {
+    if (Test-DoctorTcpConnect "github.com" 443) {
+        return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+    }
 
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         try {
@@ -562,7 +571,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             if ($fixResult.changed) {
                 if (-not $DryRun -and -not $opts.dry_run_fix) {
                     $json = $cfgObj | ConvertTo-Json -Depth 50
-                    Set-ContentUtf8 $CfgPath $json
+                    Write-Utf8FileAtomic -Path $CfgPath -Content $json
                 }
                 if (-not $opts.json) {
                     if ($opts.dry_run_fix) {

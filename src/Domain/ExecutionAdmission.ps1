@@ -103,10 +103,6 @@ function Test-ExecutionAdmissionMultiTurnContract($Contract) {
     return Test-ExecutionAdmissionContractShape $Contract 'multi_turn_user_decision'
 }
 
-function Test-ExecutionAdmissionOneShotContract($Contract) {
-    return Test-ExecutionAdmissionContractShape $Contract 'one_shot'
-}
-
 function Get-ExecutionAdmissionContractMode($Contract) {
     $snapshot = Get-ExecutionAdmissionContractSnapshot $Contract
     if ($script:ExecutionAdmissionProfiles.Contains($snapshot.mode) -and (Test-ExecutionAdmissionContractShape $snapshot $snapshot.mode)) { return $snapshot.mode }

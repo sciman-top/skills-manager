@@ -2,6 +2,7 @@ BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
     . (Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1')
+    . (Join-Path $repoRoot 'src\Core.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillCatalogCompiler.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillEligibilityPolicy.ps1')
     . (Join-Path $repoRoot 'src\Application\SkillProjection.ps1')

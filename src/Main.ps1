@@ -34,8 +34,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "删除技能库" { 删除技能库 }
             "发现" { 发现 }
             "命令导入安装" { 命令导入安装 }
-            "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
-            "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
+            "add" { if (-not (Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args))) { exit 1 } }
+            "npx" { if (-not (Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)))) { exit 1 } }
             "迁移" { Invoke-MigrationCommand $args }
             "migration" { Invoke-MigrationCommand $args }
             "迁移解锁" { Invoke-MigrationUnlockCommand $args }

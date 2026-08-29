@@ -14,6 +14,7 @@ function Normalize-RepoUrl([string]$repo) {
         return $u
     }
     if ($r -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+        $r = $r -replace "\.git$", ""
         return ("https://github.com/{0}.git" -f $r)
     }
     return $r
@@ -41,17 +42,7 @@ function Guess-VendorName([string]$repo) {
 }
 function Mask-SensitiveGitText([string]$text) {
     if ([string]::IsNullOrWhiteSpace($text)) { return $text }
-    if ($null -ne (Get-Command Protect-SensitiveText -CommandType Function -ErrorAction SilentlyContinue)) {
-        return (Protect-SensitiveText $text)
-    }
-    $masked = [string]$text
-    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
-    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&\s]+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'']+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'']+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
-    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
-    return $masked
+    return (Protect-SensitiveText $text)
 }
 function Invoke-Git([string[]]$GitArgs) {
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
@@ -109,38 +100,14 @@ function Invoke-Git([string[]]$GitArgs) {
         throw ("git 失败：{0}；详情：{1}" -f $cmdText, $summary)
     }
 }
-function Invoke-GitCapture([string[]]$GitArgs) {
+# Invoke-GitCapture / Invoke-GitCaptureLines 的公共执行核：
+# $Ok.Value=false 表示 git 以非零退出码失败；DryRun 视为成功且无输出。
+function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok) {
+    $Ok.Value = $false
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
         Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
-        return ""
-    }
-    Log ("git {0}" -f ($safeArgs -join " "))
-    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
-    $prevNativeErrorPref = $null
-    $prevErrorActionPreference = $ErrorActionPreference
-    try {
-        if ($canTuneNativeErrPref) {
-            $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
-            $PSNativeCommandUseErrorActionPreference = $false
-        }
-        $ErrorActionPreference = "Continue"
-        $out = & git @GitArgs 2>$null
-        if ($LASTEXITCODE -ne 0) { return $null }
-    }
-    finally {
-        $ErrorActionPreference = $prevErrorActionPreference
-        if ($canTuneNativeErrPref) {
-            $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
-        }
-    }
-    if ($null -eq $out) { return "" }
-    return (($out | Select-Object -First 1).ToString().Trim())
-}
-function Invoke-GitCaptureLines([string[]]$GitArgs) {
-    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
-    if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
+        $Ok.Value = $true
         return @()
     }
     Log ("git {0}" -f ($safeArgs -join " "))
@@ -162,12 +129,26 @@ function Invoke-GitCaptureLines([string[]]$GitArgs) {
             $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
         }
     }
+    $Ok.Value = $true
     $lines = @()
     foreach ($line in @($out)) {
         $text = Convert-GitOutputLineToText $line
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
         $lines += $text
     }
+    return ,$lines
+}
+function Invoke-GitCapture([string[]]$GitArgs) {
+    $ok = $false
+    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
+    if (-not $ok) { return $null }
+    if (@($lines).Count -eq 0) { return "" }
+    return ([string]$lines[0]).Trim()
+}
+function Invoke-GitCaptureLines([string[]]$GitArgs) {
+    $ok = $false
+    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
+    if (-not $ok) { return @() }
     return ,$lines
 }
 function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
@@ -594,6 +575,7 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
 }
 function Has-GitChanges {
     $out = Invoke-GitCapture @("status", "--porcelain")
+    if ($null -eq $out) { return $true }
     return -not [string]::IsNullOrWhiteSpace($out)
 }
 function Get-GitLockPathFromOutputLine([string]$line) {

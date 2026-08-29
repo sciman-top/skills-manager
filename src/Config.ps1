@@ -76,7 +76,9 @@ function Get-DirtyManualImportTargets($cfg) {
     if ($null -eq $cfg) { return @() }
 
     foreach ($i in @($cfg.imports)) {
-        if ($i.mode -ne "manual") { continue }
+        if ($null -eq $i) { continue }
+        $iMode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($iMode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
         if (-not (Test-Path $cache)) { continue }
         if (-not (Test-IsGitRepoRoot $cache)) { continue }
@@ -168,7 +170,14 @@ function LoadCfg() {
     Apply-DirectoryMigrations $dirMigrations ([ref]$changed)
     if ($changed) {
         Log "已自动修复 skills.json 中的无效项/重复项。" "WARN"
-        SaveCfgSafe $cfg $raw
+        try {
+            SaveCfgSafe $cfg $raw
+        }
+        catch {
+            # 目录已改名而配置回写失败会造成磁盘/配置名称分叉；把目录迁回原名保持一致。
+            Undo-DirectoryMigrations $dirMigrations
+            throw
+        }
     }
     return $cfg
 }
@@ -178,11 +187,13 @@ function Normalize-Cfg($cfg) {
     if (-not $cfg.PSObject.Properties.Match("mcp_servers").Count) { $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() }
     if (-not $cfg.PSObject.Properties.Match("mcp_targets").Count) { $cfg | Add-Member -NotePropertyName mcp_targets -NotePropertyValue @() }
     if (-not $cfg.PSObject.Properties.Match("update_force").Count) { $cfg | Add-Member -NotePropertyName update_force -NotePropertyValue $true }
-    if ($cfg.mappings -eq $null) { $cfg.mappings = @() }
-    if ($cfg.imports -eq $null) { $cfg.imports = @() }
-    if ($cfg.mcp_servers -eq $null) { $cfg.mcp_servers = @() }
-    if ($cfg.mcp_targets -eq $null) { $cfg.mcp_targets = @() }
-    if ($cfg.update_force -eq $null) { $cfg.update_force = $true }
+    # $null 必须放比较符左侧：右侧写法在数组含 null 元素时是集合过滤而非空值判断，
+    # 会把含 null 的有效数组整组误判为缺失并回写清空。
+    if ($null -eq $cfg.mappings) { $cfg.mappings = @() }
+    if ($null -eq $cfg.imports) { $cfg.imports = @() }
+    if ($null -eq $cfg.mcp_servers) { $cfg.mcp_servers = @() }
+    if ($null -eq $cfg.mcp_targets) { $cfg.mcp_targets = @() }
+    if ($null -eq $cfg.update_force) { $cfg.update_force = $true }
     if ([string]::IsNullOrWhiteSpace($cfg.sync_mode)) { $cfg.sync_mode = "link" }
     return $cfg
 }
@@ -744,6 +755,33 @@ function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [
     Invoke-MoveItem $src $dst
     Log ("{0} 目录已迁移：{1} -> {2}" -f $label, $oldName, $newName) "WARN"
     $changed.Value = $true
+}
+function Undo-DirectoryMigrations($dirMigrations) {
+    if ($null -eq $dirMigrations) { return }
+    foreach ($v in $dirMigrations.vendors) {
+        Undo-DirNameRename $VendorDir $v.new $v.old "vendor"
+    }
+    foreach ($i in $dirMigrations.imports) {
+        Undo-DirNameRename $ImportDir $i.new $i.old "import 缓存"
+        if ($i.mode -eq "manual") {
+            Undo-DirNameRename $ManualDir $i.new $i.old "manual 技能"
+        }
+    }
+}
+function Undo-DirNameRename([string]$baseDir, [string]$currentName, [string]$originalName, [string]$label) {
+    if ([string]::IsNullOrWhiteSpace($currentName) -or [string]::IsNullOrWhiteSpace($originalName)) { return }
+    if ($currentName -eq $originalName) { return }
+    $src = Join-Path $baseDir $currentName
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    $dst = Join-Path $baseDir $originalName
+    if (Test-Path -LiteralPath $dst) { return }
+    try {
+        Invoke-MoveItem $src $dst
+        Log ("{0} 目录迁移已回退：{1} -> {2}" -f $label, $currentName, $originalName) "WARN"
+    }
+    catch {
+        Log ("{0} 目录迁移回退失败：{1} -> {2}；原因：{3}" -f $label, $currentName, $originalName, $_.Exception.Message) "WARN"
+    }
 }
 function Apply-DirectoryMigrations($dirMigrations, [ref]$changed) {
     if ($null -eq $dirMigrations) { return }

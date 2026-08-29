@@ -817,7 +817,11 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         $from = [string]$item.from
         if ($vendor -eq "manual") {
             $before = @($cfg.imports).Count
-            $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $from) })
+            $cfg.imports = @($cfg.imports | Where-Object {
+                    if ($null -eq $_) { return $true }
+                    $importMode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                    -not ($importMode -eq "manual" -and $_.name -eq $from)
+                })
             $deletedManualImports += ($before - @($cfg.imports).Count)
 
             $legacyPath = Join-Path $ManualDir $from

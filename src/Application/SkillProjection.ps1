@@ -40,7 +40,7 @@ function Get-NativeSkillProjectionPackageHash {
         # Package-root catalog.json is a generated projection artifact (see
         # Get-SkillPackageContentHash); it must not affect package identity.
         if ($relative -eq 'catalog.json') { continue }
-        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $hash = Get-FileContentHashCached $file.FullName
         $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
     }
     return Get-OperationSha256 ($parts.ToArray() -join "`n")
