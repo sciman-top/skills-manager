@@ -1157,6 +1157,36 @@ public string CreatePresentation() => "courseware.pptx";
             (Get-AuditRepoScanKeywords $scan) | Should -Contain "interface_web_ui"
         }
 
+        It "Does not derive backup_recovery from the generic word migration alone" {
+            $repo = Join-Path $TestDrive "target-repo-migration-noise"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "schema.py") @"
+def run_migration(plan):
+    '''Apply a database migration plan step by step.'''
+    return plan
+"@
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-migration-noise"
+
+            @($scan.detected.requirement_signals | Where-Object { $_.domain -eq "operations" -and $_.subject -eq "backup_recovery" }).Count | Should -Be 0
+        }
+
+        It "Excludes the scanner's own sources and fixtures from target evidence" {
+            $repo = Join-Path $TestDrive "target-repo-is-scanner"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src\Commands") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "src\Commands\AuditTargets.Copy.ps1") @"
+# A scanner look-alike inside the scanned target.  Its vocabulary describes the
+# scanner, not a capability of this repository.
+$signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_processing" })
+"@
+
+            $scan = New-AuditRepoScan "skills-manager" $repo "..\target-repo-is-scanner"
+
+            @($scan.detected.requirement_signals | Where-Object { $_.subject -eq "document_processing" }).Count | Should -Be 0
+            @($scan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" }).Count | Should -Be 0
+            $scan.scan_coverage.self_referential_count | Should -Be 1
+        }
+
         It "Highlights source-backed product workflows without letting raw file volume promote technical context" {
             $webEvidence = @(
                 1..40 | ForEach-Object { [pscustomobject]@{ kind = "source_code"; path = "src\\web-$_.ts"; signal = "interface:web_ui@L$_" } }

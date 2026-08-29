@@ -18374,6 +18374,15 @@ function Get-AuditEvidenceLines([string]$Content) {
     return @($result.ToArray())
 }
 
+function Test-AuditScannerSelfFile([string]$RelativePath) {
+    # When a configured target IS this repository, the scanner's own sources and
+    # fixtures describe signal vocabulary; they must not become target evidence.
+    $normalized = ([string]$RelativePath).Replace('/', '\')
+    return [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Commands\\AuditTargets(\.[^\\]+)?\.ps1$') -or
+        [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Application\\CapabilityInventory\.ps1$') -or
+        [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets|SkillAudit|CapabilityInventory)\.Tests\.ps1$')
+}
+
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
     if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
     $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
@@ -18407,7 +18416,7 @@ function Add-AuditRequirementFactsFromText {
         [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|create|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|create|produce)\w*" },
         [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; pattern = "(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
         [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
-        [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bmigration\b|\bwinpe\b" }
+        [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b" }
     )
     foreach ($line in @(Get-AuditEvidenceLines $Content)) {
         foreach ($signal in @($signals)) {
@@ -18537,7 +18546,10 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
                 continue
             }
             $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $file.FullName
-            $kind = if ($relativePath -match '(?i)(^|\\)(tests?|spec|__tests__)(\\|$)|(?i)(test|spec)\\.[a-z0-9]+$') { "test" } elseif ($relativePath -match '(?i)^(tools|scripts|build)(\\|$)') { "supporting_code" } else { "source_code" }
+            if (Test-AuditScannerSelfFile $relativePath) {
+                $sourceScanSelfReferentialCount++
+                continue
+            }
             $kind = Get-AuditSourceEvidenceKind $relativePath
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
             Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
@@ -20766,7 +20778,7 @@ function Get-AuditRemovalAlternativeSources {
         }
     }
     if (-not ([string]$candidateVendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase)) {
-        foreach ($relativePath in @("overrides\\patches\\$name\\SKILL.md", "overrides\\custom\\$name\\SKILL.md")) {
+        foreach ($relativePath in @("overrides\patches\$name\SKILL.md", "overrides\custom\$name\SKILL.md")) {
             $fullPath = Join-Path $RepositoryRoot $relativePath
             if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
                 $sources.Add([pscustomobject]([ordered]@{ kind = "override"; vendor = "overrides"; from = $name; path = ($relativePath -replace '\\', '/') })) | Out-Null

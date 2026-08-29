@@ -208,7 +208,7 @@ function Get-AuditRemovalAlternativeSources {
         }
     }
     if (-not ([string]$candidateVendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase)) {
-        foreach ($relativePath in @("overrides\\patches\\$name\\SKILL.md", "overrides\\custom\\$name\\SKILL.md")) {
+        foreach ($relativePath in @("overrides\patches\$name\SKILL.md", "overrides\custom\$name\SKILL.md")) {
             $fullPath = Join-Path $RepositoryRoot $relativePath
             if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
                 $sources.Add([pscustomobject]([ordered]@{ kind = "override"; vendor = "overrides"; from = $name; path = ($relativePath -replace '\\', '/') })) | Out-Null
