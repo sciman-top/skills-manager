@@ -629,7 +629,11 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            # Fail closed: the existing file holds host settings beyond MCP
+            # (model/theme/auth references). Rebuilding a minimal payload here
+            # would overwrite them; throwing lets the transaction snapshot
+            # restore the original file instead.
+            throw ("宿主 MCP 配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 
@@ -650,7 +654,7 @@ function Build-ZCodeMcpPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("ZCode MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            throw ("ZCode 宿主配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 
@@ -1601,7 +1605,7 @@ function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("Gemini settings.json 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            throw ("Gemini settings.json 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 

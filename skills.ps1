@@ -13878,7 +13878,11 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            # Fail closed: the existing file holds host settings beyond MCP
+            # (model/theme/auth references). Rebuilding a minimal payload here
+            # would overwrite them; throwing lets the transaction snapshot
+            # restore the original file instead.
+            throw ("宿主 MCP 配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 
@@ -13899,7 +13903,7 @@ function Build-ZCodeMcpPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("ZCode MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            throw ("ZCode 宿主配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 
@@ -14850,7 +14854,7 @@ function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
             }
         }
         catch {
-            Log ("Gemini settings.json 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+            throw ("Gemini settings.json 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
         }
     }
 
@@ -21419,7 +21423,9 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         return [pscustomobject]$policy
     }
     catch {
-        return [pscustomobject]$policy
+        # Fail closed: a malformed evidence policy (or unreadable snapshot)
+        # must fail preflight, not silently disable source coverage checks.
+        throw ("invalid_source_evidence_policy：source_strategy.evidence_policy 无法解析，拒绝降级为 disabled：{0}" -f $_.Exception.Message)
     }
 }
 
@@ -21496,7 +21502,9 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         return [pscustomobject]$policy
     }
     catch {
-        return [pscustomobject]$policy
+        # Fail closed: a malformed decision-quality policy must fail preflight,
+        # not silently disable keyword trace checks.
+        throw ("invalid_decision_quality_policy：source_strategy.decision_quality_policy 无法解析，拒绝降级为 disabled：{0}" -f $_.Exception.Message)
     }
 }
 
@@ -21800,6 +21808,11 @@ function Invoke-AuditRecommendationsPreflight {
     $snapshotPath = Join-Path $recommendationDir "snapshot.json"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     $snapshot = Read-AuditSnapshot $recommendationDir
+    # Fail closed on mixed-run bundles: recommendations must come from the same
+    # scan run as the snapshot they are validated against.
+    if ($null -ne $rec) {
+        Need ([string]$snapshot.run_id -eq [string]$rec.run_id) ("run_mismatch：snapshot.run_id '{0}' 与 recommendations.run_id '{1}' 不一致，拒绝跨 run 拼接。" -f [string]$snapshot.run_id, [string]$rec.run_id)
+    }
     $liveState = Get-AuditLiveInstalledState
     $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
@@ -22036,6 +22049,24 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
     if (-not $shapeValid) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='Workflow receipt does not prove preflight, dry-run, and stable inputs.'; path=$workflowPath } }
     if ([IO.Path]::GetFullPath([string]$receipt.recommendations_path) -ne $resolved -or [string]$receipt.recommendations_sha256 -ne [string](Get-FileContentHash $resolved)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='Recommendations changed after the validated dry-run.'; path=$workflowPath }
+    }
+    # Bind the receipt to the exact snapshot it scanned: same run id and same
+    # snapshot bytes, so a bundle cannot mix a receipt from a different run.
+    $snapshotPath = Join-Path (Split-Path -Parent $resolved) 'snapshot.json'
+    if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json is missing from the run bundle.'; path=$workflowPath }
+    }
+    $receiptRunId = if ($receipt.PSObject.Properties.Match('run_id').Count -gt 0) { [string]$receipt.run_id } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($receiptRunId)) {
+        $snapshotRunId = [string](Read-AuditSnapshot (Split-Path -Parent $resolved)).run_id
+        if ($snapshotRunId -ne $receiptRunId) {
+            return [pscustomobject]@{ pass=$false; code='run_mismatch'; message=('snapshot.run_id {0} does not match receipt.run_id {1}.' -f $snapshotRunId, $receiptRunId); path=$workflowPath }
+        }
+    }
+    $scan = $receipt.scan
+    $receiptSnapshotSha = if ($null -ne $scan -and $scan.PSObject.Properties.Match('snapshot_sha256').Count -gt 0) { [string]$scan.snapshot_sha256 } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($receiptSnapshotSha) -and $receiptSnapshotSha -ne [string](Get-FileContentHash $snapshotPath)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='snapshot.json changed after the validated dry-run.'; path=$workflowPath }
     }
     $current = Get-AuditWorkflowInputState $resolved
     $accepted = $receipt.input_stability.after_dry_run
