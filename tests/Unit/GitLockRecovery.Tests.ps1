@@ -241,7 +241,7 @@ Describe "Git lock recovery" {
                     "skills/keep/SKILL.md"
                     "skills/old/scripts/helper.js"
                 )
-            } -ParameterFilter { $GitArgs[0] -eq "ls-files" }
+            } -ParameterFilter { $GitArgs -contains "ls-files" }
 
             Push-Location $repo
             try {

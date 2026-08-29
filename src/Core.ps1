@@ -1,7 +1,8 @@
-# Root must be the script's own location, not the caller's CWD: the CLI is
-# invoked through absolute-path shims (skills.cmd / install.ps1) from any
-# directory, and a CWD-bound root would read or mutate a foreign skills.json.
-$Root = $PSScriptRoot
+# Root is the repository root: the generated entry (skills.ps1 at the repo
+# root) resolves it from $PSScriptRoot so shims work from any CWD. When this
+# file is dot-sourced directly (verify-skills-config.ps1), $PSScriptRoot is
+# src/ and the original CWD-based fallback keeps those consumers working.
+$Root = if ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf)) { $PSScriptRoot } else { (Resolve-Path ".").Path }
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
 $VendorDir = Join-Path $Root "vendor"
