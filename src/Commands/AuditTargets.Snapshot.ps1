@@ -242,6 +242,36 @@ function Get-AuditExternalSkillFacts($cfg = $null) {
     return @($facts.ToArray() | Sort-Object source_kind, qualified_name)
 }
 
+function Get-AuditMcpValueSignature($value) {
+    # A one-way digest of sorted name=value pairs.  Keeps secret material out of
+    # snapshots while letting the MCP fingerprint detect value-only changes that
+    # key-only (env_keys/header_keys) facts cannot see.
+    if ($null -eq $value) { return "" }
+    $pairs = @()
+    if ($value -is [hashtable] -or $value -is [System.Collections.IDictionary]) {
+        foreach ($k in @($value.Keys | Sort-Object)) {
+            $pairs += ("{0}={1}" -f [string]$k, ($value[$k] | ConvertTo-Json -Compress -Depth 10))
+        }
+    }
+    elseif (Test-AuditObjectLike $value) {
+        foreach ($p in @($value.PSObject.Properties | Sort-Object Name)) {
+            $pairs += ("{0}={1}" -f [string]$p.Name, ($p.Value | ConvertTo-Json -Compress -Depth 10))
+        }
+    }
+    else {
+        return ""
+    }
+    if ($pairs.Count -eq 0) { return "" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($pairs -join "`n")))
+        return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant().Substring(0, 16)
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Get-AuditMcpServerFacts($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @()
@@ -278,6 +308,7 @@ function Get-AuditMcpServerFacts($cfg = $null) {
             $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
             $row.args = if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $s.args) { @($s.args) } else { @() }
             $envKeys = @()
+            $envSignature = ""
             if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $s.env) {
                 if ($s.env -is [hashtable] -or $s.env -is [System.Collections.IDictionary]) {
                     $envKeys = @($s.env.Keys | ForEach-Object { [string]$_ } | Sort-Object)
@@ -285,12 +316,15 @@ function Get-AuditMcpServerFacts($cfg = $null) {
                 else {
                     $envKeys = @($s.env.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
                 }
+                $envSignature = Get-AuditMcpValueSignature $s.env
             }
             $row.env_keys = @($envKeys)
+            if (-not [string]::IsNullOrWhiteSpace($envSignature)) { $row.env_signature = $envSignature }
         }
         else {
             $row.url = if ($s.PSObject.Properties.Match("url").Count -gt 0) { [string]$s.url } else { "" }
             $headerKeys = @()
+            $headerSignature = ""
             if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $s.headers) {
                 if ($s.headers -is [hashtable] -or $s.headers -is [System.Collections.IDictionary]) {
                     $headerKeys = @($s.headers.Keys | ForEach-Object { [string]$_ } | Sort-Object)
@@ -298,8 +332,10 @@ function Get-AuditMcpServerFacts($cfg = $null) {
                 else {
                     $headerKeys = @($s.headers.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
                 }
+                $headerSignature = Get-AuditMcpValueSignature $s.headers
             }
             $row.header_keys = @($headerKeys)
+            if (-not [string]::IsNullOrWhiteSpace($headerSignature)) { $row.header_signature = $headerSignature }
             $row.bearer_token_env_var = if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0) { [string]$s.bearer_token_env_var } else { "" }
         }
         $facts += [pscustomobject]$row

@@ -1931,6 +1931,14 @@ function Get-McpServerSignature($server) {
         if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $server.env) {
             $sig.env = ConvertTo-OrderedSignatureValue $server.env
         }
+        # Audit facts carry sanitized key lists plus a value digest so that
+        # env-only changes still move the fingerprint.
+        if ($server.PSObject.Properties.Match("env_keys").Count -gt 0 -and $null -ne $server.env_keys) {
+            $sig.env_keys = @($server.env_keys | ForEach-Object { ([string]$_).Trim() } | Sort-Object)
+        }
+        if ($server.PSObject.Properties.Match("env_signature").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.env_signature)) {
+            $sig.env_signature = [string]$server.env_signature
+        }
     }
     else {
         if ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) {
@@ -1938,6 +1946,12 @@ function Get-McpServerSignature($server) {
         }
         if ($server.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $server.headers) {
             $sig.headers = ConvertTo-OrderedSignatureValue $server.headers
+        }
+        if ($server.PSObject.Properties.Match("header_keys").Count -gt 0 -and $null -ne $server.header_keys) {
+            $sig.header_keys = @($server.header_keys | ForEach-Object { ([string]$_).Trim() } | Sort-Object)
+        }
+        if ($server.PSObject.Properties.Match("header_signature").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.header_signature)) {
+            $sig.header_signature = [string]$server.header_signature
         }
         if ($server.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)) {
             $sig.bearer_token_env_var = [string]$server.bearer_token_env_var

@@ -169,6 +169,8 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 扫描产物位于 ignored `reports/skill-audit/<run-id>/`，每个 run 固定只有三个文件：`snapshot.json` 是不可变审查输入，`recommendations.json` 是唯一允许 AI 编辑的决策文件，`receipt.json` 是命令维护的阶段、结果、补偿/回滚与 truth-boundary 记录。扫描固定汇总全部 enabled 目标仓；`--target` 仅为兼容保留，不再缩小范围。`--query` 用于冻结本次任务语境；省略时只生成仓库能力盘点，不得据此声称存在用户需求缺口，也不能据此新增、删除或替换 skill/MCP。`snapshot.json` 还记录 `scan_contract`、全仓汇总画像和 `scan_coverage`，用于披露证据范围与采样上限。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。缺少 snapshot 直接阻断，不生成第四个报告或 evidence 文件。
 
+自 `prompt_contract_version=audit-prompt-v20260829.3`（skills 口径改为 current-profile 有效库存 + configured supply 双轨、MCP 指纹纳入 env/header 值域摘要）起，此前所有 run 的 `snapshot.json` 因指纹口径切换必然 stale，预检会 fail closed 要求重扫——这是预期的口径迁移行为，不是环境故障。
+
 ### 规则审查
 
 ```powershell

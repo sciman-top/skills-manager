@@ -1653,6 +1653,55 @@ $scan.detected.artifact_capabilities | Out-Null
             @($facts[0].enabled_tools) | Should -Be @("query-docs", "resolve-library-id")
         }
 
+        It "Detects MCP env value-only changes through sanitized facts fingerprints" {
+            $serverA = [pscustomobject]@{
+                name      = "api"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "api-mcp")
+                env       = [pscustomobject]@{ API_TOKEN = "alpha-secret" }
+            }
+            $serverB = [pscustomobject]@{
+                name      = "api"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "api-mcp")
+                env       = [pscustomobject]@{ API_TOKEN = "beta-secret" }
+            }
+
+            $factsA = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverA) }))
+            $factsB = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverB) }))
+
+            $factsA[0].PSObject.Properties.Match("env_signature").Count | Should -Be 1
+            [string]($factsA[0].env_signature) | Should -Not -Be [string]($factsB[0].env_signature)
+            ([string]($factsA[0].env_signature)).Length | Should -Be 16
+            (Get-AuditFingerprintFromMcpServers $factsA) | Should -Not -Be (Get-AuditFingerprintFromMcpServers $factsB)
+            # Sanitized facts must not leak the secret value itself.
+            ($factsA | ConvertTo-Json -Depth 10) | Should -Not -Match "alpha-secret"
+        }
+
+        It "Detects MCP header value-only changes for http facts" {
+            $serverA = [pscustomobject]@{
+                name      = "docs"
+                transport = "http"
+                url       = "https://example.com/mcp"
+                headers   = [pscustomobject]@{ Authorization = "Bearer one" }
+            }
+            $serverB = [pscustomobject]@{
+                name      = "docs"
+                transport = "http"
+                url       = "https://example.com/mcp"
+                headers   = [pscustomobject]@{ Authorization = "Bearer two" }
+            }
+
+            $factsA = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverA) }))
+            $factsB = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverB) }))
+
+            $factsA[0].PSObject.Properties.Match("header_signature").Count | Should -Be 1
+            [string]($factsA[0].header_signature) | Should -Not -Be [string]($factsB[0].header_signature)
+            (Get-AuditFingerprintFromMcpServers $factsA) | Should -Not -Be (Get-AuditFingerprintFromMcpServers $factsB)
+        }
+
         It "Distinguishes an absent MCP tool allowlist from an explicit empty allowlist" {
             $withoutAllowlist = @(Get-AuditMcpServerFacts ([pscustomobject]@{
                         mcp_servers = @([pscustomobject]@{
