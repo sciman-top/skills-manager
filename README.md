@@ -214,7 +214,7 @@ Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从�
 .\skills.ps1 capability-inventory --view skill-surfaces --host-probe --json
 ```
 
-默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
+默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；对仍会被 Codex `full-compatible` 投影的仓库技能，另输出 `retirement_candidates` 的 host-profile 排除候选。候选只保留精确重叠、目标配置路径和不改变的跨宿主/冷目录范围，不能自行卸载，也不把插件存在推断成成功调用。它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
 
 ## 外置参考仓
 

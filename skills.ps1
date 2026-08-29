@@ -3652,6 +3652,50 @@ function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]
     return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-CapabilitySurfaceTextHash $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
 }
 
+function Get-CapabilityNativeReplacementCandidates {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SourcePreferences
+    )
+
+    # A same-name plugin is only a replacement candidate.  Repository supply
+    # remains available for other hosts and cold discovery until a separately
+    # authorized lifecycle change removes it.
+    try { $fullCompatible = Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName codex -RequestedProfile 'full-compatible' }
+    catch { return @() }
+    if (-not [bool]$fullCompatible.include_all) { return @() }
+
+    $candidates = [Collections.Generic.List[object]]::new()
+    foreach ($preference in @($SourcePreferences | Where-Object {
+                [bool]$_.standalone_duplicate -and
+                [string]$_.duplicate_surface -eq 'repo_supply' -and
+                [bool]$_.plugin_installed -and
+                [bool]$_.native_source_preferred
+            })) {
+        $name = ([string]$preference.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $alreadyExcluded = $name -in @($fullCompatible.excluded_names)
+        $candidates.Add([pscustomobject][ordered]@{
+                kind = 'skill'
+                name = $name
+                operation = 'exclude_from_host_profile'
+                status = $(if ($alreadyExcluded) { 'already_excluded_from_host_profile' } else { 'candidate_requires_replacement_validation_and_user_confirmation' })
+                actionable = -not $alreadyExcluded
+                target_host = 'codex'
+                profile = 'full-compatible'
+                config_path = 'skill_projection.projection_profiles.hosts.codex.exclude'
+                proposed_value = $name
+                evidence = @('enabled_plugin_same_name', 'repository_supply_duplicate', 'full_compatible_includes_all')
+                preserves = @('repository_supply', 'cold_catalog', 'claude_projection', 'zcode_projection')
+                does_not_prove = @('host_loaded', 'successful_invocation', 'replacement_task_coverage')
+                plugin_path = [string]$preference.plugin_path
+                duplicate_path = [string]$preference.duplicate_path
+            }) | Out-Null
+    }
+    return @($candidates.ToArray() | Sort-Object name)
+}
+
 function New-SkillSurfaceView {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [switch]$HostProbe, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
@@ -3787,7 +3831,8 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    $retirementCandidates = Get-CapabilityNativeReplacementCandidates -ProjectionConfig $projection -SourcePreferences $sourcePreferences.ToArray()
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); retirement_candidates = $retirementCandidates; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -11385,6 +11430,77 @@ function 安装 {
     构建生效
 }
 
+function Get-UnmappedSkillOutputNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$CandidateNames
+    )
+
+    $remaining = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($mapping in @($Config.mappings)) {
+        $name = ([string]$mapping.to).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $remaining.Add($name) | Out-Null }
+    }
+
+    $unmapped = [Collections.Generic.List[string]]::new()
+    foreach ($candidate in @($CandidateNames | Sort-Object -Unique)) {
+        $name = ([string]$candidate).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name) -and -not $remaining.Contains($name)) {
+            $unmapped.Add($name) | Out-Null
+        }
+    }
+    return $unmapped.ToArray()
+}
+
+function Remove-RetiredSkillProjectionReferences {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SkillNames
+    )
+
+    $result = [ordered]@{ discovery_memberships = 0; profile_entries = 0 }
+    if ($null -eq $Config -or $null -eq $Config.skill_projection) { return [pscustomobject]$result }
+    $retired = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($skillName in @($SkillNames)) {
+        $name = ([string]$skillName).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $retired.Add($name) | Out-Null }
+    }
+    if ($retired.Count -eq 0) { return [pscustomobject]$result }
+
+    $projection = $Config.skill_projection
+    $catalog = if ($projection.PSObject.Properties.Match('discovery_catalog').Count -gt 0) { $projection.discovery_catalog } else { $null }
+    $memberships = if ($null -ne $catalog -and $catalog.PSObject.Properties.Match('domain_memberships').Count -gt 0) { $catalog.domain_memberships } else { $null }
+    if ($null -ne $memberships) {
+        foreach ($domain in @($memberships.PSObject.Properties)) {
+            $current = @($domain.Value)
+            $retained = @($current | Where-Object { -not $retired.Contains(([string]$_).Trim()) })
+            $result.discovery_memberships += ($current.Count - $retained.Count)
+            $domain.Value = $retained
+        }
+    }
+
+    $profiles = if ($projection.PSObject.Properties.Match('projection_profiles').Count -gt 0) { $projection.projection_profiles } else { $null }
+    if ($null -eq $profiles) { return [pscustomobject]$result }
+    $profileGroups = [Collections.Generic.List[object]]::new()
+    if ($profiles.PSObject.Properties.Match('profiles').Count -gt 0 -and $null -ne $profiles.profiles) { $profileGroups.Add($profiles.profiles) | Out-Null }
+    if ($profiles.PSObject.Properties.Match('hosts').Count -gt 0 -and $null -ne $profiles.hosts) { $profileGroups.Add($profiles.hosts) | Out-Null }
+    foreach ($group in @($profileGroups.ToArray())) {
+        foreach ($profile in @($group.PSObject.Properties)) {
+            foreach ($propertyName in @('include', 'exclude')) {
+                $property = $profile.Value.PSObject.Properties[$propertyName]
+                if ($null -eq $property) { continue }
+                $current = @($property.Value)
+                $retained = @($current | Where-Object { -not $retired.Contains(([string]$_).Trim()) })
+                $result.profile_entries += ($current.Count - $retained.Count)
+                $property.Value = $retained
+            }
+        }
+    }
+    return [pscustomobject]$result
+}
+
 function 卸载([string[]]$tokens = @()) {
     Preflight
     $cfg = LoadCfg
@@ -11473,8 +11589,12 @@ function 卸载([string[]]$tokens = @()) {
     $deletedLegacyManualDirs = 0
     $deletedOverrides = 0
     $backedOverrides = 0
+    $removedOutputNames = [Collections.Generic.List[string]]::new()
     foreach ($item in $selectedItems) {
         if ($item.vendor -eq "manual") {
+            foreach ($mapping in @($cfg.mappings | Where-Object { $_.vendor -eq 'manual' -and $_.from -eq $item.from })) {
+                $removedOutputNames.Add([string]$mapping.to) | Out-Null
+            }
             $before = @($cfg.imports).Count
             $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $item.from) })
             $deletedManualImports += ($before - @($cfg.imports).Count)
@@ -11487,16 +11607,24 @@ function 卸载([string[]]$tokens = @()) {
             $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") })
         }
         elseif ($item.vendor -eq "overrides") {
+            $removedOutputNames.Add([string]$item.from) | Out-Null
             $bak = Backup-OverrideDir $item.from
             if ($bak) { $backedOverrides++ }
             $deletedOverrides++
         }
         else {
             # mapping 技能：从 mappings 移除
-            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$($item.vendor)|$($item.from)") })
+            $skillPath = Normalize-SkillPath ([string]$item.from)
+            foreach ($mapping in @($cfg.mappings | Where-Object {
+                        $_.vendor -eq $item.vendor -and (Normalize-SkillPath ([string]$_.from)) -eq $skillPath
+                    })) {
+                $removedOutputNames.Add([string]$mapping.to) | Out-Null
+            }
+            $cfg.mappings = @($cfg.mappings | Where-Object {
+                    -not ($_.vendor -eq $item.vendor -and (Normalize-SkillPath ([string]$_.from)) -eq $skillPath)
+                })
             $removedMappings++
 
-            $skillPath = Normalize-SkillPath ([string]$item.from)
             $hasSameMapping = @($cfg.mappings | Where-Object { $_.vendor -eq $item.vendor -and $_.from -eq $skillPath }).Count -gt 0
             if (-not $hasSameMapping) {
                 $beforeImports = @($cfg.imports).Count
@@ -11512,6 +11640,8 @@ function 卸载([string[]]$tokens = @()) {
         }
     }
 
+    $retiredOutputNames = Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames $removedOutputNames.ToArray()
+    $removedReferences = Remove-RetiredSkillProjectionReferences -Config $cfg -SkillNames $retiredOutputNames
     SaveCfg $cfg
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
@@ -11519,6 +11649,8 @@ function 卸载([string[]]$tokens = @()) {
     if ($deletedManualImports -gt 0) { $parts += "删除 manual 导入 $deletedManualImports 项" }
     if ($deletedLegacyManualDirs -gt 0) { $parts += "清理 legacy manual 目录 $deletedLegacyManualDirs 项" }
     if ($deletedOverrides -gt 0) { $parts += "删除 overrides $deletedOverrides 项（已备份 $backedOverrides 项）" }
+    if ($removedReferences.discovery_memberships -gt 0) { $parts += "清理 discovery catalog 引用 $($removedReferences.discovery_memberships) 项" }
+    if ($removedReferences.profile_entries -gt 0) { $parts += "清理投影 profile 引用 $($removedReferences.profile_entries) 项" }
     Write-Host ("已完成：{0}。开始【构建生效】..." -f ($parts -join "，"))
     if ($backedOverrides -gt 0) {
         Write-Host "提示：overrides 备份已保存到 overrides/.bak/，如需彻底清理可手动删除该目录或其中备份。"

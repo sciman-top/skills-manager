@@ -54,6 +54,50 @@ function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]
     return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-CapabilitySurfaceTextHash $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
 }
 
+function Get-CapabilityNativeReplacementCandidates {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SourcePreferences
+    )
+
+    # A same-name plugin is only a replacement candidate.  Repository supply
+    # remains available for other hosts and cold discovery until a separately
+    # authorized lifecycle change removes it.
+    try { $fullCompatible = Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName codex -RequestedProfile 'full-compatible' }
+    catch { return @() }
+    if (-not [bool]$fullCompatible.include_all) { return @() }
+
+    $candidates = [Collections.Generic.List[object]]::new()
+    foreach ($preference in @($SourcePreferences | Where-Object {
+                [bool]$_.standalone_duplicate -and
+                [string]$_.duplicate_surface -eq 'repo_supply' -and
+                [bool]$_.plugin_installed -and
+                [bool]$_.native_source_preferred
+            })) {
+        $name = ([string]$preference.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $alreadyExcluded = $name -in @($fullCompatible.excluded_names)
+        $candidates.Add([pscustomobject][ordered]@{
+                kind = 'skill'
+                name = $name
+                operation = 'exclude_from_host_profile'
+                status = $(if ($alreadyExcluded) { 'already_excluded_from_host_profile' } else { 'candidate_requires_replacement_validation_and_user_confirmation' })
+                actionable = -not $alreadyExcluded
+                target_host = 'codex'
+                profile = 'full-compatible'
+                config_path = 'skill_projection.projection_profiles.hosts.codex.exclude'
+                proposed_value = $name
+                evidence = @('enabled_plugin_same_name', 'repository_supply_duplicate', 'full_compatible_includes_all')
+                preserves = @('repository_supply', 'cold_catalog', 'claude_projection', 'zcode_projection')
+                does_not_prove = @('host_loaded', 'successful_invocation', 'replacement_task_coverage')
+                plugin_path = [string]$preference.plugin_path
+                duplicate_path = [string]$preference.duplicate_path
+            }) | Out-Null
+    }
+    return @($candidates.ToArray() | Sort-Object name)
+}
+
 function New-SkillSurfaceView {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [switch]$HostProbe, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
@@ -189,5 +233,6 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    $retirementCandidates = Get-CapabilityNativeReplacementCandidates -ProjectionConfig $projection -SourcePreferences $sourcePreferences.ToArray()
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); retirement_candidates = $retirementCandidates; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }

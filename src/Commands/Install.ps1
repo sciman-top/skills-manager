@@ -1541,6 +1541,77 @@ function 安装 {
     构建生效
 }
 
+function Get-UnmappedSkillOutputNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$CandidateNames
+    )
+
+    $remaining = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($mapping in @($Config.mappings)) {
+        $name = ([string]$mapping.to).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $remaining.Add($name) | Out-Null }
+    }
+
+    $unmapped = [Collections.Generic.List[string]]::new()
+    foreach ($candidate in @($CandidateNames | Sort-Object -Unique)) {
+        $name = ([string]$candidate).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name) -and -not $remaining.Contains($name)) {
+            $unmapped.Add($name) | Out-Null
+        }
+    }
+    return $unmapped.ToArray()
+}
+
+function Remove-RetiredSkillProjectionReferences {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SkillNames
+    )
+
+    $result = [ordered]@{ discovery_memberships = 0; profile_entries = 0 }
+    if ($null -eq $Config -or $null -eq $Config.skill_projection) { return [pscustomobject]$result }
+    $retired = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($skillName in @($SkillNames)) {
+        $name = ([string]$skillName).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $retired.Add($name) | Out-Null }
+    }
+    if ($retired.Count -eq 0) { return [pscustomobject]$result }
+
+    $projection = $Config.skill_projection
+    $catalog = if ($projection.PSObject.Properties.Match('discovery_catalog').Count -gt 0) { $projection.discovery_catalog } else { $null }
+    $memberships = if ($null -ne $catalog -and $catalog.PSObject.Properties.Match('domain_memberships').Count -gt 0) { $catalog.domain_memberships } else { $null }
+    if ($null -ne $memberships) {
+        foreach ($domain in @($memberships.PSObject.Properties)) {
+            $current = @($domain.Value)
+            $retained = @($current | Where-Object { -not $retired.Contains(([string]$_).Trim()) })
+            $result.discovery_memberships += ($current.Count - $retained.Count)
+            $domain.Value = $retained
+        }
+    }
+
+    $profiles = if ($projection.PSObject.Properties.Match('projection_profiles').Count -gt 0) { $projection.projection_profiles } else { $null }
+    if ($null -eq $profiles) { return [pscustomobject]$result }
+    $profileGroups = [Collections.Generic.List[object]]::new()
+    if ($profiles.PSObject.Properties.Match('profiles').Count -gt 0 -and $null -ne $profiles.profiles) { $profileGroups.Add($profiles.profiles) | Out-Null }
+    if ($profiles.PSObject.Properties.Match('hosts').Count -gt 0 -and $null -ne $profiles.hosts) { $profileGroups.Add($profiles.hosts) | Out-Null }
+    foreach ($group in @($profileGroups.ToArray())) {
+        foreach ($profile in @($group.PSObject.Properties)) {
+            foreach ($propertyName in @('include', 'exclude')) {
+                $property = $profile.Value.PSObject.Properties[$propertyName]
+                if ($null -eq $property) { continue }
+                $current = @($property.Value)
+                $retained = @($current | Where-Object { -not $retired.Contains(([string]$_).Trim()) })
+                $result.profile_entries += ($current.Count - $retained.Count)
+                $property.Value = $retained
+            }
+        }
+    }
+    return [pscustomobject]$result
+}
+
 function 卸载([string[]]$tokens = @()) {
     Preflight
     $cfg = LoadCfg
@@ -1629,8 +1700,12 @@ function 卸载([string[]]$tokens = @()) {
     $deletedLegacyManualDirs = 0
     $deletedOverrides = 0
     $backedOverrides = 0
+    $removedOutputNames = [Collections.Generic.List[string]]::new()
     foreach ($item in $selectedItems) {
         if ($item.vendor -eq "manual") {
+            foreach ($mapping in @($cfg.mappings | Where-Object { $_.vendor -eq 'manual' -and $_.from -eq $item.from })) {
+                $removedOutputNames.Add([string]$mapping.to) | Out-Null
+            }
             $before = @($cfg.imports).Count
             $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $item.from) })
             $deletedManualImports += ($before - @($cfg.imports).Count)
@@ -1643,16 +1718,24 @@ function 卸载([string[]]$tokens = @()) {
             $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") })
         }
         elseif ($item.vendor -eq "overrides") {
+            $removedOutputNames.Add([string]$item.from) | Out-Null
             $bak = Backup-OverrideDir $item.from
             if ($bak) { $backedOverrides++ }
             $deletedOverrides++
         }
         else {
             # mapping 技能：从 mappings 移除
-            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$($item.vendor)|$($item.from)") })
+            $skillPath = Normalize-SkillPath ([string]$item.from)
+            foreach ($mapping in @($cfg.mappings | Where-Object {
+                        $_.vendor -eq $item.vendor -and (Normalize-SkillPath ([string]$_.from)) -eq $skillPath
+                    })) {
+                $removedOutputNames.Add([string]$mapping.to) | Out-Null
+            }
+            $cfg.mappings = @($cfg.mappings | Where-Object {
+                    -not ($_.vendor -eq $item.vendor -and (Normalize-SkillPath ([string]$_.from)) -eq $skillPath)
+                })
             $removedMappings++
 
-            $skillPath = Normalize-SkillPath ([string]$item.from)
             $hasSameMapping = @($cfg.mappings | Where-Object { $_.vendor -eq $item.vendor -and $_.from -eq $skillPath }).Count -gt 0
             if (-not $hasSameMapping) {
                 $beforeImports = @($cfg.imports).Count
@@ -1668,6 +1751,8 @@ function 卸载([string[]]$tokens = @()) {
         }
     }
 
+    $retiredOutputNames = Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames $removedOutputNames.ToArray()
+    $removedReferences = Remove-RetiredSkillProjectionReferences -Config $cfg -SkillNames $retiredOutputNames
     SaveCfg $cfg
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
@@ -1675,6 +1760,8 @@ function 卸载([string[]]$tokens = @()) {
     if ($deletedManualImports -gt 0) { $parts += "删除 manual 导入 $deletedManualImports 项" }
     if ($deletedLegacyManualDirs -gt 0) { $parts += "清理 legacy manual 目录 $deletedLegacyManualDirs 项" }
     if ($deletedOverrides -gt 0) { $parts += "删除 overrides $deletedOverrides 项（已备份 $backedOverrides 项）" }
+    if ($removedReferences.discovery_memberships -gt 0) { $parts += "清理 discovery catalog 引用 $($removedReferences.discovery_memberships) 项" }
+    if ($removedReferences.profile_entries -gt 0) { $parts += "清理投影 profile 引用 $($removedReferences.profile_entries) 项" }
     Write-Host ("已完成：{0}。开始【构建生效】..." -f ($parts -join "，"))
     if ($backedOverrides -gt 0) {
         Write-Host "提示：overrides 备份已保存到 overrides/.bak/，如需彻底清理可手动删除该目录或其中备份。"

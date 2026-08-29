@@ -33,14 +33,14 @@ Describe 'Read-only skill surface inventory' {
         $oldCodexHome = $env:CODEX_HOME
         try {
             $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $pluginRoot = Join-Path $fixture 'plugin'; $env:CODEX_HOME = Join-Path $fixture 'codex'
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $agentRoot 'managed-current'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $userRoot 'plugin-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $agentRoot 'managed-current\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $userRoot 'plugin-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $agentRoot 'managed-current'), (Join-Path $agentRoot 'plugin-skill'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $userRoot 'plugin-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $agentRoot 'managed-current\SKILL.md'), (Join-Path $agentRoot 'plugin-skill\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $userRoot 'plugin-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
             Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @([pscustomobject]@{ pluginId='plugin@fixture'; name='plugin'; marketplaceName='fixture'; version='1'; installed=$true; enabled=$true; source=[pscustomobject]@{ path=$pluginRoot } }) } }
             New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-current') -Target (Join-Path $agentRoot 'managed-current') -Force | Out-Null
             New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-stale') -Target (Join-Path $agentRoot 'managed-stale') -Force | Out-Null
             $externalRoot = Join-Path $fixture 'external\external-skill'; New-Item -ItemType Directory -Force -Path $externalRoot | Out-Null; [IO.File]::WriteAllText((Join-Path $externalRoot 'SKILL.md'), "---`nname: external-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)); New-Item -ItemType Junction -Path (Join-Path $userRoot 'external-skill') -Target $externalRoot -Force | Out-Null
             $snapshotPath = Join-Path $fixture 'host.json'; [IO.File]::WriteAllText($snapshotPath, (([pscustomobject]@{ captured_at = [datetimeoffset]::UtcNow.ToString('o'); coverage = 'complete'; skills = @([pscustomobject]@{ name = 'host-only'; path = 'host://skill'; entrypoint_hash = ('a' * 64); description_hash = ('b' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
-            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @('managed-current'); external_skill_inventory = [pscustomobject]@{ enabled = $true } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @('managed-current'); external_skill_inventory = [pscustomobject]@{ enabled = $true }; projection_profiles = [pscustomobject]@{ schema_version = 1; default_profile = 'core'; profiles = [pscustomobject]@{ core = [pscustomobject]@{ include = @('managed-current'); exclude = @() }; 'full-compatible' = [pscustomobject]@{ include_all = $true; exclude = @() } }; hosts = [pscustomobject]@{ codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() } } } }; mcp_servers = @() }
             $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath -HostProbe
             $view.pass | Should -BeTrue
             $view.surface_count | Should -Be 6
@@ -57,8 +57,40 @@ Describe 'Read-only skill surface inventory' {
             $preference.standalone_duplicate | Should -BeTrue
             $preference.native_source_preferred | Should -BeTrue
             $preference.action | Should -Be 'report_only_do_not_import_duplicate'
+            $candidate = @($view.retirement_candidates | Where-Object name -eq 'plugin-skill')[0]
+            $candidate.operation | Should -Be 'exclude_from_host_profile'
+            $candidate.actionable | Should -BeTrue
+            $candidate.status | Should -Be 'candidate_requires_replacement_validation_and_user_confirmation'
+            $candidate.target_host | Should -Be 'codex'
+            $candidate.profile | Should -Be 'full-compatible'
+            $candidate.config_path | Should -Be 'skill_projection.projection_profiles.hosts.codex.exclude'
+            $candidate.preserves | Should -Contain 'cold_catalog'
+            $candidate.does_not_prove | Should -Contain 'successful_invocation'
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'retains an auditable native replacement record after its Codex profile exclusion is applied' {
+        $projection = [pscustomobject]@{
+            projection_profiles = [pscustomobject]@{
+                schema_version = 1
+                default_profile = 'core'
+                profiles = [pscustomobject]@{
+                    core = [pscustomobject]@{ include = @('alpha'); exclude = @() }
+                    'full-compatible' = [pscustomobject]@{ include_all = $true; exclude = @() }
+                }
+                hosts = [pscustomobject]@{
+                    codex = [pscustomobject]@{ default_profile = 'core'; exclude = @('plugin-skill') }
+                }
+            }
+        }
+        $preference = [pscustomobject]@{ name = 'plugin-skill'; standalone_duplicate = $true; duplicate_surface = 'repo_supply'; plugin_installed = $true; native_source_preferred = $true; plugin_path = 'plugin'; duplicate_path = 'source' }
+
+        $assessment = Get-CapabilityNativeReplacementCandidates -ProjectionConfig $projection -SourcePreferences @($preference)
+
+        $assessment.Count | Should -Be 1
+        $assessment[0].status | Should -Be 'already_excluded_from_host_profile'
+        $assessment[0].actionable | Should -BeFalse
     }
 
     It 'fails closed when a host-visible skill lacks fingerprints' {

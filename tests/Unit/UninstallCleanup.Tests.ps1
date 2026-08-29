@@ -212,6 +212,63 @@ Describe "Uninstall cleanup" {
         Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
     }
 
+    It "removes retired discovery and profile references with the mapping" {
+        $cfg = [pscustomobject]@{
+            vendors = @([pscustomobject]@{ name = 'anthropics-skills'; repo = 'https://github.com/anthropics/skills.git'; ref = 'main' })
+            mappings = @(
+                [pscustomobject]@{ vendor = 'anthropics-skills'; from = 'skills\\pdf'; to = 'pdf' },
+                [pscustomobject]@{ vendor = 'anthropics-skills'; from = 'skills\\docx'; to = 'docx' }
+            )
+            imports = @(
+                [pscustomobject]@{ name = 'anthropics-skills'; mode = 'vendor'; repo = 'https://github.com/anthropics/skills.git'; ref = 'main'; skill = 'skills\\pdf'; sparse = $false },
+                [pscustomobject]@{ name = 'anthropics-skills'; mode = 'vendor'; repo = 'https://github.com/anthropics/skills.git'; ref = 'main'; skill = 'skills\\docx'; sparse = $false }
+            )
+            targets = @()
+            mcp_servers = @()
+            mcp_targets = @()
+            update_force = $false
+            sync_mode = 'link'
+            skill_projection = [pscustomobject]@{
+                discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{ content = @('pdf', 'docx') } }
+                projection_profiles = [pscustomobject]@{
+                    profiles = [pscustomobject]@{ core = [pscustomobject]@{ include = @('pdf', 'docx'); exclude = @('pdf') } }
+                    hosts = [pscustomobject]@{ codex = [pscustomobject]@{ exclude = @('pdf', 'skill-creator') } }
+                }
+            }
+        }
+
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock 收集ManualSkills { @() }
+        Mock 收集OverridesSkills { @() }
+        Mock 收集Skills { ,@([pscustomobject]@{ vendor = 'anthropics-skills'; from = 'skills\\pdf'; full = (Join-Path $TestDrive 'vendor\\anthropics-skills\\skills\\pdf') }) }
+        Mock Filter-Skills { param($items, $filter) $items }
+        Mock SaveCfg {}
+        Mock Clear-SkillsCache {}
+        Mock 构建生效 {}
+
+        卸载 @('pdf', '--yes')
+
+        @($cfg.mappings | ForEach-Object to) | Should -Be @('docx')
+        @($cfg.skill_projection.discovery_catalog.domain_memberships.content) | Should -Be @('docx')
+        @($cfg.skill_projection.projection_profiles.profiles.core.include) | Should -Be @('docx')
+        @($cfg.skill_projection.projection_profiles.profiles.core.exclude) | Should -Be @()
+        @($cfg.skill_projection.projection_profiles.hosts.codex.exclude) | Should -Be @('skill-creator')
+    }
+
+    It "preserves projection references when the output name remains mapped" {
+        $cfg = [pscustomobject]@{
+            mappings = @(
+                [pscustomobject]@{ vendor = 'vendor-a'; from = 'a'; to = 'shared' },
+                [pscustomobject]@{ vendor = 'vendor-b'; from = 'b'; to = 'shared' }
+            )
+        }
+
+        $retired = Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames @('shared')
+
+        $retired | Should -BeNullOrEmpty
+    }
+
     It "Get-InstalledSet excludes unmapped manual imports and keeps mapped/overrides only" {
         $cfg = [pscustomobject]@{
             vendors = @()
