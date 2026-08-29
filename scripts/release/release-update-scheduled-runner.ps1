@@ -2,8 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Root,
-    [switch]$AutoApply,
-    [switch]$SyncMcp
+    [switch]$AutoApply
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,7 +29,6 @@ if ($result.update_available) {
     $message = "skills-manager 有新版本：$($check.current_version) -> $($check.latest_version)"
     if ($AutoApply) {
         $applyArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$entry,'release-update','--apply','--yes','--json')
-        if ($SyncMcp) { $applyArgs += '--sync-mcp' }
         $applyRaw = & $pwsh @applyArgs
         if ($LASTEXITCODE -ne 0) { throw "release-update apply failed: exit=$LASTEXITCODE" }
         $apply = ($applyRaw | Out-String | ConvertFrom-Json)

@@ -62,7 +62,7 @@
 - `FR-SKL-003`：update/lock/build 能检测 dirty source、revision drift、duplicate output 和 dependency gap。
 - `FR-SKL-004`：本地 override 只进入 `overrides/{custom,patches,resources}`，patch 记录 provenance。
 - `FR-SKL-005`：卸载只撤配置与受管输出，不删除未授权源码或宿主-owned assets。
-- `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库可提供可重复调用且 fail-closed 的 skills-only maintenance runner，但计划任务的创建、更新、删除、运行账户、触发频率与宿主验收由 host/operator 持有；runner 不同步 MCP、不 push。
+- `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库可提供可重复调用且 fail-closed 的 skills-only maintenance runner，但计划任务的创建、更新、删除、运行账户、触发频率与宿主验收由 host/operator 持有；runner 不同步 MCP、不 push。调度注册是交互式 operator 的显式动作；调度 runner 仅检查/更新 skills-manager 自身，绝不修改宿主 MCP 配置。
 - `FR-SKL-007`（当前实现）：`skills.json` schema v3 顶层为 allowlist，仅允许 `schema_version`、`sync_mode`、`update_force`、`skill_projection`、`vendors`、`mappings`、`imports`、`targets`、`mcp_servers`、`mcp_profiles`、`mcp_targets`；v3 下未知顶层字段 fail closed。v2 保持只读迁移兼容并仅输出 observation；v2 到 v3 的迁移已按一次性、可回滚与迁移/回滚/兼容三件套验证完成。后续 schema 变更仍须遵守 [加固实施计划](skills-manager-hardening-implementation-plan.md) HSM-CFG-300/310 的兼容窗口与回滚合同。
 
 ### 5.2 MCP

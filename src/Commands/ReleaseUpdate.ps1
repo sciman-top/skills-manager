@@ -194,14 +194,13 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
 }
 
 function Get-ReleaseUpdateScheduleTokens([string[]]$Tokens) {
-    $result = [ordered]@{ action = ''; time = '09:00'; auto_apply = $false; sync_mcp = $false; json = $false }
+    $result = [ordered]@{ action = ''; time = '09:00'; auto_apply = $false; json = $false }
     foreach ($token in @($Tokens)) {
         $value = [string]$token
         switch -Regex ($value.ToLowerInvariant()) {
             '^--enable$' { $result.action = 'Enable'; continue }
             '^--disable$' { $result.action = 'Disable'; continue }
             '^--auto-apply$' { $result.auto_apply = $true; continue }
-            '^--sync-mcp$' { $result.sync_mcp = $true; continue }
             '^--json$' { $result.json = $true; continue }
             '^--time=' { $result.time = $value.Substring(7); continue }
             default { throw ("release-update-schedule 不支持参数：{0}" -f $value) }
@@ -209,7 +208,7 @@ function Get-ReleaseUpdateScheduleTokens([string[]]$Tokens) {
     }
     Need ($result.action -in @('Enable','Disable')) 'release-update-schedule 必须指定 --enable 或 --disable'
     Need ($result.time -match '^([01]\d|2[0-3]):[0-5]\d$') 'release-update-schedule --time 必须为 HH:mm'
-    Need ($result.action -eq 'Enable' -or (-not $result.auto_apply -and -not $result.sync_mcp)) '--auto-apply 和 --sync-mcp 仅可与 --enable 一起使用'
+    Need ($result.action -eq 'Enable' -or (-not $result.auto_apply)) '--auto-apply 仅可与 --enable 一起使用'
     return [pscustomobject]$result
 }
 
@@ -221,7 +220,6 @@ function Invoke-ReleaseUpdateScheduleCommand([string[]]$Tokens) {
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Action',$options.action,'-Root',$Root,'-Time',$options.time)
     if ($options.auto_apply) { $args += '-AutoApply' }
-    if ($options.sync_mcp) { $args += '-SyncMcp' }
     $raw = & $pwsh @args
     Need ($LASTEXITCODE -eq 0) ("Release 更新调度配置失败，exit={0}" -f $LASTEXITCODE)
     $result = ($raw | Out-String | ConvertFrom-Json)

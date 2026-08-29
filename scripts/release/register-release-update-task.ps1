@@ -4,8 +4,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('Enable','Disable')][string]$Action,
     [Parameter(Mandatory)][string]$Root,
     [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')][string]$Time = '09:00',
-    [switch]$AutoApply,
-    [switch]$SyncMcp
+    [switch]$AutoApply
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,9 +25,8 @@ if ($Action -eq 'Disable') {
 $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
 $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $runner),'-Root',('"{0}"' -f $rootPath))
 if ($AutoApply) { $arguments += '-AutoApply' }
-if ($SyncMcp) { $arguments += '-SyncMcp' }
 $taskAction = New-ScheduledTaskAction -Execute $pwsh -Argument ($arguments -join ' ')
 $trigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($Time, 'HH:mm', [Globalization.CultureInfo]::InvariantCulture))
 $principal = New-ScheduledTaskPrincipal -UserId ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME) -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger -Principal $principal -Description 'Checks skills-manager GitHub Releases and optionally applies a verified update.' -Force | Out-Null
-[pscustomobject]@{ command = 'release-update-schedule'; action = 'enabled'; task = $taskName; time = $Time; auto_apply = [bool]$AutoApply; sync_mcp = [bool]$SyncMcp } | ConvertTo-Json -Compress | Write-Output
+[pscustomobject]@{ command = 'release-update-schedule'; action = 'enabled'; task = $taskName; time = $Time; auto_apply = [bool]$AutoApply } | ConvertTo-Json -Compress | Write-Output

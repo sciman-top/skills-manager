@@ -201,7 +201,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
-  .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply] [--sync-mcp]
+  .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）

@@ -85,6 +85,15 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *skills-manager
         { Get-ReleaseUpdateScheduleTokens @('--disable','--auto-apply') } | Should -Throw '*仅可与 --enable*'
     }
 
+    It 'keeps --sync-mcp foreground-only: the unattended scheduler must not carry MCP sync' {
+        { Get-ReleaseUpdateScheduleTokens @('--enable','--sync-mcp') } | Should -Throw '*不支持参数*'
+        (Get-ReleaseUpdateTokens @('--apply','--yes','--sync-mcp')).sync_mcp | Should -BeTrue
+        $registerScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\register-release-update-task.ps1') -Raw
+        $registerScript | Should -Not -Match '(?i)SyncMcp'
+        $runner = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-scheduled-runner.ps1') -Raw
+        $runner | Should -Not -Match '(?i)SyncMcp'
+    }
+
     It 'keeps the only scheduler mutation in the constrained Release updater entrypoint' {
         $scheduler = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\register-release-update-task.ps1') -Raw
         $scheduler | Should -Match "\$taskName = 'skills-manager-release-update'"
