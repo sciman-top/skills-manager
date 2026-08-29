@@ -95,6 +95,9 @@ function Unprotect-MigrationCredentialPayload($Encrypted, [System.Security.Secur
 function Copy-MigrationTree([string]$Source, [string]$Destination) {
     if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return $false }
     $sourceRoot = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+    # The walker skips reparse entries inside the tree, but a source root that
+    # is itself a junction would pull the target tree into the private snapshot.
+    if (Is-ReparsePoint $sourceRoot) { throw ("迁移源目录不允许是链接/junction：{0}" -f $sourceRoot) }
     if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
     foreach ($entry in @(Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop)) {
         # Migration contains package payload only: never follow links and never copy Git history.
@@ -225,6 +228,10 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
         Join-Path $Root $credentialFile
     } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
+    # Physical check: a junction inside the package could redirect the lexical
+    # in-package credential path to an outside file.
+    Need (-not (Is-ReparsePoint ([IO.Path]::GetFullPath($credentialPath)))) '凭据文件不允许是链接/junction'
+    Need (-not (Test-AncestorChainHasReparse ([IO.Path]::GetFullPath($credentialPath)))) '凭据文件路径链上不允许存在链接/junction'
     Need (Test-Path -LiteralPath $credentialPath -PathType Leaf) ("缺少迁移凭据文件：{0}" -f $credentialPath)
     $credentialDocument = Get-ContentUtf8 $credentialPath | ConvertFrom-Json
     $payload = if ($credentialsEncrypted) {

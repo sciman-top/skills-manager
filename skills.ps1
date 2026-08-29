@@ -1116,6 +1116,23 @@ function Is-ReparsePoint([string]$path) {
         return $false
     }
 }
+function Test-AncestorChainHasReparse([string]$path) {
+    # Walks from $path up to the filesystem root. Lexical containment
+    # (Is-PathInsideOrEqual) cannot see a junction above a managed root, so
+    # write-boundary callers must also reject a reparse anywhere in the
+    # physical ancestor chain. Segments that do not exist yet cannot be
+    # reparse points and are skipped.
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $cursor = [IO.Path]::GetFullPath($path)
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) {
+            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+    return $false
+}
 function Is-PathUnder([string]$path, [string]$root) {
     if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
     $rootNorm = $root.TrimEnd("\")
@@ -15726,6 +15743,7 @@ function Assert-McpDesiredStateFresh([object[]]$DesiredState,[string]$ExpectedCo
         $path=[IO.Path]::GetFullPath([string]$target.path);$root=[IO.Path]::GetFullPath([string]$target.root)
         Need (Test-OperationPathWithinRoot $path $root) ("MCP target_out_of_root：{0}" -f $path)
         Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP target_reparse_forbidden：{0}" -f $path)
+        Need (-not (Test-AncestorChainHasReparse $root)) ("MCP target_root_ancestor_reparse_forbidden：{0}" -f $root)
         $exists=Test-Path -LiteralPath $path -PathType Leaf;$before=$target.before_hash
         if($null -eq $before){Need (-not $exists) ("MCP target_created_since_plan：{0}" -f $path)}
         else{Need $exists ("MCP target_missing_since_plan：{0}" -f $path);Need ((Get-OperationSha256 (Get-ContentUtf8 $path)) -eq [string]$before) ("MCP target_hash_stale：{0}" -f $path)}
@@ -15963,6 +15981,9 @@ function Unprotect-MigrationCredentialPayload($Encrypted, [System.Security.Secur
 function Copy-MigrationTree([string]$Source, [string]$Destination) {
     if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return $false }
     $sourceRoot = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+    # The walker skips reparse entries inside the tree, but a source root that
+    # is itself a junction would pull the target tree into the private snapshot.
+    if (Is-ReparsePoint $sourceRoot) { throw ("迁移源目录不允许是链接/junction：{0}" -f $sourceRoot) }
     if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
     foreach ($entry in @(Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop)) {
         # Migration contains package payload only: never follow links and never copy Git history.
@@ -16093,6 +16114,10 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
         Join-Path $Root $credentialFile
     } else { [IO.Path]::GetFullPath($options.credentials_path) }
     Need (Is-PathInsideOrEqual $credentialPath $Root) '凭据文件必须位于当前迁移包目录内'
+    # Physical check: a junction inside the package could redirect the lexical
+    # in-package credential path to an outside file.
+    Need (-not (Is-ReparsePoint ([IO.Path]::GetFullPath($credentialPath)))) '凭据文件不允许是链接/junction'
+    Need (-not (Test-AncestorChainHasReparse ([IO.Path]::GetFullPath($credentialPath)))) '凭据文件路径链上不允许存在链接/junction'
     Need (Test-Path -LiteralPath $credentialPath -PathType Leaf) ("缺少迁移凭据文件：{0}" -f $credentialPath)
     $credentialDocument = Get-ContentUtf8 $credentialPath | ConvertFrom-Json
     $payload = if ($credentialsEncrypted) {
@@ -16427,18 +16452,20 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     return $manifest
 }
 
-function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [switch]$SyncMcp) {
+function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [string]$ManifestSha256, [switch]$SyncMcp) {
     $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    Need (-not (Test-AncestorChainHasReparse $currentRoot)) ("release_install_root_reparse_forbidden：{0}" -f $currentRoot)
     $parent = Split-Path -Parent $currentRoot
     $leaf = Split-Path -Leaf $currentRoot
     Need (-not [string]::IsNullOrWhiteSpace($parent) -and -not [string]::IsNullOrWhiteSpace($leaf)) '当前安装目录不适合自动替换'
+    Need (-not [string]::IsNullOrWhiteSpace($ManifestSha256)) '缺少 RELEASE-MANIFEST 摘要，无法安全交接更新'
     $backupRoot = Join-Path $parent ("{0}.backup-{1}-{2}" -f $leaf, $ExpectedVersion, (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))
     $workerSource = Join-Path $currentRoot 'scripts\release\release-update-worker.ps1'
     Need (Test-Path -LiteralPath $workerSource -PathType Leaf) '当前安装缺少 release update worker；请手动安装新版本'
     $workerPath = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-release-update-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
     Copy-Item -LiteralPath $workerSource -Destination $workerPath -Force
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
-    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ParentProcessId',$PID)
+    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ManifestSha256',$ManifestSha256,'-ParentProcessId',$PID)
     if ($SyncMcp) { $args += '-SyncMcp' }
     $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
     return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
@@ -16471,8 +16498,9 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
         $roots = @(Get-ChildItem -LiteralPath $extract -Directory -Force)
         Need ($roots.Count -eq 1) 'Release ZIP 必须只包含一个根目录'
         $package = $roots[0].FullName
-        Test-ReleaseUpdatePackage $package $snapshot.latest_version $snapshot.package | Out-Null
-        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version $snapshot.package -SyncMcp:$options.sync_mcp
+        $verifiedManifest = Test-ReleaseUpdatePackage $package $snapshot.latest_version $snapshot.package
+        $manifestSha = (Get-FileHash -LiteralPath (Join-Path $package 'RELEASE-MANIFEST.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version $snapshot.package -ManifestSha256 $manifestSha -SyncMcp:$options.sync_mcp
         $result.status = $handoff.status; $result.worker_pid = $handoff.worker_pid; $result.backup_root = $handoff.backup_root
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
         Write-Host ("Release 更新已交给后台进程：{0}。旧目录备份将保留在：{1}" -f $handoff.worker_pid, $handoff.backup_root) -ForegroundColor Green

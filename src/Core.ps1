@@ -660,6 +660,23 @@ function Is-ReparsePoint([string]$path) {
         return $false
     }
 }
+function Test-AncestorChainHasReparse([string]$path) {
+    # Walks from $path up to the filesystem root. Lexical containment
+    # (Is-PathInsideOrEqual) cannot see a junction above a managed root, so
+    # write-boundary callers must also reject a reparse anywhere in the
+    # physical ancestor chain. Segments that do not exist yet cannot be
+    # reparse points and are skipped.
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $cursor = [IO.Path]::GetFullPath($path)
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) {
+            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+    return $false
+}
 function Is-PathUnder([string]$path, [string]$root) {
     if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
     $rootNorm = $root.TrimEnd("\")

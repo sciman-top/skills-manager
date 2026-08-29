@@ -133,18 +133,20 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     return $manifest
 }
 
-function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [switch]$SyncMcp) {
+function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [string]$ManifestSha256, [switch]$SyncMcp) {
     $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    Need (-not (Test-AncestorChainHasReparse $currentRoot)) ("release_install_root_reparse_forbidden：{0}" -f $currentRoot)
     $parent = Split-Path -Parent $currentRoot
     $leaf = Split-Path -Leaf $currentRoot
     Need (-not [string]::IsNullOrWhiteSpace($parent) -and -not [string]::IsNullOrWhiteSpace($leaf)) '当前安装目录不适合自动替换'
+    Need (-not [string]::IsNullOrWhiteSpace($ManifestSha256)) '缺少 RELEASE-MANIFEST 摘要，无法安全交接更新'
     $backupRoot = Join-Path $parent ("{0}.backup-{1}-{2}" -f $leaf, $ExpectedVersion, (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))
     $workerSource = Join-Path $currentRoot 'scripts\release\release-update-worker.ps1'
     Need (Test-Path -LiteralPath $workerSource -PathType Leaf) '当前安装缺少 release update worker；请手动安装新版本'
     $workerPath = Join-Path ([IO.Path]::GetTempPath()) ("skills-manager-release-update-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
     Copy-Item -LiteralPath $workerSource -Destination $workerPath -Force
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
-    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ParentProcessId',$PID)
+    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ManifestSha256',$ManifestSha256,'-ParentProcessId',$PID)
     if ($SyncMcp) { $args += '-SyncMcp' }
     $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
     return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
@@ -177,8 +179,9 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
         $roots = @(Get-ChildItem -LiteralPath $extract -Directory -Force)
         Need ($roots.Count -eq 1) 'Release ZIP 必须只包含一个根目录'
         $package = $roots[0].FullName
-        Test-ReleaseUpdatePackage $package $snapshot.latest_version $snapshot.package | Out-Null
-        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version $snapshot.package -SyncMcp:$options.sync_mcp
+        $verifiedManifest = Test-ReleaseUpdatePackage $package $snapshot.latest_version $snapshot.package
+        $manifestSha = (Get-FileHash -LiteralPath (Join-Path $package 'RELEASE-MANIFEST.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $handoff = Start-ReleaseUpdateHandoff $package $snapshot.latest_version $snapshot.package -ManifestSha256 $manifestSha -SyncMcp:$options.sync_mcp
         $result.status = $handoff.status; $result.worker_pid = $handoff.worker_pid; $result.backup_root = $handoff.backup_root
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
         Write-Host ("Release 更新已交给后台进程：{0}。旧目录备份将保留在：{1}" -f $handoff.worker_pid, $handoff.backup_root) -ForegroundColor Green

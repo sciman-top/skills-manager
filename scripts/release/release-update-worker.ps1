@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [ValidateSet('bootstrap','portable')][string]$PackageType = 'bootstrap',
     [Parameter(Mandatory)][int]$ParentProcessId,
+    [Parameter(Mandatory)][string]$ManifestSha256,
     [switch]$SyncMcp
 )
 
@@ -36,6 +37,45 @@ function Assert-SiblingPath([string]$Path, [string]$Parent) {
     return $full
 }
 
+# Lexical sibling checks cannot see a junction above a root; reject a reparse
+# anywhere in the physical ancestor chain of the swap roots.
+function Assert-PhysicalChainHasNoReparse([string]$Path) {
+    $cursor = [IO.Path]::GetFullPath($Path)
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) {
+            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Update path resolves through a reparse point: $cursor" }
+        }
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+}
+
+# Re-verify the staged payload after the parent exits: the wait window is a
+# TOCTOU gap in which a same-user process could mutate the staged files or
+# swap the manifest. Compare against the manifest hash the parent validated.
+function Assert-StagedPayloadIntegrity([string]$StagedRoot, [string]$ExpectedManifestSha) {
+    $manifestPath = Join-Path $StagedRoot 'RELEASE-MANIFEST.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Staged RELEASE-MANIFEST.json is missing.' }
+    $manifestSha = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($manifestSha -ne $ExpectedManifestSha) { throw 'Staged RELEASE-MANIFEST.json changed after handoff.' }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $manifestPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($manifest.files)) {
+        [void]$manifestPaths.Add(([string]$entry.path).Replace('\', '/'))
+    }
+    [void]$manifestPaths.Add('RELEASE-MANIFEST.json')
+    $rootFull = [IO.Path]::GetFullPath($StagedRoot)
+    $actual = @(Get-ChildItem -LiteralPath $StagedRoot -Recurse -File -Force)
+    if ($actual.Count -ne $manifestPaths.Count) { throw 'Staged payload file set does not match the manifest.' }
+    foreach ($file in $actual) {
+        $relative = [IO.Path]::GetRelativePath($rootFull, $file.FullName).Replace('\', '/')
+        if (-not $manifestPaths.Contains($relative)) { throw "Staged payload contains an unmanifested file: $relative" }
+        $entry = @($manifest.files | Where-Object { (([string]$_.path).Replace('\', '/')) -eq $relative })[0]
+        $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($sha -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "Staged payload file was modified after handoff: $relative" }
+    }
+}
+
 $current = [IO.Path]::GetFullPath($CurrentRoot).TrimEnd('\', '/')
 $parent = Split-Path -Parent $current
 $staged = Assert-SiblingPath $StagedRoot $parent
@@ -48,9 +88,13 @@ try {
         Start-Sleep -Seconds 1
     }
     if (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) { throw 'The initiating release-update process did not exit before timeout.' }
+    Assert-PhysicalChainHasNoReparse $current
+    Assert-PhysicalChainHasNoReparse $staged
+    Assert-PhysicalChainHasNoReparse $backup
     if (-not (Test-Path -LiteralPath $current -PathType Container)) { throw "Current installation is missing: $current" }
     if (-not (Test-Path -LiteralPath $staged -PathType Container)) { throw "Staged release is missing: $staged" }
     if (Test-Path -LiteralPath $backup) { throw "Backup path already exists: $backup" }
+    Assert-StagedPayloadIntegrity $staged $ManifestSha256
 
     $movedCurrent = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {

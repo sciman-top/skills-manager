@@ -2475,6 +2475,7 @@ function Assert-McpDesiredStateFresh([object[]]$DesiredState,[string]$ExpectedCo
         $path=[IO.Path]::GetFullPath([string]$target.path);$root=[IO.Path]::GetFullPath([string]$target.root)
         Need (Test-OperationPathWithinRoot $path $root) ("MCP target_out_of_root：{0}" -f $path)
         Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP target_reparse_forbidden：{0}" -f $path)
+        Need (-not (Test-AncestorChainHasReparse $root)) ("MCP target_root_ancestor_reparse_forbidden：{0}" -f $root)
         $exists=Test-Path -LiteralPath $path -PathType Leaf;$before=$target.before_hash
         if($null -eq $before){Need (-not $exists) ("MCP target_created_since_plan：{0}" -f $path)}
         else{Need $exists ("MCP target_missing_since_plan：{0}" -f $path);Need ((Get-OperationSha256 (Get-ContentUtf8 $path)) -eq [string]$before) ("MCP target_hash_stale：{0}" -f $path)}
