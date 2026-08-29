@@ -115,7 +115,9 @@ try {
         @()
     }
     else {
-        @('lock', 'integrity', 'config', 'scheduler', 'mor')
+        # 'mor' stays explicit-only via -Verifier: design-only MOR (MOR-000)
+        # carries no automatic gate until implementation is admitted.
+        @('lock', 'integrity', 'config', 'scheduler')
     }
     foreach ($verifier in $selectedVerifiers) {
         switch ($verifier) {

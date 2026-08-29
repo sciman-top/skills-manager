@@ -85,7 +85,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:CI_DIFF_BASE_SHA)) { $gateArgs['DiffBase'] = $env:CI_DIFF_BASE_SHA }
           if ($env:CI_GATE_PROFILE -eq 'focused') {
             $gateArgs['TestPath'] = @($env:CI_FOCUSED_TEST_PATHS | ConvertFrom-Json)
-            $gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler', 'mor')
+            $gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler')
           }
           .\scripts\quality\run-local-quality-gates.ps1 @gateArgs
 

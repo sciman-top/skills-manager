@@ -37,7 +37,8 @@ Describe 'GitHub CI workflow supply-chain contract' {
         # The final gate invocation must splat a hashtable: array splat is
         # positional-only and turned CI red by binding '-Profile' as a value.
         $script:workflow | Should -Match '\$gateArgs = @\{ Profile = \$env:CI_GATE_PROFILE \}'
-        $script:workflow | Should -Match ([regex]::Escape("`$gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler', 'mor')"))
+        $script:workflow | Should -Match ([regex]::Escape("`$gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler')"))
+        $script:workflow | Should -Not -Match "'mor'"
         $script:workflow | Should -Not -Match "\`$gateArgs = @\('-Profile'"
         # The classifier must stay in the shared resolver; CI keeps no inline copy.
         $script:workflow | Should -Not -Match 'git diff --name-only \$baseSha HEAD'
