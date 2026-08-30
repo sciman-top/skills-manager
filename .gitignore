@@ -7,17 +7,9 @@
 /docs/runtime-*.txt
 /artifacts/*
 !/artifacts/README.md
-# Keep category README anchors tracked while all generated children stay local.
+# Keep the deliveries root README tracked while all generated version trees stay local.
 !/artifacts/deliveries/
 !/artifacts/deliveries/README.md
-!/artifacts/deliveries/release/
-!/artifacts/deliveries/migration/
-!/artifacts/deliveries/release/README.md
-!/artifacts/deliveries/migration/README.md
-/artifacts/deliveries/release/*
-/artifacts/deliveries/migration/*
-!/artifacts/deliveries/release/README.md
-!/artifacts/deliveries/migration/README.md
 # Version roots are local staging only. Keep the deliveries README tracked,
 # but never allow generated public ZIPs or private snapshots into Git.
 /artifacts/deliveries/*/
