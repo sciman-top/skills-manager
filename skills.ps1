@@ -7669,11 +7669,20 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
         }
     }
 }
+function Test-GitSparseCheckoutEnabled {
+    # core.sparseCheckout 未配置或 false 均视为未启用；取证失败同样按未启用处理
+    # （跳过 disable、保留现状），不会误动已有 sparse 配置。
+    $value = Invoke-GitCapture @("config", "--bool", "core.sparseCheckout")
+    return ([string]$value -eq "true")
+}
 function Set-GitSparseCheckout([string[]]$sparsePaths) {
     $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
     if ($normalizedSparsePaths.Count -eq 0) {
-        try { Invoke-Git @("sparse-checkout", "disable") }
-        catch { Log ("sparse-checkout disable 失败，仓库可能保留陈旧 sparse 路径：{0}" -f $_.Exception.Message) "WARN" }
+        # 仅在确实启用过 sparse checkout 时才需要 disable；启用过但 disable 失败
+        # 必须 fail closed——继续 fetch/checkout 会得到不完整工作树。
+        if (Test-GitSparseCheckoutEnabled) {
+            Invoke-Git @("sparse-checkout", "disable")
+        }
         return
     }
     Remove-GitSparseCheckoutResiduals $normalizedSparsePaths
@@ -12114,17 +12123,43 @@ function Start-BuildTransaction {
 }
 
 function Rollback-BuildTransaction($txn) {
-    if ($DryRun -or $null -eq $txn) { return }
+    if ($DryRun -or $null -eq $txn) { return $true }
+    $restored = $false
+    $restoreError = $null
     try {
         if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
-        if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
-            Invoke-MoveItem $txn.backup_agent $AgentDir
-            Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        if ($txn.has_backup_agent) {
+            if (-not (Test-Path $txn.backup_agent)) {
+                $restoreError = "agent/ 备份不存在"
+            }
+            elseif (Test-Path $AgentDir) {
+                $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
+            }
+            else {
+                try {
+                    Invoke-MoveItem $txn.backup_agent $AgentDir
+                    $restored = $true
+                    Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+                }
+                catch {
+                    $restoreError = $_.Exception.Message
+                }
+            }
+        }
+        else {
+            # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
+            $restored = -not (Test-Path $AgentDir)
+            if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
         }
     }
     finally {
-        if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+        # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
+        if ($restored -and (Test-Path $txn.path)) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
     }
+    if (-not $restored) {
+        Log ("构建事务回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；原因：{1}" -f $txn.path, $restoreError) "ERROR"
+    }
+    return $restored
 }
 
 function Complete-BuildTransaction($txn) {
@@ -18879,6 +18914,11 @@ function Get-AuditGitPathStatePairs($paths) {
     if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
     $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
+    # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
+    # blob 变化，削弱 stale/drift 检测。
+    if ($LASTEXITCODE -ne 0) {
+        throw ("审计 git 取证失败：ls-files --stage exit={0}；无法验证 index 状态，拒绝生成审计指纹。" -f $LASTEXITCODE)
+    }
     $pairs = @()
     foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)

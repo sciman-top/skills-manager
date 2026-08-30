@@ -3517,3 +3517,79 @@ Describe "构建生效 rollback compensation" {
         }
     }
 }
+
+Describe "Sparse checkout disable guard" {
+    It "Fails closed when disable is required but fails" {
+        Mock Invoke-GitCapture { "true" }
+        Mock Invoke-Git { throw "git 失败：sparse-checkout disable" }
+        { Set-GitSparseCheckout @() } | Should -Throw '*git 失败*'
+        Should -Invoke Invoke-Git -Times 1 -Exactly -ParameterFilter { @($GitArgs) -contains "disable" }
+    }
+
+    It "Skips disable when sparse checkout was never enabled" {
+        Mock Invoke-GitCapture { "" }
+        Mock Invoke-Git {}
+        Set-GitSparseCheckout @()
+        Should -Invoke Invoke-Git -Times 0 -Exactly
+    }
+
+    It "Runs disable when sparse checkout is enabled" {
+        Mock Invoke-GitCapture { "true" }
+        Mock Invoke-Git {}
+        Set-GitSparseCheckout @()
+        Should -Invoke Invoke-Git -Times 1 -Exactly -ParameterFilter { @($GitArgs) -contains "disable" }
+    }
+}
+
+Describe "Build transaction rollback backup preservation" {
+    It "Restores agent and removes the transaction directory on success" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-ok"
+            $txnPath = Join-Path $root "build-t1"
+            $backupAgent = Join-Path $txnPath "agent.backup"
+            New-Item -ItemType Directory -Path (Join-Path $backupAgent "skill") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $backupAgent "skill\SKILL.md") "backup"
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
+            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = $backupAgent; has_backup_agent = $true; backup_error = $null }
+
+            Rollback-BuildTransaction $txn | Should -Be $true
+            Test-Path -LiteralPath (Join-Path $AgentDir "skill\SKILL.md") -PathType Leaf | Should -BeTrue
+            Test-Path -LiteralPath $txnPath | Should -BeFalse
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Keeps the transaction directory and backup when the restore fails" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-fail"
+            $txnPath = Join-Path $root "build-t2"
+            $backupAgent = Join-Path $txnPath "agent.backup"
+            New-Item -ItemType Directory -Path (Join-Path $backupAgent "skill") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $backupAgent "skill\SKILL.md") "backup"
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
+            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = $backupAgent; has_backup_agent = $true; backup_error = $null }
+            Mock Invoke-MoveItem { throw "file in use" }
+
+            Rollback-BuildTransaction $txn | Should -Be $false
+            Test-Path -LiteralPath $txnPath -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $backupAgent "skill\SKILL.md") -PathType Leaf | Should -BeTrue
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+}

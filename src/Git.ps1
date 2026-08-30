@@ -1038,11 +1038,20 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
         }
     }
 }
+function Test-GitSparseCheckoutEnabled {
+    # core.sparseCheckout 未配置或 false 均视为未启用；取证失败同样按未启用处理
+    # （跳过 disable、保留现状），不会误动已有 sparse 配置。
+    $value = Invoke-GitCapture @("config", "--bool", "core.sparseCheckout")
+    return ([string]$value -eq "true")
+}
 function Set-GitSparseCheckout([string[]]$sparsePaths) {
     $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
     if ($normalizedSparsePaths.Count -eq 0) {
-        try { Invoke-Git @("sparse-checkout", "disable") }
-        catch { Log ("sparse-checkout disable 失败，仓库可能保留陈旧 sparse 路径：{0}" -f $_.Exception.Message) "WARN" }
+        # 仅在确实启用过 sparse checkout 时才需要 disable；启用过但 disable 失败
+        # 必须 fail closed——继续 fetch/checkout 会得到不完整工作树。
+        if (Test-GitSparseCheckoutEnabled) {
+            Invoke-Git @("sparse-checkout", "disable")
+        }
         return
     }
     Remove-GitSparseCheckoutResiduals $normalizedSparsePaths

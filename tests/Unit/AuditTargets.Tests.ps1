@@ -2720,3 +2720,31 @@ Describe "Workflow receipt binding fail-closed" {
         $result.code | Should -Be 'validated_dry_run_stale'
     }
 }
+
+Describe "Audit git evidence fail-closed" {
+    It "Throws when the scanned worktree cannot prove its index state" {
+        Push-Location $TestDrive
+        try {
+            { Get-AuditGitPathStatePairs @("any.txt") } | Should -Throw '*ls-files*'
+        }
+        finally { Pop-Location }
+    }
+
+    It "Produces index and worktree pairs in a real repository" {
+        $repo = Join-Path $TestDrive "audit-git-repo"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        & git -C $repo config user.email "t@t.invalid"
+        & git -C $repo config user.name "t"
+        Set-ContentUtf8 (Join-Path $repo "tracked.txt") "hello"
+        & git -C $repo add tracked.txt
+        & git -C $repo commit -q -m init
+        Push-Location $repo
+        try {
+            $pairs = @(Get-AuditGitPathStatePairs @("tracked.txt"))
+            $pairs.Count | Should -Be 1
+            $pairs[0] | Should -Match '^path\|tracked\.txt\|index\|'
+        }
+        finally { Pop-Location }
+    }
+}

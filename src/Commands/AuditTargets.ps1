@@ -1500,6 +1500,11 @@ function Get-AuditGitPathStatePairs($paths) {
     if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
     $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
+    # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
+    # blob 变化，削弱 stale/drift 检测。
+    if ($LASTEXITCODE -ne 0) {
+        throw ("审计 git 取证失败：ls-files --stage exit={0}；无法验证 index 状态，拒绝生成审计指纹。" -f $LASTEXITCODE)
+    }
     $pairs = @()
     foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)

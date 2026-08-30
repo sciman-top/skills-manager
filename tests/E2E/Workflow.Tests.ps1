@@ -49,18 +49,35 @@ Describe "E2E Workflows" {
         }
 
         It "Returns a non-zero exit code when add fails instead of reporting success" {
-            $entry = (Join-Path $repoRoot "skills.ps1").Replace("'", "''")
-            $cfgPath = Join-Path $repoRoot "skills.json"
-            $before = [IO.File]::ReadAllBytes($cfgPath)
-            try {
-                # invalid.invalid 为 RFC 保留 TLD，DNS 必然 NXDOMAIN：
-                # 走 Add-ImportFromArgs 的 catch -> return $false 路径（非解析抛错路径）。
-                $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command "& '$entry' add 'https://invalid.invalid/demo.git'; exit `$LASTEXITCODE" 2>&1)
-                $LASTEXITCODE | Should -Be 1
-            }
-            finally {
-                $after = [IO.File]::ReadAllBytes($cfgPath)
-            }
+            # 密封：把自包含 bundle 复制到临时 fixture，子进程的 $Root 解析到 fixture
+            # 目录，绝不触碰仓库 skills.json；断言 fixture 配置字节不变。
+            $fixture = Join-Path $TestDrive ("cli-add-fixture-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $repoRoot "skills.ps1") -Destination (Join-Path $fixture "skills.ps1")
+            # bundle 内含按 src\ 相对路径解析的懒加载守卫，fixture 必须带 src 树，
+            # 否则守卫降级会改变失败路径的行为。
+            Copy-Item -Path (Join-Path $repoRoot "src") -Destination (Join-Path $fixture "src") -Recurse
+            Set-ContentUtf8 (Join-Path $fixture "skills.json") @'
+{
+  "schema_version": 3,
+  "vendors": [],
+  "targets": [],
+  "mappings": [],
+  "imports": [],
+  "mcp_servers": [],
+  "mcp_targets": [],
+  "sync_mode": "link",
+  "update_force": true
+}
+'@
+            $fixtureCfg = Join-Path $fixture "skills.json"
+            $before = [IO.File]::ReadAllBytes($fixtureCfg)
+            # invalid.invalid 为 RFC 保留 TLD，DNS 必然 NXDOMAIN：
+            # 走 Add-ImportFromArgs 的 catch -> return $false 路径（非解析抛错路径）。
+            $entry = (Join-Path $fixture "skills.ps1").Replace("'", "''")
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command "& '$entry' add 'https://invalid.invalid/demo.git'; exit `$LASTEXITCODE" 2>&1)
+            $LASTEXITCODE | Should -Be 1
+            $after = [IO.File]::ReadAllBytes($fixtureCfg)
             ([BitConverter]::ToString($before)) | Should -Be ([BitConverter]::ToString($after))
         }
     }

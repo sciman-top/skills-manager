@@ -1987,17 +1987,43 @@ function Start-BuildTransaction {
 }
 
 function Rollback-BuildTransaction($txn) {
-    if ($DryRun -or $null -eq $txn) { return }
+    if ($DryRun -or $null -eq $txn) { return $true }
+    $restored = $false
+    $restoreError = $null
     try {
         if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
-        if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
-            Invoke-MoveItem $txn.backup_agent $AgentDir
-            Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        if ($txn.has_backup_agent) {
+            if (-not (Test-Path $txn.backup_agent)) {
+                $restoreError = "agent/ 备份不存在"
+            }
+            elseif (Test-Path $AgentDir) {
+                $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
+            }
+            else {
+                try {
+                    Invoke-MoveItem $txn.backup_agent $AgentDir
+                    $restored = $true
+                    Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+                }
+                catch {
+                    $restoreError = $_.Exception.Message
+                }
+            }
+        }
+        else {
+            # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
+            $restored = -not (Test-Path $AgentDir)
+            if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
         }
     }
     finally {
-        if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+        # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
+        if ($restored -and (Test-Path $txn.path)) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
     }
+    if (-not $restored) {
+        Log ("构建事务回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；原因：{1}" -f $txn.path, $restoreError) "ERROR"
+    }
+    return $restored
 }
 
 function Complete-BuildTransaction($txn) {
