@@ -17,6 +17,13 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 2. Edit the real source and regenerate affected artifacts.
 3. Select one proportional closeout path below.
 
+For a new feature or module, the change description must also name the current
+real failure, a stable caller, why the existing interface cannot carry it, the
+exact write set, minimum proof, and rollback. Missing evidence means the change
+is not admitted; do not add a speculative runtime, adapter, state store, or
+governance layer. Once the independent failure is covered, stop and do not
+repeat broader gates without a new risk reason.
+
 For an ordinary change, run build, the affected test, any applicable affected verifier, and diff check:
 
 ```powershell

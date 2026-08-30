@@ -23,6 +23,7 @@
 - 更新 vendor/import/MCP 前记录来源、锁定、影响与回滚；宿主/provider/auth/session/plugin/MCP mutation 需要当前明确授权。
 - `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
+- 新增功能或 module 必须先证明当前真实失败、稳定 caller、现有 interface 无法承载、精确 write set、最低充分 proof 与 rollback；任一项缺失即 `not_admitted`，不得以未来可能需要扩展范围。
 
 ## C. 最低门禁
 - 本地收口优先 `run-local-quality-gates.ps1 -Profile auto`（与 CI 共享分类器，含 non-ignored untracked fail-safe，无法判定时选 full）；显式档位仅用于复现或覆盖。
@@ -30,6 +31,7 @@
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
 - 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`；脏树显式加 `-AllowDirtyWorktree`。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
+- 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 
 ## D. 回滚与收口
 - Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。
