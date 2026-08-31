@@ -205,31 +205,31 @@ adapter_supported_efforts:          # 人工复核、按 surface 分列、版本
 
 preset_used_efforts:               # 当前日常方案只选实际需要的三档
   gpt56_sol_only:      [low, medium, high]
-  gpt56_terra_only:   [medium, high, xhigh]
-  gpt56_luna_only:    [medium, high, xhigh]
+  gpt56_terra_only:   [high, xhigh, max]
+  gpt56_luna_only:    [high, xhigh, max]
 ```
 
 `preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前三个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
-模型支持但预设不使用的 effort（如 Sol 的 `xhigh`），以及不属于当前 surface 词表的值（如 config 面的 `max`），保持候选状态，不自动加进路由。新增某档必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch；不能仅因为数字更大或营销名称更强。
+Sol 的 `xhigh` 保持为预设未使用候选。Terra/Luna 的 `max` 虽已进入用户选定的 baseline，但当前仍不属于 Codex config surface allowlist；它必须经 MOR-100 精确 fixture 后才可启用，fixture 前 preset 只能 `manual_mapping_required`，不得静默 clamp 为 `xhigh`。新增某档仍必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch。
 
 ### 5.2 最终推荐：当前三条基础 route key
 
 | 基础 route key | `gpt56_sol_only`（日常默认） | `gpt56_terra_only` | `gpt56_luna_only` |
 | --- | --- | --- | --- |
-| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/medium | Luna/medium，`constrained` |
-| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/high | Luna/high，`constrained` |
-| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/xhigh | Luna/xhigh，`constrained` |
-| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/xhigh + 当前 emergency approval | `blocked` |
+| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/high | Luna/high，`constrained` |
+| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
+| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/max | Luna/max，`constrained` |
+| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
 
 这三档是**基础 route key**，并非宣称跨模型的同 effort 能力等价。它有四个设计目的：
 
 1. Sol 正常可用时，默认只需认识 `high / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/high 承接深度实现或获批高风险工作。
-2. Terra-only 与 Luna-only 保持相同三个基础 route key，但每个 preset 同时更换**完整的同族 model/effort map**；为降低单一替代模型的不确定性，轻量/有界写入使用 `medium/high`，而不使用 `low`。
-3. Sol/xhigh 不进入 Sol-only 日常编排，只保留为 Adapter 支持但未使用的候选；Terra/xhigh 仍作为 Terra-only 的深度 route 以及未来人工 override 的候选。
-4. Luna/xhigh 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/high 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。
+2. Terra-only 与 Luna-only 保持相同三个基础 route key，但每个 preset 同时更换**完整的同族 model/effort map**，按 `high/xhigh/max` 承接轻量、有界和深度工作。
+3. Sol/xhigh 不进入 Sol-only 日常编排；Terra/Luna 的 `max` 只属于各自 preset 的 deep route，不能外推为跨模型能力等价。
+4. Luna/max 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/high 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。
 
 route-key 命名空间不是 schema 上限；但当前 `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这三个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
 
@@ -269,22 +269,22 @@ preset_route_maps:               # Resolve 只读取 selected preset 的完整�
   gpt56_terra_only:
     model_family: gpt-5.6-terra
     route_keys:
-      light:    { model: gpt-5.6-terra, effort: medium }
-      standard: { model: gpt-5.6-terra, effort: high }
-      deep:     { model: gpt-5.6-terra, effort: xhigh }
+      light:    { model: gpt-5.6-terra, effort: high }
+      standard: { model: gpt-5.6-terra, effort: xhigh }
+      deep:     { model: gpt-5.6-terra, effort: max }
   gpt56_luna_only:
     model_family: gpt-5.6-luna
     route_keys:
       light:
-        { model: gpt-5.6-luna, effort: medium, constrained: true,
+        { model: gpt-5.6-luna, effort: high, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, independent_verifier_required],
           allowed_operations: [read_only], required_verifiers: [independent_review], max_risk_level: normal }
       standard:
-        { model: gpt-5.6-luna, effort: high, constrained: true,
+        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
       deep:
-        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
+        { model: gpt-5.6-luna, effort: max, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
@@ -301,10 +301,10 @@ Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 ex
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；surface 词表 `low/high/max` 已证实，`thinking` 不可关闭、默认 `max`；ZCode 投影面未取证） | candidate（`low`） | candidate（`high`），`constrained` | candidate（`max`），`constrained` | `blocked` |
-| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate | candidate，`constrained` | candidate | candidate + high-risk policy |
+| `zcode_glm_candidate`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
+| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/max），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
 
-每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。`DeepSeek V4 Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权；它并非模型名称带 `Pro`/`max` 就自然获得的权限。
+每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。Claude 映射的 exact model 分别为 `deepseek-v4-pro` 与 `deepseek-v4-flash`；`Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权，它并非模型名称带 `Pro`/`max` 就自然获得的权限。
 
 ## 6. 确定性 Resolve 算法
 

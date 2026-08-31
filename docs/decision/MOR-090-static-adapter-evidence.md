@@ -20,6 +20,8 @@
 
 **Fixture 优先级（2026-08-31 修订）**：MOR-100 逐项 fixture 优先验证 `gpt56_sol_only` 当前实际使用的三个 Codex config tuple：**Sol/high、Sol/medium、Sol/low**。其中 `deep` 与 high-risk 提升路径（`risk_level=high -> route_key=deep`）固定使用 Sol/high；Sol/xhigh 仍保留在 surface Adapter 候选集合中，但不再属于 Sol-only 日常 preset，也不阻断该 preset 的准入。三项 fixture 未全部通过前，Sol-only 仍只能是 intended policy default，不能外推为实际 host default。
 
+**后续 preset fixture**：用户选定 Terra-only 与 Luna-only 均使用 `high/xhigh/max`。C1/C2 当前不支持把 `max` 直接纳入 Codex config surface allowlist，因此 MOR-100 必须分别验证 Terra/max 与 Luna/max；验证前两套 preset 均为 `manual_mapping_required`，不得将 API/security surface 的 max 证据外推，也不得静默改用 xhigh。
+
 ## 2. zcode（GLM / bigmodel）
 
 | # | 事实 | 来源 | 状态 |

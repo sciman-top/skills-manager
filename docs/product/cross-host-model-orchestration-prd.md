@@ -95,16 +95,16 @@ workload + risk + exact host/identity
 
 | 基础 route key | `gpt56_sol_only` | `gpt56_terra_only` | `gpt56_luna_only` |
 | --- | --- | --- | --- |
-| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/medium | Luna/medium，`constrained` |
-| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/high | Luna/high，`constrained` |
-| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/xhigh | Luna/xhigh，`constrained` |
-| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/xhigh + 当前 emergency approval | `blocked` |
+| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/high | Luna/high，`constrained` |
+| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
+| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/max | Luna/max，`constrained` |
+| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
 
 `gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/high`、`Sol/medium`、`Sol/low` 三档。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
 
-`gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `xhigh/high/medium`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
+`gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `max/xhigh/high`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
 
-Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/xhigh 可以执行有明确写集、独立验证和回滚入口的深度任务；它不能自动解锁安全裁决、迁移、发布、公开契约或高扇出变更。
+Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/max 可以执行有明确写集、独立验证和回滚入口的深度任务；它不能自动解锁安全裁决、迁移、发布、公开契约或高扇出变更。
 
 三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
 
@@ -145,22 +145,22 @@ preset_route_maps:
   gpt56_terra_only:
     model_family: gpt-5.6-terra
     route_keys:
-      light:    { model: gpt-5.6-terra, effort: medium }
-      standard: { model: gpt-5.6-terra, effort: high }
-      deep:     { model: gpt-5.6-terra, effort: xhigh }
+      light:    { model: gpt-5.6-terra, effort: high }
+      standard: { model: gpt-5.6-terra, effort: xhigh }
+      deep:     { model: gpt-5.6-terra, effort: max }
   gpt56_luna_only:
     model_family: gpt-5.6-luna
     route_keys:
       light:
-        { model: gpt-5.6-luna, effort: medium, constrained: true,
+        { model: gpt-5.6-luna, effort: high, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, independent_verifier_required],
           allowed_operations: [read_only], required_verifiers: [independent_review], max_risk_level: normal }
       standard:
-        { model: gpt-5.6-luna, effort: high, constrained: true,
+        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
       deep:
-        { model: gpt-5.6-luna, effort: xhigh, constrained: true,
+        { model: gpt-5.6-luna, effort: max, constrained: true,
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
@@ -175,7 +175,7 @@ Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 k
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
-静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。Codex 的 `model_reasoning_effort` config/profile/`-c` 字段官方词表是 `minimal | low | medium | high | xhigh`（xhigh 为 model-dependent）；`max` 不属于该字段词表，只能作为 surface-specific candidate（例如 security 扫描面）由 MOR-090/MOR-100 单独记录，不得倒灌进 config 面合同。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版日常 GPT 预设固定只用三档。
+静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。当前静态证据中的 Codex `model_reasoning_effort` config/profile/`-c` 词表是 `minimal | low | medium | high | xhigh`（xhigh 为 model-dependent）；`max` 尚未进入该 config 面 allowlist。用户选定的 Terra/Luna `max` 因而是待 MOR-100 精确 fixture 的 preset 候选项，fixture 通过前整个 preset 必须 `manual_mapping_required`，不得近似为 `xhigh` 或借用 security/API surface 证据。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版 GPT baseline 固定只用三档。
 
 ```yaml
 adapter_supported_efforts:           # 人工维护、按 surface 分列的静态事实；示例，不是运行期发现
@@ -188,11 +188,11 @@ adapter_supported_efforts:           # 人工维护、按 surface 分列的静�
 
 preset_used_efforts:
   gpt56_sol_only:   [low, medium, high]
-  gpt56_terra_only: [medium, high, xhigh]
-  gpt56_luna_only:  [medium, high, xhigh]
+  gpt56_terra_only: [high, xhigh, max]
+  gpt56_luna_only:  [high, xhigh, max]
 ```
 
-若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/high 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。未使用的档位与未证实 surface（含 `max`）保持候选，不自动加入日常路由或 config 面合同。未来模型档位数增减只能创建版本化的新 preset/map revision；五个 execution slot 保持不变。
+若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/max、Luna/max 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。其中 Terra/Luna `max` 当前只表达用户选定的 baseline，不构成 config 面已支持事实。未来模型档位数增减只能创建版本化的新 preset/map revision；五个 execution slot 保持不变。
 
 ### 5.4 人工切换语句
 
@@ -265,8 +265,8 @@ preset_used_efforts:
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（当前候选 slug `glm-5.3-flash`；surface 词表 `low/high/max` 已证实，`thinking` 不可关闭、默认 `max`；ZCode 投影面未取证） | candidate（`low`） | candidate（`high`），`constrained` | candidate（`max`），`constrained` | `blocked` |
-| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（DeepSeek 词表含 `high`） | candidate（`max` 在词表内），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
+| `zcode_glm_candidate`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
+| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/max），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
 
 实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。Claude 侧必须分别取证 `ClaudeCodeHostAdapter`（宿主 model/effortLevel/fallback/clamp 面与 fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名、未知名回落、effort 透传）；provider 方言可表达不等于宿主当前环境生效。尤其 DeepSeek V4 Pro/max 进入高风险门并不表示“Pro/max 自动安全”；仍需当前 policy、明确 operation/写集和独立验证。GLM 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。
 
