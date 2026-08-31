@@ -15,12 +15,13 @@
 | C4 | profile 机制：`$CODEX_HOME/profile-name.config.toml` 独立文件 + `--profile` 选择；project-scoped config 不可覆盖 provider/auth/profile selection | Configuration Reference，2026-08-28 | verified；additive profile 为投影 POC 首选候选 |
 | C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
 | C6 | GPT-5.6 三档 slug 全部经官方 exact model page 直证：`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna`，且 **openai_api 面**（Responses/Chat Completions）`Reasoning.effort supports: none, low, medium (default), high, xhigh, and max`（sol/luna 页 2026-08-28 本轮抓取；terra 页同型） | developers.openai.com/api/docs/models/gpt-5.6-{sol,terra,luna} + Security workbench | `verified`（openai_api 面逐项）；注意：**API 面词表不外推到 codex_config_surface**（后者仍以 C1 为准） |
+| C7 | 本机 `codex-cli 0.150.1` 的 `codex debug models` 对 Sol/Terra/Luna 均列出 `max`；九个独立 profile（Sol high/medium/low、Terra max/xhigh/high、Luna max/xhigh/high）均通过 `codex --profile <name> --strict-config --version` | 本机只读 model catalog + strict profile load，2026-08-31 | `partial`（current-host config acceptance）；证明当前 profile 文件可加载，不证明 provider 调用或其他 host |
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
 **Fixture 优先级（2026-08-31 修订）**：MOR-100 逐项 fixture 优先验证 `gpt56_sol_only` 当前实际使用的三个 Codex config tuple：**Sol/high、Sol/medium、Sol/low**。其中 `deep` 与 high-risk 提升路径（`risk_level=high -> route_key=deep`）固定使用 Sol/high；Sol/xhigh 仍保留在 surface Adapter 候选集合中，但不再属于 Sol-only 日常 preset，也不阻断该 preset 的准入。三项 fixture 未全部通过前，Sol-only 仍只能是 intended policy default，不能外推为实际 host default。
 
-**后续 preset fixture**：用户选定 Terra-only 与 Luna-only 均使用 `high/xhigh/max`。C1/C2 当前不支持把 `max` 直接纳入 Codex config surface allowlist，因此 MOR-100 必须分别验证 Terra/max 与 Luna/max；验证前两套 preset 均为 `manual_mapping_required`，不得将 API/security surface 的 max 证据外推，也不得静默改用 xhigh。
+**后续 preset fixture**：用户选定 Terra-only 与 Luna-only 均使用 `high/xhigh/max`。C7 已证明当前机器可 strict-load Terra/max 与 Luna/max profile，因此该机器达到 `filesystem_projected` / config-load acceptance；tuple 仍保持 `partial`，直到 MOR-100 记录独立 current-host fixture。其他 host 不得复用该结论，也不得将 API/security surface 的 max 证据外推。
 
 ## 2. zcode（GLM / bigmodel）
 
@@ -64,10 +65,10 @@
 
 **三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。**协议面按 wire contract 分列**（`output_config.effort` / `reasoning_effort` / `reasoning.effort` 是三个不同字段，不合并）。
 
-canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 70 tuples，verified 48（openai_responses 18 + openai_chat_completions 18 + deepseek_anthropic_messages 6 + deepseek_chat_completions 6）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
+canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 73 tuples，verified 48（openai_responses 18 + openai_chat_completions 18 + deepseek_anthropic_messages 6 + deepseek_chat_completions 6）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
 
 - Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 48 行；由 validate 脚本计算，不人工写死）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
-- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 12 行 partial（MOR-100 fixture 逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
+- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
 
 ## 6. 来源 URL 清单（全部抓取于 2026-08-28）
 

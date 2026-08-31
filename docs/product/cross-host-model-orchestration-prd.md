@@ -175,14 +175,14 @@ Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 k
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
-静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。当前静态证据中的 Codex `model_reasoning_effort` config/profile/`-c` 词表是 `minimal | low | medium | high | xhigh`（xhigh 为 model-dependent）；`max` 尚未进入该 config 面 allowlist。用户选定的 Terra/Luna `max` 因而是待 MOR-100 精确 fixture 的 preset 候选项，fixture 通过前整个 preset 必须 `manual_mapping_required`，不得近似为 `xhigh` 或借用 security/API surface 证据。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版 GPT baseline 固定只用三档。
+静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。旧 C1 官方快照未列 config/max，但当前宿主的 `codex-cli 0.150.1` model catalog 已对 Sol/Terra/Luna 列出 `max`，且九个目标 profile 均 strict-load 成功（C7）。这只建立当前宿主的 config-load 证据；其他 host 仍须独立 fixture，不得借用 API/security surface，也不得把 profile load 外推为 provider 调用。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版 GPT baseline 固定只用三档。
 
 ```yaml
 adapter_supported_efforts:           # 人工维护、按 surface 分列的静态事实；示例，不是运行期发现
   codex_config_surface:              # model_reasoning_effort / profile / -c 覆盖共用
-    gpt-5.6-sol:   [low, medium, high, xhigh]   # xhigh model-dependent
-    gpt-5.6-terra: [low, medium, high, xhigh]
-    gpt-5.6-luna:  [low, medium, high, xhigh]
+    gpt-5.6-sol:   [low, medium, high, xhigh, max]   # max 为 C7 current-host partial
+    gpt-5.6-terra: [low, medium, high, xhigh, max]
+    gpt-5.6-luna:  [low, medium, high, xhigh, max]
   codex_security_cli_surface:        # 独立 surface；candidate，MOR-090 取证后单列
     max: candidate
 
@@ -192,7 +192,7 @@ preset_used_efforts:
   gpt56_luna_only:  [high, xhigh, max]
 ```
 
-若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/max、Luna/max 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。其中 Terra/Luna `max` 当前只表达用户选定的 baseline，不构成 config 面已支持事实。未来模型档位数增减只能创建版本化的新 preset/map revision；五个 execution slot 保持不变。
+若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/max、Luna/max 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。当前宿主的 C7/profile hash 只对本机有效；未来模型档位数增减仍只能创建版本化的新 preset/map revision，五个 execution slot 保持不变。
 
 ### 5.4 人工切换语句
 

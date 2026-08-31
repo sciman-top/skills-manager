@@ -196,10 +196,10 @@ receipt 永不保存 secret、token、cookie、prompt、完整 command、未脱�
 
 ```yaml
 adapter_supported_efforts:          # 人工复核、按 surface 分列、版本化；不是运行期枚举
-  codex_config_surface:             # model_reasoning_effort / profile / -c：官方词表 minimal..xhigh
-    gpt-5.6-sol:   [low, medium, high, xhigh]   # xhigh model-dependent
-    gpt-5.6-terra: [low, medium, high, xhigh]
-    gpt-5.6-luna:  [low, medium, high, xhigh]
+  codex_config_surface:             # model_reasoning_effort / profile / -c；max 为 C7 current-host partial
+    gpt-5.6-sol:   [low, medium, high, xhigh, max]
+    gpt-5.6-terra: [low, medium, high, xhigh, max]
+    gpt-5.6-luna:  [low, medium, high, xhigh, max]
   codex_security_cli_surface:       # 独立 surface；max 为 candidate，MOR-090 取证后单列
     max: candidate
 
@@ -213,7 +213,7 @@ preset_used_efforts:               # 当前日常方案只选实际需要的三�
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
-Sol 的 `xhigh` 保持为预设未使用候选。Terra/Luna 的 `max` 虽已进入用户选定的 baseline，但当前仍不属于 Codex config surface allowlist；它必须经 MOR-100 精确 fixture 后才可启用，fixture 前 preset 只能 `manual_mapping_required`，不得静默 clamp 为 `xhigh`。新增某档仍必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch。
+Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max` profiles 已由 `codex-cli 0.150.1` strict-load，作为 C7/current-host partial 证据；其他宿主仍须 MOR-100 exact fixture，不得静默 clamp 为 `xhigh`。新增某档仍必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch。
 
 ### 5.2 最终推荐：当前三条基础 route key
 

@@ -12,7 +12,7 @@
 | 首期 host | `codex_cli`（唯一首期宿主；ZCode/Claude 等各自静态合同取证后再接入） |
 | GPT preset invariant | 每次仅选择一个 `gpt56_sol_only` / `gpt56_terra_only` / `gpt56_luna_only`；该 preset 恰含 `light/standard/deep` 三个同族 route key，五个 execution slot 可复用三 key，禁止跨 Sol/Terra/Luna 混搭；`*_only` 作用域固定为 `parent_route_only`，只约束当前 Resolve 的父任务 route，不自动覆盖 native bridge 或其他 custom subagent；private default/override 仅保存 map 引用，完整 map 只从 tracked policy 解引用；high-risk 是额外 gate，不是第四档 |
 | 首期 intended policy default | `gpt56_sol_only`（Sol/low、Sol/medium、Sol/high；高风险=Sol/high + policy），以用户明确偏好选定，非测量最优；只有 Codex config surface 的三项 exact tuple fixture 均通过后才可写作实际 host default |
-| 其他 preset baseline | `gpt56_terra_only` 与 `gpt56_luna_only` 均为 high/xhigh/max；Terra/Luna max 在 Codex config surface 的 exact fixture 通过前仅为用户选定候选，必须 `manual_mapping_required`，不得近似为 xhigh |
+| 其他 preset baseline | `gpt56_terra_only` 与 `gpt56_luna_only` 均为 high/xhigh/max；当前宿主九个 profile 已投影并由 `codex-cli 0.150.1` strict-load，其他宿主仍须各自 exact fixture，且不得把 profile load 外推为 provider/live acceptance |
 | identity binding | 必须使用不可伪造、可审计的绑定来源；无法绑定时状态 `identity_unbound`，禁止持久 override 与 projection，仅允许 offline resolve 与 dry-run/manual handoff |
 | native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 优先于通用 route resolver 且完全排除在其外**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |
 | 普通任务 ingress | 常规入口为上游调用方/用户确认产生的结构化 RouteRequest（workload/risk_level/operation/workspace_root）；宿主 AI 不得从 prompt 私自推断；AI 分类仅可为标注建议并需确认（PRD `MOR-FR-045`） |
