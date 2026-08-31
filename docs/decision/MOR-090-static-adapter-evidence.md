@@ -18,7 +18,7 @@
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
-**Fixture 优先级（2026-08-29 修订）**：MOR-100 逐项 fixture 以 **`gpt-5.6-sol` + `model_reasoning_effort=xhigh`（codex_config_surface）为第一优先验证项**。理由：三个命名 preset 的 deep 档与 high-risk 提升路径（`risk_level=high -> route_key=deep`）全部单点依赖 xhigh，而它是 config 面唯一 model-dependent 且当前仅 `partial` 的档位；Sol-only 是 intended policy default，其可用性悬于此项。若该项 fixture 失败，预案是创建 versioned map revision 将 Sol `deep` 改钉 `high`（config 词表内、已直证可表达），不扩展新概念、不静默降级、不改 slot 目录。
+**Fixture 优先级（2026-08-31 修订）**：MOR-100 逐项 fixture 优先验证 `gpt56_sol_only` 当前实际使用的三个 Codex config tuple：**Sol/high、Sol/medium、Sol/low**。其中 `deep` 与 high-risk 提升路径（`risk_level=high -> route_key=deep`）固定使用 Sol/high；Sol/xhigh 仍保留在 surface Adapter 候选集合中，但不再属于 Sol-only 日常 preset，也不阻断该 preset 的准入。三项 fixture 未全部通过前，Sol-only 仍只能是 intended policy default，不能外推为实际 host default。
 
 ## 2. zcode（GLM / bigmodel）
 

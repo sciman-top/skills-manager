@@ -16,7 +16,7 @@
   -> 用户说“恢复默认”：只删除该 scope 的 override
 ```
 
-`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/xhigh 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
+`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/high 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
 ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
@@ -97,10 +97,10 @@ workload + risk + exact host/identity
 | --- | --- | --- | --- |
 | 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/medium | Luna/medium，`constrained` |
 | 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/high | Luna/high，`constrained` |
-| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/xhigh | Terra/xhigh | Luna/xhigh，`constrained` |
-| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/xhigh + high-risk policy | Terra/xhigh + 当前 emergency approval | `blocked` |
+| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/xhigh | Luna/xhigh，`constrained` |
+| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/xhigh + 当前 emergency approval | `blocked` |
 
-`gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/xhigh`、`Sol/medium`、`Sol/low` 三档，删除原有单独的 `Terra/xhigh` 日常槽位。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
+`gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/high`、`Sol/medium`、`Sol/low` 三档。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
 
 `gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `xhigh/high/medium`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
 
@@ -141,7 +141,7 @@ preset_route_maps:
     route_keys:
       light:    { model: gpt-5.6-sol, effort: low }
       standard: { model: gpt-5.6-sol, effort: medium }
-      deep:     { model: gpt-5.6-sol, effort: xhigh }
+      deep:     { model: gpt-5.6-sol, effort: high }
   gpt56_terra_only:
     model_family: gpt-5.6-terra
     route_keys:
@@ -187,7 +187,7 @@ adapter_supported_efforts:           # 人工维护、按 surface 分列的静�
     max: candidate
 
 preset_used_efforts:
-  gpt56_sol_only:   [low, medium, xhigh]
+  gpt56_sol_only:   [low, medium, high]
   gpt56_terra_only: [medium, high, xhigh]
   gpt56_luna_only:  [medium, high, xhigh]
 ```
@@ -276,7 +276,7 @@ preset_used_efforts:
 
 | 检查对象 | 当前保守建议 | 必要补证 |
 | --- | --- | --- |
-| `gpt56_sol_only` | `keep`，前提是 Sol/low、medium、xhigh 均为静态可表达项 | 同 workload 的 host 采用与 verifier 证据 |
+| `gpt56_sol_only` | `keep`，前提是 Sol/low、medium、high 均为静态可表达项 | 同 workload 的 host 采用与 verifier 证据 |
 | `gpt56_terra_only` critical | `keep_emergency`，不是 Sol 等价 | 当前 emergency approval + 高风险验证 |
 | `gpt56_luna_only` critical | `block` | 独立风险决策；单次表现不能解除 |
 | GLM Flash `max` | `constrained` 或 `insufficient_evidence` | ZCode 内同类 bounded-write 与 verifier 证据 |
