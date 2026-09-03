@@ -1862,7 +1862,9 @@ function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
             $merged.Add([string]$t) | Out-Null
         }
     }
-    return $merged.ToArray()
+    # Unary comma keeps the empty array from being unrolled to $null by the
+    # function output pipeline; bare command invocations rely on this.
+    return ,($merged.ToArray())
 }
 
 function Test-SkillPackagePathInsideOrEqual {

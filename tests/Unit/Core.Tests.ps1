@@ -923,6 +923,11 @@ Describe "Core Functions" {
             $tokens[1] | Should -Be "add"
             $tokens[2] | Should -Be "owner/repo"
         }
+
+        It "Returns an empty array instead of null when no filter and no args" {
+            $tokens = Merge-FilterAndArgs "" @()
+            @($tokens).Count | Should -Be 0
+        }
     }
 
     Context "Parse-McpInstallArgs" {
