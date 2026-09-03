@@ -926,6 +926,7 @@ Describe "Core Functions" {
 
         It "Returns an empty array instead of null when no filter and no args" {
             $tokens = Merge-FilterAndArgs "" @()
+            ($null -eq $tokens) | Should -Be $false
             @($tokens).Count | Should -Be 0
         }
     }
