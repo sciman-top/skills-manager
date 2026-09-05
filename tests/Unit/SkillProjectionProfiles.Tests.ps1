@@ -36,17 +36,32 @@ BeforeAll {
 }
 
 Describe 'Skill projection profiles' {
-    It 'keeps the checked-in default core profile small for every host' {
+    It 'keeps the checked-in default core-lean profile small for every host' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
 
         foreach ($hostName in @('codex', 'claude', 'zcode')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
-            $selection.profile | Should -Be 'core'
+            $selection.profile | Should -Be 'core-lean'
             $selection.include_all | Should -BeFalse
-            @($selection.included_names).Count | Should -Be 9
-            @($selection.included_names) | Should -Contain 'grill-me'
+            @($selection.included_names).Count | Should -Be 6
+            @($selection.included_names) | Should -Contain 'capability-router'
+            @($selection.included_names) | Should -Not -Contain 'codebase-design'
+            @($selection.included_names) | Should -Not -Contain 'custom-powerpoint-accessibility'
+            @($selection.included_names) | Should -Not -Contain 'grill-me'
         }
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
+    }
+
+    It 'retains the former nine-skill core set as an explicit compatibility profile' {
+        $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'
+
+        $selection.profile | Should -Be 'core'
+        $selection.include_all | Should -BeFalse
+        @($selection.included_names).Count | Should -Be 9
+        @($selection.included_names) | Should -Contain 'codebase-design'
+        @($selection.included_names) | Should -Contain 'custom-powerpoint-accessibility'
+        @($selection.included_names) | Should -Contain 'grill-me'
     }
 
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
@@ -97,7 +112,7 @@ Describe 'Skill projection profiles' {
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'does-not-exist' } | Should -Throw '*不存在的 profile*'
 
         $invalid = $config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-        $invalid.projection_profiles.profiles.core.exclude = @('research')
+        $invalid.projection_profiles.profiles.'core-lean'.exclude = @('research')
         { Resolve-SkillProjectionSelection -ProjectionConfig $invalid -HostName codex } | Should -Throw '*include/exclude 冲突*'
     }
 

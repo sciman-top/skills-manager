@@ -12,7 +12,7 @@
 
 | ID | 优先级 | 准入方式 | 依赖 | 目标 | 主要 owner | 写入域 |
 | --- | --- | --- | --- | --- | --- | --- |
-| HSM-PRJ-001 | P0 | 用户意图确认 | 无 | 投影档位决策：core（技能集合须 fresh-read）vs 维持 full-compatible（当前受管集合须 fresh-read） | user | host projection（显式授权） |
+| HSM-PRJ-001 | P0 | controlled_write（已执行） | 无 | 默认投影收窄为 `core-lean`；`core` 与 `full-compatible` 保留为显式能力面 | user + AI | skills.json + tests + docs + managed projection |
 | HSM-GAT-100 | P1 | 仓库授权 | 无 | 新建共享 gate 分类器 `scripts/quality/resolve-gate-profile.ps1` | maintainer + AI | scripts/quality + tests/Unit |
 | HSM-GAT-110 | P1 | HSM-GAT-100 合并 | GAT-100 | `run-local-quality-gates.ps1` 增加 `-Profile auto` | maintainer + AI | scripts/quality + tests/Unit + README + AGENTS.md |
 | HSM-GAT-120 | P1 | HSM-GAT-100 合并 | GAT-100（可与 110 并行） | `ci.yml` 改用共享分类器并迁移 `CiWorkflow.Tests.ps1` 断言 | maintainer + AI | .github/workflows + tests/Unit |
@@ -39,19 +39,18 @@ typed-core shadow PoC 已退役，当前不在 runtime、build 或支持边界�
 
 ## 3. 原子任务卡
 
-### HSM-PRJ-001：投影档位决策（human_decision）
+### HSM-PRJ-001：默认投影收窄（executed）
 
-- **Goal**：消除"配置默认 core、实态 full-compatible"的偏差，让宿主能力面回到用户真实意图。
-- **Current evidence**：`skills.json` `projection_profiles.default_profile=core`；当前 profile 集合数量必须以执行当日 fresh read 为准（本次为 9 个）。2026-08-22 的 ignored `reports/skill-projection/current.json` 曾记录 Codex `profile=full-compatible`、`include_all=true`、80 技能、约 32.5k 字符元数据；这是历史快照，不可替代执行当日的 receipt、受管清单和 external 目录盘点。full-compatible 需显式 `-SkillProfile full-compatible`，属"滞留的显式选择"，非静默漂移。
-- **决策问题**：日常是否需要全量技能常驻元数据？当前 core profile 集合 + 冷发现（`capability-router`/`find-skills`）是否覆盖真实工作流？
-- **执行前 fresh-read**：只读核对 `skills.json` 的 profile/default、最新 projection receipt 的 selection、受管 manifest/link 集合与 external 目录集合；若任一项与上述历史快照不符，先向用户报告当前差异并重新确认，不写宿主。
-- **Exact write set**：分支 A（恢复 core）：在 fresh-read 和当前明确授权后，执行一次 `构建生效`（无参，默认 core）+ 新会话 host probe；分支 B（维持 full）：不写任何文件，仅把用户当前决策保留在授权会话中。
-- **Out-of-scope assets**：不改 `skills.json` profile 配置、不改 `agent/`、不动 external skills、不删任何技能。
-- **Minimum verification**：分支 A 后 `reports/skill-projection/current.json` 的 `projection_selection.profile=core`；由投影 manifest 与 `skills.json` 的 profile 集合核对当前 core skills 及其数量，不把历史数量写成固定断言，并以 pre/post 集合比较证明 external 目录未变（不使用用户技能根的总目录数作为断言）。新会话确认预期技能可见。仅证明 `filesystem_projected`；`host_loaded` 需新会话事实，`live_accepted` 需真实任务。
-- **Stop condition**：投影或 probe 出现非预期写入（external skills、`~/.codex` 配置变化）即停止并回滚。
-- **Rollback**：`构建生效 -SkillProfile full-compatible` 恢复原能力面。
-- **Truth boundary**：用户决策 + 一次受控投影；不证明宿主语义改善，后者由后续真实任务观察。
-- **Execution class**：`human_decision`。
+- **Goal**：降低默认 metadata 竞争和误触发面，同时保留可回退的兼容能力，不删除 source、imports、vendor 或 cold catalog。
+- **Current evidence**：`skills.json` `projection_profiles.default_profile=core-lean`；三个宿主默认均为 6 项。原 9 项集合保留为显式 `core`；`full-compatible` 仍需显式 `-SkillProfile full-compatible`。历史 ignored projection receipt 不替代当前 manifest 或新宿主证据。
+- **Decision**：默认采用 `core-lean`；`capability-router`、`research`、`systematic-debugging`、`verification-before-completion`、`code-review-and-quality` 与 Windows PowerShell 自动化保留在默认链；`codebase-design`、`custom-powerpoint-accessibility` 与 `grill-me` 从默认链移入显式兼容/专项路径。
+- **Exact write set**：`skills.json`、`tests/Unit/SkillProjectionProfiles.Tests.ps1`、`README.md` 与本任务计划；按现有 build/projection 事务更新生成物和受管默认链接。
+- **Out-of-scope assets**：不删除任何 skill、import、vendor、catalog 条目；不改 native-agent bridge、provider/auth/model、MCP、external skills 或宿主运行时。
+- **Minimum verification**：JSON/schema/profile contract、受影响 Pester、`build.ps1` 后生成物无漂移；投影 receipt 的 profile/managed link 集合与 `core-lean` 一致。以上仅证明 `repo_verified/filesystem_projected`；`host_loaded` 需新会话事实，`live_accepted` 需真实任务。
+- **Stop condition**：发现 external skills、共享配置或非本次 managed link 发生非预期变化，立即停止并沿投影 receipt 回滚本次切片。
+- **Rollback**：显式运行 `构建生效 -SkillProfile core` 恢复原 9 项默认能力面；必要时按本次 projection receipt 恢复受管链接。
+- **Truth boundary**：这是默认暴露面优化，不宣称模型能力、宿主加载或真实任务质量自动改善。
+- **Execution class**：`controlled_write`，用户已在当前任务授权按既定建议执行。
 
 ### HSM-GAT-100：共享 gate 分类器脚本
 

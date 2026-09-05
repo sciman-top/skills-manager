@@ -133,13 +133,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core`；技能集合和数量以 `skills.json` 的 profile 为准（本次 fresh read 为 9 个通用治理技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core-lean`；技能集合和数量以 `skills.json` 的 profile 为准（本次 fresh read 为 6 个治理/安全边界技能）。原 9 项集合保留为显式 `core` 兼容档位；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
-| 宿主 | `core` | `full-compatible` 的宿主适配 |
-| --- | --- | --- |
-| ChatGPT/Codex | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
-| Claude | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 全量受管技能 |
-| ZCode | 当前 `core` profile 集合（本次 fresh read 为 9 个） | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
+| 宿主 | 默认 `core-lean` | 显式 `core` 兼容档位 | `full-compatible` 的宿主适配 |
+| --- | --- | --- | --- |
+| ChatGPT/Codex | 6 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
+| Claude | 6 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
+| ZCode | 6 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
 
 `full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
 
@@ -206,7 +206,7 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
-Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 必须有路径、`SKILL.md` hash、覆盖同包资源的 package hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。CSR-100 实现后，受管 custom-agent template 将静态声明 `model` / `model_reasoning_effort`，以优先于全局 subagent 默认值；它不改变 provider/auth，也不构成动态模型路由。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。完整阶段与任务合同见 [冷技能路由路线图](docs/product/cold-skill-routing-roadmap.md)、[实施计划](docs/product/cold-skill-routing-implementation-plan.md) 和 [验收 Runbook](docs/runbooks/cold-skill-routing-acceptance.md)。
+显式 `core` 兼容档位另保留 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 必须有路径、`SKILL.md` hash、覆盖同包资源的 package hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。CSR-100 实现后，受管 custom-agent template 将静态声明 `model` / `model_reasoning_effort`，以优先于全局 subagent 默认值；它不改变 provider/auth，也不构成动态模型路由。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。完整阶段与任务合同见 [冷技能路由路线图](docs/product/cold-skill-routing-roadmap.md)、[实施计划](docs/product/cold-skill-routing-implementation-plan.md) 和 [验收 Runbook](docs/runbooks/cold-skill-routing-acceptance.md)。
 
 ```powershell
 # 默认只读取仓库侧技能面，不调用宿主 CLI

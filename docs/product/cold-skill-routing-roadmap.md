@@ -2,13 +2,13 @@
 
 **产品契约**: 2.0  
 **状态语义**: 稳定设计合同；不记录运行时状态  
-**当前状态**: **engineering-frozen（core 常态主发现路径，不再扩展演进；2026-08-25 决议，见 §0）**
+**当前状态**: **engineering-frozen（core-lean 常态主发现路径，不再扩展演进；2026-08-25 决议后收窄默认投影，见 §0）**
 **适用范围**: 本仓受控 cold catalog、native-agent bridge 与 Codex host-specific 验收  
 **相关文档**: [PRD](skills-manager-vnext-prd.md)、[Architecture](skills-manager-vnext-architecture.md)、[实施计划](cold-skill-routing-implementation-plan.md)、[验收 Runbook](../runbooks/cold-skill-routing-acceptance.md)
 
 ## 0. 冻结决议（2026-08-25）
 
-**状态：engineering-frozen——core 常态的主发现路径，工程面不再扩展。** 决策输入：宿主投影档位最终决策为三宿主常态 `core`（`4ce3a4c7` 恢复，`full-compatible` 保留为显式 flag 能力面）；在该常态下，冷链是冷目录技能的主发现路径。工程冻结的理由：工程能力面已具备，且当前没有需要扩展的新能力；运行验收仍以各自 receipt 为准，不能由冻结状态推导 CSR-160/170 闭卷、`host_loaded`、`live_accepted` 或全部业务样本通过。
+**状态：engineering-frozen——core-lean 常态的主发现路径，工程面不再扩展。** 决策输入：三宿主默认投影已收窄为 `core-lean`；原 9 项 `core` 与 `full-compatible` 均保留为显式能力面。在该常态下，冷链是冷目录技能的主发现路径。工程冻结的理由：工程能力面已具备，且当前没有需要扩展的新能力；运行验收仍以各自 receipt 为准，不能由冻结状态推导 CSR-160/170 闭卷、`host_loaded`、`live_accepted` 或全部业务样本通过。
 
 冻结含义：
 
@@ -20,7 +20,7 @@
 重开工程演进的条件（满足其一即可重开，重开须新的决策记录）：
 
 1. 主路径出现真实失效或缺口，且修复超出缺陷修复范畴（需要新能力面）；
-2. 宿主官方机制变化使 `core`+冷链组合不可用或明确劣化；
+2. 宿主官方机制变化使 `core-lean`+冷链组合不可用或明确劣化；
 3. 目录规模触及 §4 阈值（域 >30 / 单域常驻候选 >16 / 技能 >150），按原条款重开检索前置决策。
 
 ## 1. 目标与不变量

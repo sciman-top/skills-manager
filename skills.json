@@ -9,11 +9,8 @@
     "user_skill_root": "~/.agents/skills",
     "managed_link_includes": [
       "capability-router",
-      "codebase-design",
       "code-review-and-quality",
-      "custom-powerpoint-accessibility",
       "custom-powershell-windows-automation",
-      "grill-me",
       "research",
       "systematic-debugging",
       "verification-before-completion"
@@ -23,8 +20,19 @@
     ],
     "projection_profiles": {
       "schema_version": 1,
-      "default_profile": "core",
+      "default_profile": "core-lean",
       "profiles": {
+        "core-lean": {
+          "include": [
+            "capability-router",
+            "code-review-and-quality",
+            "custom-powershell-windows-automation",
+            "research",
+            "systematic-debugging",
+            "verification-before-completion"
+          ],
+          "exclude": []
+        },
         "core": {
           "include": [
             "capability-router",
@@ -55,18 +63,18 @@
       },
       "hosts": {
         "codex": {
-          "default_profile": "core",
+          "default_profile": "core-lean",
           "exclude": [
             "skill-creator",
             "web-artifacts-builder"
           ]
         },
         "claude": {
-          "default_profile": "core",
+          "default_profile": "core-lean",
           "exclude": []
         },
         "zcode": {
-          "default_profile": "core",
+          "default_profile": "core-lean",
           "exclude": [
             "agent-browser",
             "skill-creator",
