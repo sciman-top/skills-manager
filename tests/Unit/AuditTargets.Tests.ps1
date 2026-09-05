@@ -1764,6 +1764,28 @@ $scan.detected.artifact_capabilities | Out-Null
             (Get-AuditFingerprintFromMcpServers $factsA) | Should -Not -Be (Get-AuditFingerprintFromMcpServers $factsB)
         }
 
+        It "Detects MCP enabled flips through fingerprints" {
+            $serverOn = [pscustomobject]@{
+                name      = "docs"
+                transport = "http"
+                url       = "https://example.com/mcp"
+                enabled   = $true
+            }
+            $serverOff = [pscustomobject]@{
+                name      = "docs"
+                transport = "http"
+                url       = "https://example.com/mcp"
+                enabled   = $false
+            }
+
+            $factsOn = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverOn) }))
+            $factsOff = @(Get-AuditMcpServerFacts ([pscustomobject]@{ mcp_servers = @($serverOff) }))
+
+            $factsOn[0].enabled | Should -Be $true
+            $factsOff[0].enabled | Should -Be $false
+            (Get-AuditFingerprintFromMcpServers $factsOn) | Should -Not -Be (Get-AuditFingerprintFromMcpServers $factsOff)
+        }
+
         It "Distinguishes an absent MCP tool allowlist from an explicit empty allowlist" {
             $withoutAllowlist = @(Get-AuditMcpServerFacts ([pscustomobject]@{
                         mcp_servers = @([pscustomobject]@{
