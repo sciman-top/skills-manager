@@ -65,8 +65,11 @@
         "codex": {
           "default_profile": "core-lean",
           "exclude": [
+            "docx",
+            "pptx",
             "skill-creator",
-            "web-artifacts-builder"
+            "web-artifacts-builder",
+            "xlsx"
           ]
         },
         "claude": {

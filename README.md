@@ -137,7 +137,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 | 宿主 | 默认 `core-lean` | 显式 `core` 兼容档位 | `full-compatible` 的宿主适配 |
 | --- | --- | --- | --- |
-| ChatGPT/Codex | 6 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
+| ChatGPT/Codex | 6 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
 | Claude | 6 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
 | ZCode | 6 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
 

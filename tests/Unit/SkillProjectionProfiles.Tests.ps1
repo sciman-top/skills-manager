@@ -74,7 +74,7 @@ Describe 'Skill projection profiles' {
         @($selection.excluded_names) | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
-        @($codexSelection.excluded_names) | Should -Be @('skill-creator', 'web-artifacts-builder')
+        @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
     }
 
     It 'projects every fixture skill except the selected host exclusion in full-compatible mode' {
