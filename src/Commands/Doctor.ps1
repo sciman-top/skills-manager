@@ -1,10 +1,8 @@
-function Get-DoctorGitVersion([switch]$NoHostLog) {
-    if ($DryRun -or $NoHostLog) {
-        $gitOut = & git version 2>$null
-        if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
-        return (($gitOut | Select-Object -First 1).ToString().Trim())
-    }
-    return (Invoke-GitCapture @("version"))
+function Get-DoctorGitVersion {
+    # doctor 是只读诊断：统一走直连 git 探针，不经 Invoke-GitCapture 的 Log 落盘宿主日志。
+    $gitOut = & git version 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
+    return (($gitOut | Select-Object -First 1).ToString().Trim())
 }
 
 function Get-DoctorOsDescription {
@@ -417,7 +415,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 2. Git Check
     try {
-        $gitVer = Get-DoctorGitVersion -NoHostLog:$opts.json
+        $gitVer = Get-DoctorGitVersion
         if ([string]::IsNullOrWhiteSpace($gitVer)) { throw "git version is empty" }
         $report.checks.git = [ordered]@{ ok = $true; value = $gitVer }
         if (-not $opts.json) { Write-Host "✅ Git: $gitVer" -ForegroundColor Green }

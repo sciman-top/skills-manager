@@ -905,6 +905,24 @@ Describe "Core Functions" {
             (Test-McpServerEquivalent $a $b) | Should -Be $false
             (Find-EquivalentMcpServer @($a) $b) | Should -Be $null
         }
+
+        It "Does not treat case-only command changes as equivalent" {
+            $a = [pscustomobject]@{
+                name      = "casey"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@upstash/context7-mcp")
+            }
+            $b = [pscustomobject]@{
+                name      = "casey"
+                transport = "stdio"
+                command   = "NPX"
+                args      = @("-y", "@upstash/context7-mcp")
+            }
+
+            # 仅大小写差异必须移动指纹，否则同步会误判 unchanged 跳过重写。
+            (Test-McpServerEquivalent $a $b) | Should -Be $false
+        }
     }
 
     Context "Merge-FilterAndArgs" {

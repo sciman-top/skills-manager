@@ -70,6 +70,35 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         finally { $CfgPath = $oldCfgPath }
     }
 
+    It 'Does not copy the GITHUB token into process env in read-only plan context' {
+        $oldCodex = [string]$env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+        $oldGithub = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
+        $oldCfgPath = $CfgPath
+        $oldRoot = $script:Root
+        try {
+            # Get-McpSyncPlanningContext 读显式 \$script:Root（动态作用域盖不住）。
+            $script:Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            $env:GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_test_plan_only"
+            $root = Join-Path $TestDrive 'plan-env'
+            $cfg = [pscustomobject]@{
+                targets     = @([pscustomobject]@{ path = (Join-Path $root '.codex\skills') })
+                mcp_targets = @()
+                mcp_servers = @([pscustomobject]@{ name = 'github'; transport = 'stdio'; command = 'fixture-command' })
+            }
+            Mock Load-McpPlanConfigReadOnly { [pscustomobject]@{ cfg = $cfg; raw = '{}' } }
+            # 调用方作用域 DryRun=$false：fa5aeeb2 的 -not $DryRun 守卫未覆盖 plan 入口。
+            & { $DryRun = $false; Get-McpSyncPlanningContext -ReadOnlyConfig | Out-Null }
+            [string]$env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be ""
+        }
+        finally {
+            if ($oldCodex) { $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldCodex } else { Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue }
+            if ($oldGithub) { $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithub } else { Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue }
+            $CfgPath = $oldCfgPath
+            $script:Root = $oldRoot
+        }
+    }
+
     It 'uses the ZCode native config shape and does not create an undocumented sidecar' {
         $root = Join-Path $TestDrive 'zcode-root'
         $zcode = Join-Path $root '.zcode'

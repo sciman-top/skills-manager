@@ -9699,13 +9699,11 @@ function 锁定 {
     Write-Host ("锁定摘要：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
 }
 
-function Get-DoctorGitVersion([switch]$NoHostLog) {
-    if ($DryRun -or $NoHostLog) {
-        $gitOut = & git version 2>$null
-        if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
-        return (($gitOut | Select-Object -First 1).ToString().Trim())
-    }
-    return (Invoke-GitCapture @("version"))
+function Get-DoctorGitVersion {
+    # doctor 是只读诊断：统一走直连 git 探针，不经 Invoke-GitCapture 的 Log 落盘宿主日志。
+    $gitOut = & git version 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
+    return (($gitOut | Select-Object -First 1).ToString().Trim())
 }
 
 function Get-DoctorOsDescription {
@@ -10118,7 +10116,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 2. Git Check
     try {
-        $gitVer = Get-DoctorGitVersion -NoHostLog:$opts.json
+        $gitVer = Get-DoctorGitVersion
         if ([string]::IsNullOrWhiteSpace($gitVer)) { throw "git version is empty" }
         $report.checks.git = [ordered]@{ ok = $true; value = $gitVer }
         if (-not $opts.json) { Write-Host "✅ Git: $gitVer" -ForegroundColor Green }
@@ -15959,7 +15957,9 @@ function Test-McpServerEquivalent($a, $b) {
     $sa = Get-McpServerSignature $a
     $sb = Get-McpServerSignature $b
     if ([string]::IsNullOrWhiteSpace($sa) -or [string]::IsNullOrWhiteSpace($sb)) { return $false }
-    return ($sa -eq $sb)
+    # 大小写敏感比较：command/args/url path/env 键值的仅大小写变更必须移动指纹，
+    # 否则同步会误判 unchanged 跳过重写（仓库其余安全比较统一 -ceq）。
+    return ($sa -ceq $sb)
 }
 
 function Find-EquivalentMcpServer($servers, $candidate) {
@@ -16383,29 +16383,36 @@ function Get-McpExistingStates([object[]]$Specs) {
 }
 
 function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig) {
-    $loaded = if ($ReadOnlyConfig) { Load-McpPlanConfigReadOnly } else { [pscustomobject]@{ cfg = (LoadCfg); raw = (Get-ContentUtf8 $CfgPath) } }
-    $cfg = $loaded.cfg
-    $servers = @(Resolve-McpProfileServers $cfg)
-    $activeServers = @(Get-ActiveMcpServers $servers)
-    $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match('enabled').Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
-    $pruneNames = @(Get-McpServersToPrune $servers)
-    $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
-    Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
-    $candidatePaths = @(Get-McpTargetCandidatePaths $cfg)
-    $specs = @(Get-McpSyncManagedTargetSpecs -Roots $roots -CandidatePaths $candidatePaths -RepoRoot $script:Root)
-    $existingStates = Get-McpExistingStates $specs
-    $desiredState = @(New-McpSyncDesiredState -Specs $specs -Servers $servers -ActiveServers $activeServers -ProfileDisabledNames $profileDisabledNames -PruneNames $pruneNames -ExistingStates $existingStates)
-    return [pscustomobject]@{
-        cfg = $cfg
-        config_raw = [string]$loaded.raw
-        config_revision = Get-OperationSha256 ([string]$loaded.raw)
-        servers = $servers
-        active_servers = $activeServers
-        profile_disabled_names = $profileDisabledNames
-        prune_names = $pruneNames
-        roots = $roots
-        desired_state = $desiredState
+    # 只读规划上下文（同步MCP --plan）必须无进程副作用：注入 DryRun=true，
+    # 使规划链上的 env 复制等副作用守卫一律生效；真实同步（无开关）不受影响。
+    $previousDryRun = $DryRun
+    if ($ReadOnlyConfig -and -not $DryRun) { $DryRun = $true }
+    try {
+        $loaded = if ($ReadOnlyConfig) { Load-McpPlanConfigReadOnly } else { [pscustomobject]@{ cfg = (LoadCfg); raw = (Get-ContentUtf8 $CfgPath) } }
+        $cfg = $loaded.cfg
+        $servers = @(Resolve-McpProfileServers $cfg)
+        $activeServers = @(Get-ActiveMcpServers $servers)
+        $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match('enabled').Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
+        $pruneNames = @(Get-McpServersToPrune $servers)
+        $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
+        Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
+        $candidatePaths = @(Get-McpTargetCandidatePaths $cfg)
+        $specs = @(Get-McpSyncManagedTargetSpecs -Roots $roots -CandidatePaths $candidatePaths -RepoRoot $script:Root)
+        $existingStates = Get-McpExistingStates $specs
+        $desiredState = @(New-McpSyncDesiredState -Specs $specs -Servers $servers -ActiveServers $activeServers -ProfileDisabledNames $profileDisabledNames -PruneNames $pruneNames -ExistingStates $existingStates)
+        return [pscustomobject]@{
+            cfg = $cfg
+            config_raw = [string]$loaded.raw
+            config_revision = Get-OperationSha256 ([string]$loaded.raw)
+            servers = $servers
+            active_servers = $activeServers
+            profile_disabled_names = $profileDisabledNames
+            prune_names = $pruneNames
+            roots = $roots
+            desired_state = $desiredState
+        }
     }
+    finally { $DryRun = $previousDryRun }
 }
 
 function Invoke-McpSyncPlan([switch]$Json, [string]$OutPath = '') {
