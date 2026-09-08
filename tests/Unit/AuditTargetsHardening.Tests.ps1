@@ -217,7 +217,7 @@ Describe "Audit target hardening" {
         $recPath = Join-Path $TestDrive "host-native-invalid-fallback.json"
         Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-host-native-invalid","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_target_profile":"u","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","fallback_router":"missing","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
-        { Load-AuditRecommendations $recPath | Out-Null } | Should -Throw
+        { Load-AuditRecommendations $recPath | Out-Null } | Should -Throw '*routing.fallback_router 必须出现在 members*'
     }
 
     It "Finds exact reverse references before a skill removal mutates configuration" {

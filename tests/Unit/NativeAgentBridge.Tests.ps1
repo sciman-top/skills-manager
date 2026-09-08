@@ -61,7 +61,7 @@ Describe 'Native agent bridge' {
         }
     }
 
-    It 'fails closed when a managed template drops, duplicates, weakens, or smuggles the model pin' {
+    It 'template repository invariant: every managed bridge template carries exactly one static gpt-5.6-terra/high pair (oracle-checked)' {
         $template = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
         @(Get-BridgeModelPinViolations $template) | Should -Be @()
 

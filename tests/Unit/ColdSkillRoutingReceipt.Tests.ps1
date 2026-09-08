@@ -81,7 +81,8 @@ Describe 'Cold skill routing receipt v2 verifier' {
         $migrated.schema_version | Should -Be 2
         $migrated.migrated_from.legacy_receipt_path | Should -Be ([IO.Path]::GetFullPath($legacyCopy))
         $migrated.migrated_from.legacy_receipt_sha256 | Should -Be $beforeHash
-        @($migrated.migrated_from.migration_notes).Count | Should -BeGreaterThan 0
+        # 钉内容而非数量：属性缺失时 @($null).Count==1 恒真。
+        ([string]@($migrated.migrated_from.migration_notes)[0]) | Should -Not -BeNullOrEmpty
         @($migrated.records).Count | Should -Be 3
         foreach ($record in @($migrated.records)) {
             $record.observed.skill_md_loading | Should -Be 'not_observable'

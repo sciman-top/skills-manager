@@ -3907,3 +3907,37 @@ Describe "Build transaction rollback backup preservation" {
         }
     }
 }
+
+Describe "Managed-link-only whole-root rollback" {
+    It "restores the whole-root junction when managed-link-only projection fails" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "mlo-rollback"
+            $agentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $agentDir "demo") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $agentDir "demo\SKILL.md") "---`nname: demo`ndescription: Demo skill.`n---`nbody"
+            $AgentDir = $agentDir
+            $targetRoot = Join-Path $root "user-skills"
+            New-Item -ItemType Junction -Path $targetRoot -Target $agentDir | Out-Null
+
+            $cfg = [pscustomobject]@{ sync_mode = "link"; skill_projection = [pscustomobject]@{} }
+            $targetCfg = [pscustomobject]@{ host = "codex"; receipt_path = "reports/skill-projection/mlo-rollback.json" }
+            Mock Get-SkillProjectionEffectiveSelection { [pscustomobject]@{ included_names = @("demo"); excluded_names = @(); include_all = $false } }
+            Mock Apply-NativeSkillProjection { throw "fixture projection failure" }
+
+            { Sync-ManagedLinkOnlyTarget $cfg $targetCfg $targetRoot } | Should -Throw '*fixture projection failure*'
+
+            # 行为反证：源码正则测试拦不住"恢复到错误目标/回滚失败不上报"——
+            # 这里钉真实回滚：整目录 junction 必须重建并指回 agent/。
+            (Is-ReparsePoint $targetRoot) | Should -BeTrue
+            $restoredTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+            [string]::Equals([string]$restoredTarget, [IO.Path]::GetFullPath($agentDir), [System.StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+}

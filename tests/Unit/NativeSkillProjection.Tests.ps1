@@ -88,7 +88,8 @@ Describe 'Native skill projection' {
         { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw '*rollback/recovery required*'
         $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
         $recovery.status | Should -Be 'rollback_failed'
-        @($recovery.rollback_errors).Count | Should -BeGreaterThan 0
+        # 钉内容而非数量：@($null).Count==1 恒真，错误明细丢失时本行必须红。
+        @($recovery.rollback_errors)[0] | Should -Match 'fixture rollback failure'
         $recovery.recovery_required | Should -BeTrue
     }
 

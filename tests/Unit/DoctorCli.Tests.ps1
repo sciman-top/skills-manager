@@ -34,7 +34,8 @@ Describe "Doctor CLI behavior" {
 
             $report = Invoke-Doctor @("--json", "--strict")
             $report.pass | Should -Be $false
-            @($report.risks).Count | Should -BeGreaterThan 0
+            # 钉内容而非数量：risks 属性缺失时 @($null).Count==1 恒真。
+            ([string]@($report.risks)[0]) | Should -Not -BeNullOrEmpty
             $report.strict | Should -Be $true
             $report.summary.warn_count | Should -BeGreaterThan 0
         }
