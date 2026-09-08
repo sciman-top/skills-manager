@@ -118,6 +118,17 @@ function New-EstateMutationFixture {
         @($preflight.findings.code) | Should -Be @('plan_token_mismatch')
     }
 
+    It 'rejects a plan whose authorized_root does not match the reviewed repository' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $plan.actions[0].authorized_root = $f.workspace
+
+        $preflight = Test-RuleEstateApplyPreflight $plan $f.workspace $f.codex $f.claude
+
+        $preflight.pass | Should -Be $false
+        @($preflight.findings.code) | Should -Contain 'target_out_of_scope'
+    }
+
     It 'allows unrelated dirty paths but fails closed on target drift, target-set drift, and locks' {
         $f = New-EstateMutationFixture
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude

@@ -26,6 +26,7 @@ function New-ExecutorFixture([string]$Name) {
         $result.receipt.schema_version | Should -Be 1
         $result.receipt.status | Should -Be 'applied'
         $result.receipt.verification.static_validated | Should -Be 'pass'; $result.receipt.verification.host_loaded | Should -Be 'not_run'; $result.receipt.verification.live_accepted | Should -Be 'not_run'
+        @($result.receipt.rollback)[0] | Should -Be 'git_revert_required'
     }
 
     It 'does not write when guard blocks' {

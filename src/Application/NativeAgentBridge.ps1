@@ -112,7 +112,7 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     if ($names.Count -eq 0) { throw 'native_agent_bridge.definitions must not be empty.' }
     $planned = New-Object System.Collections.Generic.List[object]
     foreach ($name in $names) {
-        if ($name -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("native_agent_bridge definition is invalid: {0}" -f $name) }
+        if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("native_agent_bridge definition is invalid: {0}" -f $name) }
         $sourcePath = Join-Path $sourceRoot ($name + '.toml')
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ("native agent template is missing: {0}" -f $sourcePath) }
         $content = Get-NativeAgentBridgeTemplate $sourcePath $name

@@ -231,4 +231,10 @@ Describe 'Skill projection profiles' {
             if (Test-Path -LiteralPath $receipt -PathType Leaf) { Remove-Item -LiteralPath $receipt -Force }
         }
     }
+
+    It 'rejects uppercase profile names that the lowercase contract forbids' {
+        $config = New-ProfileFixtureProjection 'src' 'target' 'receipt'
+        $config.projection_profiles.profiles = [pscustomobject]@{ Core = [pscustomobject]@{ include = @('alpha'); exclude = @() } }
+        { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex } | Should -Throw '*非法 profile 名*'
+    }
 }

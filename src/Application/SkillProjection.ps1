@@ -468,7 +468,7 @@ function Resolve-SkillProjectionSelection {
     $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
     if ($profileNames.Count -eq 0) { throw 'skill_projection.projection_profiles.profiles 至少需要一个 profile' }
     foreach ($profileName in $profileNames) {
-        if ($profileName -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("skill_projection.projection_profiles.profiles 包含非法 profile 名：{0}" -f $profileName) }
+        if ($profileName -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("skill_projection.projection_profiles.profiles 包含非法 profile 名：{0}" -f $profileName) }
     }
 
     $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'

@@ -159,9 +159,12 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $start
     if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
-    $output = $process.StandardOutput.ReadToEnd().Trim()
-    $errorText = $process.StandardError.ReadToEnd().Trim()
+    # 双管道异步读取，避免 stderr 充满管道缓冲时与顺序 ReadToEnd 互锁。
+    $outputTask = $process.StandardOutput.ReadToEndAsync()
+    $errorTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
+    $output = $outputTask.GetAwaiter().GetResult().Trim()
+    $errorText = $errorTask.GetAwaiter().GetResult().Trim()
     return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
 }
 

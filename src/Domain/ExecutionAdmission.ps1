@@ -289,15 +289,14 @@ function New-ExecutionAdmission {
         attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
     }
     $admission | Add-Member -NotePropertyName admission_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'adm' (Get-ExecutionAdmissionPayload $admission))
-    $contract = Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $RepoRoot
+    $contract = Test-ExecutionAdmissionContract -Admission $admission
     if (-not $contract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($contract.findings | ForEach-Object code) -join ','))) }
     return $admission
 }
 
 function Test-ExecutionAdmissionContract {
     param(
-        [Parameter(Mandatory = $true)]$Admission,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)]$Admission
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
@@ -393,7 +392,7 @@ function New-ExecutionPlan {
     }
     if ([string]::IsNullOrWhiteSpace($repoRoot)) { throw 'execution_plan_repo_root_unresolved' }
 
-    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot $repoRoot
+    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission
     if (-not $admissionContract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($admissionContract.findings | ForEach-Object code) -join ','))) }
     $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
     $planAdmissionId = [string](Get-ExecutionAdmissionProperty $Admission 'admission_id')
@@ -491,7 +490,7 @@ function Test-ExecutionAdmissionRevalidation {
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
-    foreach ($finding in @((Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @((Test-ExecutionAdmissionContract -Admission $Admission).findings)) { $findings.Add($finding) | Out-Null }
     foreach ($finding in @((Test-ExecutionPlanContract -Plan $Plan -Admission $Admission).findings)) { $findings.Add($finding) | Out-Null }
     if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
 

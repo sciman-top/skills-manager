@@ -57,7 +57,7 @@ Describe 'Execution admission' {
         $admission = New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt $issuedAt -RepoRoot $root
         $plan = New-ExecutionPlan -Admission $admission
 
-        (Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $root).pass | Should -BeTrue
+        (Test-ExecutionAdmissionContract -Admission $admission).pass | Should -BeTrue
         (Test-ExecutionPlanContract -Plan $plan -Admission $admission).pass | Should -BeTrue
         $admission.schema_version | Should -Be 2
         $admission.admission_id | Should -Match '^adm-[a-f0-9]{64}$'
@@ -85,7 +85,7 @@ Describe 'Execution admission' {
         $admission = New-ExecutionAdmission -OriginalRequest '请只读运行这个冷技能并返回结果，不改文件。' -AdmittedGoal '完成一次受限的冷技能只读运行。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_one_shot_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
         $plan = New-ExecutionPlan -Admission $admission
 
-        (Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $root).pass | Should -BeTrue
+        (Test-ExecutionAdmissionContract -Admission $admission).pass | Should -BeTrue
         (Test-ExecutionPlanContract -Plan $plan -Admission $admission).pass | Should -BeTrue
         $admission.minimum_proof | Should -Match 'cold-capability-runner'
         $admission.stop_condition | Should -Be 'parent_contract'
@@ -180,7 +180,7 @@ finally {
         $admission = New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
         $admission.exact_write_set = @('D:\\CODE\\skills-manager\\AGENTS.md')
 
-        $result = Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $root
+        $result = Test-ExecutionAdmissionContract -Admission $admission
 
         $result.pass | Should -BeFalse
         @($result.findings | ForEach-Object code) | Should -Contain 'read_only_write_set_not_empty'

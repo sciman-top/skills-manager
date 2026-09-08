@@ -39,7 +39,7 @@ function Invoke-RulePatchApply {
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
         Remove-RulePatchTransactionFile $backupPath
-        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'restore_before_bytes' }))
+        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'git_revert_required' }))
         return [pscustomobject][ordered]@{ pass = $true; status = 'applied'; findings = @(); receipt = $receipt; writes = 1; rollback = 'not_required' }
     }
     catch {

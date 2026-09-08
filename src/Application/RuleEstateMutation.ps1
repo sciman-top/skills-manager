@@ -179,10 +179,10 @@ function Test-RuleEstateApplyPreflight {
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
-        $expectedRoot = $root
-        $allowedName = [IO.Path]::GetFileName($path)
+        $repositoryName=[string](Get-RuleEstateProperty $action 'repository')
+        $expectedRoot=if($scope -eq 'repository' -and -not [string]::IsNullOrWhiteSpace($repositoryName)){[IO.Path]::GetFullPath((Join-Path $workspace $repositoryName))}else{$null}
         if ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate plans may only contain repository targets; use global-rules-* for user-level rules.')) | Out-Null }
-        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
+        if ($null -eq $expectedRoot -or $root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
         if(Test-RuleEstateReparsePath $path $root){$findings.Add((New-RuleEstateFinding 'target_reparse_forbidden' $path 'Reparse points are not accepted by rule estate.'))|Out-Null}
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
