@@ -162,7 +162,9 @@ function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
-        $allFiles = Invoke-GitCaptureLines @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref)
+        $okLines = $false
+        $allFiles = Invoke-GitCaptureCore @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref) ([ref]$okLines)
+        if (-not $okLines) { Need $false ("无法读取源仓库 {0} 的文件树（ref 可能无效或克隆不完整）：{1}" -f $repo, $ref) }
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         $candidates = @()
         foreach ($f in $allFiles) {
@@ -1090,8 +1092,8 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         }
     }
     else {
-        $gitDir = Join-Path $path ".git"
-        if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) {
+        $gitDir = Resolve-GitAdminDir $path
+        if ([string]::IsNullOrWhiteSpace($gitDir)) {
             Need $forceClean ("缓存目录已存在但不是 git 仓库且 update_force=false：{0}" -f $path)
             Log ("缓存目录不是 git 仓库，已重建：{0}" -f $path) "WARN"
             Invoke-RemoveItemWithRetry $path -Recurse

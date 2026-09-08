@@ -1292,12 +1292,79 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Get-McpServerSignature" {
+        It "Includes normalized startup_timeout_sec so manual edits move the fingerprint" {
+            $server = [pscustomobject]@{ name = "api"; command = "npx"; args = @("-y", "mcp"); startup_timeout_sec = 45 }
+            (Get-McpServerSignature $server) | Should -Match '"startup_timeout_sec":45'
+            (Get-McpServerSignature ([pscustomobject]@{ name = "api"; command = "npx"; startup_timeout_sec = "not-a-number" })) | Should -Not -Match 'startup_timeout_sec'
+            (Get-McpServerSignature ([pscustomobject]@{ name = "api"; command = "npx" })) | Should -Not -Match 'startup_timeout_sec'
+        }
+    }
+
+    Context "Host env-template projection guard" {
+        It "Refuses env template values for the Codex TOML host" {
+            $server = [pscustomobject]@{ name = "api-gw"; command = "npx"; args = @("-y", "mcp"); env = [pscustomobject]@{ API_KEY = '${API_KEY}' } }
+            { Build-CodexConfigToml "" @($server) } | Should -Throw '*环境展开*'
+        }
+
+        It "Refuses header template values for the Gemini host" {
+            $server = [pscustomobject]@{ name = "gw"; transport = "http"; url = "https://example.com/mcp"; headers = [pscustomobject]@{ Authorization = 'Bearer ${TOK}' } }
+            { Convert-McpServersToGeminiConfigMap @($server) } | Should -Throw '*环境展开*'
+        }
+
+        It "Does not copy the GITHUB token into process env under DryRun" {
+            $oldCodex = [string]$env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithub = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
+            try {
+                Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                $env:GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_test_dryrun_only"
+                # 调用方作用域注入 DryRun：函数内的 $DryRun 读取沿动态作用域命中此处。
+                & { $DryRun = $true; Build-CodexConfigToml "" @() | Out-Null }
+                [string]$env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be ""
+            }
+            finally {
+                if ($oldCodex) { $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldCodex } else { Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue }
+                if ($oldGithub) { $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithub } else { Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
     Context "Test-CfgArrayProperty" {
         It "Requires the property value itself to be an array" {
             Test-CfgArrayProperty ([pscustomobject]@{ enabled = "solo" }) "enabled" | Should -Be $false
             Test-CfgArrayProperty ([pscustomobject]@{ enabled = [pscustomobject]@{ a = 1 } }) "enabled" | Should -Be $false
             Test-CfgArrayProperty ([pscustomobject]@{ enabled = @() }) "enabled" | Should -Be $true
             Test-CfgArrayProperty ([pscustomobject]@{ enabled = @(1, 2) }) "enabled" | Should -Be $true
+        }
+    }
+
+    Context "LoadCfg -NoAutoFix" {
+        It "Diagnoses without persisting the auto-fix write-back" {
+            $oldCfgPath = $CfgPath
+            try {
+                $CfgPath = Join-Path $TestDrive "skills-noautofix.json"
+                $dupMapping = @{ vendor = "vendor-a"; from = "a"; to = "skill-x" }
+                $cfg = @{
+                    vendors = @(@{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" })
+                    targets = @(@{ path = "~/.codex/skills" })
+                    mappings = @($dupMapping, $dupMapping)
+                    imports = @()
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    sync_mode = "link"
+                    update_force = $true
+                } | ConvertTo-Json -Depth 10
+                Set-Content -Path $CfgPath -Value $cfg -Encoding UTF8
+                $before = Get-ContentUtf8 $CfgPath
+
+                LoadCfg -NoAutoFix | Out-Null
+                Get-ContentUtf8 $CfgPath | Should -Be $before
+
+                $cfgObj = LoadCfg
+                Get-ContentUtf8 $CfgPath | Should -Not -Be $before
+                @($cfgObj.mappings).Count | Should -Be 1
+            }
+            finally { $CfgPath = $oldCfgPath }
         }
     }
 

@@ -37,11 +37,12 @@ function 清理备份 {
         foreach ($e in $entries) {
             if ($e.PSIsContainer) {
                 if (Is-ReparsePoint $e.FullName) { continue }
-                if ($e.Name -eq ".bak" -or $e.Name -like "*.bak.*") { $bakDirs += $e }
+                if ($e.Name -eq ".bak" -or $e.Name -like "*.bak.*" -or $e.Name -like "*.bak-*") { $bakDirs += $e }
                 $stack.Push($e.FullName)
             }
             else {
-                if ($e.Name -like "*.bak.*") { $bakFiles += $e }
+                # AtomicFile 的临时/备份命名是 *.tmp-<guid> / *.bak-<guid>（连字符），须一并清扫。
+                if ($e.Name -like "*.bak.*" -or $e.Name -like "*.bak-*" -or $e.Name -like "*.tmp-*") { $bakFiles += $e }
             }
         }
     }

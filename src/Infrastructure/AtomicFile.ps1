@@ -30,6 +30,8 @@ function Write-BytesAtomic {
         try {
             Clear-AtomicFileWriteBlockAttributes $Path
             [System.IO.File]::WriteAllBytes($tempPath, $Bytes)
+            # Crash 边界：WriteAllBytes/Replace 未 flush-to-disk，进程崩溃可见 temp+Replace 原子性，
+            # 但掉电场景不保证持久化（可能留下旧内容或空文件）；本仓接受该边界，未启用 WriteThrough。
             if (Test-Path -LiteralPath $Path -PathType Leaf) {
                 [System.IO.File]::Replace($tempPath, $Path, $backupPath, $true)
                 Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue

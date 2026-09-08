@@ -245,10 +245,9 @@ function Invoke-StartProcess([string]$file, [string]$args) {
     }
 }
 function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
-    Log ("cmd /c mklink /J `"{0}`" `"{1}`"" -f $linkPath, $targetPath)
+    Log ("New-Item -ItemType Junction `"{0}`" -> `"{1}`"" -f $linkPath, $targetPath)
     if ($DryRun) { return }
-    & cmd /c mklink /J "$linkPath" "$targetPath" | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "mklink 失败：$linkPath -> $targetPath" }
+    New-Item -ItemType Junction -Path $linkPath -Value $targetPath -ErrorAction Stop | Out-Null
 }
 function EnsureDir([string]$p) {
     if ($DryRun) { return }

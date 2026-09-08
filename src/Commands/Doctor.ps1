@@ -198,7 +198,7 @@ function Get-DoctorSkillProjectionConsistency {
     # (filesystem_projected); it does not prove host_loaded or invocation.
     $result = [ordered]@{ ok = $true; warnings = @(); detail = "" }
     try {
-        $cfg = LoadCfg
+        $cfg = LoadCfg -NoAutoFix
         $projection = if ($cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
         if ($null -eq $projection) {
             $result.detail = "skill_projection not configured"

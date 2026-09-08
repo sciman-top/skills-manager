@@ -140,7 +140,7 @@ function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     return $true
 }
 
-function LoadCfg() {
+function LoadCfg([switch]$NoAutoFix) {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
     $raw = Get-ContentUtf8 $CfgPath
     # 保守注释支持：仅移除整行 // 注释，避免误伤字符串内容。
@@ -168,7 +168,7 @@ function LoadCfg() {
     Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
     Assert-Cfg $cfg
     Apply-DirectoryMigrations $dirMigrations ([ref]$changed)
-    if ($changed) {
+    if ($changed -and -not $NoAutoFix) {
         Log "已自动修复 skills.json 中的无效项/重复项。" "WARN"
         try {
             SaveCfgSafe $cfg $raw
@@ -1289,7 +1289,7 @@ function Assert-Cfg($cfg) {
         $mcpServerNames = New-CfgMcpServerNameSet $cfg.mcp_servers
         Need (-not [string]::IsNullOrWhiteSpace([string]$mcpProfiles.active)) "mcp_profiles.active 不能为空"
         Need ($mcpProfiles.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $mcpProfiles.profiles) "mcp_profiles 缺少 profiles"
-        Need ($mcpProfiles.profiles.PSObject.Properties.Match([string]$mcpProfiles.active).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
+        Need (@($mcpProfiles.profiles.PSObject.Properties | Where-Object { $_.Name -eq [string]$mcpProfiles.active }).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
         foreach ($profileProperty in @($mcpProfiles.profiles.PSObject.Properties)) {
             $profileName = [string]$profileProperty.Name
             $profile = $profileProperty.Value
