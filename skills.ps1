@@ -63,6 +63,8 @@ function Write-BytesAtomic {
         try {
             Clear-AtomicFileWriteBlockAttributes $Path
             [System.IO.File]::WriteAllBytes($tempPath, $Bytes)
+            # Crash 边界：WriteAllBytes/Replace 未 flush-to-disk，进程崩溃可见 temp+Replace 原子性，
+            # 但掉电场景不保证持久化（可能留下旧内容或空文件）；本仓接受该边界，未启用 WriteThrough。
             if (Test-Path -LiteralPath $Path -PathType Leaf) {
                 [System.IO.File]::Replace($tempPath, $Path, $backupPath, $true)
                 Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
@@ -701,10 +703,9 @@ function Invoke-StartProcess([string]$file, [string]$args) {
     }
 }
 function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
-    Log ("cmd /c mklink /J `"{0}`" `"{1}`"" -f $linkPath, $targetPath)
+    Log ("New-Item -ItemType Junction `"{0}`" -> `"{1}`"" -f $linkPath, $targetPath)
     if ($DryRun) { return }
-    & cmd /c mklink /J "$linkPath" "$targetPath" | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "mklink 失败：$linkPath -> $targetPath" }
+    New-Item -ItemType Junction -Path $linkPath -Value $targetPath -ErrorAction Stop | Out-Null
 }
 function EnsureDir([string]$p) {
     if ($DryRun) { return }
@@ -2591,15 +2592,14 @@ function New-ExecutionAdmission {
         attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
     }
     $admission | Add-Member -NotePropertyName admission_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'adm' (Get-ExecutionAdmissionPayload $admission))
-    $contract = Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $RepoRoot
+    $contract = Test-ExecutionAdmissionContract -Admission $admission
     if (-not $contract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($contract.findings | ForEach-Object code) -join ','))) }
     return $admission
 }
 
 function Test-ExecutionAdmissionContract {
     param(
-        [Parameter(Mandatory = $true)]$Admission,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)]$Admission
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
@@ -2695,7 +2695,7 @@ function New-ExecutionPlan {
     }
     if ([string]::IsNullOrWhiteSpace($repoRoot)) { throw 'execution_plan_repo_root_unresolved' }
 
-    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot $repoRoot
+    $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission
     if (-not $admissionContract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($admissionContract.findings | ForEach-Object code) -join ','))) }
     $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
     $planAdmissionId = [string](Get-ExecutionAdmissionProperty $Admission 'admission_id')
@@ -2793,7 +2793,7 @@ function Test-ExecutionAdmissionRevalidation {
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
-    foreach ($finding in @((Test-ExecutionAdmissionContract -Admission $Admission -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @((Test-ExecutionAdmissionContract -Admission $Admission).findings)) { $findings.Add($finding) | Out-Null }
     foreach ($finding in @((Test-ExecutionPlanContract -Plan $Plan -Admission $Admission).findings)) { $findings.Add($finding) | Out-Null }
     if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
 
@@ -4546,7 +4546,7 @@ function Resolve-SkillProjectionSelection {
     $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
     if ($profileNames.Count -eq 0) { throw 'skill_projection.projection_profiles.profiles 至少需要一个 profile' }
     foreach ($profileName in $profileNames) {
-        if ($profileName -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("skill_projection.projection_profiles.profiles 包含非法 profile 名：{0}" -f $profileName) }
+        if ($profileName -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("skill_projection.projection_profiles.profiles 包含非法 profile 名：{0}" -f $profileName) }
     }
 
     $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'
@@ -5046,7 +5046,7 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     if ($names.Count -eq 0) { throw 'native_agent_bridge.definitions must not be empty.' }
     $planned = New-Object System.Collections.Generic.List[object]
     foreach ($name in $names) {
-        if ($name -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("native_agent_bridge definition is invalid: {0}" -f $name) }
+        if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("native_agent_bridge definition is invalid: {0}" -f $name) }
         $sourcePath = Join-Path $sourceRoot ($name + '.toml')
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ("native agent template is missing: {0}" -f $sourcePath) }
         $content = Get-NativeAgentBridgeTemplate $sourcePath $name
@@ -5596,9 +5596,12 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $start
     if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
-    $output = $process.StandardOutput.ReadToEnd().Trim()
-    $errorText = $process.StandardError.ReadToEnd().Trim()
+    # 双管道异步读取，避免 stderr 充满管道缓冲时与顺序 ReadToEnd 互锁。
+    $outputTask = $process.StandardOutput.ReadToEndAsync()
+    $errorTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
+    $output = $outputTask.GetAwaiter().GetResult().Trim()
+    $errorText = $errorTask.GetAwaiter().GetResult().Trim()
     return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
 }
 
@@ -6088,10 +6091,10 @@ function Test-RuleEstateApplyPreflight {
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
-        $expectedRoot = $root
-        $allowedName = [IO.Path]::GetFileName($path)
+        $repositoryName=[string](Get-RuleEstateProperty $action 'repository')
+        $expectedRoot=if($scope -eq 'repository' -and -not [string]::IsNullOrWhiteSpace($repositoryName)){[IO.Path]::GetFullPath((Join-Path $workspace $repositoryName))}else{$null}
         if ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate plans may only contain repository targets; use global-rules-* for user-level rules.')) | Out-Null }
-        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
+        if ($null -eq $expectedRoot -or $root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
         if(Test-RuleEstateReparsePath $path $root){$findings.Add((New-RuleEstateFinding 'target_reparse_forbidden' $path 'Reparse points are not accepted by rule estate.'))|Out-Null}
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
@@ -6610,7 +6613,7 @@ function Invoke-RulePatchApply {
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
         Remove-RulePatchTransactionFile $backupPath
-        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'restore_before_bytes' }))
+        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'git_revert_required' }))
         return [pscustomobject][ordered]@{ pass = $true; status = 'applied'; findings = @(); receipt = $receipt; writes = 1; rollback = 'not_required' }
     }
     catch {
@@ -6800,7 +6803,9 @@ function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
-        $allFiles = Invoke-GitCaptureLines @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref)
+        $okLines = $false
+        $allFiles = Invoke-GitCaptureCore @("-c", "core.quotepath=false", $gitDirArg, "ls-tree", "-r", "--name-only", $ref) ([ref]$okLines)
+        if (-not $okLines) { Need $false ("无法读取源仓库 {0} 的文件树（ref 可能无效或克隆不完整）：{1}" -f $repo, $ref) }
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         $candidates = @()
         foreach ($f in $allFiles) {
@@ -7728,8 +7733,8 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         }
     }
     else {
-        $gitDir = Join-Path $path ".git"
-        if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) {
+        $gitDir = Resolve-GitAdminDir $path
+        if ([string]::IsNullOrWhiteSpace($gitDir)) {
             Need $forceClean ("缓存目录已存在但不是 git 仓库且 update_force=false：{0}" -f $path)
             Log ("缓存目录不是 git 仓库，已重建：{0}" -f $path) "WARN"
             Invoke-RemoveItemWithRetry $path -Recurse
@@ -7910,7 +7915,7 @@ function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     return $true
 }
 
-function LoadCfg() {
+function LoadCfg([switch]$NoAutoFix) {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
     $raw = Get-ContentUtf8 $CfgPath
     # 保守注释支持：仅移除整行 // 注释，避免误伤字符串内容。
@@ -7938,7 +7943,7 @@ function LoadCfg() {
     Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
     Assert-Cfg $cfg
     Apply-DirectoryMigrations $dirMigrations ([ref]$changed)
-    if ($changed) {
+    if ($changed -and -not $NoAutoFix) {
         Log "已自动修复 skills.json 中的无效项/重复项。" "WARN"
         try {
             SaveCfgSafe $cfg $raw
@@ -9059,7 +9064,7 @@ function Assert-Cfg($cfg) {
         $mcpServerNames = New-CfgMcpServerNameSet $cfg.mcp_servers
         Need (-not [string]::IsNullOrWhiteSpace([string]$mcpProfiles.active)) "mcp_profiles.active 不能为空"
         Need ($mcpProfiles.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $mcpProfiles.profiles) "mcp_profiles 缺少 profiles"
-        Need ($mcpProfiles.profiles.PSObject.Properties.Match([string]$mcpProfiles.active).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
+        Need (@($mcpProfiles.profiles.PSObject.Properties | Where-Object { $_.Name -eq [string]$mcpProfiles.active }).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
         foreach ($profileProperty in @($mcpProfiles.profiles.PSObject.Properties)) {
             $profileName = [string]$profileProperty.Name
             $profile = $profileProperty.Value
@@ -9682,7 +9687,7 @@ function Get-DoctorSkillProjectionConsistency {
     # (filesystem_projected); it does not prove host_loaded or invocation.
     $result = [ordered]@{ ok = $true; warnings = @(); detail = "" }
     try {
-        $cfg = LoadCfg
+        $cfg = LoadCfg -NoAutoFix
         $projection = if ($cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
         if ($null -eq $projection) {
             $result.detail = "skill_projection not configured"
@@ -13926,14 +13931,20 @@ function Convert-McpServersToGeminiConfigMap($servers) {
         if ($transport -eq "stdio") {
             if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
             if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
-            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) {
+                foreach ($p in @($s.env.PSObject.Properties)) { Assert-McpHostValueNotEnvTemplate ([string]$s.name) 'env' ([string]$p.Name) ([string]$p.Value) }
+                $entry.env = $s.env
+            }
         }
         else {
             if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) {
                 if ($transport -eq "http") { $entry.httpUrl = [string]$s.url }
                 else { $entry.url = [string]$s.url }
             }
-            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) {
+                foreach ($p in @($s.headers.PSObject.Properties)) { Assert-McpHostValueNotEnvTemplate ([string]$s.name) 'headers' ([string]$p.Name) ([string]$p.Value) }
+                $entry.headers = $s.headers
+            }
         }
         $map[[string]$s.name] = [pscustomobject]$entry
     }
@@ -15317,6 +15328,13 @@ function ConvertTo-TomlKey([string]$key) {
     return ('"{0}"' -f $key.Replace('\', '\\').Replace('"', '\"'))
 }
 
+function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldName, [string]$Key, [string]$Value) {
+    # Codex config.toml 与 Gemini settings.json 不做 ${VAR} 展开：模板值会按字面量传给服务进程。
+    if ($Value -match '^\s*(?:(?:Bearer|Basic)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}\s*$') {
+        Need $false ('宿主不支持 ${{VAR}} 环境展开（会按字面量传递导致认证失败），拒绝投影：{0} {1}.{2}' -f $ServerName, $FieldName, $Key)
+    }
+}
+
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -15325,7 +15343,8 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     $codexServers = @()
     $skippedGithubForMissingToken = $false
     $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
-    if ([string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
+    # plan/DRYRUN 是只读命令：不向当前进程复制 token 环境变量。
+    if (-not $DryRun -and [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
         $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
     }
     foreach ($server in @($servers)) {
@@ -15433,6 +15452,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                     else {
                         foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
                     }
+                    foreach ($k in $dict.Keys) { Assert-McpHostValueNotEnvTemplate $name $key ([string]$k) ([string]$dict[$k]) }
                     $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f (ConvertTo-TomlKey $_), (ConvertTo-TomlBasicValue $dict[$_]) })
                     $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
                     continue
@@ -15664,6 +15684,10 @@ function Get-McpServerSignature($server) {
         }
         $sig.enabled_tools = @($tools | Sort-Object)
     }
+    # startup_timeout_sec 参与 Codex 投影（无效值经 Get-CodexMcpStartupTimeoutSec 归一为忽略）；
+    # 不进签名则手改该字段不会移动 MCP 指纹。
+    $startupTimeout = Get-CodexMcpStartupTimeoutSec $server
+    if ($null -ne $startupTimeout) { $sig.startup_timeout_sec = [int]$startupTimeout }
     return ($sig | ConvertTo-Json -Depth 30 -Compress)
 }
 
@@ -16596,6 +16620,13 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
             if ($null -eq $property) { continue }
             $map = [ordered]@{}
             foreach ($entry in $property.Value.PSObject.Properties) { $map[[string]$entry.Name] = [string]$entry.Value }
+            try {
+                Assert-McpKeyValueMapSafe ([pscustomobject]$map) ("migration-unlock:{0}.{1}" -f $name, $field)
+            }
+            catch {
+                Log ("拒绝恢复不安全的凭据字段（同步MCP 也会拒绝该状态）：{0}.{1}：{2}" -f $name, $field, $_.Exception.Message) "WARN"
+                continue
+            }
             $server | Add-Member -NotePropertyName $field -NotePropertyValue ([pscustomobject]$map) -Force
             $changed++
         }
@@ -20640,15 +20671,17 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
 
 function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $configuredSupplyStale = $false
+    # fail closed：当前契约的快照必须显式携带三类指纹；缺失/空值按 stale 处理，
+    # 否则被剥离指纹的异常快照会让对应分量永远判不 stale。
+    $configuredSupplyStale = $true
     if ($snapshotState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.configured_supply_fingerprint)) {
         $configuredSupplyStale = ([string]$snapshotState.configured_supply_fingerprint -ne [string]$liveState.configured_supply_fingerprint)
     }
-    $mcpStale = $false
+    $mcpStale = $true
     if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
         $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
     }
-    $externalSkillStale = $false
+    $externalSkillStale = $true
     if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
         $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
     }
@@ -21622,6 +21655,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
     $deletedLegacyManualDirs = 0
     $deletedOverrides = 0
     $backedOverrides = 0
+    $overrideBackupPaths = New-Object System.Collections.Generic.List[string]
     foreach ($item in @($selectedItems)) {
         $vendor = [string]$item.vendor
         $from = [string]$item.from
@@ -21643,7 +21677,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         }
         elseif ($vendor -eq "overrides") {
             $bak = Backup-OverrideDir $from
-            if ($bak) { $backedOverrides++ }
+            if ($bak) { $backedOverrides++; $overrideBackupPaths.Add([string]$bak) }
             $deletedOverrides++
         }
         else {
@@ -21677,6 +21711,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         deleted_legacy_manual_dirs = $deletedLegacyManualDirs
         deleted_overrides = $deletedOverrides
         backed_overrides = $backedOverrides
+        override_backup_paths = @($overrideBackupPaths.ToArray())
     }
 }
 
@@ -22640,12 +22675,8 @@ function Invoke-AuditRecommendationsPreflight {
 
     Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
     if ($issues.Count -eq 0) {
-        if ($recommendationsExists) {
-            Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
-        }
-        else {
-            Write-Host "预检通过：审查包快照与提示词契约均匹配；recommendations.json 尚未生成，可继续生成建议。" -ForegroundColor Green
-        }
+        # recommendations.json 缺失必然已在上方产生 issue；此分支只服务已生成建议的通过路径。
+        Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
         return [pscustomobject]$report
     }
 
@@ -22787,7 +22818,7 @@ function New-AuditApplyTransactionSnapshot {
 }
 
 function Restore-AuditApplyTransaction {
-    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted)
+    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted,[string[]]$OverrideBackupPaths=@())
     $errors = New-Object System.Collections.Generic.List[string]
     try {
         if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
@@ -22805,11 +22836,15 @@ function Restore-AuditApplyTransaction {
         try { 同步MCP }
         catch { $errors.Add(('mcp_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     }
+    # overrides 卸载会把源目录移入 .bak 且补偿不搬回：这类补偿只是 partial——
+    # config 已还原但技能从投影中消失，必须如实降级并记录 .bak 位置供人工恢复。
+    $overrideBackups = @($OverrideBackupPaths)
     return [pscustomobject][ordered]@{
-        status = $(if($errors.Count -eq 0){'restored'}else{'failed'})
+        status = $(if($errors.Count -gt 0){'failed'}elseif($overrideBackups.Count -gt 0){'partial'}else{'restored'})
         config_restored = (-not $configRestoreFailed)
         skill_projection_attempted = $SkillProjectionAttempted
         mcp_projection_attempted = $McpProjectionAttempted
+        override_backup_paths = $overrideBackups
         errors = @($errors.ToArray())
         residual_cache_boundary = 'Downloaded import/vendor caches and removal backup directories are not deleted automatically; restored config makes unreferenced caches inactive.'
     }
@@ -22925,9 +22960,11 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
         throw $qualityMessage
     }
-    $liveState = if ($canReusePreflight) { $PreflightReport.live_state } else { Get-AuditLiveInstalledState }
+    # live 快照必须独立新鲜：复用 preflight 的同一对象会让 dry-run 报告与 preflight
+    # 自比较，workflow 的 live_state_changed 检测就永远不可达。
+    $liveState = Get-AuditLiveInstalledState
     $snapshotState = if ($canReusePreflight) { $PreflightReport.snapshot_state } else { Get-AuditInstalledSnapshotState $snapshotPath }
-    $snapshotStaleness = if ($canReusePreflight) { $PreflightReport.snapshot_staleness } else { Get-AuditInstalledSnapshotStaleness $snapshotState $liveState }
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
@@ -23017,6 +23054,7 @@ function Invoke-AuditRecommendationsApply {
     $transaction = New-AuditApplyTransactionSnapshot
     $skillMutationAttempted = $false
     $mcpMutationAttempted = $false
+    $overrideBackupPaths = @()
 
     try {
         foreach ($item in @($selectedAdd.items)) {
@@ -23047,7 +23085,8 @@ function Invoke-AuditRecommendationsApply {
 
         if (@($selectedRemove.items).Count -gt 0) {
             $skillMutationAttempted = $true
-            Remove-AuditSelectedInstalledSkills $selectedRemove.items | Out-Null
+            $removalStats = Remove-AuditSelectedInstalledSkills $selectedRemove.items
+            $overrideBackupPaths = @([string[]]$removalStats.override_backup_paths)
             foreach ($item in @($selectedRemove.items)) {
                 $report.rollback += ("Re-add removed skill mapping/import for '{0}' if rollback is required." -f $item.name)
             }
@@ -23123,7 +23162,7 @@ function Invoke-AuditRecommendationsApply {
         $originalFailure = $_
         if ($report.success) { $report.success = $false }
         if($skillMutationAttempted -or $mcpMutationAttempted) {
-            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted
+            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted -OverrideBackupPaths $overrideBackupPaths
             if([string]$report.compensation.status -eq 'restored'){Set-AuditApplyItemsRolledBack $plan}
         }
         $report.items = @($plan.items)
@@ -24548,11 +24587,12 @@ function 清理备份 {
         foreach ($e in $entries) {
             if ($e.PSIsContainer) {
                 if (Is-ReparsePoint $e.FullName) { continue }
-                if ($e.Name -eq ".bak" -or $e.Name -like "*.bak.*") { $bakDirs += $e }
+                if ($e.Name -eq ".bak" -or $e.Name -like "*.bak.*" -or $e.Name -like "*.bak-*") { $bakDirs += $e }
                 $stack.Push($e.FullName)
             }
             else {
-                if ($e.Name -like "*.bak.*") { $bakFiles += $e }
+                # AtomicFile 的临时/备份命名是 *.tmp-<guid> / *.bak-<guid>（连字符），须一并清扫。
+                if ($e.Name -like "*.bak.*" -or $e.Name -like "*.bak-*" -or $e.Name -like "*.tmp-*") { $bakFiles += $e }
             }
         }
     }
