@@ -253,6 +253,13 @@ function Invoke-MigrationUnlockCommand([string[]]$Tokens) {
             if ($null -eq $property) { continue }
             $map = [ordered]@{}
             foreach ($entry in $property.Value.PSObject.Properties) { $map[[string]$entry.Name] = [string]$entry.Value }
+            try {
+                Assert-McpKeyValueMapSafe ([pscustomobject]$map) ("migration-unlock:{0}.{1}" -f $name, $field)
+            }
+            catch {
+                Log ("拒绝恢复不安全的凭据字段（同步MCP 也会拒绝该状态）：{0}.{1}：{2}" -f $name, $field, $_.Exception.Message) "WARN"
+                continue
+            }
             $server | Add-Member -NotePropertyName $field -NotePropertyValue ([pscustomobject]$map) -Force
             $changed++
         }

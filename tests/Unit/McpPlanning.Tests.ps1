@@ -13,7 +13,7 @@ function New-TestMcpServer([string]$Name = 'fixture') {
             transport = 'stdio'
             command = 'fixture-command'
             args = @('--token', '${FIXTURE_ARG_TOKEN}')
-            env = [pscustomobject]@{ API_TOKEN = '${FIXTURE_ENV_TOKEN}' }
+            env = [pscustomobject]@{ FIXTURE_ENV_FLAG = 'enabled' }
         }
     }
 function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {

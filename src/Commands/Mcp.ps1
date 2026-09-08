@@ -243,14 +243,20 @@ function Convert-McpServersToGeminiConfigMap($servers) {
         if ($transport -eq "stdio") {
             if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
             if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
-            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) {
+                foreach ($p in @($s.env.PSObject.Properties)) { Assert-McpHostValueNotEnvTemplate ([string]$s.name) 'env' ([string]$p.Name) ([string]$p.Value) }
+                $entry.env = $s.env
+            }
         }
         else {
             if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) {
                 if ($transport -eq "http") { $entry.httpUrl = [string]$s.url }
                 else { $entry.url = [string]$s.url }
             }
-            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) {
+                foreach ($p in @($s.headers.PSObject.Properties)) { Assert-McpHostValueNotEnvTemplate ([string]$s.name) 'headers' ([string]$p.Name) ([string]$p.Value) }
+                $entry.headers = $s.headers
+            }
         }
         $map[[string]$s.name] = [pscustomobject]$entry
     }
@@ -1634,6 +1640,13 @@ function ConvertTo-TomlKey([string]$key) {
     return ('"{0}"' -f $key.Replace('\', '\\').Replace('"', '\"'))
 }
 
+function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldName, [string]$Key, [string]$Value) {
+    # Codex config.toml 与 Gemini settings.json 不做 ${VAR} 展开：模板值会按字面量传给服务进程。
+    if ($Value -match '^\s*(?:(?:Bearer|Basic)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}\s*$') {
+        Need $false ('宿主不支持 ${{VAR}} 环境展开（会按字面量传递导致认证失败），拒绝投影：{0} {1}.{2}' -f $ServerName, $FieldName, $Key)
+    }
+}
+
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -1642,7 +1655,8 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     $codexServers = @()
     $skippedGithubForMissingToken = $false
     $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
-    if ([string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
+    # plan/DRYRUN 是只读命令：不向当前进程复制 token 环境变量。
+    if (-not $DryRun -and [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
         $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
     }
     foreach ($server in @($servers)) {
@@ -1750,6 +1764,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                     else {
                         foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
                     }
+                    foreach ($k in $dict.Keys) { Assert-McpHostValueNotEnvTemplate $name $key ([string]$k) ([string]$dict[$k]) }
                     $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f (ConvertTo-TomlKey $_), (ConvertTo-TomlBasicValue $dict[$_]) })
                     $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
                     continue
@@ -1981,6 +1996,10 @@ function Get-McpServerSignature($server) {
         }
         $sig.enabled_tools = @($tools | Sort-Object)
     }
+    # startup_timeout_sec 参与 Codex 投影（无效值经 Get-CodexMcpStartupTimeoutSec 归一为忽略）；
+    # 不进签名则手改该字段不会移动 MCP 指纹。
+    $startupTimeout = Get-CodexMcpStartupTimeoutSec $server
+    if ($null -ne $startupTimeout) { $sig.startup_timeout_sec = [int]$startupTimeout }
     return ($sig | ConvertTo-Json -Depth 30 -Compress)
 }
 
