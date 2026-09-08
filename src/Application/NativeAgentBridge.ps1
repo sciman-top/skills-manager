@@ -37,12 +37,17 @@ function Get-NativeAgentBridgeBackupRoot([string]$TargetRoot) {
     return $backupRoot
 }
 
-function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$BackupRoot) {
+function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$BackupRoot, [System.Collections.Generic.List[object]]$MigrationLog) {
     $target = [IO.Path]::GetFullPath($TargetRoot)
     $legacyRoot = Join-Path $target 'skills-manager-backups'
     $destinationRoot = [IO.Path]::GetFullPath($BackupRoot)
-    $migrations = New-Object System.Collections.Generic.List[object]
-    if (-not (Test-Path -LiteralPath $legacyRoot)) { return @() }
+    # 账本可穿越异常：传入调用方持有的 List 时逐条落账，中途 throw 时已迁移
+    # 条目仍在账上，回滚循环才能把部分迁移如实搬回；缺省行为保持不变。
+    # 注意必须直接赋值：`$x = if (...) { $list }` 会把 List 按管线展开，
+    # 空 List 会把 $x 置为 null，后续 .Add 直接炸。
+    $migrations = $MigrationLog
+    if ($null -eq $migrations) { $migrations = New-Object System.Collections.Generic.List[object] }
+    if (-not (Test-Path -LiteralPath $legacyRoot)) { return @($migrations.ToArray()) }
 
     $legacyItem = Get-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
     if (-not $legacyItem.PSIsContainer -or [bool]($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -166,8 +171,9 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     $changed = New-Object System.Collections.Generic.List[string]
     $backups = New-Object System.Collections.Generic.List[string]
     $legacyBackupMigrations = @()
+    $legacyMigrationLog = New-Object System.Collections.Generic.List[object]
     try {
-        $legacyBackupMigrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot)
+        $legacyBackupMigrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot $legacyMigrationLog)
         foreach ($definition in $planned.ToArray()) {
             $targetPath = [string]$definition.target_path
             $existingItem = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Item -LiteralPath $targetPath -Force } else { $null }
@@ -227,6 +233,10 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
                     if (Test-Path -LiteralPath $targetPath) { throw ('native agent target still exists after rollback: {0}' -f $targetPath) }
                 }
                 else {
+                    $currentItem = Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $currentItem -and ($currentItem.PSIsContainer -or ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                        throw ('refusing to restore through unexpected reparse point during rollback: {0}' -f $targetPath)
+                    }
                     Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous)
                     $restored = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
                     if ($null -eq $restored -or -not [string]::Equals([string]$restored, [string]$previous, [StringComparison]::Ordinal)) { throw ('native agent target content verification failed: {0}' -f $targetPath) }
@@ -241,7 +251,8 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             }
             catch { $rollbackErrors.Add(('backup:{0} => {1}' -f $backupPath, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
+        # 用可穿越异常的账本（含部分迁移）回滚，而不是只看已赋值的完整返回值。
+        foreach ($migration in @($legacyMigrationLog.ToArray() | Sort-Object destination_path -Descending)) {
             try { Restore-NativeAgentBridgeLegacyMigration $migration }
             catch { $rollbackErrors.Add(('legacy:{0} => {1}' -f [string]$migration.source_path, $_.Exception.Message)) | Out-Null }
         }
@@ -256,22 +267,26 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             target_root = $targetRoot
             backup_root = $backupRoot
             backup_paths = @($backups.ToArray())
-            legacy_backup_migrations = @($legacyBackupMigrations)
+            legacy_backup_migrations = @($legacyMigrationLog.ToArray())
             changed_names = @($changed.ToArray() | Sort-Object)
             failure_message = $failure.Exception.Message
             rollback_errors = @($rollbackErrors.ToArray())
             recovery_required = ($rollbackErrors.Count -gt 0)
             truth_boundary = if ($rollbackErrors.Count -eq 0) { 'filesystem_projected' } else { 'recovery_required' }
         }
+        $receiptWritten = $false
         try {
             $receiptDirectory = Split-Path -Parent $receiptPath
             if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null }
             Write-Utf8FileAtomic -Path $receiptPath -Content ($recoveryReceipt | ConvertTo-Json -Depth 16)
+            $receiptWritten = $true
         }
         catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptPath, $_.Exception.Message)) | Out-Null }
 
         if ($rollbackErrors.Count -gt 0) {
-            throw ('Native agent bridge failed: {0}; rollback/recovery required: {1}; receipt: {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptPath)
+            # 收据写失败时如实声明未落盘，不得让最终报错引用一个不存在的收据。
+            $receiptNote = if ($receiptWritten) { ('receipt: {0}' -f $receiptPath) } else { ('receipt NOT persisted: {0}' -f $receiptPath) }
+            throw ('Native agent bridge failed: {0}; rollback/recovery required: {1}; {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptNote)
         }
         throw $failure
     }

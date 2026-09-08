@@ -173,6 +173,30 @@ Describe 'Native agent bridge' {
         (Get-NativeAgentBridgeSha256 $legacyBackup) | Should -Be (Get-NativeAgentBridgeSha256 $destination)
     }
 
+    It 'keeps a partial migration ledger across the failure and restores migrated entries' {
+        $targetRoot = Join-Path $TestDrive 'codex\agents-partial'
+        $legacyRoot = Join-Path $targetRoot 'skills-manager-backups'
+        $backupRoot = Join-Path $TestDrive 'codex\skills-manager-agent-backups-partial'
+        New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+        $goodLegacy = Join-Path $legacyRoot 'a-good.fixture.toml'
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\design-griller.toml') -Destination $goodLegacy
+        # 有 ownership marker 但缺 name 行：迁移循环处理到它时 throw。
+        $badLegacy = Join-Path $legacyRoot 'z-bad.fixture.toml'
+        Set-ContentUtf8 $badLegacy "# skills-manager-native-agent-bridge: v1`r`ndescription = malformed fixture without a name line"
+
+        $log = New-Object System.Collections.Generic.List[object]
+        { Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot $log } | Should -Throw '*lacks a role name*'
+
+        # 好文件已迁移且必须仍在账上：否则回滚循环无从把它搬回 legacy 根。
+        $log.Count | Should -Be 1
+        [string]$log[0].source_path | Should -Be $goodLegacy
+        Test-Path -LiteralPath (Join-Path $backupRoot 'a-good.fixture.toml') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $goodLegacy | Should -BeFalse
+
+        Restore-NativeAgentBridgeLegacyMigration $log[0]
+        Test-Path -LiteralPath $goodLegacy -PathType Leaf | Should -BeTrue
+    }
+
     It 'keeps grill-me prompt-visible as an explicit core entry that delegates to the native griller' {
         $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
         $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
