@@ -107,6 +107,17 @@ function New-EstateMutationFixture {
         [IO.File]::ReadAllText((Join-Path $f.repo_b 'AGENTS.md')) | Should -Be $beforeRepoB
     }
 
+    It 'rejects a plan whose apply token does not match the plan contents' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $plan.apply.required_token = 'APPLY_RULE_ESTATE_PATCH_0123456789ABCDEF'
+
+        $preflight = Test-RuleEstateApplyPreflight $plan $f.workspace $f.codex $f.claude
+
+        $preflight.pass | Should -Be $false
+        @($preflight.findings.code) | Should -Be @('plan_token_mismatch')
+    }
+
     It 'allows unrelated dirty paths but fails closed on target drift, target-set drift, and locks' {
         $f = New-EstateMutationFixture
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
