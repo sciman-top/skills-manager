@@ -147,13 +147,15 @@ function Get-PinnedSourceLicenseFiles(
     $rootLicenseNames = @(& git -C $sourceRoot ls-tree --name-only $Commit | Where-Object {
             $_ -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\..*)?$'
         } | Sort-Object -Unique)
+    $lsTreeExit = $LASTEXITCODE
     & git -C $sourceRoot cat-file -e ("{0}:README.md" -f $Commit) 2>$null
     $hasReadme = $LASTEXITCODE -eq 0
+    if ($lsTreeExit -ne 0) { throw "Unable to inspect pinned license files for $SourceName at $Commit." }
     if ($rootLicenseNames.Count -eq 0 -and $hasReadme) {
         $readmeText = (& git -C $sourceRoot show ("{0}:README.md" -f $Commit) | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "Unable to inspect pinned license files for $SourceName at $Commit." }
         if ($readmeText -match '(?im)^##\s+License\s*$' -and $readmeText -match '(?im)^MIT\s*$') { $rootLicenseNames = @('README.md') }
     }
-    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect pinned license files for $SourceName at $Commit." }
 
     $safeSourceName = [regex]::Replace($SourceName, '[^0-9A-Za-z._-]', '-')
     $relativePaths = New-Object Collections.Generic.List[string]

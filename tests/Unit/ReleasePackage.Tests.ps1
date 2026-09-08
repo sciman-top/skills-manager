@@ -48,4 +48,10 @@ Describe 'Release packaging' {
         $LASTEXITCODE | Should -Not -Be 0
         $result -join "`n" | Should -Match 'Release output directory must be artifacts\\deliveries'
     }
+
+    It 'judges the pinned README probe by its own exit code instead of a stale $LASTEXITCODE' {
+        $text = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\build-release.ps1') -Raw
+        $text | Should -Match '\$lsTreeExit = \$LASTEXITCODE'
+        $text | Should -Match 'if \(\$lsTreeExit -ne 0\) \{ throw "Unable to inspect pinned license files'
+    }
 }
