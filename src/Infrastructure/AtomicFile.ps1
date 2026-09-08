@@ -10,6 +10,32 @@ function Clear-AtomicFileWriteBlockAttributes([string]$Path) {
     catch {}
 }
 
+function Remove-AtomicFileTransactionPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 10)][int]$MaxAttempts = 3,
+        [ValidateRange(0, 1000)][int]$DelayMs = 50
+    )
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        }
+        catch {
+            if ($attempt -eq ($MaxAttempts - 1)) { break }
+        }
+        if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        Write-Warning ("Atomic file transaction cleanup pending: {0}" -f $Path)
+        return $false
+    }
+    return $true
+}
+
 function Write-BytesAtomic {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -34,7 +60,7 @@ function Write-BytesAtomic {
             # 但掉电场景不保证持久化（可能留下旧内容或空文件）；本仓接受该边界，未启用 WriteThrough。
             if (Test-Path -LiteralPath $Path -PathType Leaf) {
                 [System.IO.File]::Replace($tempPath, $Path, $backupPath, $true)
-                Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+                Remove-AtomicFileTransactionPath -Path $backupPath | Out-Null
             }
             else {
                 [System.IO.File]::Move($tempPath, $Path)
@@ -49,9 +75,7 @@ function Write-BytesAtomic {
             }
 
             foreach ($transactionPath in @($tempPath, $backupPath)) {
-                if (Test-Path -LiteralPath $transactionPath -PathType Leaf) {
-                    try { Remove-Item -LiteralPath $transactionPath -Force -ErrorAction Stop } catch {}
-                }
+                Remove-AtomicFileTransactionPath -Path $transactionPath | Out-Null
             }
             Clear-AtomicFileWriteBlockAttributes $Path
 

@@ -59,18 +59,56 @@ function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$Backu
 
         if (-not (Test-Path -LiteralPath $destinationRoot -PathType Container)) { New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null }
         $destinationPath = Join-Path $destinationRoot $legacyFile.Name
-        if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+        $destinationPreexisted = Test-Path -LiteralPath $destinationPath -PathType Leaf
+        if ($destinationPreexisted) {
             if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $legacyFile.FullName), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
                 throw ('legacy native agent backup destination conflicts: {0}' -f $destinationPath)
             }
-            Remove-Item -LiteralPath $legacyFile.FullName -Force
+            Remove-Item -LiteralPath $legacyFile.FullName -Force -ErrorAction Stop
         }
         else { Move-Item -LiteralPath $legacyFile.FullName -Destination $destinationPath -ErrorAction Stop }
-        $migrations.Add([pscustomobject][ordered]@{ source_path = $legacyFile.FullName; destination_path = $destinationPath }) | Out-Null
+        $migrations.Add([pscustomobject][ordered]@{
+            source_path = $legacyFile.FullName
+            destination_path = $destinationPath
+            destination_preexisted = $destinationPreexisted
+            source_removed = $true
+            legacy_root_removed = $false
+        }) | Out-Null
     }
 
-    if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) { Remove-Item -LiteralPath $legacyRoot -Force }
+    if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
+        foreach ($migration in $migrations) { $migration.legacy_root_removed = $true }
+    }
     return @($migrations.ToArray())
+}
+
+function Restore-NativeAgentBridgeLegacyMigration($Migration) {
+    $sourcePath = [string]$Migration.source_path
+    $destinationPath = [string]$Migration.destination_path
+    if (-not (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        throw ('legacy native agent migration destination is missing: {0}' -f $destinationPath)
+    }
+
+    $legacyRoot = Split-Path -Parent $sourcePath
+    if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force -ErrorAction Stop | Out-Null }
+    if (Test-Path -LiteralPath $sourcePath) {
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
+            -not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
+            throw ('legacy native agent migration source already exists with different content: {0}' -f $sourcePath)
+        }
+    }
+    elseif ([bool]$Migration.destination_preexisted) {
+        Copy-Item -LiteralPath $destinationPath -Destination $sourcePath -Force -ErrorAction Stop
+    }
+    else {
+        Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction Stop
+    }
+
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('legacy native agent migration source was not restored: {0}' -f $sourcePath) }
+    if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        throw ('legacy native agent migration restore verification failed: {0}' -f $sourcePath)
+    }
 }
 
 function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
@@ -174,24 +212,66 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     }
     catch {
         $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
         foreach ($definition in @($planned | Sort-Object target_path -Descending)) {
             $targetPath = [string]$definition.target_path
             if (-not $before.ContainsKey($targetPath)) { continue }
-            $previous = $before[$targetPath]
-            if ($null -eq $previous) {
-                if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Remove-Item -LiteralPath $targetPath -Force }
+            try {
+                $previous = $before[$targetPath]
+                if ($null -eq $previous) {
+                    $currentItem = Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $currentItem) {
+                        if ($currentItem.PSIsContainer -or ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('refusing to remove unexpected native agent target during rollback: {0}' -f $targetPath) }
+                        Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
+                    }
+                    if (Test-Path -LiteralPath $targetPath) { throw ('native agent target still exists after rollback: {0}' -f $targetPath) }
+                }
+                else {
+                    Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous)
+                    $restored = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
+                    if ($null -eq $restored -or -not [string]::Equals([string]$restored, [string]$previous, [StringComparison]::Ordinal)) { throw ('native agent target content verification failed: {0}' -f $targetPath) }
+                }
             }
-            else { Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous) }
+            catch { $rollbackErrors.Add(('target:{0} => {1}' -f $targetPath, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($backupPath in @($backups.ToArray())) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
-        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
-            $sourcePath = [string]$migration.source_path
-            $destinationPath = [string]$migration.destination_path
-            if ((Test-Path -LiteralPath $destinationPath -PathType Leaf) -and -not (Test-Path -LiteralPath $sourcePath)) {
-                $legacyRoot = Split-Path -Parent $sourcePath
-                if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null }
-                Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction SilentlyContinue
+        foreach ($backupPath in @($backups.ToArray())) {
+            try {
+                if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop }
+                if (Test-Path -LiteralPath $backupPath) { throw 'backup remains after cleanup' }
             }
+            catch { $rollbackErrors.Add(('backup:{0} => {1}' -f $backupPath, $_.Exception.Message)) | Out-Null }
+        }
+        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
+            try { Restore-NativeAgentBridgeLegacyMigration $migration }
+            catch { $rollbackErrors.Add(('legacy:{0} => {1}' -f [string]$migration.source_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_failed' }
+        $recoveryReceipt = [ordered]@{
+            schema_version = 1
+            status = $rollbackStatus
+            owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source_root = $sourceRoot
+            target_root = $targetRoot
+            backup_root = $backupRoot
+            backup_paths = @($backups.ToArray())
+            legacy_backup_migrations = @($legacyBackupMigrations)
+            changed_names = @($changed.ToArray() | Sort-Object)
+            failure_message = $failure.Exception.Message
+            rollback_errors = @($rollbackErrors.ToArray())
+            recovery_required = ($rollbackErrors.Count -gt 0)
+            truth_boundary = if ($rollbackErrors.Count -eq 0) { 'filesystem_projected' } else { 'recovery_required' }
+        }
+        try {
+            $receiptDirectory = Split-Path -Parent $receiptPath
+            if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null }
+            Write-Utf8FileAtomic -Path $receiptPath -Content ($recoveryReceipt | ConvertTo-Json -Depth 16)
+        }
+        catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptPath, $_.Exception.Message)) | Out-Null }
+
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('Native agent bridge failed: {0}; rollback/recovery required: {1}; receipt: {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptPath)
         }
         throw $failure
     }

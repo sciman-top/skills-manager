@@ -79,11 +79,44 @@ function Assert-StagedPayloadIntegrity([string]$StagedRoot, [string]$ExpectedMan
     }
 }
 
+function Get-ReleaseManifestSha256([string]$Root) {
+    $manifestPath = Join-Path $Root 'RELEASE-MANIFEST.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
+    return (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Invoke-ReleaseUpdateRollback([string]$Current, [string]$Backup, [string]$Failed, [string]$ExpectedManifestSha256) {
+    if (-not (Test-Path -LiteralPath $Backup -PathType Container)) {
+        return [pscustomobject]@{ status = 'not_started'; message = '' }
+    }
+
+    try {
+        if (Test-Path -LiteralPath $Current -PathType Container) {
+            Move-Item -LiteralPath $Current -Destination $Failed -ErrorAction Stop
+        }
+        Move-Item -LiteralPath $Backup -Destination $Current -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $Current -PathType Container)) {
+            throw 'Rollback completed without restoring the current installation directory.'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedManifestSha256)) {
+            $actualManifestSha256 = Get-ReleaseManifestSha256 $Current
+            if ($actualManifestSha256 -ne $ExpectedManifestSha256) {
+                throw 'Rollback restored a directory whose RELEASE-MANIFEST.json does not match the previous installation.'
+            }
+        }
+        return [pscustomobject]@{ status = 'rolled_back'; message = '' }
+    }
+    catch {
+        return [pscustomobject]@{ status = 'rollback_failed'; message = $_.Exception.Message }
+    }
+}
+
 $current = [IO.Path]::GetFullPath($CurrentRoot).TrimEnd('\', '/')
 $parent = Split-Path -Parent $current
 $staged = Assert-SiblingPath $StagedRoot $parent
 $backup = Assert-SiblingPath $BackupRoot $parent
 $failed = $current + '.failed-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss')
+$previousManifestSha256 = ''
 
 try {
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -98,6 +131,7 @@ try {
     if (-not (Test-Path -LiteralPath $staged -PathType Container)) { throw "Staged release is missing: $staged" }
     if (Test-Path -LiteralPath $backup) { throw "Backup path already exists: $backup" }
     Assert-StagedPayloadIntegrity $staged $ManifestSha256
+    $previousManifestSha256 = Get-ReleaseManifestSha256 $current
 
     $movedCurrent = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -135,20 +169,27 @@ try {
 catch {
     $message = $_.Exception.Message
     try {
-        if (Test-Path -LiteralPath $backup -PathType Container) {
-            if (Test-Path -LiteralPath $current -PathType Container) {
-                Move-Item -LiteralPath $current -Destination $failed -ErrorAction Stop
-                Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
-            }
-            else {
-                # staged→current 已失败且 current 缺失：至少把 backup 搬回 current，避免安装目录消失。
-                Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
-            }
+        $rollback = Invoke-ReleaseUpdateRollback $current $backup $failed $previousManifestSha256
+        $receiptMessage = if ([string]$rollback.status -eq 'rollback_failed') {
+            "{0}; rollback={1}" -f $message, [string]$rollback.message
         }
+        elseif ([string]$rollback.status -eq 'rolled_back') {
+            "{0}; rollback completed and previous manifest verified." -f $message
+        }
+        else { $message }
         $receiptRoot = if (Test-Path -LiteralPath $current -PathType Container) { $current } elseif (Test-Path -LiteralPath $backup -PathType Container) { $backup } else { $parent }
-        Write-UpdateWorkerReceipt $receiptRoot 'rolled_back_or_not_started' $message
+        Write-UpdateWorkerReceipt $receiptRoot ([string]$rollback.status) $receiptMessage
+        if ([string]$rollback.status -eq 'rollback_failed') {
+            Write-Error ("Release update rollback failed; recovery material was preserved: {0}" -f [string]$rollback.message)
+        }
     }
     catch { Write-Error ("Release update failed and rollback receipt could not be written: {0}" -f $_.Exception.Message) }
     Write-Error ("Release update failed: {0}" -f $message)
     exit 1
+}
+finally {
+    $workerScriptPath = $MyInvocation.MyCommand.Path
+    if (-not [string]::IsNullOrWhiteSpace($workerScriptPath) -and (Test-Path -LiteralPath $workerScriptPath -PathType Leaf)) {
+        try { Remove-Item -LiteralPath $workerScriptPath -Force -ErrorAction Stop } catch { }
+    }
 }

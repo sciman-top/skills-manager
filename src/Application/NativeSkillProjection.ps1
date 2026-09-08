@@ -71,6 +71,14 @@ function Remove-NativeSkillProjectionPath {
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
 }
 
+function Test-NativeSkillProjectionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('exists', 'kind', 'directory_path', 'link_target', 'content_hash', 'package_hash')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
 function Write-NativeSkillProjectionJsonAtomic {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Value)
 
@@ -200,12 +208,77 @@ function Apply-NativeSkillProjection {
         }
     }
     catch {
-        foreach ($temporaryPath in @($temporaryPaths.ToArray())) { Remove-NativeSkillProjectionPath $temporaryPath }
-        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) { Remove-NativeSkillProjectionPath $directory }
-        foreach ($state in @($removedDirectories.ToArray())) {
-            if (-not (Test-Path -LiteralPath ([string]$state.directory_path))) { New-NativeSkillProjectionJunction ([string]$state.directory_path) ([string]$state.link_target) }
+        $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        foreach ($temporaryPath in @($temporaryPaths.ToArray())) {
+            try {
+                Remove-NativeSkillProjectionPath $temporaryPath
+                if ((Get-NativeSkillProjectionTargetState $temporaryPath).exists) { throw 'temporary projection path remains after cleanup' }
+            }
+            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f $temporaryPath, $_.Exception.Message)) | Out-Null }
         }
-        throw
+        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) {
+            try {
+                Remove-NativeSkillProjectionPath $directory
+                if ((Get-NativeSkillProjectionTargetState $directory).exists) { throw 'created projection path remains after cleanup' }
+            }
+            catch { $rollbackErrors.Add(('created:{0} => {1}' -f $directory, $_.Exception.Message)) | Out-Null }
+        }
+        foreach ($state in @($removedDirectories.ToArray())) {
+            try {
+                $directory = [string]$state.directory_path
+                $current = Get-NativeSkillProjectionTargetState $directory
+                if (-not $current.exists) { New-NativeSkillProjectionJunction $directory ([string]$state.link_target) }
+                elseif (-not [string]::Equals([string]$current.kind, 'junction', [StringComparison]::OrdinalIgnoreCase) -or
+                    -not [string]::Equals([string]$current.link_target, [string]$state.link_target, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'removed projection path was recreated with unexpected state'
+                }
+                $restored = Get-NativeSkillProjectionTargetState $directory
+                if (-not (Test-NativeSkillProjectionStateEquivalent $state $restored)) { throw 'removed projection path restore verification failed' }
+            }
+            catch { $rollbackErrors.Add(('removed:{0} => {1}' -f [string]$state.directory_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        foreach ($expected in @($before)) {
+            try {
+                $actual = Get-NativeSkillProjectionTargetState ([string]$expected.directory_path)
+                if (-not (Test-NativeSkillProjectionStateEquivalent $expected $actual)) { throw 'projection target differs from its pre-apply state' }
+            }
+            catch { $rollbackErrors.Add(('verify:{0} => {1}' -f [string]$expected.directory_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        $afterRollback = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
+        $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_failed' }
+        $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()); status = $rollbackStatus }
+        $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+        $recoveryReceipt = [pscustomobject][ordered]@{
+            schema_version = 1
+            receipt_id = $receiptId
+            status = $rollbackStatus
+            owner = [string]$Plan.owner
+            plan_id = [string]$Plan.plan_id
+            target_root = $targetRoot
+            receipt_path = $receiptFile
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            before = [object[]]$before
+            after = [object[]]$afterRollback
+            changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
+            added_names = [object[]]@($createdDirectories | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
+            removed_names = [object[]]@($removedDirectories | ForEach-Object { Split-Path ([string]$_.directory_path) -Leaf } | Sort-Object)
+            provider_calls = 0
+            native_mutations = $createdDirectories.Count + $removedDirectories.Count
+            writes = $createdDirectories.Count + $removedDirectories.Count
+            failure_message = $failure.Exception.Message
+            rollback_errors = @($rollbackErrors.ToArray())
+            recovery_required = ($rollbackErrors.Count -gt 0)
+        }
+        try { Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt }
+        catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptFile, $_.Exception.Message)) | Out-Null }
+
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('Native skill projection failed: {0}; rollback/recovery required: {1}; receipt: {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptFile)
+        }
+        throw $failure
     }
 }
 
@@ -216,7 +289,7 @@ function Test-NativeSkillProjectionReceiptContract {
     if ($null -eq $Receipt) { return New-OperationValidationResult @((New-OperationFinding 'receipt_missing' 'error' '$' 'Projection receipt is required.')) }
     if ((Get-OperationObjectProperty $Receipt 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only receipt schema version 1 is supported.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Receipt 'receipt_id') -notmatch '^nsr-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'receipt_id_invalid' 'error' '$.receipt_id' 'Receipt id is invalid.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back', 'rollback_failed')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
     foreach ($field in @('before', 'after', 'changed_names', 'added_names', 'removed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
     if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }

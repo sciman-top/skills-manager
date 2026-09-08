@@ -43,6 +43,32 @@ function Clear-AtomicFileWriteBlockAttributes([string]$Path) {
     catch {}
 }
 
+function Remove-AtomicFileTransactionPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 10)][int]$MaxAttempts = 3,
+        [ValidateRange(0, 1000)][int]$DelayMs = 50
+    )
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        }
+        catch {
+            if ($attempt -eq ($MaxAttempts - 1)) { break }
+        }
+        if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        Write-Warning ("Atomic file transaction cleanup pending: {0}" -f $Path)
+        return $false
+    }
+    return $true
+}
+
 function Write-BytesAtomic {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -67,7 +93,7 @@ function Write-BytesAtomic {
             # 但掉电场景不保证持久化（可能留下旧内容或空文件）；本仓接受该边界，未启用 WriteThrough。
             if (Test-Path -LiteralPath $Path -PathType Leaf) {
                 [System.IO.File]::Replace($tempPath, $Path, $backupPath, $true)
-                Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+                Remove-AtomicFileTransactionPath -Path $backupPath | Out-Null
             }
             else {
                 [System.IO.File]::Move($tempPath, $Path)
@@ -82,9 +108,7 @@ function Write-BytesAtomic {
             }
 
             foreach ($transactionPath in @($tempPath, $backupPath)) {
-                if (Test-Path -LiteralPath $transactionPath -PathType Leaf) {
-                    try { Remove-Item -LiteralPath $transactionPath -Force -ErrorAction Stop } catch {}
-                }
+                Remove-AtomicFileTransactionPath -Path $transactionPath | Out-Null
             }
             Clear-AtomicFileWriteBlockAttributes $Path
 
@@ -4716,6 +4740,14 @@ function Remove-NativeSkillProjectionPath {
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
 }
 
+function Test-NativeSkillProjectionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('exists', 'kind', 'directory_path', 'link_target', 'content_hash', 'package_hash')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
 function Write-NativeSkillProjectionJsonAtomic {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Value)
 
@@ -4845,12 +4877,77 @@ function Apply-NativeSkillProjection {
         }
     }
     catch {
-        foreach ($temporaryPath in @($temporaryPaths.ToArray())) { Remove-NativeSkillProjectionPath $temporaryPath }
-        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) { Remove-NativeSkillProjectionPath $directory }
-        foreach ($state in @($removedDirectories.ToArray())) {
-            if (-not (Test-Path -LiteralPath ([string]$state.directory_path))) { New-NativeSkillProjectionJunction ([string]$state.directory_path) ([string]$state.link_target) }
+        $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        foreach ($temporaryPath in @($temporaryPaths.ToArray())) {
+            try {
+                Remove-NativeSkillProjectionPath $temporaryPath
+                if ((Get-NativeSkillProjectionTargetState $temporaryPath).exists) { throw 'temporary projection path remains after cleanup' }
+            }
+            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f $temporaryPath, $_.Exception.Message)) | Out-Null }
         }
-        throw
+        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) {
+            try {
+                Remove-NativeSkillProjectionPath $directory
+                if ((Get-NativeSkillProjectionTargetState $directory).exists) { throw 'created projection path remains after cleanup' }
+            }
+            catch { $rollbackErrors.Add(('created:{0} => {1}' -f $directory, $_.Exception.Message)) | Out-Null }
+        }
+        foreach ($state in @($removedDirectories.ToArray())) {
+            try {
+                $directory = [string]$state.directory_path
+                $current = Get-NativeSkillProjectionTargetState $directory
+                if (-not $current.exists) { New-NativeSkillProjectionJunction $directory ([string]$state.link_target) }
+                elseif (-not [string]::Equals([string]$current.kind, 'junction', [StringComparison]::OrdinalIgnoreCase) -or
+                    -not [string]::Equals([string]$current.link_target, [string]$state.link_target, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'removed projection path was recreated with unexpected state'
+                }
+                $restored = Get-NativeSkillProjectionTargetState $directory
+                if (-not (Test-NativeSkillProjectionStateEquivalent $state $restored)) { throw 'removed projection path restore verification failed' }
+            }
+            catch { $rollbackErrors.Add(('removed:{0} => {1}' -f [string]$state.directory_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        foreach ($expected in @($before)) {
+            try {
+                $actual = Get-NativeSkillProjectionTargetState ([string]$expected.directory_path)
+                if (-not (Test-NativeSkillProjectionStateEquivalent $expected $actual)) { throw 'projection target differs from its pre-apply state' }
+            }
+            catch { $rollbackErrors.Add(('verify:{0} => {1}' -f [string]$expected.directory_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        $afterRollback = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
+        $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_failed' }
+        $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()); status = $rollbackStatus }
+        $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+        $recoveryReceipt = [pscustomobject][ordered]@{
+            schema_version = 1
+            receipt_id = $receiptId
+            status = $rollbackStatus
+            owner = [string]$Plan.owner
+            plan_id = [string]$Plan.plan_id
+            target_root = $targetRoot
+            receipt_path = $receiptFile
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            before = [object[]]$before
+            after = [object[]]$afterRollback
+            changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
+            added_names = [object[]]@($createdDirectories | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
+            removed_names = [object[]]@($removedDirectories | ForEach-Object { Split-Path ([string]$_.directory_path) -Leaf } | Sort-Object)
+            provider_calls = 0
+            native_mutations = $createdDirectories.Count + $removedDirectories.Count
+            writes = $createdDirectories.Count + $removedDirectories.Count
+            failure_message = $failure.Exception.Message
+            rollback_errors = @($rollbackErrors.ToArray())
+            recovery_required = ($rollbackErrors.Count -gt 0)
+        }
+        try { Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt }
+        catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptFile, $_.Exception.Message)) | Out-Null }
+
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('Native skill projection failed: {0}; rollback/recovery required: {1}; receipt: {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptFile)
+        }
+        throw $failure
     }
 }
 
@@ -4861,7 +4958,7 @@ function Test-NativeSkillProjectionReceiptContract {
     if ($null -eq $Receipt) { return New-OperationValidationResult @((New-OperationFinding 'receipt_missing' 'error' '$' 'Projection receipt is required.')) }
     if ((Get-OperationObjectProperty $Receipt 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only receipt schema version 1 is supported.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Receipt 'receipt_id') -notmatch '^nsr-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'receipt_id_invalid' 'error' '$.receipt_id' 'Receipt id is invalid.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back', 'rollback_failed')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
     foreach ($field in @('before', 'after', 'changed_names', 'added_names', 'removed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
     if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }
@@ -4993,18 +5090,56 @@ function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$Backu
 
         if (-not (Test-Path -LiteralPath $destinationRoot -PathType Container)) { New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null }
         $destinationPath = Join-Path $destinationRoot $legacyFile.Name
-        if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+        $destinationPreexisted = Test-Path -LiteralPath $destinationPath -PathType Leaf
+        if ($destinationPreexisted) {
             if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $legacyFile.FullName), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
                 throw ('legacy native agent backup destination conflicts: {0}' -f $destinationPath)
             }
-            Remove-Item -LiteralPath $legacyFile.FullName -Force
+            Remove-Item -LiteralPath $legacyFile.FullName -Force -ErrorAction Stop
         }
         else { Move-Item -LiteralPath $legacyFile.FullName -Destination $destinationPath -ErrorAction Stop }
-        $migrations.Add([pscustomobject][ordered]@{ source_path = $legacyFile.FullName; destination_path = $destinationPath }) | Out-Null
+        $migrations.Add([pscustomobject][ordered]@{
+            source_path = $legacyFile.FullName
+            destination_path = $destinationPath
+            destination_preexisted = $destinationPreexisted
+            source_removed = $true
+            legacy_root_removed = $false
+        }) | Out-Null
     }
 
-    if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) { Remove-Item -LiteralPath $legacyRoot -Force }
+    if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
+        foreach ($migration in $migrations) { $migration.legacy_root_removed = $true }
+    }
     return @($migrations.ToArray())
+}
+
+function Restore-NativeAgentBridgeLegacyMigration($Migration) {
+    $sourcePath = [string]$Migration.source_path
+    $destinationPath = [string]$Migration.destination_path
+    if (-not (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        throw ('legacy native agent migration destination is missing: {0}' -f $destinationPath)
+    }
+
+    $legacyRoot = Split-Path -Parent $sourcePath
+    if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force -ErrorAction Stop | Out-Null }
+    if (Test-Path -LiteralPath $sourcePath) {
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
+            -not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
+            throw ('legacy native agent migration source already exists with different content: {0}' -f $sourcePath)
+        }
+    }
+    elseif ([bool]$Migration.destination_preexisted) {
+        Copy-Item -LiteralPath $destinationPath -Destination $sourcePath -Force -ErrorAction Stop
+    }
+    else {
+        Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction Stop
+    }
+
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('legacy native agent migration source was not restored: {0}' -f $sourcePath) }
+    if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        throw ('legacy native agent migration restore verification failed: {0}' -f $sourcePath)
+    }
 }
 
 function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
@@ -5108,24 +5243,66 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     }
     catch {
         $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
         foreach ($definition in @($planned | Sort-Object target_path -Descending)) {
             $targetPath = [string]$definition.target_path
             if (-not $before.ContainsKey($targetPath)) { continue }
-            $previous = $before[$targetPath]
-            if ($null -eq $previous) {
-                if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Remove-Item -LiteralPath $targetPath -Force }
+            try {
+                $previous = $before[$targetPath]
+                if ($null -eq $previous) {
+                    $currentItem = Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $currentItem) {
+                        if ($currentItem.PSIsContainer -or ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('refusing to remove unexpected native agent target during rollback: {0}' -f $targetPath) }
+                        Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
+                    }
+                    if (Test-Path -LiteralPath $targetPath) { throw ('native agent target still exists after rollback: {0}' -f $targetPath) }
+                }
+                else {
+                    Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous)
+                    $restored = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
+                    if ($null -eq $restored -or -not [string]::Equals([string]$restored, [string]$previous, [StringComparison]::Ordinal)) { throw ('native agent target content verification failed: {0}' -f $targetPath) }
+                }
             }
-            else { Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous) }
+            catch { $rollbackErrors.Add(('target:{0} => {1}' -f $targetPath, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($backupPath in @($backups.ToArray())) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
-        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
-            $sourcePath = [string]$migration.source_path
-            $destinationPath = [string]$migration.destination_path
-            if ((Test-Path -LiteralPath $destinationPath -PathType Leaf) -and -not (Test-Path -LiteralPath $sourcePath)) {
-                $legacyRoot = Split-Path -Parent $sourcePath
-                if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null }
-                Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction SilentlyContinue
+        foreach ($backupPath in @($backups.ToArray())) {
+            try {
+                if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop }
+                if (Test-Path -LiteralPath $backupPath) { throw 'backup remains after cleanup' }
             }
+            catch { $rollbackErrors.Add(('backup:{0} => {1}' -f $backupPath, $_.Exception.Message)) | Out-Null }
+        }
+        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
+            try { Restore-NativeAgentBridgeLegacyMigration $migration }
+            catch { $rollbackErrors.Add(('legacy:{0} => {1}' -f [string]$migration.source_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_failed' }
+        $recoveryReceipt = [ordered]@{
+            schema_version = 1
+            status = $rollbackStatus
+            owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source_root = $sourceRoot
+            target_root = $targetRoot
+            backup_root = $backupRoot
+            backup_paths = @($backups.ToArray())
+            legacy_backup_migrations = @($legacyBackupMigrations)
+            changed_names = @($changed.ToArray() | Sort-Object)
+            failure_message = $failure.Exception.Message
+            rollback_errors = @($rollbackErrors.ToArray())
+            recovery_required = ($rollbackErrors.Count -gt 0)
+            truth_boundary = if ($rollbackErrors.Count -eq 0) { 'filesystem_projected' } else { 'recovery_required' }
+        }
+        try {
+            $receiptDirectory = Split-Path -Parent $receiptPath
+            if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null }
+            Write-Utf8FileAtomic -Path $receiptPath -Content ($recoveryReceipt | ConvertTo-Json -Depth 16)
+        }
+        catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptPath, $_.Exception.Message)) | Out-Null }
+
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('Native agent bridge failed: {0}; rollback/recovery required: {1}; receipt: {2}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '), $receiptPath)
         }
         throw $failure
     }
@@ -7682,9 +7859,12 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
     }
 }
 function Test-GitSparseCheckoutEnabled {
-    # core.sparseCheckout 未配置或 false 均视为未启用；取证失败同样按未启用处理
-    # （跳过 disable、保留现状），不会误动已有 sparse 配置。
-    $value = Invoke-GitCapture @("config", "--bool", "core.sparseCheckout")
+    # core.sparseCheckout 未配置或 false 均视为未启用；配置取证失败必须
+    # fail closed，不能把旧 sparse 状态误判成 false 后继续使用不完整工作树。
+    $ok = $false
+    $lines = Invoke-GitCaptureCore @("config", "--bool", "core.sparseCheckout") ([ref]$ok)
+    if (-not $ok) { throw "无法读取 Git sparse checkout 配置；拒绝继续使用缓存仓库。" }
+    $value = if (@($lines).Count -eq 0) { "" } else { [string]$lines[0] }
     return ([string]$value -eq "true")
 }
 function Set-GitSparseCheckout([string[]]$sparsePaths) {
@@ -12362,18 +12542,18 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     $managedRoot = [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/')
     $targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
     $migratedWholeRootLink = $false
-    if (Test-Path -LiteralPath $targetRoot -PathType Container) {
-        $targetItem = Get-Item -LiteralPath $targetRoot -Force
-        if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
-            Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
-            Remove-Item -LiteralPath $targetRoot -Force
-            New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
-            $migratedWholeRootLink = $true
-        }
-    }
-
     try {
+        if (Test-Path -LiteralPath $targetRoot -PathType Container) {
+            $targetItem = Get-Item -LiteralPath $targetRoot -Force
+            if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+                Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
+                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                $migratedWholeRootLink = $true
+                New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+            }
+        }
+
         $projectionConfig = [pscustomobject]@{
             skill_projection = [pscustomobject]@{
                 user_skill_root = $targetRoot
@@ -12390,11 +12570,22 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
         return Apply-NativeSkillProjection -Plan $plan
     }
     catch {
+        $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
         if ($migratedWholeRootLink) {
-            Remove-NativeSkillProjectionPath $targetRoot
-            New-Junction $targetRoot $managedRoot
+            try {
+                if (Test-Path -LiteralPath $targetRoot) { Remove-NativeSkillProjectionPath $targetRoot }
+                if (Test-Path -LiteralPath $targetRoot) { throw 'managed_link_only target root remains after junction rollback cleanup' }
+                New-Junction $targetRoot $managedRoot
+                $restoredTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+                if (-not [string]::Equals($restoredTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'managed_link_only target root junction restore verification failed' }
+            }
+            catch { $rollbackErrors.Add(('whole-root-junction => {0}' -f $_.Exception.Message)) | Out-Null }
         }
-        throw
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('managed_link_only projection failed: {0}; rollback/recovery required: {1}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '))
+        }
+        throw $failure
     }
 }
 
@@ -12798,6 +12989,12 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
                 $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
                 return $false
             }
+            if ([string]$done.State -ne 'Completed') {
+                $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
+                Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
+                $running = @($running | Where-Object { $_.Id -ne $done.Id })
+                continue
+            }
             $output = Receive-Job -Id ([int]$done.Id) -ErrorAction SilentlyContinue
             Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             $running = @($running | Where-Object { $_.Id -ne $done.Id })
@@ -12831,6 +13028,11 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
             Stop-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
             Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
             $errors.Add(("prefetch timeout after {0}s: {1}" -f $timeoutSeconds, [string]$j.Name)) | Out-Null
+            continue
+        }
+        if ([string]$done.State -ne 'Completed') {
+            $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
+            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             continue
         }
         $output = Receive-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
@@ -13047,8 +13249,10 @@ function Test-UpdateCacheCleanForPlanItem($item, $cfg) {
     if (Test-IsGitRepoRoot $path) {
         Push-Location $path
         try {
-            $status = Invoke-GitCapture @("status", "--porcelain", "--ignored")
-            return [string]::IsNullOrWhiteSpace($status)
+            $statusOk = $false
+            $statusLines = Invoke-GitCaptureCore @("status", "--porcelain", "--ignored") ([ref]$statusOk)
+            if (-not $statusOk) { return $false }
+            return (@($statusLines).Count -eq 0)
         }
         finally { Pop-Location }
     }
@@ -16808,6 +17012,25 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
 $script:ReleaseUpdateRepository = 'sciman-top/skills-manager'
 $script:ReleaseUpdateHttpGet = $null
 
+function Remove-ReleaseUpdateStage([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $true }
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        }
+        catch {
+            if ($attempt -eq 2) { break }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        Write-Warning ("Release update temporary stage cleanup pending: {0}" -f $Path)
+        return $false
+    }
+    return $true
+}
+
 function Get-ReleaseUpdateTokens([string[]]$Tokens) {
     $result = [ordered]@{ action = 'check'; yes = $false; json = $false; repository = $script:ReleaseUpdateRepository; sync_mcp = $false }
     foreach ($token in @($Tokens)) {
@@ -17003,7 +17226,7 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
         return [pscustomobject]$result
     }
     catch {
-        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        Remove-ReleaseUpdateStage $stage | Out-Null
         throw
     }
 }
@@ -18946,12 +19169,27 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
     }
 }
 
+function Invoke-AuditGitLines([string[]]$GitArgs, [string]$Operation) {
+    $ok = $false
+    # Audit JSON commands must keep stdout machine-readable.  The shared Git
+    # capture core logs each command, so suppress only this read-only probe's
+    # host output while preserving the fail-closed success bit.
+    $previousSuppressAllLogging = $script:SuppressAllLogging
+    $script:SuppressAllLogging = $true
+    try { $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok) }
+    finally { $script:SuppressAllLogging = $previousSuppressAllLogging }
+    if (-not $ok) {
+        throw ("审计 git 取证失败：{0}；拒绝生成不完整审计指纹。" -f $Operation)
+    }
+    return ,@($lines)
+}
+
 function Get-AuditGitChangedPaths {
     $paths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
     $pathGroups = @(
-        @(& git -c core.quotepath=false diff --cached --name-only --no-ext-diff 2>$null),
-        @(& git -c core.quotepath=false diff --name-only --no-ext-diff 2>$null),
-        @(& git -c core.quotepath=false ls-files --others --exclude-standard 2>$null)
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--no-ext-diff") "staged changed paths"),
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--name-only", "--no-ext-diff") "worktree changed paths"),
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard") "untracked paths")
     )
     foreach ($group in $pathGroups) {
         foreach ($path in @($group)) {
@@ -18968,12 +19206,9 @@ function Get-AuditGitPathStatePairs($paths) {
     $pathList = @($paths)
     if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
-    $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
     # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
     # blob 变化，削弱 stale/drift 检测。
-    if ($LASTEXITCODE -ne 0) {
-        throw ("审计 git 取证失败：ls-files --stage exit={0}；无法验证 index 状态，拒绝生成审计指纹。" -f $LASTEXITCODE)
-    }
+    $allIndexLines = @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--stage") "index state (ls-files --stage)")
     $pairs = @()
     foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)
@@ -18990,8 +19225,8 @@ function Get-AuditGitPathStatePairs($paths) {
             $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
         }
         elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
-            $nestedHead = (& git -C $fullPath rev-parse HEAD 2>$null)
-            $nestedStatus = @(& git -C $fullPath status --porcelain 2>$null)
+            $nestedHead = @(Invoke-AuditGitLines @("-C", $fullPath, "rev-parse", "HEAD") ("nested repo HEAD: {0}" -f $path))
+            $nestedStatus = @(Invoke-AuditGitLines @("-C", $fullPath, "status", "--porcelain") ("nested repo status: {0}" -f $path))
             $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
             $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
             $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
@@ -19017,20 +19252,20 @@ function Get-AuditGitInfo([string]$resolvedPath) {
         $inside = (& git rev-parse --is-inside-work-tree 2>$null)
         if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
             $info.is_repo = $true
-            $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.branch = ([string]$branch).Trim() }
-            $commit = (& git rev-parse HEAD 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
-            $status = @(& git status --porcelain 2>$null)
-            if ($LASTEXITCODE -eq 0) {
-                $statusLines = @($status | ForEach-Object { [string]$_ })
-                $changedPaths = @(Get-AuditGitChangedPaths)
-                $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
-                $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
-                $info.dirty = ($statusLines.Count -gt 0)
-                $info.status_count = $statusLines.Count
-                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+            $branchLines = @(Invoke-AuditGitLines @("rev-parse", "--abbrev-ref", "HEAD") "branch")
+            $commitLines = @(Invoke-AuditGitLines @("rev-parse", "HEAD") "HEAD")
+            $statusLines = @(Invoke-AuditGitLines @("status", "--porcelain") "status")
+            if ($branchLines.Count -eq 0 -or $commitLines.Count -eq 0) {
+                throw "审计 git 取证失败：branch 或 HEAD 为空；拒绝生成不完整审计状态。"
             }
+            $info.branch = ([string]$branchLines[0]).Trim()
+            $info.commit = ([string]$commitLines[0]).Trim()
+            $changedPaths = @(Get-AuditGitChangedPaths)
+            $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
+            $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
+            $info.dirty = ($statusLines.Count -gt 0)
+            $info.status_count = $statusLines.Count
+            $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
         }
     }
     finally {
@@ -19752,7 +19987,6 @@ function Write-AuditReceiptSection([string]$recommendationsPath, [string]$sectio
     Write-AuditJsonFile $path $receipt
     return $path
 }
-
 
 function Get-AuditSourceStrategyOverridePath {
     return (Join-Path $script:Root "overrides\audit-source-strategy.json")

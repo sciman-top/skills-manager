@@ -564,7 +564,11 @@ Describe "Config And Update Enhancements" {
 
                 Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
                 Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $importPath }
-                Mock Invoke-GitCapture { "" } -ParameterFilter { $GitArgs[0] -eq "status" }
+                Mock Invoke-GitCaptureCore {
+                    param([string[]]$GitArgs, [ref]$Ok)
+                    $Ok.Value = $true
+                    return ,([string[]]@())
+                } -ParameterFilter { $GitArgs[0] -eq "status" }
 
                 (Test-UpdateCanFastNoop $cfg $items) | Should -Be $true
             }
@@ -588,7 +592,11 @@ Describe "Config And Update Enhancements" {
                 $items = @([pscustomobject]@{ type = "vendor"; name = "demo-vendor"; current = "abc"; target = "abc"; changed = $false })
 
                 Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
-                Mock Invoke-GitCapture { " M SKILL.md" } -ParameterFilter { $GitArgs[0] -eq "status" }
+                Mock Invoke-GitCaptureCore {
+                    param([string[]]$GitArgs, [ref]$Ok)
+                    $Ok.Value = $true
+                    return ,([string[]]@(' M SKILL.md'))
+                } -ParameterFilter { $GitArgs[0] -eq "status" }
 
                 (Test-UpdateCanFastNoop $cfg $items) | Should -Be $false
             }
@@ -611,10 +619,14 @@ Describe "Config And Update Enhancements" {
                 $items = @([pscustomobject]@{ type = "vendor"; name = "demo-vendor"; current = "abc"; target = "abc"; changed = $false })
 
                 Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
-                Mock Invoke-GitCapture { "!! old-output/" } -ParameterFilter { $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored" }
+                Mock Invoke-GitCaptureCore {
+                    param([string[]]$GitArgs, [ref]$Ok)
+                    $Ok.Value = $true
+                    return ,([string[]]@('!! old-output/'))
+                } -ParameterFilter { $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored" }
 
                 (Test-UpdateCanFastNoop $cfg $items) | Should -Be $false
-                Should -Invoke Invoke-GitCapture -Times 1 -Exactly -Scope It -ParameterFilter {
+                Should -Invoke Invoke-GitCaptureCore -Times 1 -Exactly -Scope It -ParameterFilter {
                     $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored"
                 }
             }
@@ -766,6 +778,34 @@ Describe "Config And Update Enhancements" {
                 $VendorDir = $oldVendorDir
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = $oldTimeout
             }
+        }
+
+        It "Treats a failed parallel prefetch job as failure without receiving it as success" {
+            $oldVendorDir = $VendorDir
+            try {
+                $VendorDir = Join-Path $TestDrive "vendor-prefetch-failed"
+                $vendorPath = Join-Path $VendorDir "demo"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo"; repo = "https://example.com/demo.git" })
+                    imports = @()
+                }
+                $job = [pscustomobject]@{ Id = 43; Name = "prefetch-demo" }
+                $done = [pscustomobject]@{ Id = 43; State = "Failed" }
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Start-Job { $job }
+                Mock Wait-Job { $done }
+                Mock Remove-Job {}
+                Mock Receive-Job { throw "Receive-Job should not be called for failed jobs." }
+
+                Invoke-ParallelGitPrefetch $cfg 2 | Should -Be $false
+
+                Should -Invoke Remove-Job -Times 1 -Exactly -Scope It
+                Should -Invoke Receive-Job -Times 0 -Exactly -Scope It
+            }
+            finally { $VendorDir = $oldVendorDir }
         }
 
         It "Records skip key when target-level force clean is denied" {

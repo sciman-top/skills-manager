@@ -3561,6 +3561,23 @@ Describe "Audit regression gates" {
         }
     }
 
+    Context "Update fast-noop Git probes fail-closed" {
+        It "Does not treat a failed ignored-status probe as a clean cache" {
+            $repo = Join-Path $TestDrive "update-status-failure"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            $item = [pscustomobject]@{ type = "vendor"; name = "demo"; current = "abc"; target = "abc"; changed = $false }
+            Mock VendorPath { $repo }
+            Mock Test-IsGitRepoRoot { $true }
+            Mock Invoke-GitCaptureCore {
+                param($GitArgs, $Ok)
+                $Ok.Value = $false
+                return @()
+            }
+
+            Test-UpdateCacheCleanForPlanItem $item ([pscustomobject]@{ imports = @() }) | Should -BeFalse
+        }
+    }
+
     Context "Normalize-Cfg null-element arrays" {
         It "Keeps arrays containing null elements instead of wiping them" {
             $cfg = [pscustomobject]@{
@@ -3637,14 +3654,24 @@ Describe "Sparse checkout disable guard" {
     }
 
     It "Skips disable when sparse checkout was never enabled" {
-        Mock Invoke-GitCapture { "" }
+        Mock Test-GitSparseCheckoutEnabled { $false }
         Mock Invoke-Git {}
         Set-GitSparseCheckout @()
         Should -Invoke Invoke-Git -Times 0 -Exactly
     }
 
+    It "Fails closed when the sparse checkout config probe fails" {
+        Mock Invoke-GitCaptureCore {
+            param($GitArgs, $Ok)
+            $Ok.Value = $false
+            return @()
+        }
+
+        { Set-GitSparseCheckout @() } | Should -Throw '*无法读取 Git sparse checkout 配置*'
+    }
+
     It "Runs disable when sparse checkout is enabled" {
-        Mock Invoke-GitCapture { "true" }
+        Mock Test-GitSparseCheckoutEnabled { $true }
         Mock Invoke-Git {}
         Set-GitSparseCheckout @()
         Should -Invoke Invoke-Git -Times 1 -Exactly -ParameterFilter { @($GitArgs) -contains "disable" }

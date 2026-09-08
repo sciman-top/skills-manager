@@ -2215,18 +2215,18 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     $managedRoot = [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/')
     $targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
     $migratedWholeRootLink = $false
-    if (Test-Path -LiteralPath $targetRoot -PathType Container) {
-        $targetItem = Get-Item -LiteralPath $targetRoot -Force
-        if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
-            Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
-            Remove-Item -LiteralPath $targetRoot -Force
-            New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
-            $migratedWholeRootLink = $true
-        }
-    }
-
     try {
+        if (Test-Path -LiteralPath $targetRoot -PathType Container) {
+            $targetItem = Get-Item -LiteralPath $targetRoot -Force
+            if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+                Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
+                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                $migratedWholeRootLink = $true
+                New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+            }
+        }
+
         $projectionConfig = [pscustomobject]@{
             skill_projection = [pscustomobject]@{
                 user_skill_root = $targetRoot
@@ -2243,11 +2243,22 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
         return Apply-NativeSkillProjection -Plan $plan
     }
     catch {
+        $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
         if ($migratedWholeRootLink) {
-            Remove-NativeSkillProjectionPath $targetRoot
-            New-Junction $targetRoot $managedRoot
+            try {
+                if (Test-Path -LiteralPath $targetRoot) { Remove-NativeSkillProjectionPath $targetRoot }
+                if (Test-Path -LiteralPath $targetRoot) { throw 'managed_link_only target root remains after junction rollback cleanup' }
+                New-Junction $targetRoot $managedRoot
+                $restoredTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+                if (-not [string]::Equals($restoredTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'managed_link_only target root junction restore verification failed' }
+            }
+            catch { $rollbackErrors.Add(('whole-root-junction => {0}' -f $_.Exception.Message)) | Out-Null }
         }
-        throw
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('managed_link_only projection failed: {0}; rollback/recovery required: {1}' -f $failure.Exception.Message, ($rollbackErrors -join ' | '))
+        }
+        throw $failure
     }
 }
 

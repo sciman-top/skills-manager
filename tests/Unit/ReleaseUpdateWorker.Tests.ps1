@@ -4,8 +4,14 @@ Describe 'release-update-worker staged payload integrity' {
         $workerSource = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-worker.ps1') -Raw
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($workerSource, [ref]$null, [ref]$null)
         $fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Assert-StagedPayloadIntegrity' }, $true)
+        $manifestFn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Get-ReleaseManifestSha256' }, $true)
+        $rollbackFn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Invoke-ReleaseUpdateRollback' }, $true)
         if ($null -eq $fn) { throw 'Assert-StagedPayloadIntegrity not found in worker script' }
+        if ($null -eq $manifestFn) { throw 'Get-ReleaseManifestSha256 not found in worker script' }
+        if ($null -eq $rollbackFn) { throw 'Invoke-ReleaseUpdateRollback not found in worker script' }
         . ([scriptblock]::Create($fn.Extent.Text))
+        . ([scriptblock]::Create($manifestFn.Extent.Text))
+        . ([scriptblock]::Create($rollbackFn.Extent.Text))
         $script:roots = [System.Collections.Generic.List[string]]::new()
 
         function New-StagedPackage {
@@ -66,6 +72,43 @@ Describe 'release-update-worker staged payload integrity' {
 
     It 'keeps a backup-only recovery path when current went missing mid-swap' {
         $workerScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-worker.ps1') -Raw
-        $workerScript | Should -Match '(?s)else \{\s*# staged→current 已失败且 current 缺失：至少把 backup 搬回 current，避免安装目录消失。\s*Move-Item -LiteralPath \$backup -Destination \$current -ErrorAction Stop'
+        $workerScript | Should -Match '(?s)function Invoke-ReleaseUpdateRollback.*?Move-Item -LiteralPath \$backup -Destination \$current -ErrorAction Stop'
+    }
+
+    It 'verifies a successful rollback and reports rollback failure without claiming recovery' {
+        $current = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-current-' + [guid]::NewGuid().ToString('N'))
+        $backup = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-backup-' + [guid]::NewGuid().ToString('N'))
+        $failed = $current + '.failed'
+        $script:roots.Add($current) | Out-Null
+        $script:roots.Add($backup) | Out-Null
+        try {
+            New-Item -ItemType Directory -Path $backup -Force | Out-Null
+            $manifestPath = Join-Path $backup 'RELEASE-MANIFEST.json'
+            Set-Content -LiteralPath $manifestPath -Value '{"version":"previous"}' -Encoding UTF8
+            $expected = Get-ReleaseManifestSha256 $backup
+
+            $result = Invoke-ReleaseUpdateRollback $current $backup $failed $expected
+
+            $result.status | Should -Be 'rolled_back'
+            Test-Path -LiteralPath $current -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $backup -PathType Container | Should -BeFalse
+
+            $blockedCurrent = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-blocked-' + [guid]::NewGuid().ToString('N'))
+            $blockedBackup = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-blocked-backup-' + [guid]::NewGuid().ToString('N'))
+            $script:roots.Add($blockedCurrent) | Out-Null
+            $script:roots.Add($blockedBackup) | Out-Null
+            Set-Content -LiteralPath $blockedCurrent -Value 'blocking file' -Encoding UTF8
+            New-Item -ItemType Directory -Path $blockedBackup -Force | Out-Null
+
+            $failedResult = Invoke-ReleaseUpdateRollback $blockedCurrent $blockedBackup ($blockedCurrent + '.failed') ''
+
+            $failedResult.status | Should -Be 'rollback_failed'
+            Test-Path -LiteralPath $blockedBackup -PathType Container | Should -BeTrue
+        }
+        finally {
+            foreach ($path in @($current, $backup, $failed)) {
+                if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        }
     }
 }

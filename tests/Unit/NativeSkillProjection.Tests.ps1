@@ -68,6 +68,28 @@ Describe 'Native skill projection' {
         Remove-Item -LiteralPath (Join-Path $f.source 'resident\SKILL.md') -Force
         { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw
         Test-Path -LiteralPath (Join-Path $f.target 'enabled') | Should -Be $false
+        $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
+        $recovery.status | Should -Be 'rolled_back'
+        (Test-NativeSkillProjectionReceiptContract $recovery).pass | Should -BeTrue
+    }
+
+    It 'records rollback failure instead of hiding a partial native projection' {
+        $f = New-ProjectionFixture
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        $script:junctionCalls = 0
+        Mock New-NativeSkillProjectionJunction {
+            param([string]$LinkPath, [string]$TargetPath)
+            $script:junctionCalls++
+            if ($script:junctionCalls -eq 2) { throw 'fixture junction failure' }
+            New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
+        }
+        Mock Remove-NativeSkillProjectionPath { throw 'fixture rollback failure' }
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw '*rollback/recovery required*'
+        $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
+        $recovery.status | Should -Be 'rollback_failed'
+        @($recovery.rollback_errors).Count | Should -BeGreaterThan 0
+        $recovery.recovery_required | Should -BeTrue
     }
 
     It 'rejects package asset drift after planning' {

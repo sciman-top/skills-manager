@@ -2759,6 +2759,33 @@ Describe "Workflow receipt binding fail-closed" {
 }
 
 Describe "Audit git evidence fail-closed" {
+    It "Fails when changed-path Git evidence cannot be collected" {
+        Mock Invoke-GitCaptureCore {
+            param($GitArgs, $Ok)
+            $Ok.Value = $false
+            return @()
+        }
+
+        { Get-AuditGitChangedPaths } | Should -Throw '*changed paths*'
+    }
+
+    It "Fails when repository identity or status evidence cannot be collected" {
+        $repo = Join-Path $TestDrive "audit-git-probe-failure"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        Push-Location $repo
+        try {
+            Mock Invoke-GitCaptureCore {
+                param($GitArgs, $Ok)
+                $Ok.Value = $false
+                return @()
+            }
+
+            { Get-AuditGitInfo $repo } | Should -Throw '*branch*'
+        }
+        finally { Pop-Location }
+    }
+
     It "Throws when the scanned worktree cannot prove its index state" {
         Push-Location $TestDrive
         try {

@@ -127,6 +127,12 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
                 $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
                 return $false
             }
+            if ([string]$done.State -ne 'Completed') {
+                $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
+                Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
+                $running = @($running | Where-Object { $_.Id -ne $done.Id })
+                continue
+            }
             $output = Receive-Job -Id ([int]$done.Id) -ErrorAction SilentlyContinue
             Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             $running = @($running | Where-Object { $_.Id -ne $done.Id })
@@ -160,6 +166,11 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
             Stop-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
             Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
             $errors.Add(("prefetch timeout after {0}s: {1}" -f $timeoutSeconds, [string]$j.Name)) | Out-Null
+            continue
+        }
+        if ([string]$done.State -ne 'Completed') {
+            $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
+            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             continue
         }
         $output = Receive-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
@@ -376,8 +387,10 @@ function Test-UpdateCacheCleanForPlanItem($item, $cfg) {
     if (Test-IsGitRepoRoot $path) {
         Push-Location $path
         try {
-            $status = Invoke-GitCapture @("status", "--porcelain", "--ignored")
-            return [string]::IsNullOrWhiteSpace($status)
+            $statusOk = $false
+            $statusLines = Invoke-GitCaptureCore @("status", "--porcelain", "--ignored") ([ref]$statusOk)
+            if (-not $statusOk) { return $false }
+            return (@($statusLines).Count -eq 0)
         }
         finally { Pop-Location }
     }

@@ -1477,12 +1477,27 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
     }
 }
 
+function Invoke-AuditGitLines([string[]]$GitArgs, [string]$Operation) {
+    $ok = $false
+    # Audit JSON commands must keep stdout machine-readable.  The shared Git
+    # capture core logs each command, so suppress only this read-only probe's
+    # host output while preserving the fail-closed success bit.
+    $previousSuppressAllLogging = $script:SuppressAllLogging
+    $script:SuppressAllLogging = $true
+    try { $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok) }
+    finally { $script:SuppressAllLogging = $previousSuppressAllLogging }
+    if (-not $ok) {
+        throw ("审计 git 取证失败：{0}；拒绝生成不完整审计指纹。" -f $Operation)
+    }
+    return ,@($lines)
+}
+
 function Get-AuditGitChangedPaths {
     $paths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
     $pathGroups = @(
-        @(& git -c core.quotepath=false diff --cached --name-only --no-ext-diff 2>$null),
-        @(& git -c core.quotepath=false diff --name-only --no-ext-diff 2>$null),
-        @(& git -c core.quotepath=false ls-files --others --exclude-standard 2>$null)
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--no-ext-diff") "staged changed paths"),
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--name-only", "--no-ext-diff") "worktree changed paths"),
+        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard") "untracked paths")
     )
     foreach ($group in $pathGroups) {
         foreach ($path in @($group)) {
@@ -1499,12 +1514,9 @@ function Get-AuditGitPathStatePairs($paths) {
     $pathList = @($paths)
     if ($pathList.Count -eq 0) { return @() }
     $repoRoot = [string](Get-Location).Path
-    $allIndexLines = @(& git -c core.quotepath=false ls-files --stage 2>$null)
     # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
     # blob 变化，削弱 stale/drift 检测。
-    if ($LASTEXITCODE -ne 0) {
-        throw ("审计 git 取证失败：ls-files --stage exit={0}；无法验证 index 状态，拒绝生成审计指纹。" -f $LASTEXITCODE)
-    }
+    $allIndexLines = @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--stage") "index state (ls-files --stage)")
     $pairs = @()
     foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)
@@ -1521,8 +1533,8 @@ function Get-AuditGitPathStatePairs($paths) {
             $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
         }
         elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
-            $nestedHead = (& git -C $fullPath rev-parse HEAD 2>$null)
-            $nestedStatus = @(& git -C $fullPath status --porcelain 2>$null)
+            $nestedHead = @(Invoke-AuditGitLines @("-C", $fullPath, "rev-parse", "HEAD") ("nested repo HEAD: {0}" -f $path))
+            $nestedStatus = @(Invoke-AuditGitLines @("-C", $fullPath, "status", "--porcelain") ("nested repo status: {0}" -f $path))
             $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
             $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
             $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
@@ -1548,20 +1560,20 @@ function Get-AuditGitInfo([string]$resolvedPath) {
         $inside = (& git rev-parse --is-inside-work-tree 2>$null)
         if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
             $info.is_repo = $true
-            $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.branch = ([string]$branch).Trim() }
-            $commit = (& git rev-parse HEAD 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
-            $status = @(& git status --porcelain 2>$null)
-            if ($LASTEXITCODE -eq 0) {
-                $statusLines = @($status | ForEach-Object { [string]$_ })
-                $changedPaths = @(Get-AuditGitChangedPaths)
-                $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
-                $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
-                $info.dirty = ($statusLines.Count -gt 0)
-                $info.status_count = $statusLines.Count
-                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+            $branchLines = @(Invoke-AuditGitLines @("rev-parse", "--abbrev-ref", "HEAD") "branch")
+            $commitLines = @(Invoke-AuditGitLines @("rev-parse", "HEAD") "HEAD")
+            $statusLines = @(Invoke-AuditGitLines @("status", "--porcelain") "status")
+            if ($branchLines.Count -eq 0 -or $commitLines.Count -eq 0) {
+                throw "审计 git 取证失败：branch 或 HEAD 为空；拒绝生成不完整审计状态。"
             }
+            $info.branch = ([string]$branchLines[0]).Trim()
+            $info.commit = ([string]$commitLines[0]).Trim()
+            $changedPaths = @(Get-AuditGitChangedPaths)
+            $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
+            $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
+            $info.dirty = ($statusLines.Count -gt 0)
+            $info.status_count = $statusLines.Count
+            $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
         }
     }
     finally {
@@ -2283,4 +2295,3 @@ function Write-AuditReceiptSection([string]$recommendationsPath, [string]$sectio
     Write-AuditJsonFile $path $receipt
     return $path
 }
-

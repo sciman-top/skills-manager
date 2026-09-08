@@ -52,4 +52,12 @@ exit 0
         $calls = Get-Content -LiteralPath (Join-Path $workspace "calls.log")
         ($calls -join "|") | Should -Be "build|skills doctor --strict"
     }
+
+    It "keeps managed-link-only whole-root migration inside the rollback transaction" {
+        $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $source = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Commands\Install.ps1') -Raw
+        $source | Should -Match '(?s)\$migratedWholeRootLink = \$false\s*try \{\s*if \(Test-Path -LiteralPath \$targetRoot'
+        $source | Should -Match '(?s)\$migratedWholeRootLink = \$true\s*\r?\n\s*New-Item -ItemType Directory -Path \$targetRoot'
+        $source | Should -Match '(?s)rollback/recovery required'
+    }
 }

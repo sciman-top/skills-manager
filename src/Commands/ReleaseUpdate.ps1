@@ -1,6 +1,25 @@
 $script:ReleaseUpdateRepository = 'sciman-top/skills-manager'
 $script:ReleaseUpdateHttpGet = $null
 
+function Remove-ReleaseUpdateStage([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $true }
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        }
+        catch {
+            if ($attempt -eq 2) { break }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        Write-Warning ("Release update temporary stage cleanup pending: {0}" -f $Path)
+        return $false
+    }
+    return $true
+}
+
 function Get-ReleaseUpdateTokens([string[]]$Tokens) {
     $result = [ordered]@{ action = 'check'; yes = $false; json = $false; repository = $script:ReleaseUpdateRepository; sync_mcp = $false }
     foreach ($token in @($Tokens)) {
@@ -196,7 +215,7 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
         return [pscustomobject]$result
     }
     catch {
-        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        Remove-ReleaseUpdateStage $stage | Out-Null
         throw
     }
 }

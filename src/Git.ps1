@@ -1041,9 +1041,12 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
     }
 }
 function Test-GitSparseCheckoutEnabled {
-    # core.sparseCheckout 未配置或 false 均视为未启用；取证失败同样按未启用处理
-    # （跳过 disable、保留现状），不会误动已有 sparse 配置。
-    $value = Invoke-GitCapture @("config", "--bool", "core.sparseCheckout")
+    # core.sparseCheckout 未配置或 false 均视为未启用；配置取证失败必须
+    # fail closed，不能把旧 sparse 状态误判成 false 后继续使用不完整工作树。
+    $ok = $false
+    $lines = Invoke-GitCaptureCore @("config", "--bool", "core.sparseCheckout") ([ref]$ok)
+    if (-not $ok) { throw "无法读取 Git sparse checkout 配置；拒绝继续使用缓存仓库。" }
+    $value = if (@($lines).Count -eq 0) { "" } else { [string]$lines[0] }
     return ([string]$value -eq "true")
 }
 function Set-GitSparseCheckout([string[]]$sparsePaths) {

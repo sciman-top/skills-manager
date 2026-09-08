@@ -150,6 +150,29 @@ Describe 'Native agent bridge' {
         Test-Path -LiteralPath $legacyRoot | Should -BeFalse
     }
 
+    It 'restores a legacy migration without deleting a pre-existing identical destination' {
+        $targetRoot = Join-Path $TestDrive 'codex\agents-preexisting'
+        $legacyRoot = Join-Path $targetRoot 'skills-manager-backups'
+        $backupRoot = Join-Path $TestDrive 'codex\skills-manager-agent-backups-preexisting'
+        New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+        $legacyBackup = Join-Path $legacyRoot 'design-griller.fixture.toml'
+        $destination = Join-Path $backupRoot 'design-griller.fixture.toml'
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\design-griller.toml') -Destination $legacyBackup
+        Copy-Item -LiteralPath $legacyBackup -Destination $destination
+
+        $migrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot)
+        $migrations.Count | Should -Be 1
+        $migrations[0].destination_preexisted | Should -BeTrue
+        Test-Path -LiteralPath $legacyBackup | Should -BeFalse
+
+        Restore-NativeAgentBridgeLegacyMigration $migrations[0]
+
+        Test-Path -LiteralPath $legacyBackup -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $destination -PathType Leaf | Should -BeTrue
+        (Get-NativeAgentBridgeSha256 $legacyBackup) | Should -Be (Get-NativeAgentBridgeSha256 $destination)
+    }
+
     It 'keeps grill-me prompt-visible as an explicit core entry that delegates to the native griller' {
         $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
         $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
