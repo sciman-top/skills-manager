@@ -2807,7 +2807,51 @@ Describe "Audit git evidence fail-closed" {
         try {
             $pairs = @(Get-AuditGitPathStatePairs @("tracked.txt"))
             $pairs.Count | Should -Be 1
-            $pairs[0] | Should -Match '^path\|tracked\.txt\|index\|'
+            # index 指纹必须非空：空指纹意味着 staged blob 变化进不了取证。
+            $pairs[0] | Should -Match '^path\|tracked\.txt\|index\|[^|]+'
+            $pairs[0] | Should -Match '\|worktree\|file:[0-9a-f]{64}$'
+
+            # staged 变化必须移动 index 指纹（ls-files --stage 真实进入取证）。
+            $beforeIndex = [regex]::Match($pairs[0], 'index\|([^|]+)').Groups[1].Value
+            Set-ContentUtf8 (Join-Path $repo "tracked.txt") "changed"
+            & git -C $repo add tracked.txt
+            $stagedPairs = @(Get-AuditGitPathStatePairs @("tracked.txt"))
+            $afterIndex = [regex]::Match($stagedPairs[0], 'index\|([^|]+)').Groups[1].Value
+            $afterIndex | Should -Not -Be $beforeIndex
+        }
+        finally { Pop-Location }
+    }
+
+    It "Reports a clean repository as not dirty and a changed repository as dirty with per-path evidence" {
+        $repo = Join-Path $TestDrive "audit-git-info-repo"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        & git -C $repo config user.email "t@t.invalid"
+        & git -C $repo config user.name "t"
+        Set-ContentUtf8 (Join-Path $repo "a.txt") "alpha"
+        Set-ContentUtf8 (Join-Path $repo "b.txt") "beta"
+        & git -C $repo add a.txt b.txt
+        & git -C $repo commit -q -m init
+        Push-Location $repo
+        try {
+            $clean = Get-AuditGitInfo $repo
+            $clean.is_repo | Should -Be $true
+            $clean.dirty | Should -Be $false
+            $clean.status_count | Should -Be 0
+            [string]$clean.branch | Should -Not -BeNullOrEmpty
+            [string]$clean.commit | Should -Not -BeNullOrEmpty
+
+            Set-ContentUtf8 (Join-Path $repo "a.txt") "alpha-2"
+            Set-ContentUtf8 (Join-Path $repo "b.txt") "beta-2"
+            $dirty = Get-AuditGitInfo $repo
+            $dirty.dirty | Should -Be $true
+            $dirty.status_count | Should -Be 2
+
+            # 两条改动必须各自成行：嵌套返回会让整组路径被空格拼成一条假路径。
+            $changed = @(Get-AuditGitChangedPaths)
+            $changed.Count | Should -Be 2
+            @($changed) -contains "a.txt" | Should -Be $true
+            @($changed) -contains "b.txt" | Should -Be $true
         }
         finally { Pop-Location }
     }

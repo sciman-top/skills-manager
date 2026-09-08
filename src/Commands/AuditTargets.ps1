@@ -1489,7 +1489,9 @@ function Invoke-AuditGitLines([string[]]$GitArgs, [string]$Operation) {
     if (-not $ok) {
         throw ("审计 git 取证失败：{0}；拒绝生成不完整审计指纹。" -f $Operation)
     }
-    return ,@($lines)
+    # 不用单目逗号防展开：调用点统一以 @(...) 收集，这里再包一层会产生
+    # "Count 恒为 1 的嵌套数组"，使空 status 也被判 dirty、取证行被拼接。
+    return @($lines)
 }
 
 function Get-AuditGitChangedPaths {
