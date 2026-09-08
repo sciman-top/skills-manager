@@ -3647,7 +3647,12 @@ Describe "构建生效 rollback compensation" {
 
 Describe "Sparse checkout disable guard" {
     It "Fails closed when disable is required but fails" {
-        Mock Invoke-GitCapture { "true" }
+        Mock Invoke-GitCaptureCore {
+            param($GitArgs, $Ok, $ExitCode)
+            $Ok.Value = $true
+            if ($null -ne $ExitCode) { $ExitCode.Value = 0 }
+            return ,@("true")
+        }
         Mock Invoke-Git { throw "git 失败：sparse-checkout disable" }
         { Set-GitSparseCheckout @() } | Should -Throw '*git 失败*'
         Should -Invoke Invoke-Git -Times 1 -Exactly -ParameterFilter { @($GitArgs) -contains "disable" }
@@ -3662,8 +3667,9 @@ Describe "Sparse checkout disable guard" {
 
     It "Fails closed when the sparse checkout config probe fails" {
         Mock Invoke-GitCaptureCore {
-            param($GitArgs, $Ok)
+            param($GitArgs, $Ok, $ExitCode)
             $Ok.Value = $false
+            if ($null -ne $ExitCode) { $ExitCode.Value = 128 }
             return @()
         }
 
@@ -3675,6 +3681,69 @@ Describe "Sparse checkout disable guard" {
         Mock Invoke-Git {}
         Set-GitSparseCheckout @()
         Should -Invoke Invoke-Git -Times 1 -Exactly -ParameterFilter { @($GitArgs) -contains "disable" }
+    }
+
+    It "Treats unconfigured sparse key as not enabled with real git" {
+        $oldDryRun = $DryRun
+        $DryRun = $false
+        $repo = Join-Path $TestDrive ("sparse-probe-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        git -C $repo init 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "test git init failed" }
+        Push-Location $repo
+        try {
+            # 键未配置（git config 查询 exit 1）是从未启用过 sparse 的正常态。
+            Test-GitSparseCheckoutEnabled | Should -Be $false
+            git -C $repo config --bool core.sparseCheckout false 2>$null
+            Test-GitSparseCheckoutEnabled | Should -Be $false
+            git -C $repo config --bool core.sparseCheckout true 2>$null
+            Test-GitSparseCheckoutEnabled | Should -Be $true
+        }
+        finally {
+            Pop-Location
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Skips disable without calling git when sparse key is unconfigured (real git)" {
+        $oldDryRun = $DryRun
+        $DryRun = $false
+        $repo = Join-Path $TestDrive ("sparse-fresh-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        git -C $repo init 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "test git init failed" }
+        Push-Location $repo
+        try {
+            # 存量缓存 ensure 的真实生产路径：无 sparse 键的仓库不允许误触发 disable。
+            Mock Invoke-Git { throw "git 不应被调用：键未配置时无需 disable" }
+            { Set-GitSparseCheckout @() } | Should -Not -Throw
+            Should -Invoke Invoke-Git -Times 0 -Exactly
+        }
+        finally {
+            Pop-Location
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Maps real git failure to Ok=false in Invoke-GitCaptureCore" {
+        $oldDryRun = $DryRun
+        $DryRun = $false
+        $repo = Join-Path $TestDrive ("git-core-fail-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        git -C $repo init 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "test git init failed" }
+        Push-Location $repo
+        try {
+            # 空 repo 无 HEAD：真实 git exit 128，必须映射为 Ok=false 而非空成功。
+            $ok = $true
+            $lines = Invoke-GitCaptureCore @("rev-parse", "HEAD") ([ref]$ok)
+            $ok | Should -Be $false
+            @($lines).Count | Should -Be 0
+        }
+        finally {
+            Pop-Location
+            $DryRun = $oldDryRun
+        }
     }
 }
 

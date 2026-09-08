@@ -6919,9 +6919,12 @@ function Invoke-Git([string[]]$GitArgs) {
     }
 }
 # Invoke-GitCapture / Invoke-GitCaptureLines 的公共执行核：
-# $Ok.Value=false 表示 git 以非零退出码失败；DryRun 视为成功且无输出。
-function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok) {
+# $Ok.Value=false 表示 git 以非零退出码失败；$ExitCode.Value 传出真实退出码
+# （DryRun 时为 $null），供调用方区分"正常未命中"（如 config 键不存在 exit 1）
+# 与真实取证失败；DryRun 视为成功且无输出。
+function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
     $Ok.Value = $false
+    if ($null -ne $ExitCode) { $ExitCode.Value = $null }
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
         Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
@@ -6939,7 +6942,9 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok) {
         }
         $ErrorActionPreference = "Continue"
         $out = & git @GitArgs 2>$null
-        if ($LASTEXITCODE -ne 0) { return @() }
+        $nativeExitCode = $LASTEXITCODE
+        if ($null -ne $ExitCode) { $ExitCode.Value = $nativeExitCode }
+        if ($nativeExitCode -ne 0) { return @() }
     }
     finally {
         $ErrorActionPreference = $prevErrorActionPreference
@@ -7859,11 +7864,16 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
     }
 }
 function Test-GitSparseCheckoutEnabled {
-    # core.sparseCheckout 未配置或 false 均视为未启用；配置取证失败必须
-    # fail closed，不能把旧 sparse 状态误判成 false 后继续使用不完整工作树。
+    # core.sparseCheckout 键未配置（git config 查询 exit 1）是从未启用过 sparse
+    # 的正常态，视为未启用；其余配置取证失败必须 fail closed——不能把旧 sparse
+    # 状态误判成 false 后继续使用不完整工作树。
     $ok = $false
-    $lines = Invoke-GitCaptureCore @("config", "--bool", "core.sparseCheckout") ([ref]$ok)
-    if (-not $ok) { throw "无法读取 Git sparse checkout 配置；拒绝继续使用缓存仓库。" }
+    $exitCode = $null
+    $lines = Invoke-GitCaptureCore @("config", "--bool", "core.sparseCheckout") ([ref]$ok) ([ref]$exitCode)
+    if (-not $ok) {
+        if ($exitCode -eq 1) { return $false }
+        throw ("无法读取 Git sparse checkout 配置（git exit={0}）；拒绝继续使用缓存仓库。" -f $exitCode)
+    }
     $value = if (@($lines).Count -eq 0) { "" } else { [string]$lines[0] }
     return ([string]$value -eq "true")
 }
