@@ -173,7 +173,8 @@ function New-EstateMutationFixture {
         $resumed.writes | Should -Be 0
 
         $actionId = [string]$result.receipt.actions[0].action_id
-        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId $actionId -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $rollbackToken = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 ([string]$result.receipt.operation_id)).Substring(0,16).ToUpperInvariant()
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId $actionId -Token $rollbackToken -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
         $rollback.pass | Should -Be $true
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Match '# repo-a'
     }
@@ -249,11 +250,49 @@ function New-EstateMutationFixture {
         $action = @($result.receipt.actions)[0]
         Set-Content -LiteralPath ([string]$action.backup_path) -Value 'tampered backup'
 
-        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$action.action_id) -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $rollbackToken = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 ([string]$result.receipt.operation_id)).Substring(0,16).ToUpperInvariant()
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$action.action_id) -Token $rollbackToken -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
         $rollback.pass | Should -Be $false
         @($rollback.findings.code) | Should -Contain 'rollback_backup_stale'
         [IO.File]::ReadAllText(([string]$action.target_path)) | Should -Match 'improved'
+    }
+
+    It 'rejects the legacy static rollback token that is not bound to the receipt operation' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $receiptPath = Join-Path $f.workspace 'token-binding-receipt.json'
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath $receiptPath
+        $action = @($result.receipt.actions)[0]
+
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$action.action_id) -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $rollback.pass | Should -Be $false
+        @($rollback.findings.code) | Should -Contain 'rollback_token_invalid'
+        [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Match 'improved'
+    }
+
+    It 'rejects a backup whose content no longer matches the plan-certified before state' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $receiptPath = Join-Path $f.workspace 'baseline-receipt.json'
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath $receiptPath
+        $action = @($result.receipt.actions)[0]
+        # 改写备份内容并同步改写 receipt 的 backup_sha256/length：字节校验通过，
+        # 但内容已不是 plan 认证的 before 状态——必须被基线绑定拦截。
+        Set-Content -LiteralPath ([string]$action.backup_path) -Value '# tampered baseline' -Encoding UTF8
+        $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+        $bytes = [IO.File]::ReadAllBytes([string]$action.backup_path)
+        $receipt.actions[0].backup_sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+        $receipt.actions[0].backup_length = [long]$bytes.LongLength
+        $receipt | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+        $rollbackToken = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 ([string]$receipt.operation_id)).Substring(0,16).ToUpperInvariant()
+
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$receipt.actions[0].action_id) -Token $rollbackToken -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $rollback.pass | Should -Be $false
+        @($rollback.findings.code) | Should -Contain 'rollback_backup_baseline_mismatch'
+        [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Match 'improved'
     }
 
     It 'rejects drive-root authorization and tampered rollback targets' {
@@ -269,7 +308,8 @@ function New-EstateMutationFixture {
         $receipt.actions[0].operation = 'create'
         $receipt | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
 
-        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$receipt.actions[0].action_id) -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $rollbackToken = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 ([string]$receipt.operation_id)).Substring(0,16).ToUpperInvariant()
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$receipt.actions[0].action_id) -Token $rollbackToken -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
         $rollback.pass | Should -Be $false
         @($rollback.findings.code) | Should -Contain 'rollback_target_out_of_scope'
         [IO.File]::ReadAllText($victim) | Should -Be 'keep'

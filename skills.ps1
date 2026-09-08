@@ -6357,7 +6357,6 @@ function Invoke-RuleEstateApply {
 
 function Invoke-RuleEstateRollback {
     param([string]$ReceiptPath,[string]$ActionId,[string]$Token,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot)
-    if($Token -cne 'ROLLBACK_RULE_ESTATE_PATCH'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_token_invalid' '$' 'Explicit rollback token does not match.'));writes=0}}
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath);if(-not [IO.File]::Exists($receiptFile)){throw 'Receipt does not exist.'}
     $receipt=[IO.File]::ReadAllText($receiptFile)|ConvertFrom-Json
     $workspace=[IO.Path]::GetFullPath($WorkspaceRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
@@ -6366,16 +6365,24 @@ function Invoke-RuleEstateRollback {
     if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -ne 'applied'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied receipt target.'));writes=0}}
     $target=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path'));$root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root'));$scope=[string](Get-RuleEstateProperty $action 'target_scope')
     if($scope -ne 'repository'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate rollback only accepts repository actions; global user rules use global-rules-rollback.'));writes=0}}
-    $expectedRoot=if($scope -eq 'repository'){$root}else{''}
-    $allowedName=[IO.Path]::GetFileName($target)
-    $repoValid=$scope -ne 'repository' -or (([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
-    if($scope -ne 'repository' -or [string]::IsNullOrWhiteSpace($expectedRoot) -or $root -ne $expectedRoot -or -not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or [IO.Path]::GetFileName($target) -cne $allowedName -or [IO.Path]::GetFileName($target) -notin @('AGENTS.md','CLAUDE.md') -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
+    $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
+    if(-not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
+    # 回滚令牌绑定具体 operation（与 apply 的 plan token 对称），静态常量不构成任何收据的准入。
+    $expectedRollbackToken='ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 $operationId).Substring(0,16).ToUpperInvariant()
+    if($Token -cne $expectedRollbackToken){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_token_invalid' '$' 'Explicit rollback token does not match this receipt operation.'));writes=0}}
     $expectedBackup=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}\{1}.bak' -f $operationId,$ActionId)));$backup=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'backup_path'))
     if($backup -ne $expectedBackup -or -not [IO.File]::Exists($backup)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_invalid' $backup 'Per-target backup path is missing or outside the receipt backup directory.'));writes=0}}
     $backupBytes=[IO.File]::ReadAllBytes($backup);$expectedBackupHash=[string](Get-RuleEstateProperty $action 'backup_sha256');$expectedBackupLength=[long](Get-RuleEstateProperty $action 'backup_length')
     if([string]::IsNullOrWhiteSpace($expectedBackupHash) -or $backupBytes.LongLength -ne $expectedBackupLength -or (Get-RuleEstateBytesHash $backupBytes) -ne $expectedBackupHash){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_stale' $backup 'Per-target backup content no longer matches the apply receipt.'));writes=0}}
+    # 备份内容必须绑定 plan 认证的 before 状态（与 global-rules 链对齐）：仅凭
+    # receipt 自身的 backup_sha256 无法发现 receipt 被改写或 apply 预检与读取
+    # 之间的 TOCTOU 偏差。解码方式与 plan 侧 ReadAllText 一致（UTF8+BOM 探测）。
+    $backupReader=[IO.StreamReader]::new($backup,[Text.Encoding]::UTF8,$true)
+    try{$backupText=$backupReader.ReadToEnd()}finally{$backupReader.Dispose()}
+    $beforeHash=[string](Get-RuleEstateProperty $action 'before_hash')
+    if([string]::IsNullOrWhiteSpace($beforeHash) -or (Get-OperationSha256 $backupText) -cne $beforeHash){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_baseline_mismatch' $backup 'Per-target backup content does not match the plan-certified before state.'));writes=0}}
     if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}
     $action.status='rolled_back';$action | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force;Write-RuleEstateReceipt $receiptFile $receipt
     return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=1;action_id=$ActionId}
@@ -25058,7 +25065,7 @@ MCP：
   全域审查自动发现工作区直属 Git 仓；默认排除 external、docs 与文档。可选 --registry 只比较外部快照 drift，不改变目标集合；仅显式 --out 写报告。
   .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
   .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
-  .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
+  .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH_<sha256(receipt.operation_id) 前16位大写> --json
   全域写入只接受 reviewed change-set 中的直属 Git 仓库 AGENTS.md/CLAUDE.md；用户级 Codex/Claude/ZCode 规则被拒绝，必须走 rules/global 的 global-rules-* 单写入入口。plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
   .\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
   .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --json

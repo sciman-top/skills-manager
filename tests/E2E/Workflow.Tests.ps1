@@ -604,7 +604,10 @@ exit /b 0
             $applyToken=[string]$planJson.plan.apply.required_token
             $applyOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-apply --plan $planPath @rootArgs --token $applyToken --out $receiptPath --json 2>&1);$applyExit=$LASTEXITCODE;$applyJson=($applyOutput -join "`n")|ConvertFrom-Json
             $repoAction=@($applyJson.result.receipt.actions|Where-Object target_scope -eq 'repository')[0]
-            $rollbackOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-rollback --receipt $receiptPath --action-id $repoAction.action_id @rootArgs --token ROLLBACK_RULE_ESTATE_PATCH --json 2>&1);$rollbackExit=$LASTEXITCODE;$rollbackJson=($rollbackOutput -join "`n")|ConvertFrom-Json
+            $estateOperationId=[string]$applyJson.result.receipt.operation_id
+            $rollbackSha=[Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($estateOperationId))
+            $rollbackToken='ROLLBACK_RULE_ESTATE_PATCH_{0}' -f ([Convert]::ToHexString($rollbackSha).Substring(0,16))
+            $rollbackOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-rollback --receipt $receiptPath --action-id $repoAction.action_id @rootArgs --token $rollbackToken --json 2>&1);$rollbackExit=$LASTEXITCODE;$rollbackJson=($rollbackOutput -join "`n")|ConvertFrom-Json
 
             $planExit| Should -Be 0;@($planOutput).Count| Should -Be 1;$planJson.command| Should -Be 'rule-estate-plan'
             $applyExit| Should -Be 0;@($applyOutput).Count| Should -Be 1;$applyJson.command| Should -Be 'rule-estate-apply';$applyJson.result.writes| Should -Be 2
