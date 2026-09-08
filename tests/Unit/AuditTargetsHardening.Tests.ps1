@@ -461,4 +461,12 @@ Describe "Audit target hardening" {
         $saved.next_command | Should -Match "审查目标 扫描"
         Should -Invoke Invoke-AuditRecommendationsApply -Times 0 -Exactly -Scope It
     }
+
+    It '审查应用安装推荐技能时禁用跨仓自动回退' {
+        $installScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Commands\Install.ps1') -Raw
+        $installScript | Should -Match 'function Add-ImportFromArgs\(\[string\[\]\]\$tokens, \[switch\]\$NoBuild, \[switch\]\$NoCrossRepoFallback\)'
+        $installScript | Should -Match '-not \$NoCrossRepoFallback -and -not \$script:CrossRepoAutoFallbackInProgress'
+        $applyScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Commands\AuditTargets.Apply.ps1') -Raw
+        $applyScript | Should -Match 'Add-ImportFromArgs \$item\.tokens -NoBuild -NoCrossRepoFallback'
+    }
 }

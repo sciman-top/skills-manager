@@ -1120,7 +1120,7 @@ function Invoke-AuditRecommendationsApply {
                 Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
                 $beforeCfg = LoadCfg
                 $skillMutationAttempted = $true
-                $ok = Add-ImportFromArgs $item.tokens -NoBuild
+                $ok = Add-ImportFromArgs $item.tokens -NoBuild -NoCrossRepoFallback
                 if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
                 Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
                 $item.status = "installed"

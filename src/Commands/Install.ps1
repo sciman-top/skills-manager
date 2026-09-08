@@ -38,7 +38,7 @@ function Get-PreferredSkillCandidates($candidates) {
     if ($ordered.Count -le 1) { return $ordered }
     $preferred = @($ordered | Where-Object {
             $relGit = (($_.rel -as [string]) -replace "\\", "/")
-            $relGit -match "^(\\.claude/skills|skills)(/|$)"
+            $relGit -match "^(\.claude/skills|skills)(/|$)"
         })
     if ($preferred.Count -gt 0) { return $preferred }
     return $ordered
@@ -349,7 +349,7 @@ function Get-AddImportPlanFromParsedArgs($parsed) {
     }
 }
 
-function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
+function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCrossRepoFallback) {
     Preflight
     $cfgRaw = ""
     $cfg = LoadCfg
@@ -542,7 +542,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     catch {
         $errMsg = $_.Exception.Message
         $plan = Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg
-        if ($plan -and -not $script:CrossRepoAutoFallbackInProgress) {
+        if ($plan -and -not $NoCrossRepoFallback -and -not $script:CrossRepoAutoFallbackInProgress) {
             Log ("当前仓库未命中技能，自动回退到建议仓库重试：repo={0} --skill {1}" -f $plan.repo, $plan.skill) "WARN"
             $script:CrossRepoAutoFallbackInProgress = $true
             try {
@@ -1256,7 +1256,7 @@ function Parse-IndexSelection([string]$selText, [int]$max) {
     if ($low -eq "none") { return @() }
 
     # Normalize common non-ASCII separators/dashes from IME input.
-    $selText = $selText -replace "[，、；;/;\\s]+", ","
+    $selText = $selText -replace "[，、；;/\s]+", ","
     $selText = $selText -replace "[－–—−]", "-"
 
     $set = New-Object System.Collections.Generic.HashSet[int]

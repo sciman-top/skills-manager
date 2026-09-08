@@ -61,4 +61,18 @@ Describe "Selection Cancellation" {
 
         Should -Invoke 构建生效 -Times 0 -Exactly
     }
+
+    It "Parses space-separated menu indices after separator normalization" {
+        Parse-IndexSelection "1 3 5" 5 | Should -Be @(1, 3, 5)
+        Parse-IndexSelection "1，3" 5 | Should -Be @(1, 3)
+        Parse-IndexSelection "1;3" 5 | Should -Be @(1, 3)
+    }
+
+    It "Prefers .claude/skills candidates over same-leaf candidates elsewhere" {
+        $candidates = @(
+            [pscustomobject]@{ rel = "aaa/motion" },
+            [pscustomobject]@{ rel = ".claude/skills/motion" }
+        )
+        (Get-PreferredSkillCandidates $candidates)[0].rel | Should -Be ".claude/skills/motion"
+    }
 }
