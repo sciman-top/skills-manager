@@ -104,6 +104,21 @@ Describe 'release-update-worker staged payload integrity' {
 
             $failedResult.status | Should -Be 'rollback_failed'
             Test-Path -LiteralPath $blockedBackup -PathType Container | Should -BeTrue
+
+            # 恢复成功但交接时没记录清单哈希：无法证明恢复内容，必须如实报 rollback_failed。
+            $unverifiedCurrent = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-unverified-' + [guid]::NewGuid().ToString('N'))
+            $unverifiedBackup = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-unverified-backup-' + [guid]::NewGuid().ToString('N'))
+            $script:roots.Add($unverifiedCurrent) | Out-Null
+            $script:roots.Add($unverifiedBackup) | Out-Null
+            New-Item -ItemType Directory -Path $unverifiedBackup -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $unverifiedBackup 'RELEASE-MANIFEST.json') -Value '{"version":"previous"}' -Encoding UTF8
+
+            $unverified = Invoke-ReleaseUpdateRollback $unverifiedCurrent $unverifiedBackup ($unverifiedCurrent + '.failed') ''
+
+            $unverified.status | Should -Be 'rollback_failed'
+            $unverified.message | Should -Match 'no RELEASE-MANIFEST\.json hash was recorded'
+            Test-Path -LiteralPath $unverifiedCurrent -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $unverifiedBackup -PathType Container | Should -BeFalse
         }
         finally {
             foreach ($path in @($current, $backup, $failed)) {

@@ -98,11 +98,14 @@ function Invoke-ReleaseUpdateRollback([string]$Current, [string]$Backup, [string
         if (-not (Test-Path -LiteralPath $Current -PathType Container)) {
             throw 'Rollback completed without restoring the current installation directory.'
         }
-        if (-not [string]::IsNullOrWhiteSpace($ExpectedManifestSha256)) {
-            $actualManifestSha256 = Get-ReleaseManifestSha256 $Current
-            if ($actualManifestSha256 -ne $ExpectedManifestSha256) {
-                throw 'Rollback restored a directory whose RELEASE-MANIFEST.json does not match the previous installation.'
-            }
+        # 恢复成功但交接时没记录到清单哈希（如 current 清单被提前移除的 TOCTOU）：
+        # 无法证明恢复内容等于先前安装，必须 fail closed 如实报 rollback_failed。
+        if ([string]::IsNullOrWhiteSpace($ExpectedManifestSha256)) {
+            throw 'Rollback restored the current installation but no RELEASE-MANIFEST.json hash was recorded to verify it against.'
+        }
+        $actualManifestSha256 = Get-ReleaseManifestSha256 $Current
+        if ($actualManifestSha256 -ne $ExpectedManifestSha256) {
+            throw 'Rollback restored a directory whose RELEASE-MANIFEST.json does not match the previous installation.'
         }
         return [pscustomobject]@{ status = 'rolled_back'; message = '' }
     }
@@ -151,6 +154,13 @@ try {
     }
     catch {
         Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
+        # 内联恢复与正式回滚同标准：manifest 比对不可跳过，否则恢复内容未经验证。
+        if (-not [string]::IsNullOrWhiteSpace($previousManifestSha256)) {
+            $inlineRestoredSha = Get-ReleaseManifestSha256 $current
+            if ($inlineRestoredSha -ne $previousManifestSha256) {
+                throw ('Inline recovery restored a directory whose RELEASE-MANIFEST.json does not match the previous installation (original failure: {0}).' -f $_.Exception.Message)
+            }
+        }
         throw
     }
 
@@ -180,7 +190,12 @@ catch {
         $receiptRoot = if (Test-Path -LiteralPath $current -PathType Container) { $current } elseif (Test-Path -LiteralPath $backup -PathType Container) { $backup } else { $parent }
         Write-UpdateWorkerReceipt $receiptRoot ([string]$rollback.status) $receiptMessage
         if ([string]$rollback.status -eq 'rollback_failed') {
-            Write-Error ("Release update rollback failed; recovery material was preserved: {0}" -f [string]$rollback.message)
+            # EAP=Stop 下 Write-Error 会变成终止错误并被外层 catch 误归因为
+            # "receipt could not be written"；临时降级让它只作为 stderr 记录。
+            $previousEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { Write-Error ("Release update rollback failed; recovery material was preserved: {0}" -f [string]$rollback.message) }
+            finally { $ErrorActionPreference = $previousEap }
         }
     }
     catch { Write-Error ("Release update failed and rollback receipt could not be written: {0}" -f $_.Exception.Message) }
