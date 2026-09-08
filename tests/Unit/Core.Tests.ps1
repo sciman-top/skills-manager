@@ -3625,7 +3625,7 @@ Describe "构建生效 rollback compensation" {
             Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ required = $true; promotion_mode = "unverified_override" } } -ParameterFilter { [bool]$AllowUnverified }
             Mock 应用到ClaudeCodex { @("target:x => simulated failure") } -ParameterFilter { -not $PromotionContext -or $PromotionContext.promotion_mode -ne "unverified_override" }
             Mock 应用到ClaudeCodex { @() } -ParameterFilter { $PromotionContext -and $PromotionContext.promotion_mode -eq "unverified_override" }
-            Mock Rollback-BuildTransaction {}
+            Mock Rollback-BuildTransaction { $true }
             Mock Complete-BuildTransaction {}
             Mock Sync-SkillDiscoveryCatalog {}
             Mock Sync-NativeAgentBridge {}
@@ -3636,6 +3636,48 @@ Describe "构建生效 rollback compensation" {
             Should -Invoke Complete-BuildTransaction -Times 0 -Exactly
             Should -Invoke Get-HostProjectionPromotionContext -Times 1 -Exactly -ParameterFilter { [bool]$AllowUnverified }
             Should -Invoke 应用到ClaudeCodex -Times 1 -Exactly -ParameterFilter { $PromotionContext -and $PromotionContext.promotion_mode -eq "unverified_override" }
+        }
+        finally {
+            $DryRun = $oldDryRun
+            $CfgPath = $oldCfgPath
+            $Root = $oldRoot
+        }
+    }
+
+    It "Skips compensation projection and reports rollback_failed when rollback does not restore" {
+        $oldDryRun = $DryRun
+        $oldCfgPath = $CfgPath
+        $oldRoot = $Root
+        try {
+            $DryRun = $false
+            $Root = Join-Path $TestDrive "ws-build-compensation-failed"
+            New-Item -ItemType Directory -Path $Root -Force | Out-Null
+            $CfgPath = Join-Path $Root "skills.json"
+            $cfg = [pscustomobject]@{
+                vendors = @(); targets = @(); mappings = @(); imports = @()
+                mcp_servers = @(); mcp_targets = @(); sync_mode = "link"; update_force = $true
+            }
+            Mock Preflight {}
+            Mock LoadCfg { $cfg }
+            Mock SaveCfg {}
+            Mock Optimize-Imports {}
+            Mock Write-BuildSummary {}
+            Mock Start-BuildTransaction { [pscustomobject]@{ id = "txn" } }
+            Mock 构建Agent { @() }
+            Mock 应用到ClaudeCodex { @("target:x => simulated failure") } -ParameterFilter { -not $PromotionContext -or $PromotionContext.promotion_mode -ne "unverified_override" }
+            Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ required = $false; promotion_mode = "local_only" } }
+            Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ required = $true; promotion_mode = "unverified_override" } } -ParameterFilter { [bool]$AllowUnverified }
+            Mock Rollback-BuildTransaction { $false }
+            Mock Complete-BuildTransaction {}
+            Mock Sync-SkillDiscoveryCatalog {}
+            Mock Sync-NativeAgentBridge {}
+
+            # 回滚未恢复时：不得补偿投影，最终失败集必须如实含 rollback_failed。
+            { 构建生效 } | Should -Throw '*rollback_failed*'
+
+            Should -Invoke Rollback-BuildTransaction -Times 1 -Exactly
+            Should -Invoke Get-HostProjectionPromotionContext -Times 0 -Exactly -ParameterFilter { [bool]$AllowUnverified }
+            Should -Invoke 应用到ClaudeCodex -Times 0 -Exactly -ParameterFilter { $PromotionContext -and $PromotionContext.promotion_mode -eq "unverified_override" }
         }
         finally {
             $DryRun = $oldDryRun
@@ -3792,6 +3834,54 @@ Describe "Build transaction rollback backup preservation" {
             Rollback-BuildTransaction $txn | Should -Be $false
             Test-Path -LiteralPath $txnPath -PathType Container | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $backupAgent "skill\SKILL.md") -PathType Leaf | Should -BeTrue
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Fails closed without deleting pre-build agent when backup is missing but agent existed before" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-no-backup"
+            $txnPath = Join-Path $root "build-t3"
+            New-Item -ItemType Directory -Path $txnPath -Force | Out-Null
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "pre") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir "pre\SKILL.md") "pre-build content"
+            # 备份挪动失败的三态：构建前 agent/ 仍在、无备份可恢复。
+            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = (Join-Path $txnPath "agent.backup"); has_backup_agent = $false; backup_error = "move failed"; agent_before_state = "present_no_backup" }
+
+            Rollback-BuildTransaction $txn | Should -Be $false
+            # 构建前 agent/ 是唯一副本，必须原样保留。
+            Test-Path -LiteralPath (Join-Path $AgentDir "pre\SKILL.md") -PathType Leaf | Should -BeTrue
+            Get-ContentUtf8 (Join-Path $AgentDir "pre\SKILL.md") | Should -Be "pre-build content"
+            Test-Path -LiteralPath $txnPath -PathType Container | Should -BeTrue
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Clears built agent when no agent existed before build" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-absent"
+            $txnPath = Join-Path $root "build-t4"
+            New-Item -ItemType Directory -Path $txnPath -Force | Out-Null
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "built") -Force | Out-Null
+            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = (Join-Path $txnPath "agent.backup"); has_backup_agent = $false; backup_error = $null; agent_before_state = "absent" }
+
+            Rollback-BuildTransaction $txn | Should -Be $true
+            Test-Path -LiteralPath $AgentDir | Should -BeFalse
+            Test-Path -LiteralPath $txnPath | Should -BeFalse
         }
         finally {
             $AgentDir = $oldAgentDir

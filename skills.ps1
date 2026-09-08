@@ -12305,14 +12305,19 @@ function Start-BuildTransaction {
         backup_agent = $backupAgent
         has_backup_agent = $false
         backup_error = $null
+        # 三态区分：absent=构建前无 agent/；backed_up=已挪入事务备份；
+        # present_no_backup=备份挪动失败但构建前 agent/ 仍在（回滚必须 fail closed）。
+        agent_before_state = "absent"
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
     if (Test-Path $AgentDir) {
+        $state.agent_before_state = "present_no_backup"
         try {
             Invoke-MoveItem $AgentDir $backupAgent
             $state.has_backup_agent = $true
+            $state.agent_before_state = "backed_up"
         }
         catch {
             if (Test-Path $backupAgent) { Invoke-RemoveItemWithRetry $backupAgent -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
@@ -12328,29 +12333,36 @@ function Rollback-BuildTransaction($txn) {
     $restored = $false
     $restoreError = $null
     try {
-        if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
-        if ($txn.has_backup_agent) {
-            if (-not (Test-Path $txn.backup_agent)) {
-                $restoreError = "agent/ 备份不存在"
-            }
-            elseif (Test-Path $AgentDir) {
-                $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
-            }
-            else {
-                try {
-                    Invoke-MoveItem $txn.backup_agent $AgentDir
-                    $restored = $true
-                    Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
-                }
-                catch {
-                    $restoreError = $_.Exception.Message
-                }
-            }
+        if ([string]$txn.agent_before_state -eq "present_no_backup") {
+            # 备份挪动失败但构建前 agent/ 仍在：此时 agent/ 是构建前状态的唯一
+            # 副本，删除现场等于销毁它。fail closed：不删除，如实报回滚未完成。
+            $restoreError = "构建前 agent/ 存在但事务备份缺失（备份挪动失败）；拒绝在无备份状态下删除现场"
         }
         else {
-            # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
-            $restored = -not (Test-Path $AgentDir)
-            if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
+            if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+            if ($txn.has_backup_agent) {
+                if (-not (Test-Path $txn.backup_agent)) {
+                    $restoreError = "agent/ 备份不存在"
+                }
+                elseif (Test-Path $AgentDir) {
+                    $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
+                }
+                else {
+                    try {
+                        Invoke-MoveItem $txn.backup_agent $AgentDir
+                        $restored = $true
+                        Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+                    }
+                    catch {
+                        $restoreError = $_.Exception.Message
+                    }
+                }
+            }
+            else {
+                # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
+                $restored = -not (Test-Path $AgentDir)
+                if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
+            }
         }
     }
     finally {
@@ -12767,23 +12779,35 @@ function 构建生效(
             Stop-DryRunMirrorCollect
         }
         if ($needRollback) {
-            if ($null -ne $txn) { Rollback-BuildTransaction $txn }
-            Write-Host "⚠️ 已回滚本次构建产物（agent/）。同步目标可能仍需手动重建。" -ForegroundColor Yellow
-            # 部分宿主目标可能已写入本次构建产物；对已尝试宿主投影的路径，按回滚后的
-            # agent/ 状态补偿重建。补偿 restores 的是构建前已投影过的状态，且工作树
-            # 此刻必然 dirty，因此走 unverified 晋级；补偿自身失败只显式报告，不再回滚。
-            if ($hostProjectionAttempted -and -not $DryRun) {
-                try {
-                    $restoreContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$true
-                    $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile
-                    if (@($restoreFailures).Count -gt 0) {
-                        throw ("补偿投影仍失败 {0} 项：{1}" -f @($restoreFailures).Count, [string]@($restoreFailures)[0])
+            # 回滚结果必须如实消费：回滚未完成时严禁补偿投影（否则投影到宿主
+            # 目标的是未回滚的本次构建产物），并把 rollback_failed 并入失败集。
+            $rollbackRestored = [bool](Rollback-BuildTransaction $txn)
+            if ($rollbackRestored) {
+                Write-Host "⚠️ 已回滚本次构建产物（agent/）。同步目标可能仍需手动重建。" -ForegroundColor Yellow
+                # 部分宿主目标可能已写入本次构建产物；对已尝试宿主投影的路径，按回滚后的
+                # agent/ 状态补偿重建。补偿 restores 的是构建前已投影过的状态，且工作树
+                # 此刻必然 dirty，因此走 unverified 晋级；补偿自身失败只显式报告，不再回滚。
+                if ($hostProjectionAttempted -and -not $DryRun) {
+                    try {
+                        $restoreContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$true
+                        $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile
+                        if (@($restoreFailures).Count -gt 0) {
+                            throw ("补偿投影仍失败 {0} 项：{1}" -f @($restoreFailures).Count, [string]@($restoreFailures)[0])
+                        }
+                        Log "补偿投影完成：宿主目标已按回滚后的 agent/ 状态重建。" "WARN"
                     }
-                    Log "补偿投影完成：宿主目标已按回滚后的 agent/ 状态重建。" "WARN"
+                    catch {
+                        Log ("补偿投影失败，宿主目标可能残留本次构建产物，需手动重建：{0}" -f $_.Exception.Message) "ERROR"
+                    }
                 }
-                catch {
-                    Log ("补偿投影失败，宿主目标可能残留本次构建产物，需手动重建：{0}" -f $_.Exception.Message) "ERROR"
-                }
+            }
+            else {
+                $rollbackFailure = "rollback_failed：agent/ 回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）；已跳过补偿投影，避免把未回滚的构建产物投影到宿主目标"
+                if ($null -ne $txn) { $rollbackFailure = ("rollback_failed：agent/ 回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；已跳过补偿投影，避免把未回滚的构建产物投影到宿主目标" -f $txn.path) }
+                # 前置为头条目：回滚未完成是收口时最需要行动的信息，必须在失败
+                # 汇总首行可见，而不是被原始构建失败掩蔽。
+                $failures = @($rollbackFailure) + $failures
+                Log $rollbackFailure "ERROR"
             }
         }
         else {
