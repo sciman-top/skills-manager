@@ -1809,8 +1809,10 @@ function Resolve-GeminiAntigravityRootsFromCandidates($paths) {
             $searchStart = $idx + $token.Length
         }
     }
-    # Keep array shape when only one root is found.
-    return ,@($roots | Sort-Object)
+    # 平铺返回：调用点统一以 @(...) 收集数组形状。单目逗号防展开与调用点
+    # @() 叠加会再包一层嵌套（Count 恒 1），使空目标守卫恒真、多 root 期望
+    # 集错乱、Gemini 多 root 参数绑定崩溃。
+    return @($roots | Sort-Object)
 }
 
 function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
@@ -1905,8 +1907,10 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
         $roots.Add($norm) | Out-Null
     }
 
-    # Keep array shape when only one root is found.
-    return ,@($roots | Sort-Object)
+    # 平铺返回：调用点统一以 @(...) 收集数组形状。单目逗号防展开与调用点
+    # @() 叠加会再包一层嵌套（Count 恒 1），使空目标守卫恒真、多 root 期望
+    # 集错乱、Gemini 多 root 参数绑定崩溃。
+    return @($roots | Sort-Object)
 }
 
 function ConvertTo-OrderedSignatureValue($value) {

@@ -50,6 +50,26 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         @($withTrae | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.path) }).Count | Should -Be 0
     }
 
+    It 'fails closed when no MCP target roots resolve' {
+        $oldCfgPath = $CfgPath
+        try {
+            $root = Join-Path $TestDrive 'no-targets'
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $CfgPath = Join-Path $root 'skills.json'
+            $cfg = [pscustomobject]@{
+                targets     = @()
+                mcp_targets = @()
+                mcp_servers = @()
+            }
+            Mock Load-McpPlanConfigReadOnly { [pscustomobject]@{ cfg = $cfg; raw = '{}' } }
+
+            # 回归钉：resolver 的嵌套返回曾使 roots.Count 恒为 1，空配置
+            # 被静默放行为"同步 0 个目标"。
+            { Get-McpSyncPlanningContext -ReadOnlyConfig } | Should -Throw '*未找到可同步的 MCP 目标目录*'
+        }
+        finally { $CfgPath = $oldCfgPath }
+    }
+
     It 'uses the ZCode native config shape and does not create an undocumented sidecar' {
         $root = Join-Path $TestDrive 'zcode-root'
         $zcode = Join-Path $root '.zcode'

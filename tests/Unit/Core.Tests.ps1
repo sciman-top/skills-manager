@@ -2019,7 +2019,7 @@ command = "cmd"
                 "C:\Users\sciman\.gemini\antigravity\skills",
                 "C:\Users\sciman\.trae\skills"
             )
-            $roots = Resolve-GeminiAntigravityRootsFromCandidates $paths
+            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
             $roots.Count | Should -Be 1
             $roots[0] | Should -Be "C:\Users\sciman\.gemini\antigravity"
         }
@@ -2029,7 +2029,7 @@ command = "cmd"
                 "C:\Users\sciman\.gemini\antigravity-backup\skills",
                 "C:\Users\sciman\.gemini\antigravity2\skills"
             )
-            $roots = Resolve-GeminiAntigravityRootsFromCandidates $paths
+            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
             @($roots).Count | Should -Be 0
         }
 
@@ -2037,7 +2037,7 @@ command = "cmd"
             $paths = @(
                 "C:\tmp\.gemini\antigravity-backup\foo\.gemini\antigravity\skills"
             )
-            $roots = Resolve-GeminiAntigravityRootsFromCandidates $paths
+            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
             $roots.Count | Should -Be 1
             $roots[0] | Should -Be "C:\tmp\.gemini\antigravity-backup\foo\.gemini\antigravity"
         }
@@ -2046,7 +2046,7 @@ command = "cmd"
             $paths = @(
                 "C:\tmp\foo.gemini\antigravity\skills"
             )
-            $roots = Resolve-GeminiAntigravityRootsFromCandidates $paths
+            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
             @($roots).Count | Should -Be 0
         }
     }
@@ -2665,7 +2665,7 @@ command = "npx"
                 )
                 mcp_targets = @()
             }
-            $roots = Resolve-McpTargetRootsFromCfg $cfg
+            $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
             $roots.Count | Should -Be 3
             ($roots -contains (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".claude")) | Should -Be $true
             ($roots -contains (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex")) | Should -Be $true
@@ -2679,7 +2679,7 @@ command = "npx"
                 )
                 mcp_targets = @()
             }
-            $roots = Resolve-McpTargetRootsFromCfg $cfg
+            $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
             $roots.Count | Should -Be 1
             $roots[0] | Should -Be (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".claude")
         }
@@ -2693,7 +2693,7 @@ command = "npx"
                 )
                 mcp_targets = @()
             }
-            $roots = Resolve-McpTargetRootsFromCfg $cfg
+            $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
             @($roots).Count | Should -Be 3
             ($roots -contains (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".gemini")) | Should -Be $false
             ($roots -contains (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex")) | Should -Be $false
@@ -2710,7 +2710,7 @@ command = "npx"
                     "~/.gemini_backup/foo/.gemini/mcp.json"
                 )
             }
-            $roots = Resolve-McpTargetRootsFromCfg $cfg
+            $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
             $roots.Count | Should -Be 1
             $roots[0] | Should -Match "\\.gemini$"
             $roots[0] | Should -Not -Match "mcp\\.json$"
@@ -2723,7 +2723,7 @@ command = "npx"
                     "~/.trae/workspace/.claude/skills"
                 )
             }
-            $roots = Resolve-McpTargetRootsFromCfg $cfg
+            $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
             $roots.Count | Should -Be 1
             $roots[0] | Should -Be (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".trae")
         }
