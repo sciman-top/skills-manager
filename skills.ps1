@@ -1151,7 +1151,8 @@ function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
     if ($p -match "^[A-Za-z]:") { return $false }
     $parts = $p.Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     foreach ($part in $parts) {
-        if ($part -eq "..") { return $false }
+        # Win32 打开路径时剥掉每段尾部的点与空格：'.. ' 会被归一成 '..' 触发穿越。
+        if ($part -cmatch '^[\s.]*\.\.[\s.]*$') { return $false }
     }
     if (-not $AllowDot -and $p -eq ".") { return $false }
     return $true
@@ -6059,6 +6060,10 @@ function Test-RuleEstateApplyPreflight {
     if ($null -eq $Plan -or (Get-RuleEstateProperty $Plan 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $Plan 'domain') -ne 'rule_estate') { return [pscustomobject]@{ pass=$false; findings=@((New-RuleEstateFinding 'plan_invalid' '$' 'Rule estate plan is invalid.')) } }
     $workspace = [IO.Path]::GetFullPath($WorkspaceRoot); $codex=[IO.Path]::GetFullPath($CodexUserRoot); $claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     if ($workspace -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'workspace_root')) -or $codex -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'codex_user_root')) -or $claude -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'claude_user_root'))) { $findings.Add((New-RuleEstateFinding 'authorization_root_mismatch' '$' 'CLI roots must exactly match the plan roots.')) | Out-Null }
+    $planToken=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')
+    $planSeed='{0}|{1}|{2}|{3}|{4}|{5}' -f [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'review') 'content_hash'),$workspace,$codex,$claude,[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'target_set') 'hash'),((@(Get-RuleEstateProperty $Plan 'actions') | ForEach-Object { [string](Get-RuleEstateProperty $_ 'action_id') }) -join '|')
+    $rederivedToken='APPLY_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 $planSeed).Substring(0,16).ToUpperInvariant()
+    if ($planToken -cne $rederivedToken) { $findings.Add((New-RuleEstateFinding 'plan_token_mismatch' '$.apply.required_token' 'Plan token does not match the plan contents; the plan file may have changed after planning.')) | Out-Null }
     $freshSet = Get-RuleEstateTargetSetSnapshot $workspace @(Get-RuleEstateProperty $Plan 'exclude_names')
     if ($freshSet.hash -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'target_set') 'hash')) { $findings.Add((New-RuleEstateFinding 'target_set_drift' '$.target_set' 'Workspace direct Git target set changed after planning.')) | Out-Null }
     $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path');$reviewDocument=$null
@@ -8013,14 +8018,14 @@ function Test-CfgArrayProperty($obj, [string]$name) {
         $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
         foreach ($key in @($obj.Keys)) {
             if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return (Assert-IsArray (, $obj[$key]))
+                return (Assert-IsArray $obj[$key])
             }
         }
         return $false
     }
     $property = @($obj.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
     if ($property.Count -ne 1) { return $false }
-    return (Assert-IsArray (, $property[0].Value))
+    return (Assert-IsArray $property[0].Value)
 }
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }
@@ -10123,7 +10128,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report.summary.error_count = @($report.summary.errors).Count
     $report.summary.warn_count = @($report.summary.warnings).Count
     if ($opts.json) {
-        Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
     }
     Write-Host ""
@@ -10176,7 +10180,7 @@ function Get-PreferredSkillCandidates($candidates) {
     if ($ordered.Count -le 1) { return $ordered }
     $preferred = @($ordered | Where-Object {
             $relGit = (($_.rel -as [string]) -replace "\\", "/")
-            $relGit -match "^(\\.claude/skills|skills)(/|$)"
+            $relGit -match "^(\.claude/skills|skills)(/|$)"
         })
     if ($preferred.Count -gt 0) { return $preferred }
     return $ordered
@@ -10487,7 +10491,7 @@ function Get-AddImportPlanFromParsedArgs($parsed) {
     }
 }
 
-function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
+function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCrossRepoFallback) {
     Preflight
     $cfgRaw = ""
     $cfg = LoadCfg
@@ -10680,7 +10684,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     catch {
         $errMsg = $_.Exception.Message
         $plan = Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg
-        if ($plan -and -not $script:CrossRepoAutoFallbackInProgress) {
+        if ($plan -and -not $NoCrossRepoFallback -and -not $script:CrossRepoAutoFallbackInProgress) {
             Log ("当前仓库未命中技能，自动回退到建议仓库重试：repo={0} --skill {1}" -f $plan.repo, $plan.skill) "WARN"
             $script:CrossRepoAutoFallbackInProgress = $true
             try {
@@ -11394,7 +11398,7 @@ function Parse-IndexSelection([string]$selText, [int]$max) {
     if ($low -eq "none") { return @() }
 
     # Normalize common non-ASCII separators/dashes from IME input.
-    $selText = $selText -replace "[，、；;/;\\s]+", ","
+    $selText = $selText -replace "[，、；;/\s]+", ","
     $selText = $selText -replace "[－–—−]", "-"
 
     $set = New-Object System.Collections.Generic.HashSet[int]
@@ -15304,6 +15308,15 @@ function ConvertTo-TomlBasicValue($value) {
     return ('"{0}"' -f $text)
 }
 
+function Test-TomlBareKey([string]$key) {
+    return $key -cmatch '^[A-Za-z0-9_-]+$'
+}
+
+function ConvertTo-TomlKey([string]$key) {
+    if (Test-TomlBareKey $key) { return $key }
+    return ('"{0}"' -f $key.Replace('\', '\\').Replace('"', '\"'))
+}
+
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -15400,6 +15413,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if ($managedNames.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }
         foreach ($name in $managedNames) {
+            Need (Test-TomlBareKey $name) ("mcp_server 名不是合法的 Codex TOML bare key，拒绝写入 config.toml：{0}" -f $name)
             $entry = $managedMap.$name
             $output.Add(("[mcp_servers.{0}]" -f $name)) | Out-Null
             foreach ($prop in $entry.PSObject.Properties) {
@@ -15408,7 +15422,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                 if ($null -eq $val) { continue }
                 if ($val -is [Array]) {
                     $arr = @($val | ForEach-Object { ConvertTo-TomlBasicValue $_ })
-                    $output.Add(("{0} = [{1}]" -f $key, ($arr -join ", "))) | Out-Null
+                    $output.Add(("{0} = [{1}]" -f (ConvertTo-TomlKey $key), ($arr -join ", "))) | Out-Null
                     continue
                 }
                 if ($val -is [hashtable] -or $val -is [System.Collections.IDictionary] -or $val -is [pscustomobject]) {
@@ -15419,11 +15433,11 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                     else {
                         foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
                     }
-                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f $_, (ConvertTo-TomlBasicValue $dict[$_]) })
+                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f (ConvertTo-TomlKey $_), (ConvertTo-TomlBasicValue $dict[$_]) })
                     $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
                     continue
                 }
-                $output.Add(("{0} = {1}" -f $key, (ConvertTo-TomlBasicValue $val))) | Out-Null
+                $output.Add(("{0} = {1}" -f (ConvertTo-TomlKey $key), (ConvertTo-TomlBasicValue $val))) | Out-Null
             }
             $output.Add("") | Out-Null
         }
@@ -16895,6 +16909,13 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     return $manifest
 }
 
+function ConvertTo-ReleaseUpdateWorkerArgument([string]$text) {
+    # Start-Process 拼接 ArgumentList 数组时不加引号；含空格/引号的值必须手工引住，
+    # 且尾随反斜杠在闭引号前会被命令行解析当作转义引号，须先剥掉。
+    if ($text -match '[\s"]') { return ('"{0}"' -f $text.TrimEnd('\')) }
+    return $text
+}
+
 function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [string]$ManifestSha256, [switch]$SyncMcp) {
     $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
     Need (-not (Test-AncestorChainHasReparse $currentRoot)) ("release_install_root_reparse_forbidden：{0}" -f $currentRoot)
@@ -16910,7 +16931,8 @@ function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersio
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ManifestSha256',$ManifestSha256,'-ParentProcessId',$PID)
     if ($SyncMcp) { $args += '-SyncMcp' }
-    $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
+    $workerArgs = @($args | ForEach-Object { ConvertTo-ReleaseUpdateWorkerArgument ([string]$_) })
+    $process = Start-Process -FilePath $pwsh -ArgumentList ($workerArgs -join ' ') -WorkingDirectory $parent -WindowStyle Hidden -PassThru
     return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
 }
 
@@ -23003,7 +23025,7 @@ function Invoke-AuditRecommendationsApply {
                 Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
                 $beforeCfg = LoadCfg
                 $skillMutationAttempted = $true
-                $ok = Add-ImportFromArgs $item.tokens -NoBuild
+                $ok = Add-ImportFromArgs $item.tokens -NoBuild -NoCrossRepoFallback
                 if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
                 Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
                 $item.status = "installed"
@@ -25119,6 +25141,10 @@ if ($MyInvocation.InvocationName -ne '.') {
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
                 $doctorTokens += @($args)
                 $doctorResult = Invoke-Doctor $doctorTokens
+                # --json 契约：JSON 必须走 stdout（Write-Host 会被重定向/管道丢弃）。
+                if (@($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--json" }).Count -gt 0) {
+                    Write-Output ($doctorResult | ConvertTo-Json -Depth 30)
+                }
                 $strictRequested = @($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
                 if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                     exit 2
