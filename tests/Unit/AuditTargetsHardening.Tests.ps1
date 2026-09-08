@@ -38,6 +38,7 @@ BeforeAll {
             live_fingerprint = [string]$live.fingerprint
             live_external_skill_fingerprint = if ($live.PSObject.Properties.Match("external_skill_fingerprint").Count -gt 0) { [string]$live.external_skill_fingerprint } else { "" }
             live_mcp_fingerprint = if ($live.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$live.mcp_fingerprint } else { "" }
+            live_configured_supply_fingerprint = if ($live.PSObject.Properties.Match("configured_supply_fingerprint").Count -gt 0) { [string]$live.configured_supply_fingerprint } else { "" }
             skills = @()
             external_skills = @()
             mcp_servers = @()
@@ -435,11 +436,16 @@ Describe "Audit target hardening" {
         $scan = New-AuditRepoScan "workflow-target" $repo $repo
         New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-workflow-target-drift" @($scan)
 
+        Mock Get-AuditLiveInstalledState {
+            [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+        }
         Mock Invoke-AuditRecommendationsPreflight {
             Set-ContentUtf8 (Join-Path $repo "changed-during-preflight.txt") "changed"
+            $stableLive = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
             [pscustomobject]@{
                 success = $true
-                live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                live_state = $stableLive
+                snapshot_state = $stableLive
             }
         }
         Mock Invoke-AuditRecommendationsApply { throw "dry-run must not execute" }

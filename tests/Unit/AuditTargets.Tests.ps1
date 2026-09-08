@@ -85,6 +85,7 @@ BeforeAll {
             $InstalledState = [pscustomobject]@{
                 snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
                 live_fingerprint = [string]$live.fingerprint; live_external_skill_fingerprint = [string]$live.external_skill_fingerprint; live_mcp_fingerprint = [string]$live.mcp_fingerprint
+                live_configured_supply_fingerprint = [string]$live.configured_supply_fingerprint
                 skills = @(); external_skills = @(); mcp_servers = @(); host_projection = $null
             }
         }
@@ -1837,15 +1838,16 @@ $scan.detected.artifact_capabilities | Out-Null
             ($facts | Where-Object source_kind -eq "plugin").qualified_name | Should -Be "demo@market::plugin-demo"
         }
 
-        It "Checks external capability drift only when the snapshot carries its fingerprint" {
-            $live = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current" }
-            $current = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current" }
-            $stale = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-old" }
+        It "Fails closed when the snapshot lacks a component fingerprint" {
+            $live = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply" }
+            $current = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply" }
+            $stale = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-old"; configured_supply_fingerprint = "supply" }
             $legacy = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp" }
 
             (Get-AuditInstalledSnapshotStaleness $current $live).is_stale | Should -Be $false
             (Get-AuditInstalledSnapshotStaleness $stale $live).external_skill_stale | Should -Be $true
-            (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should -Be $false
+            (Get-AuditInstalledSnapshotStaleness $legacy $live).external_skill_stale | Should -Be $true
+            (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should -Be $true
         }
 
         It "Treats pre-existing host projection health as state, not snapshot drift" {
@@ -1854,18 +1856,21 @@ $scan.detected.artifact_capabilities | Out-Null
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
+                configured_supply_fingerprint = "supply"
                 host_projection = $hostAtSnapshot
             }
             $current = [pscustomobject]@{
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
+                configured_supply_fingerprint = "supply"
                 host_projection = $hostAtSnapshot
             }
             $hostChanged = [pscustomobject]@{
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
+                configured_supply_fingerprint = "supply"
                 host_projection = [pscustomobject]@{ status = "available"; managed_count = 9; stale_count = 1; broken_count = 0; fingerprint = "host-changed" }
             }
 
@@ -2540,11 +2545,16 @@ $scan.detected.artifact_capabilities | Out-Null
             Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-validate-dry-run","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-dry-run"
 
+            Mock Get-AuditLiveInstalledState {
+                [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+            }
             Mock Invoke-AuditRecommendationsPreflight {
+                $stableLive = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
                 return [pscustomobject]@{
                     success = $true
                     run_id = "r-validate-dry-run"
-                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                    live_state = $stableLive
+                    snapshot_state = $stableLive
                 }
             }
             Mock Invoke-AuditRecommendationsApply {
@@ -2554,8 +2564,8 @@ $scan.detected.artifact_capabilities | Out-Null
                     run_id = "r-validate-dry-run"
                     target = "demo"
                     changed_counts = New-AuditChangedCounts @() @()
-                    snapshot_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
-                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                    snapshot_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
                     items = @()
                     removal_candidates = @()
                     mcp_items = @()
@@ -2645,14 +2655,19 @@ $scan.detected.artifact_capabilities | Out-Null
             Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-workflow-input-changed","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-workflow-input-changed"
 
+            Mock Get-AuditLiveInstalledState {
+                [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+            }
             Mock Invoke-AuditRecommendationsPreflight {
                 $snapshot = Get-ContentUtf8 (Join-Path $runDir "snapshot.json") | ConvertFrom-Json
                 $snapshot | Add-Member -NotePropertyName test_mutation -NotePropertyValue $true -Force
                 Write-AuditJsonFile (Join-Path $runDir "snapshot.json") $snapshot
+                $stableLive = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
                 return [pscustomobject]@{
                     success = $true
                     run_id = "r-workflow-input-changed"
-                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                    live_state = $stableLive
+                    snapshot_state = $stableLive
                 }
             }
             Mock Invoke-AuditRecommendationsApply { throw "dry-run must not execute" }

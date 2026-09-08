@@ -607,15 +607,17 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
 
 function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $configuredSupplyStale = $false
+    # fail closed：当前契约的快照必须显式携带三类指纹；缺失/空值按 stale 处理，
+    # 否则被剥离指纹的异常快照会让对应分量永远判不 stale。
+    $configuredSupplyStale = $true
     if ($snapshotState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.configured_supply_fingerprint)) {
         $configuredSupplyStale = ([string]$snapshotState.configured_supply_fingerprint -ne [string]$liveState.configured_supply_fingerprint)
     }
-    $mcpStale = $false
+    $mcpStale = $true
     if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
         $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
     }
-    $externalSkillStale = $false
+    $externalSkillStale = $true
     if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
         $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
     }

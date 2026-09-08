@@ -812,6 +812,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
     $deletedLegacyManualDirs = 0
     $deletedOverrides = 0
     $backedOverrides = 0
+    $overrideBackupPaths = New-Object System.Collections.Generic.List[string]
     foreach ($item in @($selectedItems)) {
         $vendor = [string]$item.vendor
         $from = [string]$item.from
@@ -833,7 +834,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         }
         elseif ($vendor -eq "overrides") {
             $bak = Backup-OverrideDir $from
-            if ($bak) { $backedOverrides++ }
+            if ($bak) { $backedOverrides++; $overrideBackupPaths.Add([string]$bak) }
             $deletedOverrides++
         }
         else {
@@ -867,6 +868,7 @@ function Remove-AuditSelectedInstalledSkills($selectedItems) {
         deleted_legacy_manual_dirs = $deletedLegacyManualDirs
         deleted_overrides = $deletedOverrides
         backed_overrides = $backedOverrides
+        override_backup_paths = @($overrideBackupPaths.ToArray())
     }
 }
 

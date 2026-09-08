@@ -735,12 +735,8 @@ function Invoke-AuditRecommendationsPreflight {
 
     Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
     if ($issues.Count -eq 0) {
-        if ($recommendationsExists) {
-            Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
-        }
-        else {
-            Write-Host "预检通过：审查包快照与提示词契约均匹配；recommendations.json 尚未生成，可继续生成建议。" -ForegroundColor Green
-        }
+        # recommendations.json 缺失必然已在上方产生 issue；此分支只服务已生成建议的通过路径。
+        Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
         return [pscustomobject]$report
     }
 
@@ -882,7 +878,7 @@ function New-AuditApplyTransactionSnapshot {
 }
 
 function Restore-AuditApplyTransaction {
-    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted)
+    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted,[string[]]$OverrideBackupPaths=@())
     $errors = New-Object System.Collections.Generic.List[string]
     try {
         if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
@@ -900,11 +896,15 @@ function Restore-AuditApplyTransaction {
         try { 同步MCP }
         catch { $errors.Add(('mcp_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
     }
+    # overrides 卸载会把源目录移入 .bak 且补偿不搬回：这类补偿只是 partial——
+    # config 已还原但技能从投影中消失，必须如实降级并记录 .bak 位置供人工恢复。
+    $overrideBackups = @($OverrideBackupPaths)
     return [pscustomobject][ordered]@{
-        status = $(if($errors.Count -eq 0){'restored'}else{'failed'})
+        status = $(if($errors.Count -gt 0){'failed'}elseif($overrideBackups.Count -gt 0){'partial'}else{'restored'})
         config_restored = (-not $configRestoreFailed)
         skill_projection_attempted = $SkillProjectionAttempted
         mcp_projection_attempted = $McpProjectionAttempted
+        override_backup_paths = $overrideBackups
         errors = @($errors.ToArray())
         residual_cache_boundary = 'Downloaded import/vendor caches and removal backup directories are not deleted automatically; restored config makes unreferenced caches inactive.'
     }
@@ -1020,9 +1020,11 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
         throw $qualityMessage
     }
-    $liveState = if ($canReusePreflight) { $PreflightReport.live_state } else { Get-AuditLiveInstalledState }
+    # live 快照必须独立新鲜：复用 preflight 的同一对象会让 dry-run 报告与 preflight
+    # 自比较，workflow 的 live_state_changed 检测就永远不可达。
+    $liveState = Get-AuditLiveInstalledState
     $snapshotState = if ($canReusePreflight) { $PreflightReport.snapshot_state } else { Get-AuditInstalledSnapshotState $snapshotPath }
-    $snapshotStaleness = if ($canReusePreflight) { $PreflightReport.snapshot_staleness } else { Get-AuditInstalledSnapshotStaleness $snapshotState $liveState }
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
@@ -1112,6 +1114,7 @@ function Invoke-AuditRecommendationsApply {
     $transaction = New-AuditApplyTransactionSnapshot
     $skillMutationAttempted = $false
     $mcpMutationAttempted = $false
+    $overrideBackupPaths = @()
 
     try {
         foreach ($item in @($selectedAdd.items)) {
@@ -1142,7 +1145,8 @@ function Invoke-AuditRecommendationsApply {
 
         if (@($selectedRemove.items).Count -gt 0) {
             $skillMutationAttempted = $true
-            Remove-AuditSelectedInstalledSkills $selectedRemove.items | Out-Null
+            $removalStats = Remove-AuditSelectedInstalledSkills $selectedRemove.items
+            $overrideBackupPaths = @([string[]]$removalStats.override_backup_paths)
             foreach ($item in @($selectedRemove.items)) {
                 $report.rollback += ("Re-add removed skill mapping/import for '{0}' if rollback is required." -f $item.name)
             }
@@ -1218,7 +1222,7 @@ function Invoke-AuditRecommendationsApply {
         $originalFailure = $_
         if ($report.success) { $report.success = $false }
         if($skillMutationAttempted -or $mcpMutationAttempted) {
-            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted
+            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted -OverrideBackupPaths $overrideBackupPaths
             if([string]$report.compensation.status -eq 'restored'){Set-AuditApplyItemsRolledBack $plan}
         }
         $report.items = @($plan.items)
