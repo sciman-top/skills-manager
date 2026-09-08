@@ -695,7 +695,8 @@ function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
     if ($p -match "^[A-Za-z]:") { return $false }
     $parts = $p.Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     foreach ($part in $parts) {
-        if ($part -eq "..") { return $false }
+        # Win32 打开路径时剥掉每段尾部的点与空格：'.. ' 会被归一成 '..' 触发穿越。
+        if ($part -cmatch '^[\s.]*\.\.[\s.]*$') { return $false }
     }
     if (-not $AllowDot -and $p -eq ".") { return $false }
     return $true

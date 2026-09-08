@@ -1625,6 +1625,15 @@ function ConvertTo-TomlBasicValue($value) {
     return ('"{0}"' -f $text)
 }
 
+function Test-TomlBareKey([string]$key) {
+    return $key -cmatch '^[A-Za-z0-9_-]+$'
+}
+
+function ConvertTo-TomlKey([string]$key) {
+    if (Test-TomlBareKey $key) { return $key }
+    return ('"{0}"' -f $key.Replace('\', '\\').Replace('"', '\"'))
+}
+
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -1721,6 +1730,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if ($managedNames.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }
         foreach ($name in $managedNames) {
+            Need (Test-TomlBareKey $name) ("mcp_server 名不是合法的 Codex TOML bare key，拒绝写入 config.toml：{0}" -f $name)
             $entry = $managedMap.$name
             $output.Add(("[mcp_servers.{0}]" -f $name)) | Out-Null
             foreach ($prop in $entry.PSObject.Properties) {
@@ -1729,7 +1739,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                 if ($null -eq $val) { continue }
                 if ($val -is [Array]) {
                     $arr = @($val | ForEach-Object { ConvertTo-TomlBasicValue $_ })
-                    $output.Add(("{0} = [{1}]" -f $key, ($arr -join ", "))) | Out-Null
+                    $output.Add(("{0} = [{1}]" -f (ConvertTo-TomlKey $key), ($arr -join ", "))) | Out-Null
                     continue
                 }
                 if ($val -is [hashtable] -or $val -is [System.Collections.IDictionary] -or $val -is [pscustomobject]) {
@@ -1740,11 +1750,11 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
                     else {
                         foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
                     }
-                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f $_, (ConvertTo-TomlBasicValue $dict[$_]) })
+                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f (ConvertTo-TomlKey $_), (ConvertTo-TomlBasicValue $dict[$_]) })
                     $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
                     continue
                 }
-                $output.Add(("{0} = {1}" -f $key, (ConvertTo-TomlBasicValue $val))) | Out-Null
+                $output.Add(("{0} = {1}" -f (ConvertTo-TomlKey $key), (ConvertTo-TomlBasicValue $val))) | Out-Null
             }
             $output.Add("") | Out-Null
         }

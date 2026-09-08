@@ -248,14 +248,14 @@ function Test-CfgArrayProperty($obj, [string]$name) {
         $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
         foreach ($key in @($obj.Keys)) {
             if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return (Assert-IsArray (, $obj[$key]))
+                return (Assert-IsArray $obj[$key])
             }
         }
         return $false
     }
     $property = @($obj.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
     if ($property.Count -ne 1) { return $false }
-    return (Assert-IsArray (, $property[0].Value))
+    return (Assert-IsArray $property[0].Value)
 }
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }

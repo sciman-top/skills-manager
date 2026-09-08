@@ -1275,7 +1275,44 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Test-SafeRelativePath" {
+        It "Rejects .. traversal" {
+            Test-SafeRelativePath "a\..\b" | Should -Be $false
+        }
+
+        It "Rejects Win32 trailing dot/space traversal variants of .." {
+            Test-SafeRelativePath "a\.. \b" | Should -Be $false
+            Test-SafeRelativePath "a\...\b" | Should -Be $false
+            Test-SafeRelativePath ".. " | Should -Be $false
+        }
+
+        It "Still accepts plain relative paths and current-dot segments" {
+            Test-SafeRelativePath "skills/foo" | Should -Be $true
+            Test-SafeRelativePath "a\.\b" | Should -Be $true
+        }
+    }
+
+    Context "Test-CfgArrayProperty" {
+        It "Requires the property value itself to be an array" {
+            Test-CfgArrayProperty ([pscustomobject]@{ enabled = "solo" }) "enabled" | Should -Be $false
+            Test-CfgArrayProperty ([pscustomobject]@{ enabled = [pscustomobject]@{ a = 1 } }) "enabled" | Should -Be $false
+            Test-CfgArrayProperty ([pscustomobject]@{ enabled = @() }) "enabled" | Should -Be $true
+            Test-CfgArrayProperty ([pscustomobject]@{ enabled = @(1, 2) }) "enabled" | Should -Be $true
+        }
+    }
+
     Context "Build-CodexConfigToml" {
+        It "Quotes TOML inline keys that are not bare keys" {
+            $server = [pscustomobject]@{ name = "api-gw"; transport = "http"; url = "https://example.com/mcp"; headers = [pscustomobject]@{ "X.Custom" = "abc" } }
+            $toml = Build-CodexConfigToml "" @($server)
+            ($toml -join "`n") | Should -Match '"X\.Custom" = "abc"'
+        }
+
+        It "Refuses a managed server whose name is not a TOML bare key" {
+            $server = [pscustomobject]@{ name = "a.b"; transport = "http"; url = "https://example.com/mcp" }
+            { Build-CodexConfigToml "" @($server) } | Should -Throw '*bare key*'
+        }
+
         It "Preserves host-owned approval and sandbox settings" {
             $existing = @'
 model = "gpt-5.6-luna"
