@@ -39,6 +39,7 @@ BeforeAll {
             live_external_skill_fingerprint = if ($live.PSObject.Properties.Match("external_skill_fingerprint").Count -gt 0) { [string]$live.external_skill_fingerprint } else { "" }
             live_mcp_fingerprint = if ($live.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$live.mcp_fingerprint } else { "" }
             live_configured_supply_fingerprint = if ($live.PSObject.Properties.Match("configured_supply_fingerprint").Count -gt 0) { [string]$live.configured_supply_fingerprint } else { "" }
+            profile_selection_status = if ($live.PSObject.Properties.Match("profile_selection_status").Count -gt 0) { [string]$live.profile_selection_status } else { "available" }
             skills = @()
             external_skills = @()
             mcp_servers = @()

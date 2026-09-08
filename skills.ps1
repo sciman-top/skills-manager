@@ -19269,12 +19269,29 @@ function Get-AuditGitChangedPaths {
     return @($paths)
 }
 
+function Get-AuditPlainDirectoryFingerprint([string]$dirPath) {
+    # 父仓内普通未跟踪目录的内容指纹：git status 对整个目录只报一行，
+    # 内部变化只能靠逐文件哈希进入取证（嵌套仓则走 head|status 对，不经过这里）。
+    $fullBase = [IO.Path]::GetFullPath($dirPath)
+    $pairs = New-Object System.Collections.Generic.List[string]
+    foreach ($file in @(Get-ChildItem -LiteralPath $fullBase -Recurse -File -Force)) {
+        $relative = [string]$file.FullName.Substring($fullBase.Length).TrimStart('\', '/').Replace('/', '\')
+        $pairs.Add(("file|{0}|{1}" -f $relative, [string](Get-FileContentHash $file.FullName))) | Out-Null
+    }
+    $ordered = $pairs.ToArray()
+    [Array]::Sort($ordered, [System.StringComparer]::Ordinal)
+    return (Get-AuditFingerprintFromVendorFromPairs @($ordered) $true)
+}
+
 function Get-AuditGitPathStatePairs($paths) {
     # 单次全量 ls-files 取代逐路径派生进程（脏路径多时每路径一个 git 进程是扫描
     # 的主要耗时）；pathspec 的目录前缀语义用前缀过滤等价复现。
     $pathList = @($paths)
     if ($pathList.Count -eq 0) { return @() }
-    $repoRoot = [string](Get-Location).Path
+    # git status/diff/ls-files 输出仓根相对路径：用扫描目录拼接会拼出不存在的
+    # 路径（目标指向仓库子目录时）。
+    $repoRootLines = @(Invoke-AuditGitLines @("rev-parse", "--show-toplevel") "repository toplevel")
+    $repoRoot = ([string]$repoRootLines[0]).Trim()
     # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
     # blob 变化，削弱 stale/drift 检测。
     $allIndexLines = @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--stage") "index state (ls-files --stage)")
@@ -19294,11 +19311,20 @@ function Get-AuditGitPathStatePairs($paths) {
             $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
         }
         elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
-            $nestedHead = @(Invoke-AuditGitLines @("-C", $fullPath, "rev-parse", "HEAD") ("nested repo HEAD: {0}" -f $path))
-            $nestedStatus = @(Invoke-AuditGitLines @("-C", $fullPath, "status", "--porcelain") ("nested repo status: {0}" -f $path))
-            $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
-            $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
-            $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
+            # 只有独立仓根才按嵌套仓取证：rev-parse 对父仓内普通目录返回父仓
+            # HEAD/status，会让不同内容的未跟踪目录得到相同 directory 指纹。
+            $nestedTopLines = @(Invoke-AuditGitLines @("-C", $fullPath, "rev-parse", "--show-toplevel") ("nested repo toplevel: {0}" -f $path))
+            $nestedTop = ([string]$nestedTopLines[0]).Trim()
+            if ([string]::Equals($nestedTop, $fullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $nestedHead = @(Invoke-AuditGitLines @("-C", $fullPath, "rev-parse", "HEAD") ("nested repo HEAD: {0}" -f $path))
+                $nestedStatus = @(Invoke-AuditGitLines @("-C", $fullPath, "status", "--porcelain") ("nested repo status: {0}" -f $path))
+                $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
+                $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
+                $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
+            }
+            else {
+                $worktreeState = "directory:" + (Get-AuditPlainDirectoryFingerprint $fullPath)
+            }
         }
         $pairs += ("path|{0}|index|{1}|worktree|{2}" -f [string]$path, $indexFingerprint, $worktreeState)
     }
@@ -20951,6 +20977,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
         $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     }
+    $profileSelectionStatus = ""
+    if (Test-AuditJsonProperty $data 'profile_selection_status') { $profileSelectionStatus = [string]$data.profile_selection_status }
     $hostProjection = if (Test-AuditJsonProperty $data 'host_projection') { $data.host_projection } else { $null }
     $capturedAt = ""
     if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
@@ -20968,6 +20996,7 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = $mcpFingerprint
+        profile_selection_status = $profileSelectionStatus
         host_projection = $hostProjection
     })
 }
@@ -20996,11 +21025,19 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
             $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint)
         }
     }
+    # fail closed：'unavailable'（取证异常回退）或旧快照缺失状态时指纹为空/不可信，
+    # 空对空相等会让 profile selection 永远判不 stale，preflight 会基于安装状态
+    # 未知的空快照放行。'available'/'selection_unresolved'/'not_configured' 的
+    # 指纹有确定性语义，仍按指纹比较。
+    $profileSelectionStatus = ""
+    if ($snapshotState.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { $profileSelectionStatus = [string]$snapshotState.profile_selection_status }
+    $profileSelectionStale = ($profileSelectionStatus -eq 'unavailable' -or [string]::IsNullOrWhiteSpace($profileSelectionStatus))
+    if (-not $profileSelectionStale) { $profileSelectionStale = $skillStale }
     return [pscustomobject]([ordered]@{
-            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $hostStale)
+            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $profileSelectionStale -or $hostStale)
             skill_stale = $skillStale
             configured_supply_stale = $configuredSupplyStale
-            profile_selection_stale = $skillStale
+            profile_selection_stale = $profileSelectionStale
             mcp_stale = $mcpStale
             external_skill_stale = $externalSkillStale
             host_projection_stale = $hostStale

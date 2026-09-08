@@ -584,6 +584,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
         $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     }
+    $profileSelectionStatus = ""
+    if (Test-AuditJsonProperty $data 'profile_selection_status') { $profileSelectionStatus = [string]$data.profile_selection_status }
     $hostProjection = if (Test-AuditJsonProperty $data 'host_projection') { $data.host_projection } else { $null }
     $capturedAt = ""
     if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
@@ -601,6 +603,7 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = $mcpFingerprint
+        profile_selection_status = $profileSelectionStatus
         host_projection = $hostProjection
     })
 }
@@ -629,11 +632,19 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
             $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint)
         }
     }
+    # fail closed：'unavailable'（取证异常回退）或旧快照缺失状态时指纹为空/不可信，
+    # 空对空相等会让 profile selection 永远判不 stale，preflight 会基于安装状态
+    # 未知的空快照放行。'available'/'selection_unresolved'/'not_configured' 的
+    # 指纹有确定性语义，仍按指纹比较。
+    $profileSelectionStatus = ""
+    if ($snapshotState.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { $profileSelectionStatus = [string]$snapshotState.profile_selection_status }
+    $profileSelectionStale = ($profileSelectionStatus -eq 'unavailable' -or [string]::IsNullOrWhiteSpace($profileSelectionStatus))
+    if (-not $profileSelectionStale) { $profileSelectionStale = $skillStale }
     return [pscustomobject]([ordered]@{
-            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $hostStale)
+            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $profileSelectionStale -or $hostStale)
             skill_stale = $skillStale
             configured_supply_stale = $configuredSupplyStale
-            profile_selection_stale = $skillStale
+            profile_selection_stale = $profileSelectionStale
             mcp_stale = $mcpStale
             external_skill_stale = $externalSkillStale
             host_projection_stale = $hostStale

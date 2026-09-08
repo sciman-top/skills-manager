@@ -86,6 +86,7 @@ BeforeAll {
                 snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
                 live_fingerprint = [string]$live.fingerprint; live_external_skill_fingerprint = [string]$live.external_skill_fingerprint; live_mcp_fingerprint = [string]$live.mcp_fingerprint
                 live_configured_supply_fingerprint = [string]$live.configured_supply_fingerprint
+                profile_selection_status = if ($live.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { [string]$live.profile_selection_status } else { 'available' }
                 skills = @(); external_skills = @(); mcp_servers = @(); host_projection = $null
             }
         }
@@ -1840,14 +1841,19 @@ $scan.detected.artifact_capabilities | Out-Null
 
         It "Fails closed when the snapshot lacks a component fingerprint" {
             $live = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply" }
-            $current = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply" }
-            $stale = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-old"; configured_supply_fingerprint = "supply" }
+            $current = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
+            $stale = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-old"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
             $legacy = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp" }
+            $unavailableProfile = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current"; configured_supply_fingerprint = "supply"; profile_selection_status = "unavailable" }
 
             (Get-AuditInstalledSnapshotStaleness $current $live).is_stale | Should -Be $false
             (Get-AuditInstalledSnapshotStaleness $stale $live).external_skill_stale | Should -Be $true
             (Get-AuditInstalledSnapshotStaleness $legacy $live).external_skill_stale | Should -Be $true
             (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should -Be $true
+            # profile selection 取证异常（unavailable）或旧快照缺失状态时指纹不可信，必须 fail closed。
+            (Get-AuditInstalledSnapshotStaleness $unavailableProfile $live).profile_selection_stale | Should -Be $true
+            (Get-AuditInstalledSnapshotStaleness $unavailableProfile $live).is_stale | Should -Be $true
+            (Get-AuditInstalledSnapshotStaleness $legacy $live).profile_selection_stale | Should -Be $true
         }
 
         It "Treats pre-existing host projection health as state, not snapshot drift" {
@@ -1856,21 +1862,21 @@ $scan.detected.artifact_capabilities | Out-Null
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
-                configured_supply_fingerprint = "supply"
+                configured_supply_fingerprint = "supply"; profile_selection_status = "available"
                 host_projection = $hostAtSnapshot
             }
             $current = [pscustomobject]@{
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
-                configured_supply_fingerprint = "supply"
+                configured_supply_fingerprint = "supply"; profile_selection_status = "available"
                 host_projection = $hostAtSnapshot
             }
             $hostChanged = [pscustomobject]@{
                 fingerprint = "skills"
                 mcp_fingerprint = "mcp"
                 external_skill_fingerprint = "external"
-                configured_supply_fingerprint = "supply"
+                configured_supply_fingerprint = "supply"; profile_selection_status = "available"
                 host_projection = [pscustomobject]@{ status = "available"; managed_count = 9; stale_count = 1; broken_count = 0; fingerprint = "host-changed" }
             }
 
@@ -2546,10 +2552,10 @@ $scan.detected.artifact_capabilities | Out-Null
             New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-dry-run"
 
             Mock Get-AuditLiveInstalledState {
-                [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+                [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
             }
             Mock Invoke-AuditRecommendationsPreflight {
-                $stableLive = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+                $stableLive = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
                 return [pscustomobject]@{
                     success = $true
                     run_id = "r-validate-dry-run"
@@ -2564,8 +2570,8 @@ $scan.detected.artifact_capabilities | Out-Null
                     run_id = "r-validate-dry-run"
                     target = "demo"
                     changed_counts = New-AuditChangedCounts @() @()
-                    snapshot_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
-                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply" }
+                    snapshot_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
+                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external"; configured_supply_fingerprint = "supply"; profile_selection_status = "available" }
                     items = @()
                     removal_candidates = @()
                     mcp_items = @()
@@ -2789,6 +2795,14 @@ Describe "Audit git evidence fail-closed" {
     It "Throws when the scanned worktree cannot prove its index state" {
         Push-Location $TestDrive
         try {
+            # 顶层探针成功（假仓根），仅 ls-files 取证失败：钉 index fail-closed。
+            Mock Invoke-GitCaptureCore {
+                param($GitArgs, $Ok)
+                if (@($GitArgs) -contains "ls-files") { $Ok.Value = $false; return @() }
+                $Ok.Value = $true
+                return ,@("C:\fake-toplevel")
+            }
+
             { Get-AuditGitPathStatePairs @("any.txt") } | Should -Throw '*ls-files*'
         }
         finally { Pop-Location }
@@ -2852,6 +2866,49 @@ Describe "Audit git evidence fail-closed" {
             $changed.Count | Should -Be 2
             @($changed) -contains "a.txt" | Should -Be $true
             @($changed) -contains "b.txt" | Should -Be $true
+        }
+        finally { Pop-Location }
+    }
+
+    It "Fingerprints plain untracked directories by content and nested repos by head" {
+        $repo = Join-Path $TestDrive "audit-git-dir-evidence"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        & git -C $repo config user.email "t@t.invalid"
+        & git -C $repo config user.name "t"
+        Set-ContentUtf8 (Join-Path $repo "root.txt") "root"
+        & git -C $repo add root.txt
+        & git -C $repo commit -q -m init
+        # 普通未跟踪目录（父仓内）与嵌套仓各一。
+        $plainDir = Join-Path $repo "plain-dir"
+        New-Item -ItemType Directory -Path $plainDir -Force | Out-Null
+        Set-ContentUtf8 (Join-Path $plainDir "note.txt") "v1"
+        $nestedPath = Join-Path $repo "nested"
+        New-Item -ItemType Directory -Path $nestedPath -Force | Out-Null
+        & git -C $nestedPath init -q 2>$null
+        & git -C $nestedPath config user.email "t@t.invalid"
+        & git -C $nestedPath config user.name "t"
+        Set-ContentUtf8 (Join-Path $nestedPath "inner.txt") "inner"
+        & git -C $nestedPath add inner.txt
+        & git -C $nestedPath commit -q -m nested-init
+        Push-Location $repo
+        try {
+            $pairs = @(Get-AuditGitPathStatePairs @("plain-dir", "nested", "root.txt"))
+            $pairs.Count | Should -Be 3
+
+            $plainPair = @($pairs | Where-Object { $_ -like 'path|plain-dir|*' })[0]
+            $plainPair | Should -Match '\|worktree\|directory:[0-9a-f]{64}$'
+            $plainBefore = [regex]::Match($plainPair, 'directory:([0-9a-f]{64})').Groups[1].Value
+
+            # 普通目录内容变化必须移动 directory 指纹（旧实现会得到相同的父仓指纹）。
+            Set-ContentUtf8 (Join-Path $plainDir "note.txt") "v2"
+            $pairsAfter = @(Get-AuditGitPathStatePairs @("plain-dir"))
+            $plainAfter = [regex]::Match($pairsAfter[0], 'directory:([0-9a-f]{64})').Groups[1].Value
+            $plainAfter | Should -Not -Be $plainBefore
+
+            # 嵌套仓按 head|status 对取证（head 进入指纹）。
+            $nestedPair = @($pairs | Where-Object { $_ -like 'path|nested|*' })[0]
+            $nestedPair | Should -Match '\|worktree\|directory:[0-9a-f]{64}$'
         }
         finally { Pop-Location }
     }
