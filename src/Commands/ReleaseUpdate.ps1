@@ -133,6 +133,13 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     return $manifest
 }
 
+function ConvertTo-ReleaseUpdateWorkerArgument([string]$text) {
+    # Start-Process 拼接 ArgumentList 数组时不加引号；含空格/引号的值必须手工引住，
+    # 且尾随反斜杠在闭引号前会被命令行解析当作转义引号，须先剥掉。
+    if ($text -match '[\s"]') { return ('"{0}"' -f $text.TrimEnd('\')) }
+    return $text
+}
+
 function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersion, [string]$PackageType, [string]$ManifestSha256, [switch]$SyncMcp) {
     $currentRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
     Need (-not (Test-AncestorChainHasReparse $currentRoot)) ("release_install_root_reparse_forbidden：{0}" -f $currentRoot)
@@ -148,7 +155,8 @@ function Start-ReleaseUpdateHandoff([string]$StagedRoot, [string]$ExpectedVersio
     $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-CurrentRoot',$currentRoot,'-StagedRoot',$StagedRoot,'-BackupRoot',$backupRoot,'-ExpectedVersion',$ExpectedVersion,'-PackageType',$PackageType,'-ManifestSha256',$ManifestSha256,'-ParentProcessId',$PID)
     if ($SyncMcp) { $args += '-SyncMcp' }
-    $process = Start-Process -FilePath $pwsh -ArgumentList $args -WorkingDirectory $parent -WindowStyle Hidden -PassThru
+    $workerArgs = @($args | ForEach-Object { ConvertTo-ReleaseUpdateWorkerArgument ([string]$_) })
+    $process = Start-Process -FilePath $pwsh -ArgumentList ($workerArgs -join ' ') -WorkingDirectory $parent -WindowStyle Hidden -PassThru
     return [pscustomobject][ordered]@{ status = 'handoff_started'; worker_pid = $process.Id; staged_root = $StagedRoot; backup_root = $backupRoot }
 }
 

@@ -101,4 +101,11 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *skills-manager
         $scheduler | Should -Not -Match '(?i)-RunLevel\s+Highest'
         (Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\run-local-quality-gates.ps1') -Raw) | Should -Match 'approvedSchedulerPath'
     }
+
+    It 'quotes hidden worker handoff arguments so whitespace paths survive' {
+        ConvertTo-ReleaseUpdateWorkerArgument 'C:\Program Files\skills-manager' | Should -Be '"C:\Program Files\skills-manager"'
+        ConvertTo-ReleaseUpdateWorkerArgument '-NoProfile' | Should -Be '-NoProfile'
+        ConvertTo-ReleaseUpdateWorkerArgument 'C:\tools\skills-manager' | Should -Be 'C:\tools\skills-manager'
+        ConvertTo-ReleaseUpdateWorkerArgument 'C:\space dir\' | Should -Be '"C:\space dir"'
+    }
 }
