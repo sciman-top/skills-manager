@@ -236,12 +236,11 @@ Describe "Git lock recovery" {
             $oldItem = Get-Item -LiteralPath $oldRoot -Force
             $oldItem.Attributes = ($oldItem.Attributes -bor [System.IO.FileAttributes]::ReadOnly)
 
-            Mock Invoke-GitCaptureLines {
-                @(
-                    "skills/keep/SKILL.md"
-                    "skills/old/scripts/helper.js"
-                )
-            } -ParameterFilter { $GitArgs -contains "ls-files" }
+            Mock Invoke-GitCaptureCore {
+                param($GitArgs, $Ok)
+                $Ok.Value = $true
+                return ,@("skills/keep/SKILL.md", "skills/old/scripts/helper.js")
+            } -ParameterFilter { @($GitArgs) -contains "ls-files" }
 
             Push-Location $repo
             try {

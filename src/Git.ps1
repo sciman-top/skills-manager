@@ -100,7 +100,7 @@ function Invoke-Git([string[]]$GitArgs) {
         throw ("git 失败：{0}；详情：{1}" -f $cmdText, $summary)
     }
 }
-# Invoke-GitCapture / Invoke-GitCaptureLines 的公共执行核：
+# Invoke-GitCapture 的公共执行核：
 # $Ok.Value=false 表示 git 以非零退出码失败；$ExitCode.Value 传出真实退出码
 # （DryRun 时为 $null），供调用方区分"正常未命中"（如 config 键不存在 exit 1）
 # 与真实取证失败；DryRun 视为成功且无输出。
@@ -149,12 +149,6 @@ function Invoke-GitCapture([string[]]$GitArgs) {
     if (-not $ok) { return $null }
     if (@($lines).Count -eq 0) { return "" }
     return ([string]$lines[0]).Trim()
-}
-function Invoke-GitCaptureLines([string[]]$GitArgs) {
-    $ok = $false
-    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
-    if (-not $ok) { return @() }
-    return ,$lines
 }
 function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
     Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
@@ -955,7 +949,14 @@ function Remove-GitSparseCheckoutResiduals([string[]]$sparsePaths) {
     }
     # quotepath=false keeps non-ASCII paths literal; the default C-escapes
     # them, which silently breaks every line-based path consumer below.
-    $trackedPaths = @(Invoke-GitCaptureLines @("-c", "core.quotepath=false", "ls-files"))
+    # 直调核心拿 ok 位：ls-files 失败必须显式跳过预清理，不得把空结果
+    # 当"无残留"（此前双层 @() 还会让 trackedPaths 恒为单元素嵌套数组）。
+    $trackedOk = $false
+    $trackedPaths = Invoke-GitCaptureCore @("-c", "core.quotepath=false", "ls-files") ([ref]$trackedOk)
+    if (-not $trackedOk) {
+        Log ("无法读取 git ls-files，跳过 sparse 残留预清理（交由 git 后续处理）") "WARN"
+        return
+    }
     $candidates = @(Get-GitSparsePruneCandidates $trackedPaths $normalizedSparsePaths)
     foreach ($candidate in $candidates) {
         $candidatePath = $candidate -replace "/", "\"

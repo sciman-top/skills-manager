@@ -1356,10 +1356,17 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
         Set-ContentUtf8 $CfgPath $json
     }
     catch {
+        $saveError = $_
         if ($rawBackup) {
-            Set-ContentUtf8 $CfgPath $rawBackup
+            # 回滚写失败不得覆盖原始保存异常：聚合两者，归因才不失真。
+            try {
+                Set-ContentUtf8 $CfgPath $rawBackup
+            }
+            catch {
+                throw ("配置保存失败且回滚写入也失败：保存错误={0}；回滚错误={1}" -f $saveError.Exception.Message, $_.Exception.Message)
+            }
         }
-        throw
+        throw $saveError
     }
 }
 
