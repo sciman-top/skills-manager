@@ -131,6 +131,10 @@ if ($MyInvocation.InvocationName -ne '.') {
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
                 $doctorTokens += @($args)
                 $doctorResult = Invoke-Doctor $doctorTokens
+                # --json 契约：JSON 必须走 stdout（Write-Host 会被重定向/管道丢弃）。
+                if (@($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--json" }).Count -gt 0) {
+                    Write-Output ($doctorResult | ConvertTo-Json -Depth 30)
+                }
                 $strictRequested = @($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
                 if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                     exit 2

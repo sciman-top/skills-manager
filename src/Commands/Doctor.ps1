@@ -644,7 +644,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report.summary.error_count = @($report.summary.errors).Count
     $report.summary.warn_count = @($report.summary.warnings).Count
     if ($opts.json) {
-        Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
     }
     Write-Host ""

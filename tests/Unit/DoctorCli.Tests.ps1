@@ -188,4 +188,11 @@ Describe "Doctor CLI behavior" {
         $parsed.checks.network.reason | Should -Be "offline_contract"
         @($parsed.checks.mcp_transport | Where-Object protocol -eq 'streamable_http').Count | Should -BeGreaterThan 0
     }
+
+    It "Emits --json output on stdout from the Main dispatch, not from Invoke-Doctor" {
+        $mainScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Main.ps1') -Raw
+        $mainScript | Should -Match 'Write-Output \(\$doctorResult \| ConvertTo-Json -Depth 30\)'
+        $doctorScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Commands\Doctor.ps1') -Raw
+        $doctorScript | Should -Not -Match 'Write-Host \(\$report \| ConvertTo-Json'
+    }
 }
