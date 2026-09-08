@@ -63,4 +63,9 @@ Describe 'release-update-worker staged payload integrity' {
         $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $pkg.manifest_path -Encoding utf8
         { Assert-StagedPayloadIntegrity $pkg.root $pkg.manifest_sha } | Should -Throw '*changed after handoff*'
     }
+
+    It 'keeps a backup-only recovery path when current went missing mid-swap' {
+        $workerScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-worker.ps1') -Raw
+        $workerScript | Should -Match '(?s)else \{\s*# staged→current 已失败且 current 缺失：至少把 backup 搬回 current，避免安装目录消失。\s*Move-Item -LiteralPath \$backup -Destination \$current -ErrorAction Stop'
+    }
 }

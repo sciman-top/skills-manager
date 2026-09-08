@@ -135,9 +135,15 @@ try {
 catch {
     $message = $_.Exception.Message
     try {
-        if ((Test-Path -LiteralPath $backup -PathType Container) -and (Test-Path -LiteralPath $current -PathType Container)) {
-            Move-Item -LiteralPath $current -Destination $failed -ErrorAction Stop
-            Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
+        if (Test-Path -LiteralPath $backup -PathType Container) {
+            if (Test-Path -LiteralPath $current -PathType Container) {
+                Move-Item -LiteralPath $current -Destination $failed -ErrorAction Stop
+                Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
+            }
+            else {
+                # staged→current 已失败且 current 缺失：至少把 backup 搬回 current，避免安装目录消失。
+                Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
+            }
         }
         $receiptRoot = if (Test-Path -LiteralPath $current -PathType Container) { $current } elseif (Test-Path -LiteralPath $backup -PathType Container) { $backup } else { $parent }
         Write-UpdateWorkerReceipt $receiptRoot 'rolled_back_or_not_started' $message
