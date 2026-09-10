@@ -31,6 +31,7 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Reference shelf](../EXTERNAL_REFERENCE_REPO_TIERS.md)：外置参考仓的 owned-root 与刷新边界。
 - [Hardening implementation plan](skills-manager-hardening-implementation-plan.md)：2026-08 双独立审计五轮交叉评审收敛的 P0–P3 任务卡（共享 gate 分类器、schema v3 allowlist、单宿主静态 guard POC、规则减法实验、工作区清理与投影决策）。
 - [Cold-skill routing acceptance runbook](../runbooks/cold-skill-routing-acceptance.md)：host-specific 验收的输入、receipt 和停止条件；它不替代仓库测试。
+- [AI 编码效能手册](ai-coding-playbook.md)：六杠杆/常见坑到既有机制的映射、宿主元数据预算观测口径（`capability-inventory` 的 `metadata_budget`）、GPT/GLM 分工与资产积累节奏。参考件，不是规则或门禁，不进入任何宿主上下文。
 
 运行真值不写入本目录：
 
