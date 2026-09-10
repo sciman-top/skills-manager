@@ -3696,7 +3696,26 @@ function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, 
     $text = [string]$metadata.text
     $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
     $description = [string]$metadata.description
-    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+}
+
+# Additive metadata-budget observation for the retirement policy's budget
+# trigger.  Rows are raw measurements only: no host budget model, no threshold
+# and no pass impact live here; interpretation stays with the documented
+# policy (docs/product/ai-coding-playbook.md).
+function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
+    $measured = @($Items | Where-Object { $null -ne $_ -and $null -ne $_.PSObject.Properties['description_chars'] })
+    $descriptionChars = @($measured | ForEach-Object { [int]$_.description_chars })
+    $entrypointBytes = @($measured | ForEach-Object { [int]$_.entrypoint_bytes })
+    return [pscustomobject][ordered]@{
+        surface = $Surface
+        skill_count = @($Items).Count
+        measured_count = $measured.Count
+        description_chars_total = $(if ($descriptionChars.Count) { ($descriptionChars | Measure-Object -Sum).Sum } else { 0 })
+        description_chars_max = $(if ($descriptionChars.Count) { ($descriptionChars | Measure-Object -Maximum).Maximum } else { 0 })
+        entrypoint_bytes_total = $(if ($entrypointBytes.Count) { ($entrypointBytes | Measure-Object -Sum).Sum } else { 0 })
+        entrypoint_bytes_max = $(if ($entrypointBytes.Count) { ($entrypointBytes | Measure-Object -Maximum).Maximum } else { 0 })
+    }
 }
 
 function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
@@ -3922,7 +3941,16 @@ function New-SkillSurfaceView {
         }
     }
     $retirementCandidates = Get-CapabilityNativeReplacementCandidates -ProjectionConfig $projection -SourcePreferences $sourcePreferences.ToArray()
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); retirement_candidates = $retirementCandidates; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    $metadataBudget = @(
+        New-SkillMetadataBudgetRecord 'repo_supply' $repoItems
+        New-SkillMetadataBudgetRecord 'canonical_projection' $projectionItems
+        New-SkillMetadataBudgetRecord 'user_skill_root' $userItems.ToArray()
+        New-SkillMetadataBudgetRecord 'host_skill_roots' $hostRootItems.ToArray()
+        New-SkillMetadataBudgetRecord 'system' $systemItems
+        New-SkillMetadataBudgetRecord 'plugins' $pluginItems
+        New-SkillMetadataBudgetRecord 'host_visible' $hostItems
+    )
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); retirement_candidates = $retirementCandidates; metadata_budget = $metadataBudget; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }

@@ -70,6 +70,50 @@ Describe 'Read-only skill surface inventory' {
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
 
+    It 'reports additive metadata budget observability without affecting pass or identity' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $agentRoot = Join-Path $fixture 'agent'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $demoRoot = Join-Path $agentRoot 'demo'; New-Item -ItemType Directory -Force -Path $demoRoot | Out-Null
+            $skillText = "---`nname: demo`ndescription: fixture`n---`n"
+            [IO.File]::WriteAllText((Join-Path $demoRoot 'SKILL.md'), $skillText, [Text.UTF8Encoding]::new($false))
+            $snapshotPath = Join-Path $fixture 'host.json'; [IO.File]::WriteAllText($snapshotPath, (([pscustomobject]@{ captured_at = [datetimeoffset]::UtcNow.ToString('o'); coverage = 'complete'; skills = @([pscustomobject]@{ name = 'host-only'; path = 'host://skill'; entrypoint_hash = ('a' * 64); description_hash = ('b' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = 'missing-user-skills'; managed_link_includes = @(); sources = @() }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath
+            $item = @($view.surfaces | Where-Object name -eq 'repo_supply')[0].items[0]
+
+            $item.description_chars | Should -Be 7
+            $item.entrypoint_bytes | Should -Be ([Text.Encoding]::UTF8.GetByteCount($skillText))
+            $item.owner | Should -Be 'repo_generated'
+
+            $budget = $view.metadata_budget
+            @($budget).Count | Should -Be 7
+            @($budget.surface) | Should -Be @('repo_supply', 'canonical_projection', 'user_skill_root', 'host_skill_roots', 'system', 'plugins', 'host_visible')
+            $repoRow = @($budget | Where-Object surface -eq 'repo_supply')[0]
+            $repoRow.skill_count | Should -Be 1
+            $repoRow.measured_count | Should -Be 1
+            $repoRow.description_chars_total | Should -Be 7
+            $repoRow.description_chars_max | Should -Be 7
+            $repoRow.entrypoint_bytes_total | Should -Be ([Text.Encoding]::UTF8.GetByteCount($skillText))
+            $hostRow = @($budget | Where-Object surface -eq 'host_visible')[0]
+            $hostRow.skill_count | Should -Be 1
+            $hostRow.measured_count | Should -Be 0
+            $hostRow.description_chars_total | Should -Be 0
+            $emptyRow = @($budget | Where-Object surface -eq 'plugins')[0]
+            $emptyRow.skill_count | Should -Be 0
+            $emptyRow.measured_count | Should -Be 0
+            $emptyRow.entrypoint_bytes_max | Should -Be 0
+
+            $view.pass | Should -BeTrue
+            ($view.surfaces | Where-Object name -eq 'repo_supply').fingerprint | Should -Match '^[a-f0-9]{64}$'
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
     It 'retains an auditable native replacement record after its Codex profile exclusion is applied' {
         $projection = [pscustomobject]@{
             projection_profiles = [pscustomobject]@{
