@@ -3992,6 +3992,100 @@ Describe "Build transaction rollback backup preservation" {
             $DryRun = $oldDryRun
         }
     }
+
+    It "Restores catalog-stage writes into agent before the fingerprint CAS on rollback" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-catalog"
+            $txnPath = Join-Path $root "build-t5"
+            $backupAgent = Join-Path $txnPath "agent.backup"
+            New-Item -ItemType Directory -Path (Join-Path $backupAgent "skill") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $backupAgent "skill\SKILL.md") "backup"
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
+            # agent_after_fingerprint 采集于构建完成时刻；cold-discovery catalog
+            # 阶段随后向 agent/ 内写入。回滚必须先还原 catalog 快照，否则 CAS
+            # 会把合法的 catalog 写入误判为并发漂移。
+            $agentAfterFingerprint = Get-DirectoryFingerprint $AgentDir
+            $catalogFile = Join-Path $AgentDir "new\catalog.json"
+            $catalogBytes = [System.Text.Encoding]::UTF8.GetBytes("catalog-generated")
+            Set-ContentUtf8 $catalogFile "catalog-generated"
+            $catalogSnapshot = [pscustomobject][ordered]@{
+                path = [IO.Path]::GetFullPath($catalogFile)
+                existed = $false
+                bytes = [byte[]]@()
+                before_hash = ''
+                before_kind = 'missing'
+                after_known = $true
+                after_existed = $true
+                after_bytes = $catalogBytes
+                after_hash = (Get-SkillProjectionBytesSha256 $catalogBytes)
+                after_kind = 'file'
+            }
+            $txn = [pscustomobject]@{
+                path = $txnPath
+                backup_agent = $backupAgent
+                has_backup_agent = $true
+                backup_error = $null
+                agent_before_state = 'backed_up'
+                agent_before_fingerprint = Get-DirectoryFingerprint $backupAgent
+                backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+                agent_after_fingerprint = $agentAfterFingerprint
+                agent_after_fingerprint_error = ''
+                catalog_transaction = [pscustomobject]@{ file_snapshots = @($catalogSnapshot) }
+            }
+
+            Rollback-BuildTransaction $txn | Should -Be $true
+            Test-Path -LiteralPath $catalogFile | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $AgentDir "new\SKILL.md") | Should -BeFalse
+            Get-ContentUtf8 (Join-Path $AgentDir "skill\SKILL.md") | Should -Be "backup"
+            Test-Path -LiteralPath $txnPath | Should -BeFalse
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
+
+    It "Still fails closed on true concurrent drift without a catalog transaction" {
+        $oldAgentDir = $AgentDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $root = Join-Path $TestDrive "txn-drift"
+            $txnPath = Join-Path $root "build-t6"
+            $backupAgent = Join-Path $txnPath "agent.backup"
+            New-Item -ItemType Directory -Path (Join-Path $backupAgent "skill") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $backupAgent "skill\SKILL.md") "backup"
+            $AgentDir = Join-Path $root "agent"
+            New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
+            $txn = [pscustomobject]@{
+                path = $txnPath
+                backup_agent = $backupAgent
+                has_backup_agent = $true
+                backup_error = $null
+                agent_before_state = 'backed_up'
+                agent_before_fingerprint = Get-DirectoryFingerprint $backupAgent
+                backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+                agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                agent_after_fingerprint_error = ''
+            }
+            # 无事务快照覆盖的构建后变更仍是并发漂移，必须 fail closed。
+            Set-ContentUtf8 (Join-Path $AgentDir "new\stray.txt") "drift"
+
+            Rollback-BuildTransaction $txn | Should -Be $false
+            Test-Path -LiteralPath $txnPath -PathType Container | Should -BeTrue
+            Get-ContentUtf8 (Join-Path $backupAgent "skill\SKILL.md") | Should -Be "backup"
+        }
+        finally {
+            $AgentDir = $oldAgentDir
+            $DryRun = $oldDryRun
+        }
+    }
 }
 
 Describe "Managed-link-only whole-root rollback" {

@@ -26,11 +26,13 @@ function Get-SkillDiscoveryCatalogPath($projectionCfg) {
     return [IO.Path]::GetFullPath($catalogPath)
 }
 
-function Get-SkillDiscoveryPortableCatalogPath($projectionCfg) {
+function Get-SkillDiscoveryPortableCatalogPath($projectionCfg, [switch]$SkipRouterExistenceCheck) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     $routerRoot = Join-Path $managedRoot 'capability-router'
-    if (-not (Test-Path -LiteralPath (Join-Path $routerRoot 'SKILL.md') -PathType Leaf)) { return '' }
+    # SkipRouterExistenceCheck 供构建事务预登记使用：事务创建于构建前，
+    # 此时 capability-router 可能尚未被物化，但构建后 Sync 会向该路径写入。
+    if (-not $SkipRouterExistenceCheck -and -not (Test-Path -LiteralPath (Join-Path $routerRoot 'SKILL.md') -PathType Leaf)) { return '' }
     return [IO.Path]::GetFullPath((Join-Path $routerRoot 'catalog.json'))
 }
 
@@ -584,7 +586,7 @@ function New-SkillDiscoveryCatalogTransaction($projectionCfg) {
         $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
         -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
-        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg -SkipRouterExistenceCheck
         if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
     return [pscustomobject]@{
@@ -723,7 +725,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
         $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
-        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg -SkipRouterExistenceCheck
         if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'

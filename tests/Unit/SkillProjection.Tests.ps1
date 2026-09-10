@@ -168,6 +168,28 @@ unified_exec = true
         finally { $DryRun = $oldDryRun }
     }
 
+    It 'registers the portable catalog path in a transaction created before capability-router is materialized' {
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            # CI fresh-checkout 序：Preflight 只建出空 managed 根，事务创建时
+            # capability-router 尚未物化；构建后 Sync 必须仍能写入两条登记路径。
+            $managed = Join-Path $TestDrive 'catalog-transaction-prebuild'
+            New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+            $projection = [pscustomobject]@{ managed_source_path = $managed }
+
+            $transaction = New-SkillDiscoveryCatalogTransaction $projection
+            @($transaction.file_snapshots).Count | Should -Be 2
+            @($transaction.file_snapshots | Where-Object { $_.before_kind -eq 'missing' }).Count | Should -Be 2
+
+            New-ProjectionSkill $managed 'capability-router' 'capability-router' | Out-Null
+            Sync-SkillDiscoveryCatalog $projection $transaction -SkipLock | Out-Null
+            @($transaction.file_snapshots | Where-Object { -not $_.after_known }).Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $managed 'capability-router\catalog.json') -PathType Leaf | Should -BeTrue
+        }
+        finally { $DryRun = $oldDryRun }
+    }
+
     It 'projects declared cold side effects and the transitive dependency contract' {
         $managed = Join-Path $TestDrive 'closure-catalog-managed'
         New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null

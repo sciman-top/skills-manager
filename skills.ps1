@@ -12863,6 +12863,20 @@ function Rollback-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return $true }
     $restored = $false
     $restoreError = $null
+    # Cold-discovery catalog 阶段会在构建完成后向 agent/ 写入 catalog 文件，
+    # 其快照必须先于 agent/ 指纹 CAS 还原：agent_after_fingerprint 采集于
+    # 构建完成时刻，带着 catalog 写入比对会被误判为并发漂移。
+    $catalogTransaction = if ($txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
+    $catalogRestoreError = $null
+    if ($null -ne $catalogTransaction) {
+        foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
+            try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
+            catch {
+                $catalogError = ('cold-discovery catalog rollback failed: {0}' -f $_.Exception.Message)
+                $catalogRestoreError = if ([string]::IsNullOrWhiteSpace([string]$catalogRestoreError)) { $catalogError } else { '{0}; {1}' -f $catalogRestoreError, $catalogError }
+            }
+        }
+    }
     try {
         if ([string]$txn.agent_before_state -eq "present_no_backup") {
             # 备份挪动失败但构建前 agent/ 仍在：此时 agent/ 是构建前状态的唯一
@@ -12948,16 +12962,9 @@ function Rollback-BuildTransaction($txn) {
         }
     }
     finally {
-        $catalogTransaction = if ($null -ne $txn -and $txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
-        if ($null -ne $catalogTransaction) {
-            foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
-                try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
-                catch {
-                    $catalogError = ('cold-discovery catalog rollback failed: {0}' -f $_.Exception.Message)
-                    $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogError } else { '{0}; {1}' -f $restoreError, $catalogError }
-                    $restored = $false
-                }
-            }
+        if (-not [string]::IsNullOrWhiteSpace([string]$catalogRestoreError)) {
+            $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogRestoreError } else { '{0}; {1}' -f $restoreError, $catalogRestoreError }
+            $restored = $false
         }
         # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
         if ($restored -and (Test-PathEntry $txn.path)) {
@@ -24782,11 +24789,13 @@ function Get-SkillDiscoveryCatalogPath($projectionCfg) {
     return [IO.Path]::GetFullPath($catalogPath)
 }
 
-function Get-SkillDiscoveryPortableCatalogPath($projectionCfg) {
+function Get-SkillDiscoveryPortableCatalogPath($projectionCfg, [switch]$SkipRouterExistenceCheck) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     $routerRoot = Join-Path $managedRoot 'capability-router'
-    if (-not (Test-Path -LiteralPath (Join-Path $routerRoot 'SKILL.md') -PathType Leaf)) { return '' }
+    # SkipRouterExistenceCheck 供构建事务预登记使用：事务创建于构建前，
+    # 此时 capability-router 可能尚未被物化，但构建后 Sync 会向该路径写入。
+    if (-not $SkipRouterExistenceCheck -and -not (Test-Path -LiteralPath (Join-Path $routerRoot 'SKILL.md') -PathType Leaf)) { return '' }
     return [IO.Path]::GetFullPath((Join-Path $routerRoot 'catalog.json'))
 }
 
@@ -25340,7 +25349,7 @@ function New-SkillDiscoveryCatalogTransaction($projectionCfg) {
         $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
         -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
-        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg -SkipRouterExistenceCheck
         if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
     return [pscustomobject]@{
@@ -25479,7 +25488,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
         $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
-        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg -SkipRouterExistenceCheck
         if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
