@@ -1,6 +1,7 @@
 $nativeSkillProjectionRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command New-NativeSkillProjectionPlan -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Application\SkillProjection.ps1') }
+if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Core.ps1') }
 
 function Get-NativeSkillProjectionFileHash {
     param([string]$Path)
@@ -31,7 +32,7 @@ function Get-NativeSkillProjectionTargetState {
 
     $directory = [IO.Path]::GetFullPath($DirectoryPath).TrimEnd('\', '/')
     $skillPath = Join-Path $directory 'SKILL.md'
-    $item = Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
+    $item = Get-ExistingFileSystemItem $directory
     if ($null -eq $item) {
         return [pscustomobject][ordered]@{
             exists = $false
@@ -65,7 +66,7 @@ function Ensure-NativeSkillProjectionDirectory {
 function Remove-NativeSkillProjectionPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $item = Get-ExistingFileSystemItem $Path
     if ($null -eq $item) { return }
     if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) { Remove-Item -LiteralPath $Path -Force }
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
@@ -97,6 +98,9 @@ function Write-NativeSkillProjectionJsonAtomic {
 function New-NativeSkillProjectionJunction {
     param([Parameter(Mandatory = $true)][string]$LinkPath, [Parameter(Mandatory = $true)][string]$TargetPath)
 
+    $linkParent = Split-Path -Parent ([IO.Path]::GetFullPath($LinkPath))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $linkParent ([IO.Path]::GetPathRoot($linkParent))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor ([IO.Path]::GetFullPath($TargetPath)) ([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($TargetPath)))
     Ensure-NativeSkillProjectionDirectory (Split-Path -Parent $LinkPath)
     if (Get-Command New-Junction -ErrorAction SilentlyContinue) {
         New-Junction $LinkPath $TargetPath -QuietIfUnchanged
@@ -115,6 +119,10 @@ function Get-NativeSkillProjectionReceiptPath {
     $receiptRoot = [IO.Path]::GetFullPath((Join-Path $nativeSkillProjectionRepoRoot 'reports\skill-projection'))
     if (-not (Test-NativeSkillProjectionPathWithinRoot $path $receiptRoot) -or [string]::Equals($path.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $path -Parent) $receiptRoot
+    $receiptItem = Get-ExistingFileSystemItem $path
+    if ($null -ne $receiptItem) {
+        if ($receiptItem.PSIsContainer -or ($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Native projection receipt must be a regular file.' }
+    }
     return $path
 }
 
@@ -122,41 +130,96 @@ function Apply-NativeSkillProjection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Plan,
-        [string]$ReceiptPath = ''
+        [string]$ReceiptPath = '',
+        [switch]$SkipLock
     )
+
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Apply-NativeSkillProjection -Plan $Plan -ReceiptPath $ReceiptPath -SkipLock
+        })
+    }
 
     $contract = Test-NativeSkillProjectionPlanContract $Plan
     if (-not [bool]$contract.pass) { throw ('Projection plan contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
     if ([string]$Plan.status -ne 'ready' -or -not [bool]$Plan.pass) { throw 'Only a ready native projection plan can be applied.' }
 
-    $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
-    Ensure-NativeSkillProjectionDirectory $targetRoot
+    # Validate every write boundary before the first directory creation.  In
+    # particular, a caller-supplied receipt override must not leave an empty
+    # target root behind when it is rejected.
     $receiptFile = Get-NativeSkillProjectionReceiptPath $Plan $ReceiptPath
+    $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
+    $targetRootItem = Get-ExistingFileSystemItem $targetRoot
+    $targetRootExisted = $null -ne $targetRootItem
+    if ($targetRootExisted) {
+        if (-not $targetRootItem.PSIsContainer) { throw ('Projection target root is not a directory: {0}' -f $targetRoot) }
+        if (($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Projection target root must not be a reparse point: {0}' -f $targetRoot) }
+    }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
     $affectedDirectories = @(@($Plan.skills | ForEach-Object { [string]$_.target_directory }) + @($Plan.removals | ForEach-Object { [string]$_.target_directory }) | Sort-Object -Unique)
     $before = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
     $changedNames = New-Object System.Collections.Generic.List[string]
     $createdDirectories = New-Object System.Collections.Generic.List[string]
     $removedDirectories = New-Object System.Collections.Generic.List[object]
-    $temporaryPaths = New-Object System.Collections.Generic.List[string]
+    $mutations = New-Object System.Collections.Generic.List[object]
+    $temporaryPaths = New-Object System.Collections.Generic.List[object]
+    $targetRootCreationClaimed = -not $targetRootExisted
     try {
+        if ($targetRootCreationClaimed) {
+            try {
+                # Do not use -Force here.  A no-force create gives us an
+                # ownership boundary: if another writer created the root
+                # after the preflight observation, the path is treated as
+                # external and must not be removed during rollback.
+                New-Item -ItemType Directory -Path $targetRoot -ErrorAction Stop | Out-Null
+            }
+            catch {
+                # Clear the claim before inspecting the raced path.  If the
+                # inspection itself fails, the outer rollback must preserve
+                # the root rather than risk deleting an unowned path.
+                $targetRootCreationClaimed = $false
+                $racedRoot = Get-ExistingFileSystemItem $targetRoot
+                if ($null -eq $racedRoot) { throw }
+            }
+            $rootItem = Get-ExistingFileSystemItem $targetRoot
+            if ($null -eq $rootItem -or -not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'projection target root is not a regular directory after creation'
+            }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
+        }
+
         foreach ($skill in @($Plan.skills | Sort-Object name)) {
             $sourcePath = [IO.Path]::GetFullPath([string]$skill.source_path)
             $sourceDirectory = [IO.Path]::GetFullPath([string]$skill.source_directory)
             $targetDirectory = [IO.Path]::GetFullPath([string]$skill.target_directory)
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Projection source drifted: {0}' -f $sourcePath) }
             if (-not [string]::Equals((Get-NativeSkillProjectionFileHash $sourcePath), [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection source hash drifted: {0}' -f $sourcePath) }
+            Assert-NativeSkillProjectionPackageTreeHasNoReparse $sourceDirectory ([IO.Path]::GetPathRoot($sourceDirectory))
             if (-not [string]::Equals((Get-NativeSkillProjectionPackageHash $sourceDirectory), [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection package hash drifted: {0}' -f $sourceDirectory) }
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection target escaped the owned root: {0}' -f $targetDirectory) }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetDirectory) $targetRoot
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if ([bool]$current.exists) {
                 if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
                 throw ('Projection target conflict or drift: {0}' -f $targetDirectory)
             }
             $temporaryPath = Join-Path $targetRoot ('.skills-manager-native-projection-{0}' -f ([guid]::NewGuid().ToString('N')))
-            $temporaryPaths.Add($temporaryPath) | Out-Null
+            $temporaryRecord = [pscustomobject]@{ path = $temporaryPath; target = $sourceDirectory }
+            $temporaryPaths.Add($temporaryRecord) | Out-Null
             New-NativeSkillProjectionJunction $temporaryPath $sourceDirectory
             Move-Item -LiteralPath $temporaryPath -Destination $targetDirectory
-            $temporaryPaths.Remove($temporaryPath) | Out-Null
+            $temporaryPaths.Remove($temporaryRecord) | Out-Null
+            $expectedAfter = [pscustomobject][ordered]@{
+                exists = $true
+                kind = 'junction'
+                directory_path = $targetDirectory.TrimEnd('\', '/')
+                skill_path = Join-Path $targetDirectory 'SKILL.md'
+                link_target = $sourceDirectory.TrimEnd('\', '/')
+                content_hash = [string]$skill.content_hash
+                package_hash = [string]$skill.package_hash
+            }
+            $mutations.Add([pscustomobject][ordered]@{ operation = 'create'; path = $targetDirectory; target_root = $targetRoot; before = $current; after = $expectedAfter }) | Out-Null
+            if (-not (Test-NativeSkillProjectionStateEquivalent $expectedAfter (Get-NativeSkillProjectionTargetState $targetDirectory))) { throw ('Projection target creation verification failed: {0}' -f $targetDirectory) }
             $createdDirectories.Add($targetDirectory) | Out-Null
             $changedNames.Add([string]$skill.name) | Out-Null
         }
@@ -164,9 +227,20 @@ function Apply-NativeSkillProjection {
         foreach ($removal in @($Plan.removals | Sort-Object name)) {
             $targetDirectory = [IO.Path]::GetFullPath([string]$removal.target_directory)
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection removal escaped the owned root: {0}' -f $targetDirectory) }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetDirectory) $targetRoot
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if (-not [bool]$current.exists) { continue }
             if ([string]$current.kind -ne 'junction' -or -not [string]::Equals([string]$current.link_target, [string]$removal.previous_link_target, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection stale target drifted: {0}' -f $targetDirectory) }
+            $expectedAfter = [pscustomobject][ordered]@{
+                exists = $false
+                kind = 'missing'
+                directory_path = $targetDirectory.TrimEnd('\', '/')
+                skill_path = Join-Path $targetDirectory 'SKILL.md'
+                link_target = ''
+                content_hash = ''
+                package_hash = ''
+            }
+            $mutations.Add([pscustomobject][ordered]@{ operation = 'remove'; path = $targetDirectory; target_root = $targetRoot; before = $current; after = $expectedAfter }) | Out-Null
             $removedDirectories.Add($current) | Out-Null
             Remove-NativeSkillProjectionPath $targetDirectory
             $changedNames.Add([string]$removal.name) | Out-Null
@@ -210,33 +284,51 @@ function Apply-NativeSkillProjection {
     catch {
         $failure = $_
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
-        foreach ($temporaryPath in @($temporaryPaths.ToArray())) {
+        foreach ($temporaryRecord in @($temporaryPaths.ToArray())) {
             try {
+                $temporaryPath = [string]$temporaryRecord.path
+                $temporaryState = Get-NativeSkillProjectionTargetState $temporaryPath
+                if (-not $temporaryState.exists) { continue }
+                if ([string]$temporaryState.kind -ne 'junction' -or -not [string]::Equals([string]$temporaryState.link_target, [string]$temporaryRecord.target, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'temporary projection path was changed by another writer'
+                }
                 Remove-NativeSkillProjectionPath $temporaryPath
                 if ((Get-NativeSkillProjectionTargetState $temporaryPath).exists) { throw 'temporary projection path remains after cleanup' }
             }
-            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f $temporaryPath, $_.Exception.Message)) | Out-Null }
+            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f [string]$temporaryRecord.path, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) {
+        for ($mutationIndex = $mutations.Count - 1; $mutationIndex -ge 0; $mutationIndex--) {
             try {
-                Remove-NativeSkillProjectionPath $directory
-                if ((Get-NativeSkillProjectionTargetState $directory).exists) { throw 'created projection path remains after cleanup' }
-            }
-            catch { $rollbackErrors.Add(('created:{0} => {1}' -f $directory, $_.Exception.Message)) | Out-Null }
-        }
-        foreach ($state in @($removedDirectories.ToArray())) {
-            try {
-                $directory = [string]$state.directory_path
-                $current = Get-NativeSkillProjectionTargetState $directory
-                if (-not $current.exists) { New-NativeSkillProjectionJunction $directory ([string]$state.link_target) }
-                elseif (-not [string]::Equals([string]$current.kind, 'junction', [StringComparison]::OrdinalIgnoreCase) -or
-                    -not [string]::Equals([string]$current.link_target, [string]$state.link_target, [StringComparison]::OrdinalIgnoreCase)) {
-                    throw 'removed projection path was recreated with unexpected state'
+                $mutation = $mutations[$mutationIndex]
+                $path = [string]$mutation.path
+                $current = Get-NativeSkillProjectionTargetState $path
+                if (Test-NativeSkillProjectionStateEquivalent $mutation.before $current) { continue }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $mutation.after $current)) { throw ('projection rollback conflict: current state is neither before nor after: {0}' -f $path) }
+                Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $path) ([string]$mutation.target_root)
+                if ([bool]$mutation.after.exists) {
+                    if ([string]$mutation.after.kind -ne 'junction') { throw ('projection rollback refuses to remove a non-junction after-state: {0}' -f $path) }
+                    Remove-NativeSkillProjectionPath $path
                 }
-                $restored = Get-NativeSkillProjectionTargetState $directory
-                if (-not (Test-NativeSkillProjectionStateEquivalent $state $restored)) { throw 'removed projection path restore verification failed' }
+                if ([bool]$mutation.before.exists) {
+                    if ([string]$mutation.before.kind -ne 'junction') { throw ('projection rollback refuses to recreate a non-junction before-state: {0}' -f $path) }
+                    New-NativeSkillProjectionJunction $path ([string]$mutation.before.link_target)
+                }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $mutation.before (Get-NativeSkillProjectionTargetState $path))) { throw ('projection rollback verification failed: {0}' -f $path) }
             }
-            catch { $rollbackErrors.Add(('removed:{0} => {1}' -f [string]$state.directory_path, $_.Exception.Message)) | Out-Null }
+            catch { $rollbackErrors.Add(('mutation:{0} => {1}' -f [string]$mutation.path, $_.Exception.Message)) | Out-Null }
+        }
+
+        if ($targetRootCreationClaimed) {
+            try {
+                $rootItem = Get-ExistingFileSystemItem $targetRoot
+                if ($null -ne $rootItem) {
+                    if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'created target root is no longer a regular directory' }
+                    if (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -gt 0) { throw 'created target root is not empty after rollback' }
+                    Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                    if ((Get-NativeSkillProjectionTargetState $targetRoot).exists) { throw 'created target root remains after cleanup' }
+                }
+            }
+            catch { $rollbackErrors.Add(('target-root:{0} => {1}' -f $targetRoot, $_.Exception.Message)) | Out-Null }
         }
 
         foreach ($expected in @($before)) {
@@ -272,7 +364,11 @@ function Apply-NativeSkillProjection {
             rollback_errors = @($rollbackErrors.ToArray())
             recovery_required = ($rollbackErrors.Count -gt 0)
         }
-        try { Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt }
+        try {
+            $validatedReceiptFile = Get-NativeSkillProjectionReceiptPath $Plan $receiptFile
+            if (-not [string]::Equals($validatedReceiptFile, $receiptFile, [StringComparison]::OrdinalIgnoreCase)) { throw 'recovery receipt path changed during rollback' }
+            Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt
+        }
         catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptFile, $_.Exception.Message)) | Out-Null }
 
         if ($rollbackErrors.Count -gt 0) {

@@ -897,7 +897,9 @@ function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
     }
 }
 function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $dirItem = Get-ExistingFileSystemItem $dir
+    if ($null -eq $dirItem) { return "missing" }
+    Need $dirItem.PSIsContainer ("目录指纹目标不是目录：{0}" -f $dir)
     $baseDir = [System.IO.Path]::GetFullPath($dir)
     $baseWithSeparator = $baseDir
     if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
@@ -1105,6 +1107,23 @@ function RoboMirror([string]$src, [string]$dst) {
     Out-Host
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
 }
+function Get-ExistingFileSystemItem([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        return Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        # Only a genuine missing path is an acceptable null result. Access,
+        # provider, and malformed-path failures must remain visible to callers
+        # that are deciding whether a write or cleanup boundary is safe.
+        if ($_.Exception -is [System.Management.Automation.ItemNotFoundException] -or
+            [string]$_.CategoryInfo.Category -eq 'ObjectNotFound') {
+            return $null
+        }
+        throw
+    }
+}
+
 function Test-PathEntry([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     try {
@@ -1132,10 +1151,18 @@ function Test-AncestorChainHasReparse([string]$path) {
     # physical ancestor chain. Segments that do not exist yet cannot be
     # reparse points and are skipped.
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    $cursor = [IO.Path]::GetFullPath($path)
+    try { $cursor = [IO.Path]::GetFullPath($path) }
+    catch { return $true }
     while (-not [string]::IsNullOrWhiteSpace($cursor)) {
-        if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) {
-            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        try {
+            $item = Get-ExistingFileSystemItem $cursor
+            if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        catch {
+            # A path that exists but cannot be inspected is not a safe write
+            # boundary.  Missing lexical segments remain harmless and are
+            # skipped while walking toward the filesystem root.
+            if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) { return $true }
         }
         $parent = [IO.Directory]::GetParent($cursor)
         $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
@@ -1182,12 +1209,30 @@ function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
     if (-not $AllowDot -and $p -eq ".") { return $false }
     return $true
 }
-function Assert-SafeTargetDir([string]$targetPath) {
+function Assert-SafeTargetDir([string]$targetPath, [switch]$AllowManagedWholeRootJunction) {
     Need (-not [string]::IsNullOrWhiteSpace($targetPath)) "target path 不能为空"
     Need (-not (Is-DriveRoot $targetPath)) ("target path 不能是盘符根目录：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $Root $targetPath)) ("target path 不能是仓库根或其父级：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $AgentDir $targetPath)) ("target path 不能是 agent/ 或其父级：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $targetPath $AgentDir)) ("target path 不能位于 agent/ 内部：{0}" -f $targetPath)
+
+    $fullTarget = [IO.Path]::GetFullPath($targetPath).TrimEnd('\', '/')
+    $targetItem = Get-ExistingFileSystemItem $fullTarget
+    if ($null -ne $targetItem) {
+        Need $targetItem.PSIsContainer ("target path 必须是目录：{0}" -f $targetPath)
+        $targetIsReparse = ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        if ($targetIsReparse) {
+            $managedWholeRoot = $false
+            if ($AllowManagedWholeRootJunction) {
+                $currentTarget = Get-ReparsePointTargetFullPath $fullTarget
+                $managedWholeRoot = [string]::Equals([string]$currentTarget, [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+            }
+            Need $managedWholeRoot ("target path 不允许是 reparse point：{0}" -f $targetPath)
+        }
+    }
+
+    $parent = [IO.Directory]::GetParent($fullTarget)
+    Need ($null -ne $parent -and -not (Test-AncestorChainHasReparse $parent.FullName)) ("target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
 }
 function Is-ExcludedPath([string]$path, [string[]]$roots) {
     foreach ($r in $roots) {
@@ -1220,9 +1265,12 @@ function Backup-OverrideDir([string]$overrideName) {
     return $bakPath
 }
 function New-Junction([string]$linkPath, [string]$targetPath, [switch]$QuietIfUnchanged) {
-    EnsureDir $targetPath
-    EnsureDir (Split-Path $linkPath -Parent)
     $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
+    Need (-not (Test-AncestorChainHasReparse $targetFullPath)) ("junction target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
+    $linkParent = Split-Path $linkPath -Parent
+    Need (-not (Test-AncestorChainHasReparse $linkParent)) ("junction link path 的物理父级链不允许存在 reparse point：{0}" -f $linkPath)
+    EnsureDir $targetPath
+    EnsureDir $linkParent
 
     if (Test-PathEntry $linkPath) {
         if (Is-ReparsePoint $linkPath) {
@@ -4103,6 +4151,68 @@ function Evaluate-SkillEligibility {
 $skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Core.ps1') }
+
+function Get-SkillManagerProjectionMutexName([string]$RootPath) {
+    if ([string]::IsNullOrWhiteSpace($RootPath)) { throw 'Projection lock root is required.' }
+    $fullRoot = [IO.Path]::GetFullPath($RootPath).TrimEnd('\', '/')
+    # Windows paths are case-insensitive. Normalize case before hashing so a
+    # caller using a different spelling still joins the same cross-process lock.
+    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+        $fullRoot = $fullRoot.ToUpperInvariant()
+    }
+    return ('Local\skills-manager-projection-{0}' -f (Get-OperationSha256 $fullRoot).Substring(0, 32))
+}
+
+function Enter-SkillManagerProjectionLock {
+    param(
+        [string]$RootPath = $skillProjectionApplicationRepoRoot,
+        [ValidateRange(1, 60)][int]$TimeoutSeconds = 30
+    )
+
+    $name = Get-SkillManagerProjectionMutexName $RootPath
+    $mutex = $null
+    $acquired = $false
+    try {
+        $mutex = [System.Threading.Mutex]::new($false, $name)
+        try {
+            $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            # The OS has already transferred ownership to this waiter.  The
+            # abandoned owner cannot leave a stale lock behind.
+            $acquired = $true
+        }
+        if (-not $acquired) { throw ('Projection/build lock is busy: {0}' -f $name) }
+        return [pscustomobject]@{ name = $name; mutex = $mutex; acquired = $true }
+    }
+    catch {
+        if ($null -ne $mutex -and -not $acquired) { $mutex.Dispose() }
+        throw
+    }
+}
+
+function Exit-SkillManagerProjectionLock($Lease) {
+    if ($null -eq $Lease) { return }
+    $mutex = $Lease.mutex
+    try {
+        if ([bool]$Lease.acquired -and $null -ne $mutex) { $mutex.ReleaseMutex() }
+    }
+    finally {
+        if ($null -ne $mutex) { $mutex.Dispose() }
+    }
+}
+
+function Invoke-WithSkillManagerProjectionLock {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [string]$RootPath = $skillProjectionApplicationRepoRoot
+    )
+
+    $lease = Enter-SkillManagerProjectionLock $RootPath
+    try { & $ScriptBlock }
+    finally { Exit-SkillManagerProjectionLock $lease }
+}
 
 function Get-NativeSkillProjectionProperty {
     param($Object, [string[]]$Names)
@@ -4154,13 +4264,36 @@ function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
     param([string]$Path, [string]$AllowedRoot)
     $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
     $cursor = [IO.Path]::GetFullPath($Path)
-    while (Test-NativeSkillProjectionPathWithinRoot $cursor $root) {
-        if (Test-Path -LiteralPath $cursor) {
-            $item = Get-Item -LiteralPath $cursor -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Native projection path crosses a reparse point: $cursor" }
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $cursor $root)) { throw "Native projection path is outside its allowed root: $cursor" }
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        try { $item = Get-ExistingFileSystemItem $cursor }
+        catch { throw "Native projection path cannot be inspected: $cursor; $($_.Exception.Message)" }
+        if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Native projection path crosses a reparse point: $cursor"
         }
-        if ([string]::Equals($cursor.TrimEnd('\', '/'), $root, [StringComparison]::OrdinalIgnoreCase)) { break }
-        $cursor = Split-Path $cursor -Parent
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+}
+
+function Assert-NativeSkillProjectionPackageTreeHasNoReparse {
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$AllowedRoot = '')
+
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = if ([string]::IsNullOrWhiteSpace($AllowedRoot)) { [IO.Path]::GetPathRoot($fullPath) } else { [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/') }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $fullPath $boundary
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) { throw "Native projection package root is not a directory: $fullPath" }
+
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($fullPath)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Native projection package crosses a reparse point: $($entry.FullName)"
+            }
+            if ($entry.PSIsContainer) { $pending.Push($entry.FullName) }
+        }
     }
 }
 
@@ -4182,6 +4315,7 @@ function Get-NativeSkillProjectionSettings {
     if ([string]::IsNullOrWhiteSpace($userSkillRoot)) { throw 'skill_projection.user_skill_root is required for native projection.' }
     if (-not [string]::Equals($targetRoot.TrimEnd('\', '/'), $userSkillRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must equal skill_projection.user_skill_root.' }
     if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
     if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
     return [pscustomobject][ordered]@{
@@ -4317,6 +4451,16 @@ function New-NativeSkillProjectionPlan {
         }
         if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-OperationPathWithinRoot $sourcePath $sourceRoot)) {
             $findings.Add((New-OperationFinding 'source_path_outside_root' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source path is outside its declared source root.')) | Out-Null
+            continue
+        }
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw "Native projection source root is not a directory: $sourceRoot" }
+            $sourceBoundary = if ([string]::IsNullOrWhiteSpace($sourceRoot)) { [IO.Path]::GetPathRoot($sourcePath) } else { $sourceRoot }
+            if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { Assert-NativeSkillProjectionPathHasNoReparseAncestor $sourceRoot $sourceBoundary }
+            Assert-NativeSkillProjectionPackageTreeHasNoReparse ([IO.Path]::GetDirectoryName($sourcePath)) $sourceBoundary
+        }
+        catch {
+            $findings.Add((New-OperationFinding 'source_reparse_forbidden' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source roots and packages must not contain reparse points.')) | Out-Null
             continue
         }
         $contentHash = ([string](Get-NativeSkillProjectionProperty $entry @('content_hash'))).Trim().ToLowerInvariant()
@@ -4670,6 +4814,7 @@ function Get-SkillProjectionProfileContractErrors($ProjectionConfig, $Targets = 
 $nativeSkillProjectionRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command New-NativeSkillProjectionPlan -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Application\SkillProjection.ps1') }
+if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Core.ps1') }
 
 function Get-NativeSkillProjectionFileHash {
     param([string]$Path)
@@ -4700,7 +4845,7 @@ function Get-NativeSkillProjectionTargetState {
 
     $directory = [IO.Path]::GetFullPath($DirectoryPath).TrimEnd('\', '/')
     $skillPath = Join-Path $directory 'SKILL.md'
-    $item = Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
+    $item = Get-ExistingFileSystemItem $directory
     if ($null -eq $item) {
         return [pscustomobject][ordered]@{
             exists = $false
@@ -4734,7 +4879,7 @@ function Ensure-NativeSkillProjectionDirectory {
 function Remove-NativeSkillProjectionPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $item = Get-ExistingFileSystemItem $Path
     if ($null -eq $item) { return }
     if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) { Remove-Item -LiteralPath $Path -Force }
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
@@ -4766,6 +4911,9 @@ function Write-NativeSkillProjectionJsonAtomic {
 function New-NativeSkillProjectionJunction {
     param([Parameter(Mandatory = $true)][string]$LinkPath, [Parameter(Mandatory = $true)][string]$TargetPath)
 
+    $linkParent = Split-Path -Parent ([IO.Path]::GetFullPath($LinkPath))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $linkParent ([IO.Path]::GetPathRoot($linkParent))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor ([IO.Path]::GetFullPath($TargetPath)) ([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($TargetPath)))
     Ensure-NativeSkillProjectionDirectory (Split-Path -Parent $LinkPath)
     if (Get-Command New-Junction -ErrorAction SilentlyContinue) {
         New-Junction $LinkPath $TargetPath -QuietIfUnchanged
@@ -4784,6 +4932,10 @@ function Get-NativeSkillProjectionReceiptPath {
     $receiptRoot = [IO.Path]::GetFullPath((Join-Path $nativeSkillProjectionRepoRoot 'reports\skill-projection'))
     if (-not (Test-NativeSkillProjectionPathWithinRoot $path $receiptRoot) -or [string]::Equals($path.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $path -Parent) $receiptRoot
+    $receiptItem = Get-ExistingFileSystemItem $path
+    if ($null -ne $receiptItem) {
+        if ($receiptItem.PSIsContainer -or ($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Native projection receipt must be a regular file.' }
+    }
     return $path
 }
 
@@ -4791,41 +4943,96 @@ function Apply-NativeSkillProjection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Plan,
-        [string]$ReceiptPath = ''
+        [string]$ReceiptPath = '',
+        [switch]$SkipLock
     )
+
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Apply-NativeSkillProjection -Plan $Plan -ReceiptPath $ReceiptPath -SkipLock
+        })
+    }
 
     $contract = Test-NativeSkillProjectionPlanContract $Plan
     if (-not [bool]$contract.pass) { throw ('Projection plan contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
     if ([string]$Plan.status -ne 'ready' -or -not [bool]$Plan.pass) { throw 'Only a ready native projection plan can be applied.' }
 
-    $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
-    Ensure-NativeSkillProjectionDirectory $targetRoot
+    # Validate every write boundary before the first directory creation.  In
+    # particular, a caller-supplied receipt override must not leave an empty
+    # target root behind when it is rejected.
     $receiptFile = Get-NativeSkillProjectionReceiptPath $Plan $ReceiptPath
+    $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
+    $targetRootItem = Get-ExistingFileSystemItem $targetRoot
+    $targetRootExisted = $null -ne $targetRootItem
+    if ($targetRootExisted) {
+        if (-not $targetRootItem.PSIsContainer) { throw ('Projection target root is not a directory: {0}' -f $targetRoot) }
+        if (($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Projection target root must not be a reparse point: {0}' -f $targetRoot) }
+    }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
     $affectedDirectories = @(@($Plan.skills | ForEach-Object { [string]$_.target_directory }) + @($Plan.removals | ForEach-Object { [string]$_.target_directory }) | Sort-Object -Unique)
     $before = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
     $changedNames = New-Object System.Collections.Generic.List[string]
     $createdDirectories = New-Object System.Collections.Generic.List[string]
     $removedDirectories = New-Object System.Collections.Generic.List[object]
-    $temporaryPaths = New-Object System.Collections.Generic.List[string]
+    $mutations = New-Object System.Collections.Generic.List[object]
+    $temporaryPaths = New-Object System.Collections.Generic.List[object]
+    $targetRootCreationClaimed = -not $targetRootExisted
     try {
+        if ($targetRootCreationClaimed) {
+            try {
+                # Do not use -Force here.  A no-force create gives us an
+                # ownership boundary: if another writer created the root
+                # after the preflight observation, the path is treated as
+                # external and must not be removed during rollback.
+                New-Item -ItemType Directory -Path $targetRoot -ErrorAction Stop | Out-Null
+            }
+            catch {
+                # Clear the claim before inspecting the raced path.  If the
+                # inspection itself fails, the outer rollback must preserve
+                # the root rather than risk deleting an unowned path.
+                $targetRootCreationClaimed = $false
+                $racedRoot = Get-ExistingFileSystemItem $targetRoot
+                if ($null -eq $racedRoot) { throw }
+            }
+            $rootItem = Get-ExistingFileSystemItem $targetRoot
+            if ($null -eq $rootItem -or -not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'projection target root is not a regular directory after creation'
+            }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
+        }
+
         foreach ($skill in @($Plan.skills | Sort-Object name)) {
             $sourcePath = [IO.Path]::GetFullPath([string]$skill.source_path)
             $sourceDirectory = [IO.Path]::GetFullPath([string]$skill.source_directory)
             $targetDirectory = [IO.Path]::GetFullPath([string]$skill.target_directory)
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Projection source drifted: {0}' -f $sourcePath) }
             if (-not [string]::Equals((Get-NativeSkillProjectionFileHash $sourcePath), [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection source hash drifted: {0}' -f $sourcePath) }
+            Assert-NativeSkillProjectionPackageTreeHasNoReparse $sourceDirectory ([IO.Path]::GetPathRoot($sourceDirectory))
             if (-not [string]::Equals((Get-NativeSkillProjectionPackageHash $sourceDirectory), [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection package hash drifted: {0}' -f $sourceDirectory) }
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection target escaped the owned root: {0}' -f $targetDirectory) }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetDirectory) $targetRoot
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if ([bool]$current.exists) {
                 if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
                 throw ('Projection target conflict or drift: {0}' -f $targetDirectory)
             }
             $temporaryPath = Join-Path $targetRoot ('.skills-manager-native-projection-{0}' -f ([guid]::NewGuid().ToString('N')))
-            $temporaryPaths.Add($temporaryPath) | Out-Null
+            $temporaryRecord = [pscustomobject]@{ path = $temporaryPath; target = $sourceDirectory }
+            $temporaryPaths.Add($temporaryRecord) | Out-Null
             New-NativeSkillProjectionJunction $temporaryPath $sourceDirectory
             Move-Item -LiteralPath $temporaryPath -Destination $targetDirectory
-            $temporaryPaths.Remove($temporaryPath) | Out-Null
+            $temporaryPaths.Remove($temporaryRecord) | Out-Null
+            $expectedAfter = [pscustomobject][ordered]@{
+                exists = $true
+                kind = 'junction'
+                directory_path = $targetDirectory.TrimEnd('\', '/')
+                skill_path = Join-Path $targetDirectory 'SKILL.md'
+                link_target = $sourceDirectory.TrimEnd('\', '/')
+                content_hash = [string]$skill.content_hash
+                package_hash = [string]$skill.package_hash
+            }
+            $mutations.Add([pscustomobject][ordered]@{ operation = 'create'; path = $targetDirectory; target_root = $targetRoot; before = $current; after = $expectedAfter }) | Out-Null
+            if (-not (Test-NativeSkillProjectionStateEquivalent $expectedAfter (Get-NativeSkillProjectionTargetState $targetDirectory))) { throw ('Projection target creation verification failed: {0}' -f $targetDirectory) }
             $createdDirectories.Add($targetDirectory) | Out-Null
             $changedNames.Add([string]$skill.name) | Out-Null
         }
@@ -4833,9 +5040,20 @@ function Apply-NativeSkillProjection {
         foreach ($removal in @($Plan.removals | Sort-Object name)) {
             $targetDirectory = [IO.Path]::GetFullPath([string]$removal.target_directory)
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection removal escaped the owned root: {0}' -f $targetDirectory) }
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetDirectory) $targetRoot
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if (-not [bool]$current.exists) { continue }
             if ([string]$current.kind -ne 'junction' -or -not [string]::Equals([string]$current.link_target, [string]$removal.previous_link_target, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection stale target drifted: {0}' -f $targetDirectory) }
+            $expectedAfter = [pscustomobject][ordered]@{
+                exists = $false
+                kind = 'missing'
+                directory_path = $targetDirectory.TrimEnd('\', '/')
+                skill_path = Join-Path $targetDirectory 'SKILL.md'
+                link_target = ''
+                content_hash = ''
+                package_hash = ''
+            }
+            $mutations.Add([pscustomobject][ordered]@{ operation = 'remove'; path = $targetDirectory; target_root = $targetRoot; before = $current; after = $expectedAfter }) | Out-Null
             $removedDirectories.Add($current) | Out-Null
             Remove-NativeSkillProjectionPath $targetDirectory
             $changedNames.Add([string]$removal.name) | Out-Null
@@ -4879,33 +5097,51 @@ function Apply-NativeSkillProjection {
     catch {
         $failure = $_
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
-        foreach ($temporaryPath in @($temporaryPaths.ToArray())) {
+        foreach ($temporaryRecord in @($temporaryPaths.ToArray())) {
             try {
+                $temporaryPath = [string]$temporaryRecord.path
+                $temporaryState = Get-NativeSkillProjectionTargetState $temporaryPath
+                if (-not $temporaryState.exists) { continue }
+                if ([string]$temporaryState.kind -ne 'junction' -or -not [string]::Equals([string]$temporaryState.link_target, [string]$temporaryRecord.target, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'temporary projection path was changed by another writer'
+                }
                 Remove-NativeSkillProjectionPath $temporaryPath
                 if ((Get-NativeSkillProjectionTargetState $temporaryPath).exists) { throw 'temporary projection path remains after cleanup' }
             }
-            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f $temporaryPath, $_.Exception.Message)) | Out-Null }
+            catch { $rollbackErrors.Add(('temporary:{0} => {1}' -f [string]$temporaryRecord.path, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) {
+        for ($mutationIndex = $mutations.Count - 1; $mutationIndex -ge 0; $mutationIndex--) {
             try {
-                Remove-NativeSkillProjectionPath $directory
-                if ((Get-NativeSkillProjectionTargetState $directory).exists) { throw 'created projection path remains after cleanup' }
-            }
-            catch { $rollbackErrors.Add(('created:{0} => {1}' -f $directory, $_.Exception.Message)) | Out-Null }
-        }
-        foreach ($state in @($removedDirectories.ToArray())) {
-            try {
-                $directory = [string]$state.directory_path
-                $current = Get-NativeSkillProjectionTargetState $directory
-                if (-not $current.exists) { New-NativeSkillProjectionJunction $directory ([string]$state.link_target) }
-                elseif (-not [string]::Equals([string]$current.kind, 'junction', [StringComparison]::OrdinalIgnoreCase) -or
-                    -not [string]::Equals([string]$current.link_target, [string]$state.link_target, [StringComparison]::OrdinalIgnoreCase)) {
-                    throw 'removed projection path was recreated with unexpected state'
+                $mutation = $mutations[$mutationIndex]
+                $path = [string]$mutation.path
+                $current = Get-NativeSkillProjectionTargetState $path
+                if (Test-NativeSkillProjectionStateEquivalent $mutation.before $current) { continue }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $mutation.after $current)) { throw ('projection rollback conflict: current state is neither before nor after: {0}' -f $path) }
+                Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $path) ([string]$mutation.target_root)
+                if ([bool]$mutation.after.exists) {
+                    if ([string]$mutation.after.kind -ne 'junction') { throw ('projection rollback refuses to remove a non-junction after-state: {0}' -f $path) }
+                    Remove-NativeSkillProjectionPath $path
                 }
-                $restored = Get-NativeSkillProjectionTargetState $directory
-                if (-not (Test-NativeSkillProjectionStateEquivalent $state $restored)) { throw 'removed projection path restore verification failed' }
+                if ([bool]$mutation.before.exists) {
+                    if ([string]$mutation.before.kind -ne 'junction') { throw ('projection rollback refuses to recreate a non-junction before-state: {0}' -f $path) }
+                    New-NativeSkillProjectionJunction $path ([string]$mutation.before.link_target)
+                }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $mutation.before (Get-NativeSkillProjectionTargetState $path))) { throw ('projection rollback verification failed: {0}' -f $path) }
             }
-            catch { $rollbackErrors.Add(('removed:{0} => {1}' -f [string]$state.directory_path, $_.Exception.Message)) | Out-Null }
+            catch { $rollbackErrors.Add(('mutation:{0} => {1}' -f [string]$mutation.path, $_.Exception.Message)) | Out-Null }
+        }
+
+        if ($targetRootCreationClaimed) {
+            try {
+                $rootItem = Get-ExistingFileSystemItem $targetRoot
+                if ($null -ne $rootItem) {
+                    if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'created target root is no longer a regular directory' }
+                    if (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -gt 0) { throw 'created target root is not empty after rollback' }
+                    Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                    if ((Get-NativeSkillProjectionTargetState $targetRoot).exists) { throw 'created target root remains after cleanup' }
+                }
+            }
+            catch { $rollbackErrors.Add(('target-root:{0} => {1}' -f $targetRoot, $_.Exception.Message)) | Out-Null }
         }
 
         foreach ($expected in @($before)) {
@@ -4941,7 +5177,11 @@ function Apply-NativeSkillProjection {
             rollback_errors = @($rollbackErrors.ToArray())
             recovery_required = ($rollbackErrors.Count -gt 0)
         }
-        try { Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt }
+        try {
+            $validatedReceiptFile = Get-NativeSkillProjectionReceiptPath $Plan $receiptFile
+            if (-not [string]::Equals($validatedReceiptFile, $receiptFile, [StringComparison]::OrdinalIgnoreCase)) { throw 'recovery receipt path changed during rollback' }
+            Write-NativeSkillProjectionJsonAtomic $receiptFile $recoveryReceipt
+        }
         catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptFile, $_.Exception.Message)) | Out-Null }
 
         if ($rollbackErrors.Count -gt 0) {
@@ -4977,6 +5217,7 @@ function New-NativeSkillProjectionRuntimePlan {
 
     $root = [IO.Path]::GetFullPath($ManagedRoot)
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw ('Managed skill root does not exist: {0}' -f $root) }
+    Assert-NativeSkillProjectionPackageTreeHasNoReparse $root $root
     $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($ExcludedNames)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
@@ -5044,6 +5285,73 @@ function Get-NativeAgentBridgeSha256([string]$Path) {
     return ([string](Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash).ToLowerInvariant()
 }
 
+function Get-NativeAgentBridgeBytesSha256([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { return '' }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
+function Get-NativeAgentBridgeItem([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'native agent bridge path is required.' }
+    try { return Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
+    catch {
+        if ($_.Exception -is [System.Management.Automation.ItemNotFoundException]) { return $null }
+        throw
+    }
+}
+
+function Get-NativeAgentBridgeFileState([string]$Path) {
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $item = Get-NativeAgentBridgeItem $fullPath
+    if ($null -eq $item) {
+        return [pscustomobject][ordered]@{
+            path = $fullPath
+            exists = $false
+            kind = 'missing'
+            hash = ''
+            bytes = [byte[]]@()
+        }
+    }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return [pscustomobject][ordered]@{
+            path = $fullPath
+            exists = $true
+            kind = 'reparse'
+            hash = ''
+            bytes = [byte[]]@()
+        }
+    }
+    if ($item.PSIsContainer) {
+        return [pscustomobject][ordered]@{
+            path = $fullPath
+            exists = $true
+            kind = 'directory'
+            hash = ''
+            bytes = [byte[]]@()
+        }
+    }
+    $bytes = [IO.File]::ReadAllBytes($fullPath)
+    return [pscustomobject][ordered]@{
+        path = $fullPath
+        exists = $true
+        kind = 'file'
+        hash = Get-NativeAgentBridgeBytesSha256 $bytes
+        bytes = $bytes
+    }
+}
+
+function Test-NativeAgentBridgeFileStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('exists', 'kind', 'hash')) {
+        if (-not [string]::Equals([string]$Expected.$field, [string]$Actual.$field, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Get-NativeAgentBridgeTextFromBytes([byte[]]$Bytes, [string]$Path) {
+    try { return ([System.Text.UTF8Encoding]::new($false, $true)).GetString($Bytes).TrimStart([char]0xFEFF) }
+    catch { throw ('native agent bridge file is not valid UTF-8: {0}' -f $Path) }
+}
+
 function Resolve-NativeAgentBridgePath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'native_agent_bridge path is required.' }
     $resolved = $Path.Trim()
@@ -5078,43 +5386,75 @@ function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$Backu
     # 空 List 会把 $x 置为 null，后续 .Add 直接炸。
     $migrations = $MigrationLog
     if ($null -eq $migrations) { $migrations = New-Object System.Collections.Generic.List[object] }
-    if (-not (Test-Path -LiteralPath $legacyRoot)) { return @($migrations.ToArray()) }
-
-    $legacyItem = Get-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
+    $legacyItem = Get-NativeAgentBridgeItem $legacyRoot
+    if ($null -eq $legacyItem) { return @($migrations.ToArray()) }
     if (-not $legacyItem.PSIsContainer -or [bool]($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw ('legacy native agent backup root is not a regular directory: {0}' -f $legacyRoot)
     }
     if (Test-NativeAgentBridgeWithin $destinationRoot $target) { throw 'native agent backup destination must stay outside the host agent discovery root.' }
 
-    foreach ($legacyFile in @(Get-ChildItem -LiteralPath $legacyRoot -File -Filter '*.toml' -Force | Sort-Object Name)) {
-        $content = Get-Content -LiteralPath $legacyFile.FullName -Raw -Encoding UTF8
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $legacyRoot ([IO.Path]::GetPathRoot($target))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $destinationRoot) ([IO.Path]::GetPathRoot($destinationRoot))
+    $destinationItem = Get-NativeAgentBridgeItem $destinationRoot
+    if ($null -ne $destinationItem -and (-not $destinationItem.PSIsContainer -or [bool]($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw ('native agent backup destination is not a regular directory: {0}' -f $destinationRoot)
+    }
+
+    $newMigrations = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(Get-ChildItem -LiteralPath $legacyRoot -Force -ErrorAction Stop | Sort-Object Name)) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw ('legacy native agent backup contains a reparse point: {0}' -f $entry.FullName)
+        }
+        if ($entry.PSIsContainer -or $entry.Extension -ne '.toml') { continue }
+        $legacyFile = Get-NativeAgentBridgeFileState $entry.FullName
+        Need ($legacyFile.kind -eq 'file') ('legacy native agent backup is not a regular file: {0}' -f $entry.FullName)
+        $content = Get-NativeAgentBridgeTextFromBytes $legacyFile.bytes $entry.FullName
         if ($content -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { continue }
         $nameMatch = [regex]::Match($content, '(?m)^name\s*=\s*"([^"]+)"\s*$')
-        if (-not $nameMatch.Success) { throw ('legacy native agent backup lacks a role name: {0}' -f $legacyFile.FullName) }
-        Get-NativeAgentBridgeTemplate $legacyFile.FullName $nameMatch.Groups[1].Value | Out-Null
+        if (-not $nameMatch.Success) { throw ('legacy native agent backup lacks a role name: {0}' -f $legacyFile.path) }
+        $template = Get-NativeAgentBridgeTemplateRecord $legacyFile.path $nameMatch.Groups[1].Value
+        Need ([string]::Equals([string]$template.sha256, [string]$legacyFile.hash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent backup changed while it was being validated: {0}' -f $legacyFile.path)
 
-        if (-not (Test-Path -LiteralPath $destinationRoot -PathType Container)) { New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null }
-        $destinationPath = Join-Path $destinationRoot $legacyFile.Name
-        $destinationPreexisted = Test-Path -LiteralPath $destinationPath -PathType Leaf
+        if ($null -eq (Get-NativeAgentBridgeItem $destinationRoot)) {
+            New-Item -ItemType Directory -Path $destinationRoot -Force -ErrorAction Stop | Out-Null
+            $destinationItem = Get-NativeAgentBridgeItem $destinationRoot
+            if ($null -eq $destinationItem -or -not $destinationItem.PSIsContainer -or [bool]($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw ('native agent backup destination was not created as a regular directory: {0}' -f $destinationRoot)
+            }
+        }
+        $destinationPath = Join-Path $destinationRoot (Split-Path -Leaf $legacyFile.path)
+        $destinationState = Get-NativeAgentBridgeFileState $destinationPath
+        $destinationPreexisted = [bool]$destinationState.exists
         if ($destinationPreexisted) {
-            if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $legacyFile.FullName), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
+            if ($destinationState.kind -ne 'file' -or -not [string]::Equals([string]$legacyFile.hash, [string]$destinationState.hash, [StringComparison]::OrdinalIgnoreCase)) {
                 throw ('legacy native agent backup destination conflicts: {0}' -f $destinationPath)
             }
-            Remove-Item -LiteralPath $legacyFile.FullName -Force -ErrorAction Stop
+            Need (Test-NativeAgentBridgeFileStateEquivalent $legacyFile (Get-NativeAgentBridgeFileState $legacyFile.path)) ('legacy native agent backup changed before migration: {0}' -f $legacyFile.path)
+            Remove-Item -LiteralPath $legacyFile.path -Force -ErrorAction Stop
         }
-        else { Move-Item -LiteralPath $legacyFile.FullName -Destination $destinationPath -ErrorAction Stop }
-        $migrations.Add([pscustomobject][ordered]@{
-            source_path = $legacyFile.FullName
+        else {
+            Need (Test-NativeAgentBridgeFileStateEquivalent $legacyFile (Get-NativeAgentBridgeFileState $legacyFile.path)) ('legacy native agent backup changed before migration: {0}' -f $legacyFile.path)
+            Need (Test-NativeAgentBridgeFileStateEquivalent $destinationState (Get-NativeAgentBridgeFileState $destinationPath)) ('legacy native agent backup destination appeared during migration: {0}' -f $destinationPath)
+            Move-Item -LiteralPath $legacyFile.path -Destination $destinationPath -ErrorAction Stop
+        }
+        $destinationAfter = Get-NativeAgentBridgeFileState $destinationPath
+        Need ($destinationAfter.kind -eq 'file' -and [string]::Equals([string]$destinationAfter.hash, [string]$legacyFile.hash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent backup migration verification failed: {0}' -f $destinationPath)
+        Need ((Get-NativeAgentBridgeFileState $legacyFile.path).kind -eq 'missing') ('legacy native agent backup source remains after migration: {0}' -f $legacyFile.path)
+        $migration = [pscustomobject][ordered]@{
+            source_path = $legacyFile.path
             destination_path = $destinationPath
             destination_preexisted = $destinationPreexisted
+            content_sha256 = [string]$legacyFile.hash
             source_removed = $true
             legacy_root_removed = $false
-        }) | Out-Null
+        }
+        $migrations.Add($migration) | Out-Null
+        $newMigrations.Add($migration) | Out-Null
     }
 
     if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) {
         Remove-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
-        foreach ($migration in $migrations) { $migration.legacy_root_removed = $true }
+        foreach ($migration in $newMigrations) { $migration.legacy_root_removed = $true }
     }
     return @($migrations.ToArray())
 }
@@ -5122,42 +5462,84 @@ function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$Backu
 function Restore-NativeAgentBridgeLegacyMigration($Migration) {
     $sourcePath = [string]$Migration.source_path
     $destinationPath = [string]$Migration.destination_path
-    if (-not (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
-        throw ('legacy native agent migration destination is missing: {0}' -f $destinationPath)
-    }
-
     $legacyRoot = Split-Path -Parent $sourcePath
-    if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force -ErrorAction Stop | Out-Null }
-    if (Test-Path -LiteralPath $sourcePath) {
-        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
-            -not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
-            throw ('legacy native agent migration source already exists with different content: {0}' -f $sourcePath)
-        }
+    $destinationRoot = Split-Path -Parent $destinationPath
+    $expectedHash = if ($Migration.PSObject.Properties.Match('content_sha256').Count -gt 0) { [string]$Migration.content_sha256 } elseif ($Migration.PSObject.Properties.Match('source_sha256').Count -gt 0) { [string]$Migration.source_sha256 } else { '' }
+    Need ($expectedHash -match '^[a-f0-9]{64}$') ('legacy native agent migration lacks a valid content hash: {0}' -f $sourcePath)
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $legacyRoot ([IO.Path]::GetPathRoot($sourcePath))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $destinationRoot ([IO.Path]::GetPathRoot($destinationPath))
+
+    $destination = Get-NativeAgentBridgeFileState $destinationPath
+    Need ($destination.kind -eq 'file' -and [string]::Equals([string]$destination.hash, $expectedHash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent migration destination changed concurrently: {0}' -f $destinationPath)
+    $source = Get-NativeAgentBridgeFileState $sourcePath
+    if ($source.kind -eq 'reparse' -or $source.kind -eq 'directory') {
+        throw ('legacy native agent migration source is not a regular file: {0}' -f $sourcePath)
     }
-    elseif ([bool]$Migration.destination_preexisted) {
-        Copy-Item -LiteralPath $destinationPath -Destination $sourcePath -Force -ErrorAction Stop
+    if ($source.kind -eq 'file') {
+        Need ([string]::Equals([string]$source.hash, $expectedHash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent migration source already exists with different content: {0}' -f $sourcePath)
+        Need ([bool]$Migration.destination_preexisted) ('legacy native agent migration source appeared while destination was transaction-owned: {0}' -f $sourcePath)
     }
     else {
-        Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction Stop
+        $legacyItem = Get-NativeAgentBridgeItem $legacyRoot
+        if ($null -eq $legacyItem) {
+            New-Item -ItemType Directory -Path $legacyRoot -Force -ErrorAction Stop | Out-Null
+            $legacyItem = Get-NativeAgentBridgeItem $legacyRoot
+        }
+        if ($null -eq $legacyItem -or -not $legacyItem.PSIsContainer -or [bool]($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ('legacy native agent migration source parent is not a regular directory: {0}' -f $legacyRoot)
+        }
+        if ([bool]$Migration.destination_preexisted) {
+            Write-BytesAtomic -Path $sourcePath -Bytes ([byte[]]$destination.bytes)
+        }
+        else {
+            Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction Stop
+        }
     }
 
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('legacy native agent migration source was not restored: {0}' -f $sourcePath) }
-    if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $sourcePath), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
-        throw ('legacy native agent migration restore verification failed: {0}' -f $sourcePath)
+    $restoredSource = Get-NativeAgentBridgeFileState $sourcePath
+    Need ($restoredSource.kind -eq 'file' -and [string]::Equals([string]$restoredSource.hash, $expectedHash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent migration source was not restored: {0}' -f $sourcePath)
+    $restoredDestination = Get-NativeAgentBridgeFileState $destinationPath
+    if ([bool]$Migration.destination_preexisted) {
+        Need ($restoredDestination.kind -eq 'file' -and [string]::Equals([string]$restoredDestination.hash, $expectedHash, [StringComparison]::OrdinalIgnoreCase)) ('legacy native agent migration pre-existing destination changed during restore: {0}' -f $destinationPath)
+    }
+    else {
+        Need ($restoredDestination.kind -eq 'missing') ('legacy native agent migration destination remains after restore: {0}' -f $destinationPath)
     }
 }
 
-function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
-    $content = Get-Content -LiteralPath $SourcePath -Raw -Encoding UTF8
+function Assert-NativeAgentBridgeTemplateContent([string]$Content, [string]$SourcePath, [string]$Name) {
+    $content = $Content.TrimStart([char]0xFEFF)
     if ($content -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent template lacks ownership marker: {0}" -f $SourcePath) }
     if ($content -notmatch ('(?m)^name\s*=\s*"{0}"\s*$' -f [regex]::Escape($Name))) { throw ("native agent template name mismatch: {0}" -f $SourcePath) }
     foreach ($field in @('description', 'developer_instructions')) {
         if ($content -notmatch ('(?m)^{0}\s*=' -f $field)) { throw ("native agent template lacks {0}: {1}" -f $field, $SourcePath) }
     }
-    return $content
 }
 
-function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
+function Get-NativeAgentBridgeTemplateRecord($SourcePath, [string]$Name) {
+    $state = Get-NativeAgentBridgeFileState $SourcePath
+    Need ($state.kind -eq 'file') ("native agent template is not a regular file: {0}" -f $SourcePath)
+    $content = Get-NativeAgentBridgeTextFromBytes $state.bytes $SourcePath
+    Assert-NativeAgentBridgeTemplateContent $content $SourcePath $Name
+    return [pscustomobject][ordered]@{
+        path = [string]$state.path
+        content = $content.TrimStart([char]0xFEFF)
+        bytes = [byte[]]$state.bytes
+        sha256 = [string]$state.hash
+    }
+}
+
+function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
+    return [string](Get-NativeAgentBridgeTemplateRecord $SourcePath $Name).content
+}
+
+function Sync-NativeAgentBridge($Config, $PromotionContext = $null, [switch]$SkipLock) {
+    if (-not $SkipLock -and -not $DryRun) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-NativeAgentBridge $Config $PromotionContext -SkipLock
+        })
+    }
+
     $bridge = Get-NativeAgentBridgeValue (Get-NativeAgentBridgeValue $Config 'skill_projection') 'native_agent_bridge'
     if ($null -eq $bridge -or -not [bool](Get-NativeAgentBridgeValue $bridge 'enabled')) {
         return [pscustomobject]@{ enabled = $false; persisted = $false; changed_names = @(); receipt_path = ''; truth_boundary = 'not_configured' }
@@ -5181,6 +5563,10 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
     Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot $codexRoot
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
+    $receiptItem = Get-NativeAgentBridgeItem $receiptPath
+    if ($null -ne $receiptItem) {
+        if ($receiptItem.PSIsContainer -or [bool]($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'native agent bridge receipt must be a regular file.' }
+    }
 
     $names = @((Get-NativeAgentBridgeValue $bridge 'definitions') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     if ($names.Count -eq 0) { throw 'native_agent_bridge.definitions must not be empty.' }
@@ -5188,40 +5574,85 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     foreach ($name in $names) {
         if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("native_agent_bridge definition is invalid: {0}" -f $name) }
         $sourcePath = Join-Path $sourceRoot ($name + '.toml')
-        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ("native agent template is missing: {0}" -f $sourcePath) }
-        $content = Get-NativeAgentBridgeTemplate $sourcePath $name
-        $planned.Add([pscustomobject]@{ name = $name; source_path = $sourcePath; target_path = (Join-Path $targetRoot ($name + '.toml')); content = $content; source_sha256 = Get-NativeAgentBridgeSha256 $sourcePath }) | Out-Null
+        $template = Get-NativeAgentBridgeTemplateRecord $sourcePath $name
+        $planned.Add([pscustomobject][ordered]@{
+                name = $name
+                source_path = $sourcePath
+                target_path = (Join-Path $targetRoot ($name + '.toml'))
+                content = [string]$template.content
+                bytes = [byte[]]$template.bytes
+                source_sha256 = [string]$template.sha256
+            }) | Out-Null
     }
 
     if ($DryRun) {
         return [pscustomobject]@{ enabled = $true; persisted = $false; changed_names = @($planned | ForEach-Object name); receipt_path = $receiptPath; truth_boundary = 'planned'; definitions = @($planned | Select-Object name, source_path, target_path, source_sha256) }
     }
 
-    if (-not (Test-Path -LiteralPath $targetRoot -PathType Container)) { New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null }
+    $targetRootItem = Get-NativeAgentBridgeItem $targetRoot
+    $targetRootExisted = $null -ne $targetRootItem
+    if ($targetRootExisted -and (-not $targetRootItem.PSIsContainer -or [bool]($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw ('native agent target root is not a regular directory: {0}' -f $targetRoot)
+    }
+    $targetRootCreationClaimed = -not $targetRootExisted
     $before = @{}
+    $after = @{}
     $changed = New-Object System.Collections.Generic.List[string]
     $backups = New-Object System.Collections.Generic.List[string]
+    $backupRecords = New-Object System.Collections.Generic.List[object]
     $legacyBackupMigrations = @()
     $legacyMigrationLog = New-Object System.Collections.Generic.List[object]
     try {
+        if ($targetRootCreationClaimed) {
+            New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+            $targetRootItem = Get-NativeAgentBridgeItem $targetRoot
+            if ($null -eq $targetRootItem -or -not $targetRootItem.PSIsContainer -or [bool]($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw ('native agent target root was not created as a regular directory: {0}' -f $targetRoot)
+            }
+        }
+        Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
         $legacyBackupMigrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot $legacyMigrationLog)
         foreach ($definition in $planned.ToArray()) {
             $targetPath = [string]$definition.target_path
-            $existingItem = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Item -LiteralPath $targetPath -Force } else { $null }
-            if ($null -ne $existingItem -and ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ("native agent target must not be a reparse point: {0}" -f $targetPath) }
-            $existing = if ($null -ne $existingItem) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
-            $before[$targetPath] = $existing
-            if ($null -ne $existing -and $existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent target is not owned by skills-manager: {0}" -f $targetPath) }
-            if ($null -ne $existing -and [string]::Equals($existing, [string]$definition.content, [StringComparison]::Ordinal)) { continue }
-            if ($null -ne $existing) {
-                if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) { New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null }
-                $backupPath = Join-Path $backupRoot ('{0}.{1}.toml' -f $definition.name, (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
-                Write-Utf8FileAtomic -Path $backupPath -Content $existing
-                $backups.Add($backupPath) | Out-Null
+            Need (Test-NativeAgentBridgeWithin $targetPath $targetRoot) ("native agent target escaped its owned root: {0}" -f $targetPath)
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetPath) $targetRoot
+
+            $sourceState = Get-NativeAgentBridgeFileState ([string]$definition.source_path)
+            Need ($sourceState.kind -eq 'file' -and [string]::Equals([string]$sourceState.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("native agent template changed after planning: {0}" -f $definition.source_path)
+            $current = Get-NativeAgentBridgeFileState $targetPath
+            $before[$targetPath] = $current
+            if ($current.kind -eq 'reparse' -or $current.kind -eq 'directory') { throw ("native agent target must be a regular file: {0}" -f $targetPath) }
+            if ($current.kind -eq 'file') {
+                $existing = Get-NativeAgentBridgeTextFromBytes $current.bytes $targetPath
+                if ($existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent target is not owned by skills-manager: {0}" -f $targetPath) }
             }
-            Write-Utf8FileAtomic -Path $targetPath -Content ([string]$definition.content)
+            if ($current.kind -eq 'file' -and [string]::Equals([string]$current.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+
+            $beforeWrite = Get-NativeAgentBridgeFileState $targetPath
+            Need (Test-NativeAgentBridgeFileStateEquivalent $current $beforeWrite) ("native agent target changed while it was being planned: {0}" -f $targetPath)
+            if ($current.kind -eq 'file') {
+                $backupRootItem = Get-NativeAgentBridgeItem $backupRoot
+                if ($null -eq $backupRootItem) {
+                    New-Item -ItemType Directory -Path $backupRoot -Force -ErrorAction Stop | Out-Null
+                    $backupRootItem = Get-NativeAgentBridgeItem $backupRoot
+                }
+                if (-not $backupRootItem.PSIsContainer -or [bool]($backupRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw ('native agent backup root is not a regular directory: {0}' -f $backupRoot) }
+                $backupPath = Join-Path $backupRoot ('{0}.{1}.{2}.toml' -f $definition.name, (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), ([guid]::NewGuid().ToString('N')))
+                Write-BytesAtomic -Path $backupPath -Bytes ([byte[]]$current.bytes)
+                $backupState = Get-NativeAgentBridgeFileState $backupPath
+                Need ($backupState.kind -eq 'file' -and [string]::Equals([string]$backupState.hash, [string]$current.hash, [StringComparison]::OrdinalIgnoreCase)) ("native agent backup verification failed: {0}" -f $backupPath)
+                $backups.Add($backupPath) | Out-Null
+                $backupRecords.Add([pscustomobject][ordered]@{ path = $backupPath; sha256 = [string]$current.hash }) | Out-Null
+            }
+            Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$definition.bytes)
+            $written = Get-NativeAgentBridgeFileState $targetPath
+            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("native agent target verification failed: {0}" -f $targetPath)
+            $after[$targetPath] = $written
             $changed.Add([string]$definition.name) | Out-Null
         }
+        Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
         $receipt = [ordered]@{
             schema_version = 1
             status = 'applied'
@@ -5237,15 +5668,33 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             backup_root = $backupRoot
             backup_paths = @($backups.ToArray())
             legacy_backup_migrations = @($legacyBackupMigrations)
-            definitions = @($planned | ForEach-Object { [ordered]@{ name = $_.name; source_sha256 = $_.source_sha256; target_sha256 = Get-NativeAgentBridgeSha256 $_.target_path } })
+            definitions = @($planned | ForEach-Object {
+                    $targetState = Get-NativeAgentBridgeFileState ([string]$_.target_path)
+                    $beforeState = if ($before.ContainsKey([string]$_.target_path)) { $before[[string]$_.target_path] } else { $null }
+                    [ordered]@{
+                        name = $_.name
+                        source_sha256 = $_.source_sha256
+                        before_sha256 = if ($null -eq $beforeState) { '' } else { [string]$beforeState.hash }
+                        target_sha256 = [string]$targetState.hash
+                    }
+                })
             provider_calls = 0
             native_mutations = $changed.Count + $legacyBackupMigrations.Count
             writes = $changed.Count + $legacyBackupMigrations.Count
             truth_boundary = 'filesystem_projected'
         }
         $receiptDirectory = Split-Path -Parent $receiptPath
-        if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force | Out-Null }
+        $receiptDirectoryItem = Get-NativeAgentBridgeItem $receiptDirectory
+        if ($null -eq $receiptDirectoryItem) {
+            New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null
+            $receiptDirectoryItem = Get-NativeAgentBridgeItem $receiptDirectory
+        }
+        if ($null -eq $receiptDirectoryItem -or -not $receiptDirectoryItem.PSIsContainer -or [bool]($receiptDirectoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw ('native agent bridge receipt directory is not a regular directory: {0}' -f $receiptDirectory) }
         Write-Utf8FileAtomic -Path $receiptPath -Content ($receipt | ConvertTo-Json -Depth 12)
+        $persistedReceipt = Get-NativeAgentBridgeFileState $receiptPath
+        Need ($persistedReceipt.kind -eq 'file') ('native agent bridge receipt was not persisted: {0}' -f $receiptPath)
+        $persistedReceiptObject = Get-NativeAgentBridgeTextFromBytes $persistedReceipt.bytes $receiptPath | ConvertFrom-Json
+        Need ([string]$persistedReceiptObject.status -eq 'applied') ('native agent bridge receipt verification failed: {0}' -f $receiptPath)
     }
     catch {
         $failure = $_
@@ -5255,37 +5704,59 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             if (-not $before.ContainsKey($targetPath)) { continue }
             try {
                 $previous = $before[$targetPath]
-                if ($null -eq $previous) {
-                    $currentItem = Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
-                    if ($null -ne $currentItem) {
-                        if ($currentItem.PSIsContainer -or ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('refusing to remove unexpected native agent target during rollback: {0}' -f $targetPath) }
-                        Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
-                    }
-                    if (Test-Path -LiteralPath $targetPath) { throw ('native agent target still exists after rollback: {0}' -f $targetPath) }
+                $current = Get-NativeAgentBridgeFileState $targetPath
+                if (Test-NativeAgentBridgeFileStateEquivalent $previous $current) { continue }
+                Need ($after.ContainsKey($targetPath)) ("native agent target changed without an expected after-state: {0}" -f $targetPath)
+                Need (Test-NativeAgentBridgeFileStateEquivalent $after[$targetPath] $current) ("native agent target changed concurrently; rollback refused: {0}" -f $targetPath)
+                Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetPath) $targetRoot
+                if ($previous.kind -eq 'missing') {
+                    Need ($current.kind -eq 'file') ("refusing to remove unexpected native agent target during rollback: {0}" -f $targetPath)
+                    Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
                 }
                 else {
-                    $currentItem = Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
-                    if ($null -ne $currentItem -and ($currentItem.PSIsContainer -or ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-                        throw ('refusing to restore through unexpected reparse point during rollback: {0}' -f $targetPath)
-                    }
-                    Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous)
-                    $restored = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
-                    if ($null -eq $restored -or -not [string]::Equals([string]$restored, [string]$previous, [StringComparison]::Ordinal)) { throw ('native agent target content verification failed: {0}' -f $targetPath) }
+                    Need ($previous.kind -eq 'file') ("refusing to restore a non-file native agent target: {0}" -f $targetPath)
+                    Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$previous.bytes)
                 }
+                Need (Test-NativeAgentBridgeFileStateEquivalent $previous (Get-NativeAgentBridgeFileState $targetPath)) ('native agent target rollback verification failed: {0}' -f $targetPath)
             }
             catch { $rollbackErrors.Add(('target:{0} => {1}' -f $targetPath, $_.Exception.Message)) | Out-Null }
         }
-        foreach ($backupPath in @($backups.ToArray())) {
-            try {
-                if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop }
-                if (Test-Path -LiteralPath $backupPath) { throw 'backup remains after cleanup' }
-            }
-            catch { $rollbackErrors.Add(('backup:{0} => {1}' -f $backupPath, $_.Exception.Message)) | Out-Null }
-        }
+
         # 用可穿越异常的账本（含部分迁移）回滚，而不是只看已赋值的完整返回值。
         foreach ($migration in @($legacyMigrationLog.ToArray() | Sort-Object destination_path -Descending)) {
-            try { Restore-NativeAgentBridgeLegacyMigration $migration }
+            try {
+                Restore-NativeAgentBridgeLegacyMigration $migration
+            }
             catch { $rollbackErrors.Add(('legacy:{0} => {1}' -f [string]$migration.source_path, $_.Exception.Message)) | Out-Null }
+        }
+
+        # Recovery material remains available whenever any rollback step failed.
+        # If cleanup is safe, compare the recorded hash before deleting each
+        # backup so a concurrent edit is never silently discarded.
+        if ($rollbackErrors.Count -eq 0) {
+            foreach ($backup in @($backupRecords.ToArray())) {
+                try {
+                    $backupState = Get-NativeAgentBridgeFileState ([string]$backup.path)
+                    Need ($backupState.kind -eq 'file' -and [string]::Equals([string]$backupState.hash, [string]$backup.sha256, [StringComparison]::OrdinalIgnoreCase)) ('native agent backup changed concurrently: {0}' -f [string]$backup.path)
+                    Remove-Item -LiteralPath ([string]$backup.path) -Force -ErrorAction Stop
+                    Need ((Get-NativeAgentBridgeFileState ([string]$backup.path)).kind -eq 'missing') ('native agent backup remains after cleanup: {0}' -f [string]$backup.path)
+                }
+                catch { $rollbackErrors.Add(('backup:{0} => {1}' -f [string]$backup.path, $_.Exception.Message)) | Out-Null }
+            }
+        }
+
+        if ($targetRootCreationClaimed) {
+            try {
+                $rootItem = Get-NativeAgentBridgeItem $targetRoot
+                if ($null -ne $rootItem) {
+                    Need $rootItem.PSIsContainer ('created native agent target root is no longer a directory')
+                    Need (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ('created native agent target root is no longer a regular directory')
+                    Need (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -eq 0) ('created native agent target root is not empty after rollback')
+                    Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                    Need ($null -eq (Get-NativeAgentBridgeItem $targetRoot)) ('created native agent target root remains after cleanup')
+                }
+            }
+            catch { $rollbackErrors.Add(('target-root:{0} => {1}' -f $targetRoot, $_.Exception.Message)) | Out-Null }
         }
 
         $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_failed' }
@@ -5307,9 +5778,13 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
         }
         $receiptWritten = $false
         try {
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
             $receiptDirectory = Split-Path -Parent $receiptPath
-            if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null }
+            $receiptDirectoryItem = Get-NativeAgentBridgeItem $receiptDirectory
+            if ($null -eq $receiptDirectoryItem) { New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null; $receiptDirectoryItem = Get-NativeAgentBridgeItem $receiptDirectory }
+            if ($null -eq $receiptDirectoryItem -or -not $receiptDirectoryItem.PSIsContainer -or [bool]($receiptDirectoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw ('native agent bridge recovery receipt directory is not a regular directory: {0}' -f $receiptDirectory) }
             Write-Utf8FileAtomic -Path $receiptPath -Content ($recoveryReceipt | ConvertTo-Json -Depth 16)
+            Need ((Get-NativeAgentBridgeFileState $receiptPath).kind -eq 'file') ('native agent bridge recovery receipt was not persisted: {0}' -f $receiptPath)
             $receiptWritten = $true
         }
         catch { $rollbackErrors.Add(('receipt:{0} => {1}' -f $receiptPath, $_.Exception.Message)) | Out-Null }
@@ -12333,24 +12808,52 @@ function Start-BuildTransaction {
         backup_agent = $backupAgent
         has_backup_agent = $false
         backup_error = $null
+        backup_agent_fingerprint = ''
+        agent_before_fingerprint = 'missing'
+        agent_after_fingerprint = ''
+        agent_after_fingerprint_error = ''
         # 三态区分：absent=构建前无 agent/；backed_up=已挪入事务备份；
         # present_no_backup=备份挪动失败但构建前 agent/ 仍在（回滚必须 fail closed）。
         agent_before_state = "absent"
     }
     if ($DryRun) { return [pscustomobject]$state }
+    $agentParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($AgentDir))
+    Need ($null -ne $agentParent -and -not (Test-AncestorChainHasReparse $agentParent.FullName)) ("构建 agent/ 的物理父级链不允许存在 reparse point：{0}" -f $AgentDir)
+    $txnParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($txnRoot))
+    Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("构建事务的物理父级链不允许存在 reparse point：{0}" -f $txnRoot)
+    $txnRootItem = Get-ExistingFileSystemItem $txnRoot
+    if ($null -ne $txnRootItem) {
+        Need $txnRootItem.PSIsContainer ("构建事务根必须是目录：{0}" -f $txnRoot)
+        Need (($txnRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务根不允许是 reparse point：{0}" -f $txnRoot)
+    }
     EnsureDir $txnRoot
     EnsureDir $path
-    if (Test-Path $AgentDir) {
+    $txnPathItem = Get-ExistingFileSystemItem $path
+    Need ($null -ne $txnPathItem -and $txnPathItem.PSIsContainer -and ($txnPathItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务目录不是普通目录：{0}" -f $path)
+    $agentItem = Get-ExistingFileSystemItem $AgentDir
+    if ($null -ne $agentItem) {
+        Need $agentItem.PSIsContainer ("构建前 agent/ 必须是目录：{0}" -f $AgentDir)
+        Need (($agentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建前 agent/ 不允许是 reparse point：{0}" -f $AgentDir)
+        $state.agent_before_fingerprint = Get-DirectoryFingerprint $AgentDir
         $state.agent_before_state = "present_no_backup"
         try {
             Invoke-MoveItem $AgentDir $backupAgent
             $state.has_backup_agent = $true
             $state.agent_before_state = "backed_up"
+            try {
+                $state.backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+            }
+            catch {
+                # The move already succeeded. Preserve the backup and mark the
+                # transaction unusable for normal completion; rollback can then
+                # retain it instead of deleting the only known copy.
+                $state.backup_error = $_.Exception.Message
+                Log ("agent/ 已移入事务备份，但备份指纹读取失败；保留备份并阻断本次构建：{0}" -f $_.Exception.Message) "ERROR"
+            }
         }
         catch {
-            if (Test-Path $backupAgent) { Invoke-RemoveItemWithRetry $backupAgent -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
             $state.backup_error = $_.Exception.Message
-            Log ("旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：{0}" -f $_.Exception.Message)
+            Log ("旧 agent/ 无法安全挪入事务备份；保留事务现场并阻断本次构建：{0}" -f $_.Exception.Message) "ERROR"
         }
     }
     return [pscustomobject]$state
@@ -12367,35 +12870,103 @@ function Rollback-BuildTransaction($txn) {
             $restoreError = "构建前 agent/ 存在但事务备份缺失（备份挪动失败）；拒绝在无备份状态下删除现场"
         }
         else {
-            if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
-            if ($txn.has_backup_agent) {
-                if (-not (Test-Path $txn.backup_agent)) {
+            $hasFingerprintContract = @('agent_before_fingerprint', 'agent_after_fingerprint', 'agent_after_fingerprint_error') | ForEach-Object {
+                $txn.PSObject.Properties.Match($_).Count -gt 0
+            } | Where-Object { -not $_ } | Measure-Object | Select-Object -ExpandProperty Count
+            if ($hasFingerprintContract -gt 0) {
+                $restoreError = '构建事务缺少 agent/ 指纹合同；拒绝删除现场'
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace([string]$txn.agent_after_fingerprint_error)) {
+                $restoreError = ("构建后 agent/ 指纹不可用：{0}" -f [string]$txn.agent_after_fingerprint_error)
+            }
+            elseif ([string]::IsNullOrWhiteSpace([string]$txn.agent_after_fingerprint)) {
+                $restoreError = '构建事务缺少可靠的构建后 agent/ 指纹；拒绝删除现场'
+            }
+            else {
+                $currentFingerprint = ''
+                try {
+                    $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $currentItem -and (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer)) {
+                        throw '当前 agent/ 不是普通目录'
+                    }
+                    $currentFingerprint = Get-DirectoryFingerprint $AgentDir
+                }
+                catch {
+                    $restoreError = ("无法读取构建后 agent/ 指纹：{0}" -f $_.Exception.Message)
+                }
+                if ($null -eq $restoreError -and -not [string]::Equals([string]$currentFingerprint, [string]$txn.agent_after_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                    $restoreError = ("构建后 agent/ 已发生并发漂移，拒绝覆盖：expected={0}, actual={1}" -f [string]$txn.agent_after_fingerprint, $currentFingerprint)
+                }
+            }
+
+            if ($null -eq $restoreError -and (Test-PathEntry $AgentDir)) {
+                $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction Stop
+                if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer) {
+                    $restoreError = '当前 agent/ 在删除前变为非普通目录，拒绝递归删除'
+                }
+                else {
+                    try {
+                        $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
+                        if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                    }
+                    catch { $restoreError = $_.Exception.Message }
+                }
+            }
+
+            if ($null -eq $restoreError -and $txn.has_backup_agent) {
+                if (-not (Test-Path -LiteralPath $txn.backup_agent -PathType Container)) {
                     $restoreError = "agent/ 备份不存在"
                 }
-                elseif (Test-Path $AgentDir) {
+                elseif (Test-PathEntry $AgentDir) {
                     $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
                 }
                 else {
                     try {
+                        $backupItem = Get-Item -LiteralPath $txn.backup_agent -Force -ErrorAction Stop
+                        if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'agent/ 事务备份是 reparse point' }
+                        $backupFingerprint = Get-DirectoryFingerprint $txn.backup_agent
+                        if ($txn.PSObject.Properties.Match('backup_agent_fingerprint').Count -eq 0 -or
+                            -not [string]::Equals([string]$backupFingerprint, [string]$txn.backup_agent_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                            throw ("agent/ 事务备份已发生并发漂移：expected={0}, actual={1}" -f [string]$txn.backup_agent_fingerprint, $backupFingerprint)
+                        }
                         Invoke-MoveItem $txn.backup_agent $AgentDir
+                        $restoredFingerprint = Get-DirectoryFingerprint $AgentDir
+                        if (-not [string]::Equals([string]$restoredFingerprint, [string]$txn.agent_before_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                            throw ("恢复后的 agent/ 指纹不匹配：expected={0}, actual={1}" -f [string]$txn.agent_before_fingerprint, $restoredFingerprint)
+                        }
                         $restored = $true
                         Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
                     }
-                    catch {
-                        $restoreError = $_.Exception.Message
-                    }
+                    catch { $restoreError = $_.Exception.Message }
                 }
             }
-            else {
-                # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
-                $restored = -not (Test-Path $AgentDir)
-                if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
+            elseif ($null -eq $restoreError) {
+                # 构建前没有 agent/（无备份可恢复）：CAS 清理成功后即回到缺失状态。
+                $restored = [string]::Equals([string]$txn.agent_before_fingerprint, 'missing', [StringComparison]::OrdinalIgnoreCase) -and -not (Test-PathEntry $AgentDir)
+                if (-not $restored) { $restoreError = '构建前 agent/ 状态不是缺失，拒绝无备份回滚' }
             }
         }
     }
     finally {
+        $catalogTransaction = if ($null -ne $txn -and $txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
+        if ($null -ne $catalogTransaction) {
+            foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
+                try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
+                catch {
+                    $catalogError = ('cold-discovery catalog rollback failed: {0}' -f $_.Exception.Message)
+                    $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogError } else { '{0}; {1}' -f $restoreError, $catalogError }
+                    $restored = $false
+                }
+            }
+        }
         # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
-        if ($restored -and (Test-Path $txn.path)) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+        if ($restored -and (Test-PathEntry $txn.path)) {
+            $txnRemoved = Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore
+            if (-not $txnRemoved -or (Test-PathEntry $txn.path)) {
+                $restored = $false
+                $restoreError = '构建事务目录清理未完成，已保留现场'
+            }
+        }
     }
     if (-not $restored) {
         Log ("构建事务回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；原因：{1}" -f $txn.path, $restoreError) "ERROR"
@@ -12405,10 +12976,25 @@ function Rollback-BuildTransaction($txn) {
 
 function Complete-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return }
-    if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+    $txnPath = [IO.Path]::GetFullPath([string]$txn.path)
+    $txnRoot = [IO.Path]::GetFullPath((Join-Path $Root '.txn'))
+    Need (Is-PathInsideOrEqual $txnPath $txnRoot -and -not [string]::Equals($txnPath, $txnRoot, [StringComparison]::OrdinalIgnoreCase)) ("构建事务清理路径越界：{0}" -f $txnPath)
+    $txnParent = [IO.Directory]::GetParent($txnPath)
+    Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("构建事务清理路径的物理父级链不安全：{0}" -f $txnPath)
+    $txnItem = Get-ExistingFileSystemItem $txnPath
+    if ($null -eq $txnItem) { return }
+    Need $txnItem.PSIsContainer ("构建事务清理目标不是目录：{0}" -f $txnPath)
+    Need (($txnItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务清理目标不允许是 reparse point：{0}" -f $txnPath)
+    $removed = Invoke-RemoveItemWithRetry $txnPath -Recurse -IgnoreFailure
+    Need ($removed -and $null -eq (Get-ExistingFileSystemItem $txnPath)) ("构建事务目录清理未完成：{0}" -f $txnPath)
 }
 
-function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
+function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            构建Agent $cfg -SkipPreflight:$SkipPreflight -Txn $Txn -SkipLock
+        })
+    }
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -12556,6 +13142,21 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             }
             Write-Host "   建议：删除上述 mappings 后再执行【构建生效】。" -ForegroundColor Yellow
         }
+        if ($null -ne $Txn -and -not $DryRun) {
+            try {
+                $agentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction SilentlyContinue
+                if ($null -ne $agentItem -and (($agentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $agentItem.PSIsContainer)) {
+                    throw '构建后 agent/ 不是普通目录'
+                }
+                $Txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                $Txn.agent_after_fingerprint_error = ''
+            }
+            catch {
+                $Txn.agent_after_fingerprint = ''
+                $Txn.agent_after_fingerprint_error = $_.Exception.Message
+                $failures.Add(("build-txn:agent-after-fingerprint => {0}" -f $_.Exception.Message)) | Out-Null
+            }
+        }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
         return $failures.ToArray()
@@ -12577,7 +13178,12 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
+function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target, [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-ManagedLinkOnlyTarget $cfg $targetCfg $target -SkipLock
+        })
+    }
     Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
     Need ($null -ne $cfg.skill_projection) 'managed_link_only target 需要 skill_projection 配置'
     $targetHost = Get-SkillProjectionTargetHost $targetCfg
@@ -12591,16 +13197,21 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
 
     $managedRoot = [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/')
     $targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
+    Assert-SafeTargetDir $targetRoot -AllowManagedWholeRootJunction
     $migratedWholeRootLink = $false
+    $wholeRootBefore = Get-NativeSkillProjectionTargetState $targetRoot
+    $wholeRootAfter = $null
     try {
         if (Test-Path -LiteralPath $targetRoot -PathType Container) {
             $targetItem = Get-Item -LiteralPath $targetRoot -Force
             if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
                 Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
-                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
                 $migratedWholeRootLink = $true
+                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                $wholeRootAfter = Get-NativeSkillProjectionTargetState $targetRoot
                 New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+                $wholeRootAfter = Get-NativeSkillProjectionTargetState $targetRoot
             }
         }
 
@@ -12624,11 +13235,22 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
         if ($migratedWholeRootLink) {
             try {
-                if (Test-Path -LiteralPath $targetRoot) { Remove-NativeSkillProjectionPath $targetRoot }
-                if (Test-Path -LiteralPath $targetRoot) { throw 'managed_link_only target root remains after junction rollback cleanup' }
-                New-Junction $targetRoot $managedRoot
-                $restoredTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
-                if (-not [string]::Equals($restoredTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'managed_link_only target root junction restore verification failed' }
+                $currentRoot = Get-NativeSkillProjectionTargetState $targetRoot
+                if (Test-NativeSkillProjectionStateEquivalent $wholeRootBefore $currentRoot) {
+                    # Already restored by the inner transaction or an early failure.
+                }
+                elseif ($null -eq $wholeRootAfter -or -not (Test-NativeSkillProjectionStateEquivalent $wholeRootAfter $currentRoot)) {
+                    throw 'managed_link_only target root rollback conflict: current state is neither before nor after'
+                }
+                else {
+                    if ($currentRoot.exists) {
+                        if ($currentRoot.kind -ne 'directory') { throw 'managed_link_only target root after-state is not a regular directory' }
+                        if (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -gt 0) { throw 'managed_link_only target root contains unexpected concurrent entries' }
+                        Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                    }
+                    New-Junction $targetRoot $managedRoot
+                }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $wholeRootBefore (Get-NativeSkillProjectionTargetState $targetRoot))) { throw 'managed_link_only target root junction restore verification failed' }
             }
             catch { $rollbackErrors.Add(('whole-root-junction => {0}' -f $_.Exception.Message)) | Out-Null }
         }
@@ -12639,7 +13261,12 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     }
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '') {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '', [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            应用到ClaudeCodex $cfg -SkipPreflight:$SkipPreflight -PromotionContext $PromotionContext -SkillProfile $SkillProfile -SkipLock
+        })
+    }
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -12651,7 +13278,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                 try {
                     $target = Resolve-TargetDir $t.path
                     if (-not $target) { continue }
-                    Assert-SafeTargetDir $target
+                    Assert-SafeTargetDir $target -AllowManagedWholeRootJunction:([bool](Get-CfgObjectProperty $t 'managed_link_only'))
 
                     if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
                         $targetHost = Get-SkillProjectionTargetHost $t
@@ -12719,8 +13346,14 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 function 构建生效(
     [string]$SkillProfile = '',
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
-    [switch]$SkipHostProjection
+    [switch]$SkipHostProjection,
+    [switch]$SkipLock
 ) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipHostProjection:$SkipHostProjection -SkipLock
+        })
+    }
     & {
         Preflight
         $cfg = LoadCfg
@@ -12743,7 +13376,17 @@ function 构建生效(
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="
+        $catalogTransaction = $null
+        if ($SkipHostProjection -and -not $DryRun) {
+            # The catalog is the only repository-side projection performed by
+            # this branch; snapshot it before moving agent/ into the build
+            # transaction so a later failure can restore both surfaces.
+            $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
+        }
         $txn = Start-BuildTransaction
+        if ($null -ne $txn -and $null -ne $catalogTransaction) {
+            $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+        }
         Start-DryRunMirrorCollect
         try {
             $failures = @()
@@ -12755,7 +13398,7 @@ function 构建生效(
             }
             elseif ($SkipHostProjection) {
                 try {
-                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection
+                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection $catalogTransaction -SkipLock
                     if ([bool]$catalogProjection.enabled) {
                         Log ("已生成仓内 cold-discovery catalog：skills={0}，domains={1}" -f [int]$catalogProjection.skill_count, [int]$catalogProjection.domain_count)
                     }
@@ -12789,7 +13432,7 @@ function 构建生效(
             }
             if (-not $SkipHostProjection -and @($failures).Count -eq 0) {
                 try {
-                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext
+                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
                     if ([bool]$bridgeProjection.enabled) {
                         Log ("原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f ((@($bridgeProjection.changed_names) -join ','), [bool]$bridgeProjection.persisted, [string]$bridgeProjection.truth_boundary))
                     }
@@ -24347,7 +24990,12 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     return $catalog
 }
 
-function Sync-SkillDiscoveryCatalog($projectionCfg) {
+function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switch]$SkipLock) {
+    if (-not $DryRun -and -not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-SkillDiscoveryCatalog $projectionCfg $Transaction -SkipLock
+        })
+    }
     if ($null -eq $projectionCfg -or $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -eq 0) {
         return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
     }
@@ -24360,8 +25008,15 @@ function Sync-SkillDiscoveryCatalog($projectionCfg) {
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
     $portableChanged = -not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and -not [string]::Equals($portableExisting.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     if (-not $DryRun) {
-        if ($primaryChanged) { Set-ContentUtf8 $catalogPath $desired }
-        if ($portableChanged) { Set-ContentUtf8 $portableCatalogPath $desired }
+        $desiredBytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($desired)
+        if ($primaryChanged) {
+            Set-SkillProjectionFileTransactionExpectedAfter $Transaction $catalogPath $desiredBytes
+            Set-ContentUtf8 $catalogPath $desired
+        }
+        if ($portableChanged) {
+            Set-SkillProjectionFileTransactionExpectedAfter $Transaction $portableCatalogPath $desiredBytes
+            Set-ContentUtf8 $portableCatalogPath $desired
+        }
     }
     return [pscustomobject]@{
         enabled = $true
@@ -24584,42 +25239,124 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
     }
 }
 
-function Get-SkillProjectionFileTransactionSnapshot([string]$Path) {
+function Get-SkillProjectionBytesSha256([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { return '' }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
+function Get-SkillProjectionFileTransactionState([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
-    if (Test-PathEntry $fullPath) {
-        Need (Test-Path -LiteralPath $fullPath -PathType Leaf) ("Projection transaction expected a file target: {0}" -f $fullPath)
-        return [pscustomobject]@{ path = $fullPath; existed = $true; bytes = [IO.File]::ReadAllBytes($fullPath) }
+    $item = Get-ExistingFileSystemItem $fullPath
+    if ($null -eq $item) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $false; kind = 'missing'; hash = ''; bytes = [byte[]]@() }
     }
-    return [pscustomobject]@{ path = $fullPath; existed = $false; bytes = [byte[]]@() }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'reparse'; hash = ''; bytes = [byte[]]@() }
+    }
+    if ($item.PSIsContainer) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'directory'; hash = ''; bytes = [byte[]]@() }
+    }
+    $bytes = [IO.File]::ReadAllBytes($fullPath)
+    return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'file'; hash = Get-SkillProjectionBytesSha256 $bytes; bytes = $bytes }
+}
+
+function Test-SkillProjectionFileTransactionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('exists', 'kind', 'hash')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Get-SkillProjectionFileTransactionSnapshot([string]$Path) {
+    $state = Get-SkillProjectionFileTransactionState $Path
+    Need ([string]$state.kind -in @('missing', 'file')) ("Projection transaction expected a regular file target: {0}" -f $state.path)
+    $parent = [IO.Directory]::GetParent([string]$state.path)
+    Need ($null -ne $parent -and -not (Test-AncestorChainHasReparse $parent.FullName)) ("Projection transaction file path crosses a reparse point: {0}" -f $state.path)
+    return [pscustomobject][ordered]@{
+        path = [string]$state.path
+        existed = [bool]$state.exists
+        bytes = [byte[]]$state.bytes
+        before_hash = [string]$state.hash
+        before_kind = [string]$state.kind
+        after_known = $false
+        after_existed = $false
+        after_bytes = [byte[]]@()
+        after_hash = ''
+        after_kind = 'missing'
+    }
+}
+
+function Set-SkillProjectionFileTransactionExpectedAfter($Transaction, [string]$Path, [byte[]]$Bytes) {
+    if ($null -eq $Transaction) { return }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $snapshot = @($Transaction.file_snapshots | Where-Object { [string]$_.path -eq $fullPath })[0]
+    Need ($null -ne $snapshot) ("Projection transaction has no snapshot for write target: {0}" -f $fullPath)
+    $snapshot.after_known = $true
+    $snapshot.after_existed = $true
+    $snapshot.after_bytes = [byte[]]$Bytes
+    $snapshot.after_hash = Get-SkillProjectionBytesSha256 $Bytes
+    $snapshot.after_kind = 'file'
+}
+
+function Set-SkillProjectionFileTransactionExpectedAfterFromPath($Transaction, [string]$Path) {
+    $state = Get-SkillProjectionFileTransactionState $Path
+    Need ([string]$state.kind -eq 'file') ("Projection transaction expected a regular file after write: {0}" -f $Path)
+    Set-SkillProjectionFileTransactionExpectedAfter $Transaction $Path ([byte[]]$state.bytes)
 }
 
 function Restore-SkillProjectionFileTransactionSnapshot($Snapshot) {
     $path = [IO.Path]::GetFullPath([string]$Snapshot.path)
-    if (-not [bool]$Snapshot.existed) {
-        if (Test-PathEntry $path) {
-            Need (Test-Path -LiteralPath $path -PathType Leaf) ("Projection rollback found non-file drift: {0}" -f $path)
-            Remove-Item -LiteralPath $path -Force
-        }
-        return
+    $before = [pscustomobject]@{
+        path = $path
+        exists = [bool]$Snapshot.existed
+        kind = if ([string]::IsNullOrWhiteSpace([string]$Snapshot.before_kind)) { if ([bool]$Snapshot.existed) { 'file' } else { 'missing' } } else { [string]$Snapshot.before_kind }
+        hash = if ($Snapshot.PSObject.Properties.Match('before_hash').Count -gt 0) { [string]$Snapshot.before_hash } else { if ([bool]$Snapshot.existed) { Get-SkillProjectionBytesSha256 ([byte[]]$Snapshot.bytes) } else { '' } }
+    }
+    $current = Get-SkillProjectionFileTransactionState $path
+    if (Test-SkillProjectionFileTransactionStateEquivalent $before $current) { return }
+    Need ([bool]$Snapshot.after_known) ("Projection rollback conflict: target changed without a recorded expected-after state: {0}" -f $path)
+    $after = [pscustomobject]@{ path = $path; exists = [bool]$Snapshot.after_existed; kind = [string]$Snapshot.after_kind; hash = [string]$Snapshot.after_hash }
+    Need (Test-SkillProjectionFileTransactionStateEquivalent $after $current) ("Projection rollback conflict: current file is neither before nor after state: {0}" -f $path)
+
+    if (-not [bool]$before.exists) {
+        Need ([string]$current.kind -eq 'file') ("Projection rollback refuses to remove a non-file after-state: {0}" -f $path)
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    else {
+        Need ([string]$before.kind -eq 'file') ("Projection rollback refuses to restore a non-file before-state: {0}" -f $path)
+        $parent = [IO.Directory]::GetParent($path)
+        Need ($null -ne $parent -and (Test-Path -LiteralPath $parent.FullName -PathType Container)) ("Projection rollback parent is missing: {0}" -f $path)
+        Need (-not (Test-AncestorChainHasReparse $parent.FullName)) ("Projection rollback parent crosses a reparse point: {0}" -f $path)
+        Write-BytesAtomic -Path $path -Bytes ([byte[]]$Snapshot.bytes)
     }
 
-    EnsureDir (Split-Path -Parent $path)
-    $temporaryPath = '{0}.rollback.{1}' -f $path, ([guid]::NewGuid().ToString('N'))
-    try {
-        [IO.File]::WriteAllBytes($temporaryPath, [byte[]]$Snapshot.bytes)
-        Move-Item -LiteralPath $temporaryPath -Destination $path -Force
+    Need (Test-SkillProjectionFileTransactionStateEquivalent $before (Get-SkillProjectionFileTransactionState $path)) ("Projection rollback verification failed: {0}" -f $path)
+}
+
+function New-SkillDiscoveryCatalogTransaction($projectionCfg) {
+    $filePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $projectionCfg -and
+        $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
+        -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
+        $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
-    finally {
-        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+    return [pscustomobject]@{
+        file_snapshots = @($filePaths | Sort-Object | ForEach-Object { Get-SkillProjectionFileTransactionSnapshot $_ })
+        preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     }
 }
 
 function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$TargetRoot) {
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     $targetRootPath = Resolve-SkillProjectionPath $TargetRoot
-    $rootExisted = Test-Path -LiteralPath $targetRootPath -PathType Container
-    if (Test-PathEntry $targetRootPath) {
+    $targetRootItem = Get-ExistingFileSystemItem $targetRootPath
+    $rootExisted = $null -ne $targetRootItem -and $targetRootItem.PSIsContainer
+    if ($null -ne $targetRootItem) {
         Need $rootExisted ("Projection target root is not a directory: {0}" -f $targetRootPath)
+        Need (($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("Projection transaction target root must be a regular directory: {0}" -f $targetRootPath)
     }
 
     $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -24639,22 +25376,22 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
             Need (Is-ReparsePoint $linkPath) ("Projection target conflict is not a managed junction: {0}" -f $linkPath)
             $target = Get-ReparsePointTargetFullPath $linkPath
             Need (-not [string]::IsNullOrWhiteSpace($target)) ("Projection target junction cannot be resolved: {0}" -f $linkPath)
-            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
         }
         else {
-            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $false; target = '' }
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $false; target = ''; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
         }
     }
 
     if ($rootExisted) {
         $managedPrefix = $managedRoot.TrimEnd('\') + '\'
-        foreach ($entry in @(Get-ChildItem -LiteralPath $targetRootPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $targetRootPath -Directory -Force -ErrorAction Stop | Where-Object Name -ne '.system')) {
             if (-not (Is-ReparsePoint $entry.FullName)) { continue }
             $target = Get-ReparsePointTargetFullPath $entry.FullName
             if ([string]::IsNullOrWhiteSpace($target) -or -not $target.StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
             $linkPath = [IO.Path]::GetFullPath($entry.FullName)
             if (-not $affected.ContainsKey($linkPath)) {
-                $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+                $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
             }
         }
     }
@@ -24667,32 +25404,70 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
     }
 }
 
+function Get-CodexManagedSkillLinkTransactionState([string]$Path) {
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $item = Get-ExistingFileSystemItem $fullPath
+    if ($null -eq $item) { return [pscustomobject]@{ path = $fullPath; existed = $false; kind = 'missing'; target = '' } }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return [pscustomobject]@{ path = $fullPath; existed = $true; kind = 'junction'; target = [string](Get-ReparsePointTargetFullPath $fullPath) }
+    }
+    return [pscustomobject]@{ path = $fullPath; existed = $true; kind = if ($item.PSIsContainer) { 'directory' } else { 'file' }; target = '' }
+}
+
+function Test-CodexManagedSkillLinkTransactionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('existed', 'kind', 'target')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Set-CodexManagedSkillLinkTransactionExpectedAfter($Transaction, [string]$TargetRoot) {
+    if ($null -eq $Transaction) { return }
+    $snapshot = @($Transaction.link_snapshots | Where-Object { [string]$_.target_root -eq [IO.Path]::GetFullPath($TargetRoot) })[0]
+    Need ($null -ne $snapshot) ("Projection transaction has no link snapshot for target root: {0}" -f $TargetRoot)
+    foreach ($entry in @($snapshot.entries)) {
+        $state = Get-CodexManagedSkillLinkTransactionState ([string]$entry.path)
+        $entry.after_known = $true
+        $entry.after_existed = [bool]$state.existed
+        $entry.after_kind = [string]$state.kind
+        $entry.after_target = [string]$state.target
+    }
+}
+
 function Restore-CodexManagedSkillLinkTransactionSnapshot($Snapshot) {
     $managedRoot = [IO.Path]::GetFullPath([string]$Snapshot.managed_root)
     foreach ($state in @($Snapshot.entries | Sort-Object path -Descending)) {
         $path = [IO.Path]::GetFullPath([string]$state.path)
-        if ([bool]$state.existed) {
-            if (Test-PathEntry $path) {
-                Need (Is-ReparsePoint $path) ("Projection link rollback found non-junction drift: {0}" -f $path)
-                $currentTarget = Get-ReparsePointTargetFullPath $path
-                if ([string]::Equals([string]$currentTarget, [string]$state.target, [StringComparison]::OrdinalIgnoreCase)) { continue }
-                Invoke-RemoveItem $path -Recurse
-            }
-            New-Junction $path ([string]$state.target) -QuietIfUnchanged
-            continue
-        }
+        $before = [pscustomobject]@{ path = $path; existed = [bool]$state.existed; kind = if ([bool]$state.existed) { 'junction' } else { 'missing' }; target = [string]$state.target }
+        $current = Get-CodexManagedSkillLinkTransactionState $path
+        if (Test-CodexManagedSkillLinkTransactionStateEquivalent $before $current) { continue }
+        Need ([bool]$state.after_known) ("Projection link rollback conflict: target changed without a recorded expected-after state: {0}" -f $path)
+        $after = [pscustomobject]@{ path = $path; existed = [bool]$state.after_existed; kind = [string]$state.after_kind; target = [string]$state.after_target }
+        Need (Test-CodexManagedSkillLinkTransactionStateEquivalent $after $current) ("Projection link rollback conflict: current state is neither before nor after: {0}" -f $path)
 
-        if (Test-PathEntry $path) {
-            Need (Is-ReparsePoint $path) ("Projection link rollback found unexpected non-junction state: {0}" -f $path)
-            $currentTarget = Get-ReparsePointTargetFullPath $path
-            Need (-not [string]::IsNullOrWhiteSpace($currentTarget) -and (Is-PathInsideOrEqual $currentTarget $managedRoot)) ("Projection link rollback refused an unrelated junction: {0}" -f $path)
-            Invoke-RemoveItem $path -Recurse
+        if ($current.existed) {
+            Need ($current.kind -eq 'junction') ("Projection link rollback refuses to remove a non-junction after-state: {0}" -f $path)
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
+        if ($before.existed) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$before.target)) ("Projection link rollback cannot resolve the before target: {0}" -f $path)
+            Need (Is-PathInsideOrEqual ([string]$before.target) $managedRoot) ("Projection link rollback refused an unrelated junction: {0}" -f $path)
+            New-Junction $path ([string]$before.target) -QuietIfUnchanged
+        }
+        Need (Test-CodexManagedSkillLinkTransactionStateEquivalent $before (Get-CodexManagedSkillLinkTransactionState $path)) ("Projection link rollback verification failed: {0}" -f $path)
     }
 
     $targetRoot = [IO.Path]::GetFullPath([string]$Snapshot.target_root)
-    if (-not [bool]$Snapshot.root_existed -and (Test-Path -LiteralPath $targetRoot -PathType Container) -and @(Get-ChildItem -LiteralPath $targetRoot -Force).Count -eq 0) {
-        Remove-Item -LiteralPath $targetRoot -Force
+    if (-not [bool]$Snapshot.root_existed) {
+        $rootItem = Get-ExistingFileSystemItem $targetRoot
+        if ($null -ne $rootItem) {
+            Need $rootItem.PSIsContainer ("Projection rollback found a non-directory created root: {0}" -f $targetRoot)
+            Need (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("Projection rollback refuses to remove a reparse created root: {0}" -f $targetRoot)
+            Need (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -eq 0) ("Projection rollback found unexpected entries in created root: {0}" -f $targetRoot)
+            Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+            Need (-not (Test-PathEntry $targetRoot)) ("Projection rollback created root remains: {0}" -f $targetRoot)
+        }
     }
 }
 
@@ -24732,6 +25507,8 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
         file_snapshots = @($filePaths | Sort-Object | ForEach-Object { Get-SkillProjectionFileTransactionSnapshot $_ })
         link_snapshots = @($linkSnapshots.ToArray())
         config_backup_path = ''
+        config_backup_hash = ''
+        preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     }
 }
 
@@ -24741,7 +25518,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
-    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg
+    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg $transaction -SkipLock
     $nativeProjectionPlan = $null
     $nativeProjectionFingerprintPlan = $null
     $nativeProjectionApply = $null
@@ -24760,7 +25537,22 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
         }
         else {
-            $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
+            try {
+                $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
+            }
+            catch {
+                # Native apply writes a durable recovery receipt before it
+                # rethrows.  Aggregate rollback must not restore the old
+                # receipt over that evidence.
+                if ($null -ne $transaction -and $null -ne $transaction.preserve_file_paths) {
+                    $transaction.preserve_file_paths.Add([IO.Path]::GetFullPath([string]$nativeProjectionPlan.receipt_path)) | Out-Null
+                }
+                throw
+            }
+            if ($null -ne $transaction) {
+                Set-SkillProjectionFileTransactionExpectedAfterFromPath $transaction ([string]$nativeProjectionPlan.receipt_path)
+                Set-CodexManagedSkillLinkTransactionExpectedAfter $transaction ([string]$nativeProjectionPlan.target_root)
+            }
             # The apply plan can contain owned links that are removed while switching
             # profiles. Persist the post-apply steady state in the manifest
             # fingerprint so a fresh validation does not treat that successful
@@ -24781,6 +25573,12 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             if ($changed) {
                 $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
                 if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
+                if ($null -ne $transaction -and -not [string]::IsNullOrWhiteSpace([string]$writtenBackupPath)) {
+                    $transaction.config_backup_hash = ([string](Get-FileHash -LiteralPath $writtenBackupPath -Algorithm SHA256).Hash).ToLowerInvariant()
+                }
+                if ($null -ne $transaction) {
+                    Set-SkillProjectionFileTransactionExpectedAfter $transaction $configPath ((New-Object System.Text.UTF8Encoding($false)).GetBytes($desired))
+                }
                 Set-ContentUtf8 $configPath $desired
             }
             $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionFingerprintPlan $selection
@@ -24834,7 +25632,11 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                     truncated = [bool]$nativeProjectionPlan.truncated
                 } }
             }
-            Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+            $manifestText = $manifest | ConvertTo-Json -Depth 20
+            if ($null -ne $transaction) {
+                Set-SkillProjectionFileTransactionExpectedAfter $transaction $manifestPath ((New-Object System.Text.UTF8Encoding($false)).GetBytes($manifestText))
+            }
+            Set-ContentUtf8 $manifestPath $manifestText
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
         }
         $backupPath = [string]$writeResult.backup_path
@@ -24854,8 +25656,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     }
 }
 
-function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
+function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null, [switch]$SkipLock) {
     if ($DryRun) { return Invoke-CodexSkillProjectionSyncCore $projectionCfg $promotionContext }
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-CodexSkillProjection $projectionCfg $promotionContext -SkipLock
+        })
+    }
 
     $configRaw = if ($projectionCfg.PSObject.Properties.Match('codex_config_path').Count -gt 0) { [string]$projectionCfg.codex_config_path } else { '~/.codex/config.toml' }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match('manifest_path').Count -gt 0) { [string]$projectionCfg.manifest_path } else { 'reports/skill-projection/current.json' }
@@ -24873,11 +25680,17 @@ function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         foreach ($snapshot in @($transaction.file_snapshots | Sort-Object path -Descending)) {
+            if ($null -ne $transaction.preserve_file_paths -and $transaction.preserve_file_paths.Contains([IO.Path]::GetFullPath([string]$snapshot.path))) { continue }
             try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$transaction.config_backup_path) -and (Test-Path -LiteralPath ([string]$transaction.config_backup_path) -PathType Leaf)) {
-            try { Remove-Item -LiteralPath ([string]$transaction.config_backup_path) -Force }
+            try {
+                $backupPath = [IO.Path]::GetFullPath([string]$transaction.config_backup_path)
+                $backupHash = ([string](Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash).ToLowerInvariant()
+                Need ([string]::IsNullOrWhiteSpace([string]$transaction.config_backup_hash) -or [string]::Equals($backupHash, [string]$transaction.config_backup_hash, [StringComparison]::OrdinalIgnoreCase)) ("Projection rollback backup changed concurrently: {0}" -f $backupPath)
+                Remove-Item -LiteralPath $backupPath -Force
+            }
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         if ($rollbackErrors.Count -gt 0) {

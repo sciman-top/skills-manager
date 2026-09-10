@@ -3703,6 +3703,63 @@ Describe "构建生效 rollback compensation" {
             $Root = $oldRoot
         }
     }
+
+    It "passes a catalog transaction when host projection is skipped" {
+        $oldDryRun = $DryRun
+        $oldCfgPath = $CfgPath
+        $oldLogPath = $LogPath
+        $oldRoot = $Root
+        $oldLocked = $Locked
+        $oldSuppressAllLogging = $script:SuppressAllLogging
+        try {
+            $DryRun = $false
+            $Locked = $false
+            $script:SuppressAllLogging = $true
+            $Root = Join-Path $TestDrive "ws-build-skip-host"
+            New-Item -ItemType Directory -Path $Root -Force | Out-Null
+            $CfgPath = Join-Path $Root "skills.json"
+            $LogPath = Join-Path $Root "build.log"
+            $managed = Join-Path $Root "agent"
+            $cfg = [pscustomobject]@{
+                vendors = @(); targets = @(); mappings = @(); imports = @()
+                mcp_servers = @(); mcp_targets = @(); sync_mode = "link"; update_force = $true
+                skill_projection = [pscustomobject]@{ managed_source_path = $managed }
+            }
+            Mock Preflight {}
+            Mock LoadCfg { $cfg }
+            Mock SaveCfg {}
+            Mock Optimize-Imports {}
+            Mock Write-BuildSummary {}
+            Mock New-SkillDiscoveryCatalogTransaction {
+                [pscustomobject]@{
+                    file_snapshots = @()
+                    preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                }
+            }
+            Mock Start-BuildTransaction { [pscustomobject]@{ path = (Join-Path $Root '.txn\build-test') } }
+            Mock 构建Agent { @() }
+            Mock Sync-SkillDiscoveryCatalog {
+                param($ProjectionCfg, $Transaction, [switch]$SkipLock)
+                if ($null -eq $Transaction) { throw 'catalog transaction missing' }
+                [pscustomobject]@{ enabled = $false; changed = $false; persisted = $false; skill_count = 0; domain_count = 0 }
+            }
+            Mock Complete-BuildTransaction {}
+
+            { 构建生效 -SkipHostProjection } | Should -Not -Throw
+
+            Should -Invoke New-SkillDiscoveryCatalogTransaction -Times 1 -Exactly
+            Should -Invoke Sync-SkillDiscoveryCatalog -Times 1 -Exactly -ParameterFilter { $null -ne $Transaction -and [bool]$SkipLock }
+            Should -Invoke Complete-BuildTransaction -Times 1 -Exactly
+        }
+        finally {
+            $DryRun = $oldDryRun
+            $CfgPath = $oldCfgPath
+            $LogPath = $oldLogPath
+            $Root = $oldRoot
+            $Locked = $oldLocked
+            $script:SuppressAllLogging = $oldSuppressAllLogging
+        }
+    }
 }
 
 Describe "Sparse checkout disable guard" {
@@ -3821,7 +3878,17 @@ Describe "Build transaction rollback backup preservation" {
             $AgentDir = Join-Path $root "agent"
             New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
             Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
-            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = $backupAgent; has_backup_agent = $true; backup_error = $null }
+            $txn = [pscustomobject]@{
+                path = $txnPath
+                backup_agent = $backupAgent
+                has_backup_agent = $true
+                backup_error = $null
+                agent_before_state = 'backed_up'
+                agent_before_fingerprint = Get-DirectoryFingerprint $backupAgent
+                backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+                agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                agent_after_fingerprint_error = ''
+            }
 
             Rollback-BuildTransaction $txn | Should -Be $true
             Test-Path -LiteralPath (Join-Path $AgentDir "skill\SKILL.md") -PathType Leaf | Should -BeTrue
@@ -3846,7 +3913,17 @@ Describe "Build transaction rollback backup preservation" {
             $AgentDir = Join-Path $root "agent"
             New-Item -ItemType Directory -Path (Join-Path $AgentDir "new") -Force | Out-Null
             Set-ContentUtf8 (Join-Path $AgentDir "new\SKILL.md") "new"
-            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = $backupAgent; has_backup_agent = $true; backup_error = $null }
+            $txn = [pscustomobject]@{
+                path = $txnPath
+                backup_agent = $backupAgent
+                has_backup_agent = $true
+                backup_error = $null
+                agent_before_state = 'backed_up'
+                agent_before_fingerprint = Get-DirectoryFingerprint $backupAgent
+                backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+                agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                agent_after_fingerprint_error = ''
+            }
             Mock Invoke-MoveItem { throw "file in use" }
 
             Rollback-BuildTransaction $txn | Should -Be $false
@@ -3895,7 +3972,16 @@ Describe "Build transaction rollback backup preservation" {
             New-Item -ItemType Directory -Path $txnPath -Force | Out-Null
             $AgentDir = Join-Path $root "agent"
             New-Item -ItemType Directory -Path (Join-Path $AgentDir "built") -Force | Out-Null
-            $txn = [pscustomobject]@{ path = $txnPath; backup_agent = (Join-Path $txnPath "agent.backup"); has_backup_agent = $false; backup_error = $null; agent_before_state = "absent" }
+            $txn = [pscustomobject]@{
+                path = $txnPath
+                backup_agent = (Join-Path $txnPath "agent.backup")
+                has_backup_agent = $false
+                backup_error = $null
+                agent_before_state = "absent"
+                agent_before_fingerprint = 'missing'
+                agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                agent_after_fingerprint_error = ''
+            }
 
             Rollback-BuildTransaction $txn | Should -Be $true
             Test-Path -LiteralPath $AgentDir | Should -BeFalse

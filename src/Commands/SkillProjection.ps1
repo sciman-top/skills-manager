@@ -234,7 +234,12 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     return $catalog
 }
 
-function Sync-SkillDiscoveryCatalog($projectionCfg) {
+function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switch]$SkipLock) {
+    if (-not $DryRun -and -not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-SkillDiscoveryCatalog $projectionCfg $Transaction -SkipLock
+        })
+    }
     if ($null -eq $projectionCfg -or $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -eq 0) {
         return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
     }
@@ -247,8 +252,15 @@ function Sync-SkillDiscoveryCatalog($projectionCfg) {
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
     $portableChanged = -not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and -not [string]::Equals($portableExisting.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     if (-not $DryRun) {
-        if ($primaryChanged) { Set-ContentUtf8 $catalogPath $desired }
-        if ($portableChanged) { Set-ContentUtf8 $portableCatalogPath $desired }
+        $desiredBytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($desired)
+        if ($primaryChanged) {
+            Set-SkillProjectionFileTransactionExpectedAfter $Transaction $catalogPath $desiredBytes
+            Set-ContentUtf8 $catalogPath $desired
+        }
+        if ($portableChanged) {
+            Set-SkillProjectionFileTransactionExpectedAfter $Transaction $portableCatalogPath $desiredBytes
+            Set-ContentUtf8 $portableCatalogPath $desired
+        }
     }
     return [pscustomobject]@{
         enabled = $true
@@ -471,42 +483,124 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
     }
 }
 
-function Get-SkillProjectionFileTransactionSnapshot([string]$Path) {
+function Get-SkillProjectionBytesSha256([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { return '' }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
+function Get-SkillProjectionFileTransactionState([string]$Path) {
     $fullPath = [IO.Path]::GetFullPath($Path)
-    if (Test-PathEntry $fullPath) {
-        Need (Test-Path -LiteralPath $fullPath -PathType Leaf) ("Projection transaction expected a file target: {0}" -f $fullPath)
-        return [pscustomobject]@{ path = $fullPath; existed = $true; bytes = [IO.File]::ReadAllBytes($fullPath) }
+    $item = Get-ExistingFileSystemItem $fullPath
+    if ($null -eq $item) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $false; kind = 'missing'; hash = ''; bytes = [byte[]]@() }
     }
-    return [pscustomobject]@{ path = $fullPath; existed = $false; bytes = [byte[]]@() }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'reparse'; hash = ''; bytes = [byte[]]@() }
+    }
+    if ($item.PSIsContainer) {
+        return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'directory'; hash = ''; bytes = [byte[]]@() }
+    }
+    $bytes = [IO.File]::ReadAllBytes($fullPath)
+    return [pscustomobject][ordered]@{ path = $fullPath; exists = $true; kind = 'file'; hash = Get-SkillProjectionBytesSha256 $bytes; bytes = $bytes }
+}
+
+function Test-SkillProjectionFileTransactionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('exists', 'kind', 'hash')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Get-SkillProjectionFileTransactionSnapshot([string]$Path) {
+    $state = Get-SkillProjectionFileTransactionState $Path
+    Need ([string]$state.kind -in @('missing', 'file')) ("Projection transaction expected a regular file target: {0}" -f $state.path)
+    $parent = [IO.Directory]::GetParent([string]$state.path)
+    Need ($null -ne $parent -and -not (Test-AncestorChainHasReparse $parent.FullName)) ("Projection transaction file path crosses a reparse point: {0}" -f $state.path)
+    return [pscustomobject][ordered]@{
+        path = [string]$state.path
+        existed = [bool]$state.exists
+        bytes = [byte[]]$state.bytes
+        before_hash = [string]$state.hash
+        before_kind = [string]$state.kind
+        after_known = $false
+        after_existed = $false
+        after_bytes = [byte[]]@()
+        after_hash = ''
+        after_kind = 'missing'
+    }
+}
+
+function Set-SkillProjectionFileTransactionExpectedAfter($Transaction, [string]$Path, [byte[]]$Bytes) {
+    if ($null -eq $Transaction) { return }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $snapshot = @($Transaction.file_snapshots | Where-Object { [string]$_.path -eq $fullPath })[0]
+    Need ($null -ne $snapshot) ("Projection transaction has no snapshot for write target: {0}" -f $fullPath)
+    $snapshot.after_known = $true
+    $snapshot.after_existed = $true
+    $snapshot.after_bytes = [byte[]]$Bytes
+    $snapshot.after_hash = Get-SkillProjectionBytesSha256 $Bytes
+    $snapshot.after_kind = 'file'
+}
+
+function Set-SkillProjectionFileTransactionExpectedAfterFromPath($Transaction, [string]$Path) {
+    $state = Get-SkillProjectionFileTransactionState $Path
+    Need ([string]$state.kind -eq 'file') ("Projection transaction expected a regular file after write: {0}" -f $Path)
+    Set-SkillProjectionFileTransactionExpectedAfter $Transaction $Path ([byte[]]$state.bytes)
 }
 
 function Restore-SkillProjectionFileTransactionSnapshot($Snapshot) {
     $path = [IO.Path]::GetFullPath([string]$Snapshot.path)
-    if (-not [bool]$Snapshot.existed) {
-        if (Test-PathEntry $path) {
-            Need (Test-Path -LiteralPath $path -PathType Leaf) ("Projection rollback found non-file drift: {0}" -f $path)
-            Remove-Item -LiteralPath $path -Force
-        }
-        return
+    $before = [pscustomobject]@{
+        path = $path
+        exists = [bool]$Snapshot.existed
+        kind = if ([string]::IsNullOrWhiteSpace([string]$Snapshot.before_kind)) { if ([bool]$Snapshot.existed) { 'file' } else { 'missing' } } else { [string]$Snapshot.before_kind }
+        hash = if ($Snapshot.PSObject.Properties.Match('before_hash').Count -gt 0) { [string]$Snapshot.before_hash } else { if ([bool]$Snapshot.existed) { Get-SkillProjectionBytesSha256 ([byte[]]$Snapshot.bytes) } else { '' } }
+    }
+    $current = Get-SkillProjectionFileTransactionState $path
+    if (Test-SkillProjectionFileTransactionStateEquivalent $before $current) { return }
+    Need ([bool]$Snapshot.after_known) ("Projection rollback conflict: target changed without a recorded expected-after state: {0}" -f $path)
+    $after = [pscustomobject]@{ path = $path; exists = [bool]$Snapshot.after_existed; kind = [string]$Snapshot.after_kind; hash = [string]$Snapshot.after_hash }
+    Need (Test-SkillProjectionFileTransactionStateEquivalent $after $current) ("Projection rollback conflict: current file is neither before nor after state: {0}" -f $path)
+
+    if (-not [bool]$before.exists) {
+        Need ([string]$current.kind -eq 'file') ("Projection rollback refuses to remove a non-file after-state: {0}" -f $path)
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    else {
+        Need ([string]$before.kind -eq 'file') ("Projection rollback refuses to restore a non-file before-state: {0}" -f $path)
+        $parent = [IO.Directory]::GetParent($path)
+        Need ($null -ne $parent -and (Test-Path -LiteralPath $parent.FullName -PathType Container)) ("Projection rollback parent is missing: {0}" -f $path)
+        Need (-not (Test-AncestorChainHasReparse $parent.FullName)) ("Projection rollback parent crosses a reparse point: {0}" -f $path)
+        Write-BytesAtomic -Path $path -Bytes ([byte[]]$Snapshot.bytes)
     }
 
-    EnsureDir (Split-Path -Parent $path)
-    $temporaryPath = '{0}.rollback.{1}' -f $path, ([guid]::NewGuid().ToString('N'))
-    try {
-        [IO.File]::WriteAllBytes($temporaryPath, [byte[]]$Snapshot.bytes)
-        Move-Item -LiteralPath $temporaryPath -Destination $path -Force
+    Need (Test-SkillProjectionFileTransactionStateEquivalent $before (Get-SkillProjectionFileTransactionState $path)) ("Projection rollback verification failed: {0}" -f $path)
+}
+
+function New-SkillDiscoveryCatalogTransaction($projectionCfg) {
+    $filePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $projectionCfg -and
+        $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
+        -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
+        $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
-    finally {
-        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+    return [pscustomobject]@{
+        file_snapshots = @($filePaths | Sort-Object | ForEach-Object { Get-SkillProjectionFileTransactionSnapshot $_ })
+        preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     }
 }
 
 function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$TargetRoot) {
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     $targetRootPath = Resolve-SkillProjectionPath $TargetRoot
-    $rootExisted = Test-Path -LiteralPath $targetRootPath -PathType Container
-    if (Test-PathEntry $targetRootPath) {
+    $targetRootItem = Get-ExistingFileSystemItem $targetRootPath
+    $rootExisted = $null -ne $targetRootItem -and $targetRootItem.PSIsContainer
+    if ($null -ne $targetRootItem) {
         Need $rootExisted ("Projection target root is not a directory: {0}" -f $targetRootPath)
+        Need (($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("Projection transaction target root must be a regular directory: {0}" -f $targetRootPath)
     }
 
     $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -526,22 +620,22 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
             Need (Is-ReparsePoint $linkPath) ("Projection target conflict is not a managed junction: {0}" -f $linkPath)
             $target = Get-ReparsePointTargetFullPath $linkPath
             Need (-not [string]::IsNullOrWhiteSpace($target)) ("Projection target junction cannot be resolved: {0}" -f $linkPath)
-            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
         }
         else {
-            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $false; target = '' }
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $false; target = ''; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
         }
     }
 
     if ($rootExisted) {
         $managedPrefix = $managedRoot.TrimEnd('\') + '\'
-        foreach ($entry in @(Get-ChildItem -LiteralPath $targetRootPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $targetRootPath -Directory -Force -ErrorAction Stop | Where-Object Name -ne '.system')) {
             if (-not (Is-ReparsePoint $entry.FullName)) { continue }
             $target = Get-ReparsePointTargetFullPath $entry.FullName
             if ([string]::IsNullOrWhiteSpace($target) -or -not $target.StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
             $linkPath = [IO.Path]::GetFullPath($entry.FullName)
             if (-not $affected.ContainsKey($linkPath)) {
-                $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+                $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target; after_known = $false; after_existed = $false; after_kind = 'missing'; after_target = '' }
             }
         }
     }
@@ -554,32 +648,70 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
     }
 }
 
+function Get-CodexManagedSkillLinkTransactionState([string]$Path) {
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $item = Get-ExistingFileSystemItem $fullPath
+    if ($null -eq $item) { return [pscustomobject]@{ path = $fullPath; existed = $false; kind = 'missing'; target = '' } }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return [pscustomobject]@{ path = $fullPath; existed = $true; kind = 'junction'; target = [string](Get-ReparsePointTargetFullPath $fullPath) }
+    }
+    return [pscustomobject]@{ path = $fullPath; existed = $true; kind = if ($item.PSIsContainer) { 'directory' } else { 'file' }; target = '' }
+}
+
+function Test-CodexManagedSkillLinkTransactionStateEquivalent($Expected, $Actual) {
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    foreach ($field in @('existed', 'kind', 'target')) {
+        if (-not [string]::Equals([string](Get-OperationObjectProperty $Expected $field), [string](Get-OperationObjectProperty $Actual $field), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Set-CodexManagedSkillLinkTransactionExpectedAfter($Transaction, [string]$TargetRoot) {
+    if ($null -eq $Transaction) { return }
+    $snapshot = @($Transaction.link_snapshots | Where-Object { [string]$_.target_root -eq [IO.Path]::GetFullPath($TargetRoot) })[0]
+    Need ($null -ne $snapshot) ("Projection transaction has no link snapshot for target root: {0}" -f $TargetRoot)
+    foreach ($entry in @($snapshot.entries)) {
+        $state = Get-CodexManagedSkillLinkTransactionState ([string]$entry.path)
+        $entry.after_known = $true
+        $entry.after_existed = [bool]$state.existed
+        $entry.after_kind = [string]$state.kind
+        $entry.after_target = [string]$state.target
+    }
+}
+
 function Restore-CodexManagedSkillLinkTransactionSnapshot($Snapshot) {
     $managedRoot = [IO.Path]::GetFullPath([string]$Snapshot.managed_root)
     foreach ($state in @($Snapshot.entries | Sort-Object path -Descending)) {
         $path = [IO.Path]::GetFullPath([string]$state.path)
-        if ([bool]$state.existed) {
-            if (Test-PathEntry $path) {
-                Need (Is-ReparsePoint $path) ("Projection link rollback found non-junction drift: {0}" -f $path)
-                $currentTarget = Get-ReparsePointTargetFullPath $path
-                if ([string]::Equals([string]$currentTarget, [string]$state.target, [StringComparison]::OrdinalIgnoreCase)) { continue }
-                Invoke-RemoveItem $path -Recurse
-            }
-            New-Junction $path ([string]$state.target) -QuietIfUnchanged
-            continue
-        }
+        $before = [pscustomobject]@{ path = $path; existed = [bool]$state.existed; kind = if ([bool]$state.existed) { 'junction' } else { 'missing' }; target = [string]$state.target }
+        $current = Get-CodexManagedSkillLinkTransactionState $path
+        if (Test-CodexManagedSkillLinkTransactionStateEquivalent $before $current) { continue }
+        Need ([bool]$state.after_known) ("Projection link rollback conflict: target changed without a recorded expected-after state: {0}" -f $path)
+        $after = [pscustomobject]@{ path = $path; existed = [bool]$state.after_existed; kind = [string]$state.after_kind; target = [string]$state.after_target }
+        Need (Test-CodexManagedSkillLinkTransactionStateEquivalent $after $current) ("Projection link rollback conflict: current state is neither before nor after: {0}" -f $path)
 
-        if (Test-PathEntry $path) {
-            Need (Is-ReparsePoint $path) ("Projection link rollback found unexpected non-junction state: {0}" -f $path)
-            $currentTarget = Get-ReparsePointTargetFullPath $path
-            Need (-not [string]::IsNullOrWhiteSpace($currentTarget) -and (Is-PathInsideOrEqual $currentTarget $managedRoot)) ("Projection link rollback refused an unrelated junction: {0}" -f $path)
-            Invoke-RemoveItem $path -Recurse
+        if ($current.existed) {
+            Need ($current.kind -eq 'junction') ("Projection link rollback refuses to remove a non-junction after-state: {0}" -f $path)
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
+        if ($before.existed) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$before.target)) ("Projection link rollback cannot resolve the before target: {0}" -f $path)
+            Need (Is-PathInsideOrEqual ([string]$before.target) $managedRoot) ("Projection link rollback refused an unrelated junction: {0}" -f $path)
+            New-Junction $path ([string]$before.target) -QuietIfUnchanged
+        }
+        Need (Test-CodexManagedSkillLinkTransactionStateEquivalent $before (Get-CodexManagedSkillLinkTransactionState $path)) ("Projection link rollback verification failed: {0}" -f $path)
     }
 
     $targetRoot = [IO.Path]::GetFullPath([string]$Snapshot.target_root)
-    if (-not [bool]$Snapshot.root_existed -and (Test-Path -LiteralPath $targetRoot -PathType Container) -and @(Get-ChildItem -LiteralPath $targetRoot -Force).Count -eq 0) {
-        Remove-Item -LiteralPath $targetRoot -Force
+    if (-not [bool]$Snapshot.root_existed) {
+        $rootItem = Get-ExistingFileSystemItem $targetRoot
+        if ($null -ne $rootItem) {
+            Need $rootItem.PSIsContainer ("Projection rollback found a non-directory created root: {0}" -f $targetRoot)
+            Need (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("Projection rollback refuses to remove a reparse created root: {0}" -f $targetRoot)
+            Need (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -eq 0) ("Projection rollback found unexpected entries in created root: {0}" -f $targetRoot)
+            Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+            Need (-not (Test-PathEntry $targetRoot)) ("Projection rollback created root remains: {0}" -f $targetRoot)
+        }
     }
 }
 
@@ -619,6 +751,8 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
         file_snapshots = @($filePaths | Sort-Object | ForEach-Object { Get-SkillProjectionFileTransactionSnapshot $_ })
         link_snapshots = @($linkSnapshots.ToArray())
         config_backup_path = ''
+        config_backup_hash = ''
+        preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     }
 }
 
@@ -628,7 +762,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
-    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg
+    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg $transaction -SkipLock
     $nativeProjectionPlan = $null
     $nativeProjectionFingerprintPlan = $null
     $nativeProjectionApply = $null
@@ -647,7 +781,22 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
         }
         else {
-            $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
+            try {
+                $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
+            }
+            catch {
+                # Native apply writes a durable recovery receipt before it
+                # rethrows.  Aggregate rollback must not restore the old
+                # receipt over that evidence.
+                if ($null -ne $transaction -and $null -ne $transaction.preserve_file_paths) {
+                    $transaction.preserve_file_paths.Add([IO.Path]::GetFullPath([string]$nativeProjectionPlan.receipt_path)) | Out-Null
+                }
+                throw
+            }
+            if ($null -ne $transaction) {
+                Set-SkillProjectionFileTransactionExpectedAfterFromPath $transaction ([string]$nativeProjectionPlan.receipt_path)
+                Set-CodexManagedSkillLinkTransactionExpectedAfter $transaction ([string]$nativeProjectionPlan.target_root)
+            }
             # The apply plan can contain owned links that are removed while switching
             # profiles. Persist the post-apply steady state in the manifest
             # fingerprint so a fresh validation does not treat that successful
@@ -668,6 +817,12 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             if ($changed) {
                 $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
                 if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
+                if ($null -ne $transaction -and -not [string]::IsNullOrWhiteSpace([string]$writtenBackupPath)) {
+                    $transaction.config_backup_hash = ([string](Get-FileHash -LiteralPath $writtenBackupPath -Algorithm SHA256).Hash).ToLowerInvariant()
+                }
+                if ($null -ne $transaction) {
+                    Set-SkillProjectionFileTransactionExpectedAfter $transaction $configPath ((New-Object System.Text.UTF8Encoding($false)).GetBytes($desired))
+                }
                 Set-ContentUtf8 $configPath $desired
             }
             $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionFingerprintPlan $selection
@@ -721,7 +876,11 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                     truncated = [bool]$nativeProjectionPlan.truncated
                 } }
             }
-            Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+            $manifestText = $manifest | ConvertTo-Json -Depth 20
+            if ($null -ne $transaction) {
+                Set-SkillProjectionFileTransactionExpectedAfter $transaction $manifestPath ((New-Object System.Text.UTF8Encoding($false)).GetBytes($manifestText))
+            }
+            Set-ContentUtf8 $manifestPath $manifestText
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
         }
         $backupPath = [string]$writeResult.backup_path
@@ -741,8 +900,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     }
 }
 
-function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
+function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null, [switch]$SkipLock) {
     if ($DryRun) { return Invoke-CodexSkillProjectionSyncCore $projectionCfg $promotionContext }
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-CodexSkillProjection $projectionCfg $promotionContext -SkipLock
+        })
+    }
 
     $configRaw = if ($projectionCfg.PSObject.Properties.Match('codex_config_path').Count -gt 0) { [string]$projectionCfg.codex_config_path } else { '~/.codex/config.toml' }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match('manifest_path').Count -gt 0) { [string]$projectionCfg.manifest_path } else { 'reports/skill-projection/current.json' }
@@ -760,11 +924,17 @@ function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         foreach ($snapshot in @($transaction.file_snapshots | Sort-Object path -Descending)) {
+            if ($null -ne $transaction.preserve_file_paths -and $transaction.preserve_file_paths.Contains([IO.Path]::GetFullPath([string]$snapshot.path))) { continue }
             try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$transaction.config_backup_path) -and (Test-Path -LiteralPath ([string]$transaction.config_backup_path) -PathType Leaf)) {
-            try { Remove-Item -LiteralPath ([string]$transaction.config_backup_path) -Force }
+            try {
+                $backupPath = [IO.Path]::GetFullPath([string]$transaction.config_backup_path)
+                $backupHash = ([string](Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash).ToLowerInvariant()
+                Need ([string]::IsNullOrWhiteSpace([string]$transaction.config_backup_hash) -or [string]::Equals($backupHash, [string]$transaction.config_backup_hash, [StringComparison]::OrdinalIgnoreCase)) ("Projection rollback backup changed concurrently: {0}" -f $backupPath)
+                Remove-Item -LiteralPath $backupPath -Force
+            }
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
         }
         if ($rollbackErrors.Count -gt 0) {

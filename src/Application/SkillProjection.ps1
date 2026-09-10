@@ -1,6 +1,68 @@
 $skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Core.ps1') }
+
+function Get-SkillManagerProjectionMutexName([string]$RootPath) {
+    if ([string]::IsNullOrWhiteSpace($RootPath)) { throw 'Projection lock root is required.' }
+    $fullRoot = [IO.Path]::GetFullPath($RootPath).TrimEnd('\', '/')
+    # Windows paths are case-insensitive. Normalize case before hashing so a
+    # caller using a different spelling still joins the same cross-process lock.
+    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+        $fullRoot = $fullRoot.ToUpperInvariant()
+    }
+    return ('Local\skills-manager-projection-{0}' -f (Get-OperationSha256 $fullRoot).Substring(0, 32))
+}
+
+function Enter-SkillManagerProjectionLock {
+    param(
+        [string]$RootPath = $skillProjectionApplicationRepoRoot,
+        [ValidateRange(1, 60)][int]$TimeoutSeconds = 30
+    )
+
+    $name = Get-SkillManagerProjectionMutexName $RootPath
+    $mutex = $null
+    $acquired = $false
+    try {
+        $mutex = [System.Threading.Mutex]::new($false, $name)
+        try {
+            $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            # The OS has already transferred ownership to this waiter.  The
+            # abandoned owner cannot leave a stale lock behind.
+            $acquired = $true
+        }
+        if (-not $acquired) { throw ('Projection/build lock is busy: {0}' -f $name) }
+        return [pscustomobject]@{ name = $name; mutex = $mutex; acquired = $true }
+    }
+    catch {
+        if ($null -ne $mutex -and -not $acquired) { $mutex.Dispose() }
+        throw
+    }
+}
+
+function Exit-SkillManagerProjectionLock($Lease) {
+    if ($null -eq $Lease) { return }
+    $mutex = $Lease.mutex
+    try {
+        if ([bool]$Lease.acquired -and $null -ne $mutex) { $mutex.ReleaseMutex() }
+    }
+    finally {
+        if ($null -ne $mutex) { $mutex.Dispose() }
+    }
+}
+
+function Invoke-WithSkillManagerProjectionLock {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [string]$RootPath = $skillProjectionApplicationRepoRoot
+    )
+
+    $lease = Enter-SkillManagerProjectionLock $RootPath
+    try { & $ScriptBlock }
+    finally { Exit-SkillManagerProjectionLock $lease }
+}
 
 function Get-NativeSkillProjectionProperty {
     param($Object, [string[]]$Names)
@@ -52,13 +114,36 @@ function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
     param([string]$Path, [string]$AllowedRoot)
     $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
     $cursor = [IO.Path]::GetFullPath($Path)
-    while (Test-NativeSkillProjectionPathWithinRoot $cursor $root) {
-        if (Test-Path -LiteralPath $cursor) {
-            $item = Get-Item -LiteralPath $cursor -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Native projection path crosses a reparse point: $cursor" }
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $cursor $root)) { throw "Native projection path is outside its allowed root: $cursor" }
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        try { $item = Get-ExistingFileSystemItem $cursor }
+        catch { throw "Native projection path cannot be inspected: $cursor; $($_.Exception.Message)" }
+        if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Native projection path crosses a reparse point: $cursor"
         }
-        if ([string]::Equals($cursor.TrimEnd('\', '/'), $root, [StringComparison]::OrdinalIgnoreCase)) { break }
-        $cursor = Split-Path $cursor -Parent
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+}
+
+function Assert-NativeSkillProjectionPackageTreeHasNoReparse {
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$AllowedRoot = '')
+
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = if ([string]::IsNullOrWhiteSpace($AllowedRoot)) { [IO.Path]::GetPathRoot($fullPath) } else { [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/') }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $fullPath $boundary
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) { throw "Native projection package root is not a directory: $fullPath" }
+
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($fullPath)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Native projection package crosses a reparse point: $($entry.FullName)"
+            }
+            if ($entry.PSIsContainer) { $pending.Push($entry.FullName) }
+        }
     }
 }
 
@@ -80,6 +165,7 @@ function Get-NativeSkillProjectionSettings {
     if ([string]::IsNullOrWhiteSpace($userSkillRoot)) { throw 'skill_projection.user_skill_root is required for native projection.' }
     if (-not [string]::Equals($targetRoot.TrimEnd('\', '/'), $userSkillRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must equal skill_projection.user_skill_root.' }
     if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([IO.Path]::GetPathRoot($targetRoot))
     if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
     return [pscustomobject][ordered]@{
@@ -215,6 +301,16 @@ function New-NativeSkillProjectionPlan {
         }
         if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-OperationPathWithinRoot $sourcePath $sourceRoot)) {
             $findings.Add((New-OperationFinding 'source_path_outside_root' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source path is outside its declared source root.')) | Out-Null
+            continue
+        }
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw "Native projection source root is not a directory: $sourceRoot" }
+            $sourceBoundary = if ([string]::IsNullOrWhiteSpace($sourceRoot)) { [IO.Path]::GetPathRoot($sourcePath) } else { $sourceRoot }
+            if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { Assert-NativeSkillProjectionPathHasNoReparseAncestor $sourceRoot $sourceBoundary }
+            Assert-NativeSkillProjectionPackageTreeHasNoReparse ([IO.Path]::GetDirectoryName($sourcePath)) $sourceBoundary
+        }
+        catch {
+            $findings.Add((New-OperationFinding 'source_reparse_forbidden' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source roots and packages must not contain reparse points.')) | Out-Null
             continue
         }
         $contentHash = ([string](Get-NativeSkillProjectionProperty $entry @('content_hash'))).Trim().ToLowerInvariant()

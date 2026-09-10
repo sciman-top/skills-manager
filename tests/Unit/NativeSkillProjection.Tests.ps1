@@ -62,6 +62,67 @@ Describe 'Native skill projection' {
         { New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config } | Should -Throw
     }
 
+    It 'rejects target roots and physical parents that cross junctions' {
+        $f = New-ProjectionFixture
+        $outside = Join-Path $TestDrive ('native-target-outside-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        New-Item -ItemType Junction -Path $f.target -Target $outside | Out-Null
+        { New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config } | Should -Throw '*reparse*'
+
+        $junctionParent = Join-Path $TestDrive ('native-target-parent-' + [guid]::NewGuid().ToString('N'))
+        $outsideParent = Join-Path $TestDrive ('native-target-parent-outside-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outsideParent -Force | Out-Null
+        New-Item -ItemType Junction -Path $junctionParent -Target $outsideParent | Out-Null
+        $nestedTarget = Join-Path $junctionParent 'skill-root'
+        $nestedConfig = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{
+                user_skill_root = $nestedTarget
+                native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $nestedTarget; receipt_path = $f.receipt }
+            }
+        }
+        { New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $nestedConfig } | Should -Throw '*reparse*'
+    }
+
+    It 'rejects a package-embedded junction before native projection planning' {
+        $f = New-ProjectionFixture
+        $outside = Join-Path $TestDrive ('native-package-outside-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        New-Item -ItemType Junction -Path (Join-Path $f.source 'enabled\linked') -Target $outside | Out-Null
+
+        { New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config } | Should -Throw '*reparse*'
+    }
+
+    It 'rejects an unauthorized receipt override before creating the target root' {
+        $f = New-ProjectionFixture
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        $invalidReceipt = Join-Path $TestDrive 'receipt-outside.json'
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $invalidReceipt } | Should -Throw '*override*'
+        Test-Path -LiteralPath $f.target | Should -BeFalse
+    }
+
+    It 'does not remove a target root that appeared after the plan was created' {
+        $f = New-ProjectionFixture
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        Remove-Item -LiteralPath (Join-Path $f.source 'resident\SKILL.md') -Force
+
+        Mock New-Item {
+            param([string]$Path, [string]$ItemType)
+            [IO.Directory]::CreateDirectory($Path) | Out-Null
+            throw 'simulated concurrent target-root creation'
+        } -ParameterFilter {
+            [string]$ItemType -eq 'Directory' -and
+            [string]::Equals([IO.Path]::GetFullPath([string]$Path), [IO.Path]::GetFullPath($f.target), [StringComparison]::OrdinalIgnoreCase)
+        }
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw
+        Test-Path -LiteralPath $f.target -PathType Container | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $f.target -Force).Count | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $f.target 'enabled') | Should -BeFalse
+        $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
+        $recovery.status | Should -Be 'rolled_back'
+    }
+
     It 'rolls back a partial apply when a source drifts' {
         $f = New-ProjectionFixture
         $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
@@ -91,6 +152,54 @@ Describe 'Native skill projection' {
         # 钉内容而非数量：@($null).Count==1 恒真，错误明细丢失时本行必须红。
         @($recovery.rollback_errors)[0] | Should -Match 'fixture rollback failure'
         $recovery.recovery_required | Should -BeTrue
+    }
+
+    It 'does not recursively delete a transaction-created root after an ordinary concurrent entry appears' {
+        $f = New-ProjectionFixture
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        $script:rootDriftJunctionCalls = 0
+        $concurrentPath = Join-Path $f.target 'concurrent.txt'
+        Mock New-NativeSkillProjectionJunction {
+            param([string]$LinkPath, [string]$TargetPath)
+            $script:rootDriftJunctionCalls++
+            New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
+            if ($script:rootDriftJunctionCalls -eq 1) {
+                [IO.File]::WriteAllText($concurrentPath, 'concurrent owner', [Text.UTF8Encoding]::new($false))
+                throw 'fixture root drift failure'
+            }
+        }
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw '*rollback/recovery required*'
+        [IO.File]::ReadAllText($concurrentPath) | Should -Be 'concurrent owner'
+        $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
+        $recovery.status | Should -Be 'rollback_failed'
+        @($recovery.rollback_errors).Count | Should -Be 1
+        @($recovery.rollback_errors)[0] | Should -Be ('target-root:' + $f.target + ' => created target root is not empty after rollback')
+    }
+
+    It 'refuses to overwrite a projected junction changed by another writer' {
+        $f = New-ProjectionFixture
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        $outside = Join-Path $TestDrive ('native-concurrent-junction-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        $script:junctionDriftCalls = 0
+        $firstTarget = Join-Path $f.target 'enabled'
+        Mock New-NativeSkillProjectionJunction {
+            param([string]$LinkPath, [string]$TargetPath)
+            $script:junctionDriftCalls++
+            New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
+            if ($script:junctionDriftCalls -eq 2) {
+                Remove-Item -LiteralPath $firstTarget -Force
+                New-Item -ItemType Junction -Path $firstTarget -Target $outside | Out-Null
+                throw 'fixture junction drift failure'
+            }
+        }
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw '*rollback/recovery required*'
+        (Get-NativeSkillProjectionLinkTarget $firstTarget) | Should -Be ([IO.Path]::GetFullPath($outside).TrimEnd('\', '/'))
+        $recovery = Get-Content -LiteralPath $f.receipt -Raw | ConvertFrom-Json
+        $recovery.status | Should -Be 'rollback_failed'
+        @($recovery.rollback_errors | Where-Object { $_ -like '*projection rollback conflict*' }) | Should -Not -BeNullOrEmpty
     }
 
     It 'rejects package asset drift after planning' {

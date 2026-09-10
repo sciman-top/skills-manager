@@ -29,10 +29,41 @@ Describe "Agent build" {
             $txn = Start-BuildTransaction
             New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $AgentDir "new.txt") -Value "new"
+            $txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+            $txn.agent_after_fingerprint_error = ''
             Rollback-BuildTransaction $txn
 
             Test-Path -LiteralPath (Join-Path $AgentDir "old.txt") | Should -Be $true
             Test-Path -LiteralPath (Join-Path $AgentDir "new.txt") | Should -Be $false
+        }
+        finally {
+            $Root = $oldRoot
+            $AgentDir = $oldAgent
+        }
+    }
+
+    It "preserves the moved agent backup when its fingerprint cannot be read" {
+        $oldRoot = $Root
+        $oldAgent = $AgentDir
+        try {
+            $Root = Join-Path $TestDrive "repo-fingerprint-failure"
+            $AgentDir = Join-Path $Root "agent"
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $AgentDir "old.txt") -Value "old"
+            $script:buildFingerprintCalls = 0
+            Mock Get-DirectoryFingerprint {
+                $script:buildFingerprintCalls++
+                if ($script:buildFingerprintCalls -eq 1) { return 'before-fingerprint' }
+                throw 'fixture fingerprint read failure'
+            }
+
+            $txn = Start-BuildTransaction
+
+            $txn.has_backup_agent | Should -BeTrue
+            $txn.agent_before_state | Should -Be 'backed_up'
+            $txn.backup_error | Should -Be 'fixture fingerprint read failure'
+            Test-Path -LiteralPath $txn.backup_agent -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $AgentDir | Should -BeFalse
         }
         finally {
             $Root = $oldRoot

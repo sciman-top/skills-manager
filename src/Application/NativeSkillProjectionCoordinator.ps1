@@ -10,6 +10,7 @@ function New-NativeSkillProjectionRuntimePlan {
 
     $root = [IO.Path]::GetFullPath($ManagedRoot)
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw ('Managed skill root does not exist: {0}' -f $root) }
+    Assert-NativeSkillProjectionPackageTreeHasNoReparse $root $root
     $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @($ExcludedNames)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }

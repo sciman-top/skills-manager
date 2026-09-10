@@ -1968,24 +1968,52 @@ function Start-BuildTransaction {
         backup_agent = $backupAgent
         has_backup_agent = $false
         backup_error = $null
+        backup_agent_fingerprint = ''
+        agent_before_fingerprint = 'missing'
+        agent_after_fingerprint = ''
+        agent_after_fingerprint_error = ''
         # 三态区分：absent=构建前无 agent/；backed_up=已挪入事务备份；
         # present_no_backup=备份挪动失败但构建前 agent/ 仍在（回滚必须 fail closed）。
         agent_before_state = "absent"
     }
     if ($DryRun) { return [pscustomobject]$state }
+    $agentParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($AgentDir))
+    Need ($null -ne $agentParent -and -not (Test-AncestorChainHasReparse $agentParent.FullName)) ("构建 agent/ 的物理父级链不允许存在 reparse point：{0}" -f $AgentDir)
+    $txnParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($txnRoot))
+    Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("构建事务的物理父级链不允许存在 reparse point：{0}" -f $txnRoot)
+    $txnRootItem = Get-ExistingFileSystemItem $txnRoot
+    if ($null -ne $txnRootItem) {
+        Need $txnRootItem.PSIsContainer ("构建事务根必须是目录：{0}" -f $txnRoot)
+        Need (($txnRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务根不允许是 reparse point：{0}" -f $txnRoot)
+    }
     EnsureDir $txnRoot
     EnsureDir $path
-    if (Test-Path $AgentDir) {
+    $txnPathItem = Get-ExistingFileSystemItem $path
+    Need ($null -ne $txnPathItem -and $txnPathItem.PSIsContainer -and ($txnPathItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务目录不是普通目录：{0}" -f $path)
+    $agentItem = Get-ExistingFileSystemItem $AgentDir
+    if ($null -ne $agentItem) {
+        Need $agentItem.PSIsContainer ("构建前 agent/ 必须是目录：{0}" -f $AgentDir)
+        Need (($agentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建前 agent/ 不允许是 reparse point：{0}" -f $AgentDir)
+        $state.agent_before_fingerprint = Get-DirectoryFingerprint $AgentDir
         $state.agent_before_state = "present_no_backup"
         try {
             Invoke-MoveItem $AgentDir $backupAgent
             $state.has_backup_agent = $true
             $state.agent_before_state = "backed_up"
+            try {
+                $state.backup_agent_fingerprint = Get-DirectoryFingerprint $backupAgent
+            }
+            catch {
+                # The move already succeeded. Preserve the backup and mark the
+                # transaction unusable for normal completion; rollback can then
+                # retain it instead of deleting the only known copy.
+                $state.backup_error = $_.Exception.Message
+                Log ("agent/ 已移入事务备份，但备份指纹读取失败；保留备份并阻断本次构建：{0}" -f $_.Exception.Message) "ERROR"
+            }
         }
         catch {
-            if (Test-Path $backupAgent) { Invoke-RemoveItemWithRetry $backupAgent -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
             $state.backup_error = $_.Exception.Message
-            Log ("旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：{0}" -f $_.Exception.Message)
+            Log ("旧 agent/ 无法安全挪入事务备份；保留事务现场并阻断本次构建：{0}" -f $_.Exception.Message) "ERROR"
         }
     }
     return [pscustomobject]$state
@@ -2002,35 +2030,103 @@ function Rollback-BuildTransaction($txn) {
             $restoreError = "构建前 agent/ 存在但事务备份缺失（备份挪动失败）；拒绝在无备份状态下删除现场"
         }
         else {
-            if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
-            if ($txn.has_backup_agent) {
-                if (-not (Test-Path $txn.backup_agent)) {
+            $hasFingerprintContract = @('agent_before_fingerprint', 'agent_after_fingerprint', 'agent_after_fingerprint_error') | ForEach-Object {
+                $txn.PSObject.Properties.Match($_).Count -gt 0
+            } | Where-Object { -not $_ } | Measure-Object | Select-Object -ExpandProperty Count
+            if ($hasFingerprintContract -gt 0) {
+                $restoreError = '构建事务缺少 agent/ 指纹合同；拒绝删除现场'
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace([string]$txn.agent_after_fingerprint_error)) {
+                $restoreError = ("构建后 agent/ 指纹不可用：{0}" -f [string]$txn.agent_after_fingerprint_error)
+            }
+            elseif ([string]::IsNullOrWhiteSpace([string]$txn.agent_after_fingerprint)) {
+                $restoreError = '构建事务缺少可靠的构建后 agent/ 指纹；拒绝删除现场'
+            }
+            else {
+                $currentFingerprint = ''
+                try {
+                    $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $currentItem -and (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer)) {
+                        throw '当前 agent/ 不是普通目录'
+                    }
+                    $currentFingerprint = Get-DirectoryFingerprint $AgentDir
+                }
+                catch {
+                    $restoreError = ("无法读取构建后 agent/ 指纹：{0}" -f $_.Exception.Message)
+                }
+                if ($null -eq $restoreError -and -not [string]::Equals([string]$currentFingerprint, [string]$txn.agent_after_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                    $restoreError = ("构建后 agent/ 已发生并发漂移，拒绝覆盖：expected={0}, actual={1}" -f [string]$txn.agent_after_fingerprint, $currentFingerprint)
+                }
+            }
+
+            if ($null -eq $restoreError -and (Test-PathEntry $AgentDir)) {
+                $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction Stop
+                if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer) {
+                    $restoreError = '当前 agent/ 在删除前变为非普通目录，拒绝递归删除'
+                }
+                else {
+                    try {
+                        $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
+                        if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                    }
+                    catch { $restoreError = $_.Exception.Message }
+                }
+            }
+
+            if ($null -eq $restoreError -and $txn.has_backup_agent) {
+                if (-not (Test-Path -LiteralPath $txn.backup_agent -PathType Container)) {
                     $restoreError = "agent/ 备份不存在"
                 }
-                elseif (Test-Path $AgentDir) {
+                elseif (Test-PathEntry $AgentDir) {
                     $restoreError = "当前 agent/ 未能清空，备份恢复被阻止"
                 }
                 else {
                     try {
+                        $backupItem = Get-Item -LiteralPath $txn.backup_agent -Force -ErrorAction Stop
+                        if (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'agent/ 事务备份是 reparse point' }
+                        $backupFingerprint = Get-DirectoryFingerprint $txn.backup_agent
+                        if ($txn.PSObject.Properties.Match('backup_agent_fingerprint').Count -eq 0 -or
+                            -not [string]::Equals([string]$backupFingerprint, [string]$txn.backup_agent_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                            throw ("agent/ 事务备份已发生并发漂移：expected={0}, actual={1}" -f [string]$txn.backup_agent_fingerprint, $backupFingerprint)
+                        }
                         Invoke-MoveItem $txn.backup_agent $AgentDir
+                        $restoredFingerprint = Get-DirectoryFingerprint $AgentDir
+                        if (-not [string]::Equals([string]$restoredFingerprint, [string]$txn.agent_before_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                            throw ("恢复后的 agent/ 指纹不匹配：expected={0}, actual={1}" -f [string]$txn.agent_before_fingerprint, $restoredFingerprint)
+                        }
                         $restored = $true
                         Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
                     }
-                    catch {
-                        $restoreError = $_.Exception.Message
-                    }
+                    catch { $restoreError = $_.Exception.Message }
                 }
             }
-            else {
-                # 构建前没有 agent/（无备份可恢复）：清空即回到构建前状态。
-                $restored = -not (Test-Path $AgentDir)
-                if (-not $restored) { $restoreError = "agent/ 清理未能完成" }
+            elseif ($null -eq $restoreError) {
+                # 构建前没有 agent/（无备份可恢复）：CAS 清理成功后即回到缺失状态。
+                $restored = [string]::Equals([string]$txn.agent_before_fingerprint, 'missing', [StringComparison]::OrdinalIgnoreCase) -and -not (Test-PathEntry $AgentDir)
+                if (-not $restored) { $restoreError = '构建前 agent/ 状态不是缺失，拒绝无备份回滚' }
             }
         }
     }
     finally {
+        $catalogTransaction = if ($null -ne $txn -and $txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
+        if ($null -ne $catalogTransaction) {
+            foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
+                try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
+                catch {
+                    $catalogError = ('cold-discovery catalog rollback failed: {0}' -f $_.Exception.Message)
+                    $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogError } else { '{0}; {1}' -f $restoreError, $catalogError }
+                    $restored = $false
+                }
+            }
+        }
         # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
-        if ($restored -and (Test-Path $txn.path)) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+        if ($restored -and (Test-PathEntry $txn.path)) {
+            $txnRemoved = Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore
+            if (-not $txnRemoved -or (Test-PathEntry $txn.path)) {
+                $restored = $false
+                $restoreError = '构建事务目录清理未完成，已保留现场'
+            }
+        }
     }
     if (-not $restored) {
         Log ("构建事务回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；原因：{1}" -f $txn.path, $restoreError) "ERROR"
@@ -2040,10 +2136,25 @@ function Rollback-BuildTransaction($txn) {
 
 function Complete-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return }
-    if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+    $txnPath = [IO.Path]::GetFullPath([string]$txn.path)
+    $txnRoot = [IO.Path]::GetFullPath((Join-Path $Root '.txn'))
+    Need (Is-PathInsideOrEqual $txnPath $txnRoot -and -not [string]::Equals($txnPath, $txnRoot, [StringComparison]::OrdinalIgnoreCase)) ("构建事务清理路径越界：{0}" -f $txnPath)
+    $txnParent = [IO.Directory]::GetParent($txnPath)
+    Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("构建事务清理路径的物理父级链不安全：{0}" -f $txnPath)
+    $txnItem = Get-ExistingFileSystemItem $txnPath
+    if ($null -eq $txnItem) { return }
+    Need $txnItem.PSIsContainer ("构建事务清理目标不是目录：{0}" -f $txnPath)
+    Need (($txnItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("构建事务清理目标不允许是 reparse point：{0}" -f $txnPath)
+    $removed = Invoke-RemoveItemWithRetry $txnPath -Recurse -IgnoreFailure
+    Need ($removed -and $null -eq (Get-ExistingFileSystemItem $txnPath)) ("构建事务目录清理未完成：{0}" -f $txnPath)
 }
 
-function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
+function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            构建Agent $cfg -SkipPreflight:$SkipPreflight -Txn $Txn -SkipLock
+        })
+    }
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -2191,6 +2302,21 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             }
             Write-Host "   建议：删除上述 mappings 后再执行【构建生效】。" -ForegroundColor Yellow
         }
+        if ($null -ne $Txn -and -not $DryRun) {
+            try {
+                $agentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction SilentlyContinue
+                if ($null -ne $agentItem -and (($agentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $agentItem.PSIsContainer)) {
+                    throw '构建后 agent/ 不是普通目录'
+                }
+                $Txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+                $Txn.agent_after_fingerprint_error = ''
+            }
+            catch {
+                $Txn.agent_after_fingerprint = ''
+                $Txn.agent_after_fingerprint_error = $_.Exception.Message
+                $failures.Add(("build-txn:agent-after-fingerprint => {0}" -f $_.Exception.Message)) | Out-Null
+            }
+        }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
         return $failures.ToArray()
@@ -2212,7 +2338,12 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
+function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target, [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-ManagedLinkOnlyTarget $cfg $targetCfg $target -SkipLock
+        })
+    }
     Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
     Need ($null -ne $cfg.skill_projection) 'managed_link_only target 需要 skill_projection 配置'
     $targetHost = Get-SkillProjectionTargetHost $targetCfg
@@ -2226,16 +2357,21 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
 
     $managedRoot = [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/')
     $targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
+    Assert-SafeTargetDir $targetRoot -AllowManagedWholeRootJunction
     $migratedWholeRootLink = $false
+    $wholeRootBefore = Get-NativeSkillProjectionTargetState $targetRoot
+    $wholeRootAfter = $null
     try {
         if (Test-Path -LiteralPath $targetRoot -PathType Container) {
             $targetItem = Get-Item -LiteralPath $targetRoot -Force
             if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
                 Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
-                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
                 $migratedWholeRootLink = $true
+                Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                $wholeRootAfter = Get-NativeSkillProjectionTargetState $targetRoot
                 New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+                $wholeRootAfter = Get-NativeSkillProjectionTargetState $targetRoot
             }
         }
 
@@ -2259,11 +2395,22 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
         if ($migratedWholeRootLink) {
             try {
-                if (Test-Path -LiteralPath $targetRoot) { Remove-NativeSkillProjectionPath $targetRoot }
-                if (Test-Path -LiteralPath $targetRoot) { throw 'managed_link_only target root remains after junction rollback cleanup' }
-                New-Junction $targetRoot $managedRoot
-                $restoredTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
-                if (-not [string]::Equals($restoredTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'managed_link_only target root junction restore verification failed' }
+                $currentRoot = Get-NativeSkillProjectionTargetState $targetRoot
+                if (Test-NativeSkillProjectionStateEquivalent $wholeRootBefore $currentRoot) {
+                    # Already restored by the inner transaction or an early failure.
+                }
+                elseif ($null -eq $wholeRootAfter -or -not (Test-NativeSkillProjectionStateEquivalent $wholeRootAfter $currentRoot)) {
+                    throw 'managed_link_only target root rollback conflict: current state is neither before nor after'
+                }
+                else {
+                    if ($currentRoot.exists) {
+                        if ($currentRoot.kind -ne 'directory') { throw 'managed_link_only target root after-state is not a regular directory' }
+                        if (@(Get-ChildItem -LiteralPath $targetRoot -Force -ErrorAction Stop).Count -gt 0) { throw 'managed_link_only target root contains unexpected concurrent entries' }
+                        Remove-Item -LiteralPath $targetRoot -Force -ErrorAction Stop
+                    }
+                    New-Junction $targetRoot $managedRoot
+                }
+                if (-not (Test-NativeSkillProjectionStateEquivalent $wholeRootBefore (Get-NativeSkillProjectionTargetState $targetRoot))) { throw 'managed_link_only target root junction restore verification failed' }
             }
             catch { $rollbackErrors.Add(('whole-root-junction => {0}' -f $_.Exception.Message)) | Out-Null }
         }
@@ -2274,7 +2421,12 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     }
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '') {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '', [switch]$SkipLock) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            应用到ClaudeCodex $cfg -SkipPreflight:$SkipPreflight -PromotionContext $PromotionContext -SkillProfile $SkillProfile -SkipLock
+        })
+    }
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -2286,7 +2438,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                 try {
                     $target = Resolve-TargetDir $t.path
                     if (-not $target) { continue }
-                    Assert-SafeTargetDir $target
+                    Assert-SafeTargetDir $target -AllowManagedWholeRootJunction:([bool](Get-CfgObjectProperty $t 'managed_link_only'))
 
                     if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
                         $targetHost = Get-SkillProjectionTargetHost $t
@@ -2354,8 +2506,14 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 function 构建生效(
     [string]$SkillProfile = '',
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
-    [switch]$SkipHostProjection
+    [switch]$SkipHostProjection,
+    [switch]$SkipLock
 ) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipHostProjection:$SkipHostProjection -SkipLock
+        })
+    }
     & {
         Preflight
         $cfg = LoadCfg
@@ -2378,7 +2536,17 @@ function 构建生效(
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="
+        $catalogTransaction = $null
+        if ($SkipHostProjection -and -not $DryRun) {
+            # The catalog is the only repository-side projection performed by
+            # this branch; snapshot it before moving agent/ into the build
+            # transaction so a later failure can restore both surfaces.
+            $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
+        }
         $txn = Start-BuildTransaction
+        if ($null -ne $txn -and $null -ne $catalogTransaction) {
+            $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+        }
         Start-DryRunMirrorCollect
         try {
             $failures = @()
@@ -2390,7 +2558,7 @@ function 构建生效(
             }
             elseif ($SkipHostProjection) {
                 try {
-                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection
+                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection $catalogTransaction -SkipLock
                     if ([bool]$catalogProjection.enabled) {
                         Log ("已生成仓内 cold-discovery catalog：skills={0}，domains={1}" -f [int]$catalogProjection.skill_count, [int]$catalogProjection.domain_count)
                     }
@@ -2424,7 +2592,7 @@ function 构建生效(
             }
             if (-not $SkipHostProjection -and @($failures).Count -eq 0) {
                 try {
-                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext
+                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
                     if ([bool]$bridgeProjection.enabled) {
                         Log ("原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f ((@($bridgeProjection.changed_names) -join ','), [bool]$bridgeProjection.persisted, [string]$bridgeProjection.truth_boundary))
                     }

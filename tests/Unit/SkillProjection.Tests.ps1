@@ -140,6 +140,34 @@ unified_exec = true
         finally { $DryRun = $oldDryRun }
     }
 
+    It 'binds cold-discovery catalog files to a rollback transaction' {
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $managed = Join-Path $TestDrive 'catalog-transaction-managed'
+            New-ProjectionSkill $managed 'capability-router' 'capability-router' | Out-Null
+            New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+            $catalogPath = Join-Path $managed '.skills-manager\catalog.json'
+            $portablePath = Join-Path $managed 'capability-router\catalog.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $catalogPath) -Force | Out-Null
+            Set-ContentUtf8 $catalogPath 'catalog-before'
+            Set-ContentUtf8 $portablePath 'portable-before'
+            $projection = [pscustomobject]@{ managed_source_path = $managed; discovery_catalog = [pscustomobject]@{ catalog_path = $catalogPath } }
+
+            $transaction = New-SkillDiscoveryCatalogTransaction $projection
+            @($transaction.file_snapshots).Count | Should -Be 2
+            Sync-SkillDiscoveryCatalog $projection $transaction -SkipLock | Out-Null
+            @($transaction.file_snapshots | Where-Object { -not $_.after_known }).Count | Should -Be 0
+
+            foreach ($snapshot in @($transaction.file_snapshots)) {
+                Restore-SkillProjectionFileTransactionSnapshot $snapshot
+            }
+            Get-ContentUtf8 $catalogPath | Should -Be 'catalog-before'
+            Get-ContentUtf8 $portablePath | Should -Be 'portable-before'
+        }
+        finally { $DryRun = $oldDryRun }
+    }
+
     It 'projects declared cold side effects and the transitive dependency contract' {
         $managed = Join-Path $TestDrive 'closure-catalog-managed'
         New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null

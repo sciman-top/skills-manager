@@ -415,7 +415,9 @@ function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
     }
 }
 function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $dirItem = Get-ExistingFileSystemItem $dir
+    if ($null -eq $dirItem) { return "missing" }
+    Need $dirItem.PSIsContainer ("目录指纹目标不是目录：{0}" -f $dir)
     $baseDir = [System.IO.Path]::GetFullPath($dir)
     $baseWithSeparator = $baseDir
     if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
@@ -623,6 +625,23 @@ function RoboMirror([string]$src, [string]$dst) {
     Out-Host
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
 }
+function Get-ExistingFileSystemItem([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        return Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        # Only a genuine missing path is an acceptable null result. Access,
+        # provider, and malformed-path failures must remain visible to callers
+        # that are deciding whether a write or cleanup boundary is safe.
+        if ($_.Exception -is [System.Management.Automation.ItemNotFoundException] -or
+            [string]$_.CategoryInfo.Category -eq 'ObjectNotFound') {
+            return $null
+        }
+        throw
+    }
+}
+
 function Test-PathEntry([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     try {
@@ -650,10 +669,18 @@ function Test-AncestorChainHasReparse([string]$path) {
     # physical ancestor chain. Segments that do not exist yet cannot be
     # reparse points and are skipped.
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    $cursor = [IO.Path]::GetFullPath($path)
+    try { $cursor = [IO.Path]::GetFullPath($path) }
+    catch { return $true }
     while (-not [string]::IsNullOrWhiteSpace($cursor)) {
-        if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) {
-            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        try {
+            $item = Get-ExistingFileSystemItem $cursor
+            if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        catch {
+            # A path that exists but cannot be inspected is not a safe write
+            # boundary.  Missing lexical segments remain harmless and are
+            # skipped while walking toward the filesystem root.
+            if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) { return $true }
         }
         $parent = [IO.Directory]::GetParent($cursor)
         $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
@@ -700,12 +727,30 @@ function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
     if (-not $AllowDot -and $p -eq ".") { return $false }
     return $true
 }
-function Assert-SafeTargetDir([string]$targetPath) {
+function Assert-SafeTargetDir([string]$targetPath, [switch]$AllowManagedWholeRootJunction) {
     Need (-not [string]::IsNullOrWhiteSpace($targetPath)) "target path 不能为空"
     Need (-not (Is-DriveRoot $targetPath)) ("target path 不能是盘符根目录：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $Root $targetPath)) ("target path 不能是仓库根或其父级：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $AgentDir $targetPath)) ("target path 不能是 agent/ 或其父级：{0}" -f $targetPath)
     Need (-not (Is-PathInsideOrEqual $targetPath $AgentDir)) ("target path 不能位于 agent/ 内部：{0}" -f $targetPath)
+
+    $fullTarget = [IO.Path]::GetFullPath($targetPath).TrimEnd('\', '/')
+    $targetItem = Get-ExistingFileSystemItem $fullTarget
+    if ($null -ne $targetItem) {
+        Need $targetItem.PSIsContainer ("target path 必须是目录：{0}" -f $targetPath)
+        $targetIsReparse = ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        if ($targetIsReparse) {
+            $managedWholeRoot = $false
+            if ($AllowManagedWholeRootJunction) {
+                $currentTarget = Get-ReparsePointTargetFullPath $fullTarget
+                $managedWholeRoot = [string]::Equals([string]$currentTarget, [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+            }
+            Need $managedWholeRoot ("target path 不允许是 reparse point：{0}" -f $targetPath)
+        }
+    }
+
+    $parent = [IO.Directory]::GetParent($fullTarget)
+    Need ($null -ne $parent -and -not (Test-AncestorChainHasReparse $parent.FullName)) ("target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
 }
 function Is-ExcludedPath([string]$path, [string[]]$roots) {
     foreach ($r in $roots) {
@@ -738,9 +783,12 @@ function Backup-OverrideDir([string]$overrideName) {
     return $bakPath
 }
 function New-Junction([string]$linkPath, [string]$targetPath, [switch]$QuietIfUnchanged) {
-    EnsureDir $targetPath
-    EnsureDir (Split-Path $linkPath -Parent)
     $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
+    Need (-not (Test-AncestorChainHasReparse $targetFullPath)) ("junction target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
+    $linkParent = Split-Path $linkPath -Parent
+    Need (-not (Test-AncestorChainHasReparse $linkParent)) ("junction link path 的物理父级链不允许存在 reparse point：{0}" -f $linkPath)
+    EnsureDir $targetPath
+    EnsureDir $linkParent
 
     if (Test-PathEntry $linkPath) {
         if (Is-ReparsePoint $linkPath) {
