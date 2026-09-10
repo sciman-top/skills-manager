@@ -8,6 +8,7 @@
     "managed_source_path": "agent",
     "user_skill_root": "~/.agents/skills",
     "managed_link_includes": [
+      "ai-coding-workflow",
       "capability-router",
       "code-review-and-quality",
       "custom-powershell-windows-automation",
@@ -24,6 +25,7 @@
       "profiles": {
         "core-lean": {
           "include": [
+            "ai-coding-workflow",
             "capability-router",
             "code-review-and-quality",
             "custom-powershell-windows-automation",
@@ -167,6 +169,7 @@
           "xlsx"
         ],
         "coding": [
+          "ai-coding-workflow",
           "api-and-interface-design",
           "code-simplification",
           "code-review-and-quality",

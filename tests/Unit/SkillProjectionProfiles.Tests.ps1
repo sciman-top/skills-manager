@@ -43,13 +43,29 @@ Describe 'Skill projection profiles' {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.profile | Should -Be 'core-lean'
             $selection.include_all | Should -BeFalse
-            @($selection.included_names).Count | Should -Be 6
+            @($selection.included_names).Count | Should -Be 7
+            @($selection.included_names) | Should -Contain 'ai-coding-workflow'
             @($selection.included_names) | Should -Contain 'capability-router'
             @($selection.included_names) | Should -Not -Contain 'codebase-design'
             @($selection.included_names) | Should -Not -Contain 'custom-powerpoint-accessibility'
             @($selection.included_names) | Should -Not -Contain 'grill-me'
         }
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
+    }
+
+    It 'exposes the daily coding workflow through the coding discovery domain' {
+        $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json)
+        @($config.skill_projection.discovery_catalog.domain_memberships.coding) | Should -Contain 'ai-coding-workflow'
+
+        $skillPath = Join-Path $repoRoot 'overrides\custom\ai-coding-workflow\SKILL.md'
+        Test-Path -LiteralPath $skillPath -PathType Leaf | Should -BeTrue
+        $skill = Get-ContentUtf8 $skillPath
+        foreach ($anchor in @('Goal:', 'Context:', 'Constraints:', 'Success:', 'Stop:')) {
+            $skill | Should -Match ([regex]::Escape($anchor))
+        }
+        foreach ($boundary in @('repo_verified', 'filesystem_projected', 'host_loaded', 'live_accepted')) {
+            $skill | Should -Match ([regex]::Escape($boundary))
+        }
     }
 
     It 'retains the former nine-skill core set as an explicit compatibility profile' {
