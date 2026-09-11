@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-09-04T12:02:28.7677079Z",
+  "generated_at": "2026-09-11T13:18:07.0504210Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -12,25 +12,25 @@
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "1c760d643497e9da289300e5eb2f5aca861503f7"
+      "commit": "6ca0cd7db39b41b1c37e26d335c507ee92382c6d"
     },
     {
       "name": "anthropics-skills",
       "repo": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f"
+      "commit": "34040c9c568585f6929bedeaad110ad08f079624"
     },
     {
       "name": "baoyu-skills",
       "repo": "https://github.com/jimliu/baoyu-skills.git",
       "ref": "main",
-      "commit": "6b7a2e417500561a5ecdd0b168332f4142584617"
+      "commit": "1567581c26ec29f4216c6e6835415bf30343b0e3"
     },
     {
       "name": "marketingskills",
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
-      "commit": "5cd4a7eae3a9a7b5d2aceb0613f7d1f7c4b65968"
+      "commit": "5b2c0007766c6a1cf1d53fd8fc73e979e0821022"
     },
     {
       "name": "superpowers",
@@ -47,7 +47,7 @@
       "ref": "main",
       "skill": "skills\\agent-browser",
       "sparse": false,
-      "commit": "4a98df79bd232fcde5ca3a4a48e1337b8108b160"
+      "commit": "8c15ff9f71ae60c7e99e66afe1e2d4b9bf414fe2"
     },
     {
       "name": "agent-skills",
@@ -65,7 +65,7 @@
       "ref": "main",
       "skill": "skills\\performance-optimization",
       "sparse": false,
-      "commit": "1c760d643497e9da289300e5eb2f5aca861503f7"
+      "commit": "6ca0cd7db39b41b1c37e26d335c507ee92382c6d"
     },
     {
       "name": "ant-design",
@@ -92,7 +92,7 @@
       "ref": "main",
       "skill": "skills\\baoyu-article-illustrator",
       "sparse": false,
-      "commit": "6b7a2e417500561a5ecdd0b168332f4142584617"
+      "commit": "1567581c26ec29f4216c6e6835415bf30343b0e3"
     },
     {
       "name": "codebase-design",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "9e2bcbc55b70d5c3cdc04a9789cb00c030bf7fc1"
+      "commit": "1f1a239e0b18e80d4a673ff76852ccc8ce294a19"
     },
     {
       "name": "domain-modeling",
@@ -137,7 +137,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "dc43d4512cd8aabcf254cd3c623c8d2cc2e3fdb1"
+      "commit": "570b16720c42b939e84ddc70aecd63bdbd38828d"
     },
     {
       "name": "error-handling-patterns",
@@ -155,7 +155,7 @@
       "ref": "main",
       "skill": "skills\\find-skills",
       "sparse": true,
-      "commit": "435076e78988e1e6ec40d00b0b1d76bdbbc5419a"
+      "commit": "80feb48868972d518436f26711509bc78595b5cb"
     },
     {
       "name": "grill-me",
@@ -218,7 +218,7 @@
       "ref": "main",
       "skill": "skills\\social",
       "sparse": false,
-      "commit": "5cd4a7eae3a9a7b5d2aceb0613f7d1f7c4b65968"
+      "commit": "5b2c0007766c6a1cf1d53fd8fc73e979e0821022"
     },
     {
       "name": "mcp-cli",
@@ -227,7 +227,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "7b1ebe6333397841ca918dec904d24d4695fe953"
+      "commit": "7568a482ce2df38f8965ab5336a3220db796a4ba"
     },
     {
       "name": "microsoft-code-reference",
@@ -254,7 +254,7 @@
       "ref": "main",
       "skill": "plugins\\modern-python\\skills\\modern-python",
       "sparse": false,
-      "commit": "d3323cefbcf645678b8dc481de204b02ad3d02dc"
+      "commit": "321ccfe628eca0d314b0ee4eaffcdd8a05639aaf"
     },
     {
       "name": "playwright-best-practices",
@@ -272,7 +272,7 @@
       "ref": "master",
       "skill": "powerpoint-automation",
       "sparse": false,
-      "commit": "dc43d4512cd8aabcf254cd3c623c8d2cc2e3fdb1"
+      "commit": "570b16720c42b939e84ddc70aecd63bdbd38828d"
     },
     {
       "name": "prompt-engineering-patterns",
@@ -344,7 +344,7 @@
       "ref": "main",
       "skill": "skills\\ui-animation",
       "sparse": false,
-      "commit": "f7d7a28b942bf00299ceb39e8bb2767767ed8f78"
+      "commit": "7898f84739066f620a2a292a031beb6c7f767745"
     },
     {
       "name": "vite",
@@ -362,7 +362,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "e04ea0b9cc8248686edf5ac751cadff550e162b8"
+      "commit": "c9148d0bb239ed01a95724a5928b98cdf9c30658"
     }
   ]
 }
