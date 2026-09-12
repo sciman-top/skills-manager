@@ -12,6 +12,8 @@ Describe 'release-update-worker staged payload integrity' {
         . ([scriptblock]::Create($fn.Extent.Text))
         . ([scriptblock]::Create($manifestFn.Extent.Text))
         . ([scriptblock]::Create($rollbackFn.Extent.Text))
+        $physicalFn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Assert-PhysicalChainHasNoReparse' }, $true)
+        . ([scriptblock]::Create($physicalFn.Extent.Text))
         $script:roots = [System.Collections.Generic.List[string]]::new()
 
         function New-StagedPackage {
@@ -70,9 +72,86 @@ Describe 'release-update-worker staged payload integrity' {
         { Assert-StagedPayloadIntegrity $pkg.root $pkg.manifest_sha } | Should -Throw '*changed after handoff*'
     }
 
-    It 'keeps a backup-only recovery path when current went missing mid-swap' {
-        $workerScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-worker.ps1') -Raw
-        $workerScript | Should -Match '(?s)function Invoke-ReleaseUpdateRollback.*?Move-Item -LiteralPath \$backup -Destination \$current -ErrorAction Stop'
+    It 'preserves an unowned backup on preflight failure with current missing=<CurrentMissing>' -TestCases @(
+        @{ CurrentMissing=$false }, @{ CurrentMissing=$true }
+    ) {
+        param($CurrentMissing)
+        $root = Join-Path $TestDrive 'preflight-conflict'
+        $current = Join-Path $root 'current'
+        $backup = Join-Path $root 'backup'
+        $staged = Join-Path $root 'staged'
+        New-Item -ItemType Directory -Path $current,$backup,$staged -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $current 'RELEASE-MANIFEST.json') -Value '{"version":"current"}'
+        Set-Content -LiteralPath (Join-Path $backup 'RELEASE-MANIFEST.json') -Value '{"version":"unowned"}'
+        $currentHash = Get-ReleaseManifestSha256 $current
+        $backupHash = Get-ReleaseManifestSha256 $backup
+        if ($CurrentMissing) { Remove-Item -LiteralPath $current -Recurse -Force }
+        $worker = Join-Path $root 'worker.ps1'
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts/release/release-update-worker.ps1') -Destination $worker
+        & pwsh -NoProfile -File $worker -CurrentRoot $current -StagedRoot $staged -BackupRoot $backup -ExpectedVersion v2026.09.13 -PackageType portable -ParentProcessId 2147483647 -ManifestSha256 unused 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 1
+        if ($CurrentMissing) { Test-Path -LiteralPath $current | Should -BeFalse }
+        else { Get-ReleaseManifestSha256 $current | Should -Be $currentHash }
+        Get-ReleaseManifestSha256 $backup | Should -Be $backupHash
+        @(Get-ChildItem -LiteralPath $backup -Recurse -Force).Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath $root -Directory -Filter 'current.failed-*').Count | Should -Be 0
+        $receiptRoot = if ($CurrentMissing) { $root } else { $current }
+        (Get-Content -LiteralPath (Join-Path $receiptRoot 'reports/release-update/last.json') -Raw | ConvertFrom-Json).status | Should -Be 'not_started'
+    }
+
+    It 'runs the real worker through <PackageType> replacement and recovery' -TestCases @(
+        @{ PackageType='portable'; ExpectedStatus='updated'; ExpectedExit=0 },
+        @{ PackageType='bootstrap'; ExpectedStatus='rolled_back'; ExpectedExit=1 }
+    ) {
+        param($PackageType,$ExpectedStatus,$ExpectedExit)
+        $root = Join-Path $TestDrive ('worker-' + $PackageType)
+        $current = Join-Path $root 'current'
+        $staged = Join-Path $root 'staged'
+        $backup = Join-Path $root 'backup'
+        New-Item -ItemType Directory -Path $current -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $current 'RELEASE-MANIFEST.json') -Value '{"version":"previous"}'
+        $oldHash = Get-ReleaseManifestSha256 $current
+        $pkg = New-StagedPackage
+        Copy-Item -LiteralPath $pkg.root -Destination $staged -Recurse
+        Set-Content -LiteralPath (Join-Path $staged 'install.ps1') -Value 'exit 7'
+        $manifestPath = Join-Path $staged 'RELEASE-MANIFEST.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $manifest.package = $PackageType
+        $manifest.version = 'v2026.09.13'
+        foreach ($entry in $manifest.files) {
+            $entry.sha256 = (Get-FileHash -LiteralPath (Join-Path $staged $entry.path)).Hash.ToLowerInvariant()
+        }
+        $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath
+        $newHash = Get-ReleaseManifestSha256 $staged
+        $worker = Join-Path $root 'worker.ps1'
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts/release/release-update-worker.ps1') -Destination $worker
+        & pwsh -NoProfile -File $worker -CurrentRoot $current -StagedRoot $staged -BackupRoot $backup -ExpectedVersion v2026.09.13 -PackageType $PackageType -ParentProcessId 2147483647 -ManifestSha256 $newHash 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be $ExpectedExit
+        (Get-Content -LiteralPath (Join-Path $current 'reports/release-update/last.json') -Raw | ConvertFrom-Json).status | Should -Be $ExpectedStatus
+        if ($PackageType -eq 'portable') {
+            Get-ReleaseManifestSha256 $current | Should -Be $newHash
+            Get-ReleaseManifestSha256 $backup | Should -Be $oldHash
+        }
+        else {
+            Get-ReleaseManifestSha256 $current | Should -Be $oldHash
+            $failed = @(Get-ChildItem -LiteralPath $root -Directory -Filter 'current.failed-*')
+            $failed.Count | Should -Be 1
+            Get-ReleaseManifestSha256 $failed[0].FullName | Should -Be $newHash
+        }
+    }
+
+    It 'preserves both directories when the owned backup no longer matches its recorded hash' {
+        $current = Join-Path $TestDrive 'hash-current'
+        $backup = Join-Path $TestDrive 'hash-backup'
+        New-Item -ItemType Directory -Path $current,$backup | Out-Null
+        Set-Content -LiteralPath (Join-Path $current 'RELEASE-MANIFEST.json') -Value '{"version":"current"}'
+        Set-Content -LiteralPath (Join-Path $backup 'RELEASE-MANIFEST.json') -Value '{"version":"previous"}'
+        $expected = Get-ReleaseManifestSha256 $backup
+        Set-Content -LiteralPath (Join-Path $backup 'RELEASE-MANIFEST.json') -Value '{"version":"changed"}'
+        $result = Invoke-ReleaseUpdateRollback $current $backup ($current + '.failed') $expected
+        $result.status | Should -Be 'rollback_failed'
+        (Get-Content (Join-Path $current 'RELEASE-MANIFEST.json') -Raw | ConvertFrom-Json).version | Should -Be 'current'
+        Test-Path -LiteralPath $backup | Should -BeTrue
     }
 
     It 'verifies a successful rollback and reports rollback failure without claiming recovery' {
@@ -105,7 +184,7 @@ Describe 'release-update-worker staged payload integrity' {
             $failedResult.status | Should -Be 'rollback_failed'
             Test-Path -LiteralPath $blockedBackup -PathType Container | Should -BeTrue
 
-            # 恢复成功但交接时没记录清单哈希：无法证明恢复内容，必须如实报 rollback_failed。
+            # Missing provenance must block before moving either directory.
             $unverifiedCurrent = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-unverified-' + [guid]::NewGuid().ToString('N'))
             $unverifiedBackup = Join-Path ([IO.Path]::GetTempPath()) ('worker-rollback-unverified-backup-' + [guid]::NewGuid().ToString('N'))
             $script:roots.Add($unverifiedCurrent) | Out-Null
@@ -117,8 +196,8 @@ Describe 'release-update-worker staged payload integrity' {
 
             $unverified.status | Should -Be 'rollback_failed'
             $unverified.message | Should -Match 'no RELEASE-MANIFEST\.json hash was recorded'
-            Test-Path -LiteralPath $unverifiedCurrent -PathType Container | Should -BeTrue
-            Test-Path -LiteralPath $unverifiedBackup -PathType Container | Should -BeFalse
+            Test-Path -LiteralPath $unverifiedCurrent -PathType Container | Should -BeFalse
+            Test-Path -LiteralPath $unverifiedBackup -PathType Container | Should -BeTrue
         }
         finally {
             foreach ($path in @($current, $backup, $failed)) {

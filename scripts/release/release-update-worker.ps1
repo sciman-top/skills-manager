@@ -86,22 +86,21 @@ function Get-ReleaseManifestSha256([string]$Root) {
 }
 
 function Invoke-ReleaseUpdateRollback([string]$Current, [string]$Backup, [string]$Failed, [string]$ExpectedManifestSha256) {
-    if (-not (Test-Path -LiteralPath $Backup -PathType Container)) {
-        return [pscustomobject]@{ status = 'not_started'; message = '' }
-    }
-
     try {
-        if (Test-Path -LiteralPath $Current -PathType Container) {
-            Move-Item -LiteralPath $Current -Destination $Failed -ErrorAction Stop
+        foreach ($path in @($Current, $Backup, $Failed)) { Assert-PhysicalChainHasNoReparse $path }
+        if (-not (Test-Path -LiteralPath $Backup -PathType Container)) { throw 'Owned installation backup is missing.' }
+        if ([string]::IsNullOrWhiteSpace($ExpectedManifestSha256)) {
+            throw 'Rollback blocked: no RELEASE-MANIFEST.json hash was recorded to verify the backup.'
         }
-        Move-Item -LiteralPath $Backup -Destination $Current -ErrorAction Stop
+        if ((Get-ReleaseManifestSha256 $Backup) -ne $ExpectedManifestSha256) {
+            throw 'Rollback backup RELEASE-MANIFEST.json does not match the previous installation.'
+        }
+        if (Test-Path -LiteralPath $Current -PathType Container) {
+            [IO.Directory]::Move($Current, $Failed)
+        }
+        [IO.Directory]::Move($Backup, $Current)
         if (-not (Test-Path -LiteralPath $Current -PathType Container)) {
             throw 'Rollback completed without restoring the current installation directory.'
-        }
-        # 恢复成功但交接时没记录到清单哈希（如 current 清单被提前移除的 TOCTOU）：
-        # 无法证明恢复内容等于先前安装，必须 fail closed 如实报 rollback_failed。
-        if ([string]::IsNullOrWhiteSpace($ExpectedManifestSha256)) {
-            throw 'Rollback restored the current installation but no RELEASE-MANIFEST.json hash was recorded to verify it against.'
         }
         $actualManifestSha256 = Get-ReleaseManifestSha256 $Current
         if ($actualManifestSha256 -ne $ExpectedManifestSha256) {
@@ -120,6 +119,7 @@ $staged = Assert-SiblingPath $StagedRoot $parent
 $backup = Assert-SiblingPath $BackupRoot $parent
 $failed = $current + '.failed-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss')
 $previousManifestSha256 = ''
+$movedCurrent = $false
 
 try {
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -135,34 +135,24 @@ try {
     if (Test-Path -LiteralPath $backup) { throw "Backup path already exists: $backup" }
     Assert-StagedPayloadIntegrity $staged $ManifestSha256
     $previousManifestSha256 = Get-ReleaseManifestSha256 $current
+    if ([string]::IsNullOrWhiteSpace($previousManifestSha256)) { throw 'Current installation manifest is missing before replacement.' }
 
-    $movedCurrent = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
         try {
-            Move-Item -LiteralPath $current -Destination $backup -ErrorAction Stop
+            # Directory.Move refuses an existing destination instead of nesting
+            # current inside a raced backup directory.
+            [IO.Directory]::Move($current, $backup)
             $movedCurrent = $true
             break
         }
         catch {
+            if (Test-Path -LiteralPath $backup) { throw }
             if ($attempt -eq 59) { throw }
             Start-Sleep -Seconds 1
         }
     }
     if (-not $movedCurrent) { throw 'Current installation could not be released for replacement.' }
-    try {
-        Move-Item -LiteralPath $staged -Destination $current -ErrorAction Stop
-    }
-    catch {
-        Move-Item -LiteralPath $backup -Destination $current -ErrorAction Stop
-        # 内联恢复与正式回滚同标准：manifest 比对不可跳过，否则恢复内容未经验证。
-        if (-not [string]::IsNullOrWhiteSpace($previousManifestSha256)) {
-            $inlineRestoredSha = Get-ReleaseManifestSha256 $current
-            if ($inlineRestoredSha -ne $previousManifestSha256) {
-                throw ('Inline recovery restored a directory whose RELEASE-MANIFEST.json does not match the previous installation (original failure: {0}).' -f $_.Exception.Message)
-            }
-        }
-        throw
-    }
+    [IO.Directory]::Move($staged, $current)
 
     if ($PackageType -eq 'bootstrap') {
         $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
@@ -179,7 +169,10 @@ try {
 catch {
     $message = $_.Exception.Message
     try {
-        $rollback = Invoke-ReleaseUpdateRollback $current $backup $failed $previousManifestSha256
+        $rollback = if ($movedCurrent) {
+            Invoke-ReleaseUpdateRollback $current $backup $failed $previousManifestSha256
+        }
+        else { [pscustomobject]@{ status = 'not_started'; message = '' } }
         $receiptMessage = if ([string]$rollback.status -eq 'rollback_failed') {
             "{0}; rollback={1}" -f $message, [string]$rollback.message
         }
@@ -187,7 +180,7 @@ catch {
             "{0}; rollback completed and previous manifest verified." -f $message
         }
         else { $message }
-        $receiptRoot = if (Test-Path -LiteralPath $current -PathType Container) { $current } elseif (Test-Path -LiteralPath $backup -PathType Container) { $backup } else { $parent }
+        $receiptRoot = if (Test-Path -LiteralPath $current -PathType Container) { $current } elseif ($movedCurrent -and (Test-Path -LiteralPath $backup -PathType Container)) { $backup } else { $parent }
         Write-UpdateWorkerReceipt $receiptRoot ([string]$rollback.status) $receiptMessage
         if ([string]$rollback.status -eq 'rollback_failed') {
             # EAP=Stop 下 Write-Error 会变成终止错误并被外层 catch 误归因为

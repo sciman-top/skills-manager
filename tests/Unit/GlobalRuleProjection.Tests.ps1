@@ -5,6 +5,7 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
     . (Join-Path $repoRoot 'src\Application\GlobalRuleProjection.ps1')
     . (Join-Path $repoRoot 'src\Commands\GlobalRules.ps1')
+    $script:globalRuleOriginalWriteBytes = ${function:Write-BytesAtomic}
 
     function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '') {
         $dirs = @((Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),(Join-Path $Fixture 'rules\global\zcode'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection'))
@@ -125,6 +126,87 @@ Describe 'Global rule schema v2 apply and rollback' {
         $rollback.pass|Should -BeTrue
         [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md'))|Should -Be '# old codex'
         [IO.File]::ReadAllText((Join-Path $claude 'CLAUDE.md'))|Should -Be '# old claude'
+    }
+
+    It 'rolls back after source <Change> without weakening apply freshness' -TestCases @(
+        @{ Change = 'changed' }, @{ Change = 'removed' }
+    ) {
+        param($Change)
+        $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude
+        $receipt = Invoke-TestApply $plan $fixture $codex $claude $receiptPath
+        $source = Join-Path $fixture 'rules/global/codex/AGENTS.md'
+        if ($Change -eq 'changed') { Add-Content -LiteralPath $source -Value 'later revision' }
+        else { Remove-Item -LiteralPath $source }
+        { Invoke-TestApply $plan $fixture $codex $claude $receiptPath -Resume } | Should -Throw '*source_hash_stale*'
+        $result = Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups')
+        $result.pass | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
+        [IO.File]::ReadAllText((Join-Path $claude 'CLAUDE.md')) | Should -Be '# old claude'
+    }
+
+    It 'rolls back partial apply with the second action <Stage> and operation <Operation>' -TestCases @(
+        @{ Stage='pending'; Operation='update' },
+        @{ Stage='prepared'; Operation='update' },
+        @{ Stage='landed'; Operation='update' },
+        @{ Stage='prepared'; Operation='create' },
+        @{ Stage='landed'; Operation='create' }
+    ) {
+        param($Stage,$Operation)
+        $target = Join-Path $claude 'CLAUDE.md'
+        if ($Operation -eq 'create') { Remove-Item -LiteralPath $target }
+        $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude
+        $script:globalRuleFaultEnabled = $true
+        $script:globalRuleFaultTarget = $target
+        $script:globalRuleFaultStage = $Stage
+        Mock Write-BytesAtomic {
+            param($Path,$Bytes)
+            if ($script:globalRuleFaultEnabled -and (($script:globalRuleFaultStage -eq 'pending' -and $Path -like '*claude.bak') -or ($script:globalRuleFaultStage -ne 'pending' -and $Path -eq $script:globalRuleFaultTarget))) {
+                if ($script:globalRuleFaultStage -eq 'landed') { & $script:globalRuleOriginalWriteBytes -Path $Path -Bytes $Bytes }
+                throw 'fixture second action failure'
+            }
+            & $script:globalRuleOriginalWriteBytes -Path $Path -Bytes $Bytes
+        }
+        { Invoke-TestApply $plan $fixture $codex $claude $receiptPath } | Should -Throw '*fixture second action failure*'
+        $script:globalRuleFaultEnabled = $false
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        $receipt.status | Should -Be 'recovery_required'
+        $receipt.actions[0].status | Should -Be 'applied'
+        $receipt.actions[1].status | Should -Be $(if ($Stage -eq 'pending') { 'pending' } else { 'prepared' })
+        if ($Stage -eq 'pending') {
+            [IO.File]::WriteAllText($target,'foreign change')
+            { Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups') } | Should -Throw '*Pending target drift*'
+            (Get-GlobalRuleFileFacts (Join-Path $codex 'AGENTS.md')).hash | Should -Be $plan.actions[0].source_hash
+            [IO.File]::WriteAllText($target,'# old claude')
+        }
+        $result = Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups')
+        $result.pass | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
+        if ($Operation -eq 'create') { Test-Path -LiteralPath $target | Should -BeFalse }
+        else { [IO.File]::ReadAllText($target) | Should -Be '# old claude' }
+        (Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups')).writes | Should -Be 0
+    }
+
+    It 'resumes an interrupted rollback and still blocks target drift after source changes' {
+        $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude
+        $receipt = Invoke-TestApply $plan $fixture $codex $claude $receiptPath
+        Add-Content -LiteralPath (Join-Path $fixture 'rules/global/codex/AGENTS.md') -Value 'later revision'
+        $script:globalRuleFaultEnabled = $true
+        $script:globalRuleFaultTarget = Join-Path $codex 'AGENTS.md'
+        Mock Write-BytesAtomic {
+            param($Path,$Bytes)
+            if ($script:globalRuleFaultEnabled -and $Path -eq $script:globalRuleFaultTarget) { throw 'fixture rollback interruption' }
+            & $script:globalRuleOriginalWriteBytes -Path $Path -Bytes $Bytes
+        }
+        { Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups') } | Should -Throw '*fixture rollback interruption*'
+        $interrupted = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        $interrupted.status | Should -Be 'rollback_in_progress'
+        $interrupted.actions[1].status | Should -Be 'rolled_back'
+        $script:globalRuleFaultEnabled = $false
+        [IO.File]::WriteAllText((Join-Path $claude 'CLAUDE.md'),'foreign change')
+        { Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups') } | Should -Throw '*Rolled-back target drift*'
+        [IO.File]::WriteAllText((Join-Path $claude 'CLAUDE.md'),'# old claude')
+        (Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups')).writes | Should -Be 1
+        [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
     }
 
     It 'fails closed for schema v1 plans' {

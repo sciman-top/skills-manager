@@ -71,6 +71,48 @@ Describe "Agent build" {
         }
     }
 
+    It 'preserves current agent when the backup is <Failure>' -TestCases @(
+        @{ Failure = 'missing' }, @{ Failure = 'changed' }
+    ) {
+        param($Failure)
+        $oldRoot = $Root; $oldAgent = $AgentDir
+        try {
+            $Root = Join-Path $TestDrive ('backup-' + $Failure)
+            $AgentDir = Join-Path $Root 'agent'
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'old'
+            $txn = Start-BuildTransaction
+            New-Item -ItemType Directory -Path $AgentDir | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'new.txt') 'usable current'
+            $txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+            if ($Failure -eq 'missing') { Remove-Item -LiteralPath $txn.backup_agent -Recurse -Force }
+            else { Set-ContentUtf8 (Join-Path $txn.backup_agent 'old.txt') 'changed' }
+            Rollback-BuildTransaction $txn | Should -BeFalse
+            Get-ContentUtf8 (Join-Path $AgentDir 'new.txt') | Should -Be 'usable current'
+            Test-Path -LiteralPath $txn.path | Should -BeTrue
+        }
+        finally { $Root = $oldRoot; $AgentDir = $oldAgent }
+    }
+
+    It 'restores the quarantined current agent when the backup move fails' {
+        $oldRoot = $Root; $oldAgent = $AgentDir
+        try {
+            $Root = Join-Path $TestDrive 'backup-move-failure'
+            $AgentDir = Join-Path $Root 'agent'
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'old'
+            $txn = Start-BuildTransaction
+            New-Item -ItemType Directory -Path $AgentDir | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'new.txt') 'usable current'
+            $txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+            Mock Invoke-MoveItem { throw 'fixture restore move failure' } -ParameterFilter { $src -eq $txn.backup_agent }
+            Rollback-BuildTransaction $txn | Should -BeFalse
+            Get-ContentUtf8 (Join-Path $AgentDir 'new.txt') | Should -Be 'usable current'
+            Get-ContentUtf8 (Join-Path $txn.backup_agent 'old.txt') | Should -Be 'old'
+        }
+        finally { $Root = $oldRoot; $AgentDir = $oldAgent }
+    }
+
     It "uses retry-capable deletion when clearing agent output" {
         $oldAgent = $AgentDir
         try {

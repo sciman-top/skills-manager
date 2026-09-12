@@ -7105,7 +7105,7 @@ function New-GlobalRuleProjectionPlan {
 }
 
 function Test-GlobalRulePlanBinding {
-    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$ZCodeUserRoot='',[switch]$AllowAppliedTargets)
+    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$ZCodeUserRoot='',[switch]$AllowAppliedTargets,[switch]$ForRollback)
     $findings=New-Object Collections.Generic.List[object]
     if($null-eq$Plan-or(Get-GlobalRuleProperty $Plan 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $Plan 'domain')-ne'global_rule_projection'){
         return [pscustomobject]@{pass=$false;findings=@((New-GlobalRuleFinding 'plan_schema_invalid' '$' 'Only global rule projection plan schema version 2 is supported; generate a new plan.'))}
@@ -7120,8 +7120,11 @@ function Test-GlobalRulePlanBinding {
     foreach($entry in $canonical){
         $action=if($byId.ContainsKey($entry.id)){$byId[$entry.id]}else{$null}
         if($null-eq$action-or-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $action 'source_path')) $entry.source_path)-or-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $action 'target_path')) $entry.target_path)){$findings.Add((New-GlobalRuleFinding 'plan_action_binding_mismatch' '$.actions' ('Plan is not bound to the canonical {0} action.'-f$entry.id)))|Out-Null;continue}
-        $source=Get-GlobalRuleFileFacts $entry.source_path
-        if(-not$source.exists-or$source.hash-ne[string](Get-GlobalRuleProperty $action 'source_hash')){$findings.Add((New-GlobalRuleFinding 'source_hash_stale' $entry.source_path 'Global rule source changed after planning.'))|Out-Null}
+        # Rollback is bound to the recorded operation and backup, not today's source bytes.
+        if(-not$ForRollback){
+            $source=Get-GlobalRuleFileFacts $entry.source_path
+            if(-not$source.exists-or$source.hash-ne[string](Get-GlobalRuleProperty $action 'source_hash')){$findings.Add((New-GlobalRuleFinding 'source_hash_stale' $entry.source_path 'Global rule source changed after planning.'))|Out-Null}
+        }
         $beforeExists=[bool](Get-GlobalRuleProperty $action 'before_exists');$beforeHash=[string](Get-GlobalRuleProperty $action 'before_hash');$operation=[string](Get-GlobalRuleProperty $action 'operation')
         $expectedOperation=if(-not$beforeExists){'create'}elseif($beforeHash-eq[string](Get-GlobalRuleProperty $action 'source_hash')){'unchanged'}else{'update'}
         if($operation-ne$expectedOperation){$findings.Add((New-GlobalRuleFinding 'plan_operation_invalid' '$.actions' 'Plan operation does not match its bound hashes.'))|Out-Null}
@@ -7242,24 +7245,29 @@ function Invoke-GlobalRuleProjectionRollback {
     if((Get-GlobalRuleProperty $receipt 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $receipt 'domain')-ne'global_rule_projection'){throw 'Only global rule projection receipt schema version 2 is supported; schema v1 receipts cannot be rolled back.'}
     $plan=[pscustomobject]@{schema_version=2;domain='global_rule_projection';operation_id=$receipt.operation_id;plan_hash=$receipt.plan_hash;repo_root=$receipt.repo_root;codex_user_root=$receipt.codex_user_root;claude_user_root=$receipt.claude_user_root;zcode_user_root=$receipt.zcode_user_root;actions=@($receipt.actions|ForEach-Object{[pscustomobject]@{id=$_.id;source_path=$_.source_path;target_path=$_.target_path;source_hash=$_.source_hash;before_exists=[bool]$_.before_exists;before_hash=$_.before_hash;operation=$_.operation}});apply=[pscustomobject]@{required_token=$null}}
     $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot $plan.actions $ZCodeUserRoot;$plan.apply.required_token=$identity.apply_token
-    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot -AllowAppliedTargets
+    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot -AllowAppliedTargets -ForRollback
     if(-not$planBinding.pass-or$plan.plan_hash-cne$identity.plan_hash-or$plan.operation_id-cne$identity.operation_id){throw('Global rule receipt canonical binding is invalid: {0}'-f(@($planBinding.findings.code)-join', '))}
     $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot
     if(-not$receiptBinding.pass){throw('Global rule receipt is invalid: {0}'-f(@($receiptBinding.findings.code)-join', '))}
     if($Token-cne[string]$receipt.rollback.required_token-or$Token-cne$identity.rollback_token){throw 'Global rule rollback token is invalid.'}
-    if([string]$receipt.status-notin@('applied','rollback_in_progress')){throw 'Global rule receipt is not rollback eligible.'}
+    if([string]$receipt.status-notin@('applied','in_progress','recovery_required','rollback_in_progress','rolled_back')){throw 'Global rule receipt is not rollback eligible.'}
     foreach($action in @($receipt.actions|Where-Object {$_.operation -ne 'unchanged'})){
+        $target=Get-GlobalRuleFileFacts $action.target_path;$alreadyBefore=($target.exists-eq[bool]$action.before_exists-and$target.hash-eq[string]$action.before_hash)
+        if($action.status-eq'pending'){
+            if(-not$alreadyBefore){throw('Pending target drift blocks rollback: {0}'-f$action.target_path)}
+            continue
+        }
         if([bool]$action.before_exists){
             if(-not[IO.File]::Exists([string]$action.backup_path)){throw('Global rule backup is missing: {0}'-f$action.backup_path)}
             $bytes=[IO.File]::ReadAllBytes([string]$action.backup_path);$hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
             if($bytes.Length-ne[int64]$action.backup_length-or$hash-cne[string]$action.backup_sha256-or$hash-cne[string]$action.before_hash){throw('Global rule backup integrity check failed: {0}'-f$action.backup_path)}
         }elseif(-not[string]::IsNullOrWhiteSpace([string]$action.backup_path)){throw 'Create actions must not carry a backup path.'}
-        $target=Get-GlobalRuleFileFacts $action.target_path;$alreadyBefore=($target.exists-eq[bool]$action.before_exists-and$target.hash-eq[string]$action.before_hash)
         $isDesired=($target.exists-and$target.hash-eq[string]$action.source_hash)
+        if($action.status-eq'rolled_back'-and-not$alreadyBefore){throw('Rolled-back target drift blocks rollback: {0}'-f$action.target_path)}
         if(-not$alreadyBefore-and-not$isDesired){throw('Global rule target drift blocks rollback: {0}'-f$action.target_path)}
     }
     $receipt.status='rollback_in_progress';Write-GlobalRuleReceipt $receiptFile $receipt
-    $writes=0;$reverse=@($receipt.actions|Where-Object {$_.operation -ne 'unchanged'});[array]::Reverse($reverse)
+    $writes=0;$reverse=@($receipt.actions|Where-Object {$_.operation -ne 'unchanged' -and $_.status -ne 'pending'});[array]::Reverse($reverse)
     foreach($action in $reverse){
         $target=Get-GlobalRuleFileFacts $action.target_path
         if($target.exists-eq[bool]$action.before_exists-and$target.hash-eq[string]$action.before_hash){$action.status='rolled_back';continue}
@@ -12994,6 +13002,26 @@ function Rollback-BuildTransaction($txn) {
                 }
             }
 
+            # Validate recovery material before moving or deleting the current
+            # build. Keep it in the transaction until restoration is verified.
+            if ($null -eq $restoreError -and $txn.has_backup_agent) {
+                try {
+                    $backupItem = Get-Item -LiteralPath $txn.backup_agent -Force -ErrorAction Stop
+                    if (-not $backupItem.PSIsContainer -or (Test-AncestorChainHasReparse $txn.backup_agent)) { throw 'agent/ backup is not a regular physical directory' }
+                    $backupFingerprint = Get-DirectoryFingerprint $txn.backup_agent
+                    if ($txn.PSObject.Properties.Match('backup_agent_fingerprint').Count -eq 0 -or
+                        -not [string]::Equals($backupFingerprint, [string]$txn.backup_agent_fingerprint, [StringComparison]::OrdinalIgnoreCase) -or
+                        -not [string]::Equals($backupFingerprint, [string]$txn.agent_before_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                        throw 'agent/ backup fingerprint drifted; current build was preserved'
+                    }
+                }
+                catch { $restoreError = $_.Exception.Message }
+            }
+            elseif ($null -eq $restoreError -and ([string]$txn.agent_before_state -ne 'absent' -or [string]$txn.agent_before_fingerprint -ne 'missing')) {
+                $restoreError = 'Pre-build agent existed but no verified backup is available'
+            }
+            $heldAgent = Join-Path $txn.path 'agent.rollback-current'
+            $heldCurrent = $false
             if ($null -eq $restoreError -and (Test-PathEntry $AgentDir)) {
                 $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction Stop
                 if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer) {
@@ -13001,8 +13029,15 @@ function Rollback-BuildTransaction($txn) {
                 }
                 else {
                     try {
-                        $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
-                        if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                        if ($txn.has_backup_agent) {
+                            if (Test-AncestorChainHasReparse $txn.path) { throw 'Build transaction path crosses a reparse point' }
+                            [IO.Directory]::Move($AgentDir, $heldAgent)
+                            $heldCurrent = $true
+                        }
+                        else {
+                            $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
+                            if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                        }
                     }
                     catch { $restoreError = $_.Exception.Message }
                 }
@@ -13039,6 +13074,10 @@ function Rollback-BuildTransaction($txn) {
                 # 构建前没有 agent/（无备份可恢复）：CAS 清理成功后即回到缺失状态。
                 $restored = [string]::Equals([string]$txn.agent_before_fingerprint, 'missing', [StringComparison]::OrdinalIgnoreCase) -and -not (Test-PathEntry $AgentDir)
                 if (-not $restored) { $restoreError = '构建前 agent/ 状态不是缺失，拒绝无备份回滚' }
+            }
+            if (-not $restored -and $heldCurrent -and -not (Test-PathEntry $AgentDir)) {
+                try { [IO.Directory]::Move($heldAgent, $AgentDir) }
+                catch { $restoreError = '{0}; current build retained at {1}: {2}' -f $restoreError, $heldAgent, $_.Exception.Message }
             }
         }
     }

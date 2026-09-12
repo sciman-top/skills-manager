@@ -2073,6 +2073,26 @@ function Rollback-BuildTransaction($txn) {
                 }
             }
 
+            # Validate recovery material before moving or deleting the current
+            # build. Keep it in the transaction until restoration is verified.
+            if ($null -eq $restoreError -and $txn.has_backup_agent) {
+                try {
+                    $backupItem = Get-Item -LiteralPath $txn.backup_agent -Force -ErrorAction Stop
+                    if (-not $backupItem.PSIsContainer -or (Test-AncestorChainHasReparse $txn.backup_agent)) { throw 'agent/ backup is not a regular physical directory' }
+                    $backupFingerprint = Get-DirectoryFingerprint $txn.backup_agent
+                    if ($txn.PSObject.Properties.Match('backup_agent_fingerprint').Count -eq 0 -or
+                        -not [string]::Equals($backupFingerprint, [string]$txn.backup_agent_fingerprint, [StringComparison]::OrdinalIgnoreCase) -or
+                        -not [string]::Equals($backupFingerprint, [string]$txn.agent_before_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                        throw 'agent/ backup fingerprint drifted; current build was preserved'
+                    }
+                }
+                catch { $restoreError = $_.Exception.Message }
+            }
+            elseif ($null -eq $restoreError -and ([string]$txn.agent_before_state -ne 'absent' -or [string]$txn.agent_before_fingerprint -ne 'missing')) {
+                $restoreError = 'Pre-build agent existed but no verified backup is available'
+            }
+            $heldAgent = Join-Path $txn.path 'agent.rollback-current'
+            $heldCurrent = $false
             if ($null -eq $restoreError -and (Test-PathEntry $AgentDir)) {
                 $currentItem = Get-Item -LiteralPath $AgentDir -Force -ErrorAction Stop
                 if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $currentItem.PSIsContainer) {
@@ -2080,8 +2100,15 @@ function Rollback-BuildTransaction($txn) {
                 }
                 else {
                     try {
-                        $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
-                        if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                        if ($txn.has_backup_agent) {
+                            if (Test-AncestorChainHasReparse $txn.path) { throw 'Build transaction path crosses a reparse point' }
+                            [IO.Directory]::Move($AgentDir, $heldAgent)
+                            $heldCurrent = $true
+                        }
+                        else {
+                            $removed = Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore
+                            if (-not $removed -or (Test-PathEntry $AgentDir)) { $restoreError = '当前 agent/ 未能清空，备份恢复被阻止' }
+                        }
                     }
                     catch { $restoreError = $_.Exception.Message }
                 }
@@ -2118,6 +2145,10 @@ function Rollback-BuildTransaction($txn) {
                 # 构建前没有 agent/（无备份可恢复）：CAS 清理成功后即回到缺失状态。
                 $restored = [string]::Equals([string]$txn.agent_before_fingerprint, 'missing', [StringComparison]::OrdinalIgnoreCase) -and -not (Test-PathEntry $AgentDir)
                 if (-not $restored) { $restoreError = '构建前 agent/ 状态不是缺失，拒绝无备份回滚' }
+            }
+            if (-not $restored -and $heldCurrent -and -not (Test-PathEntry $AgentDir)) {
+                try { [IO.Directory]::Move($heldAgent, $AgentDir) }
+                catch { $restoreError = '{0}; current build retained at {1}: {2}' -f $restoreError, $heldAgent, $_.Exception.Message }
             }
         }
     }
