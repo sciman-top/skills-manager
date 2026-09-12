@@ -170,7 +170,7 @@ Describe 'Native agent bridge' {
 
         Test-Path -LiteralPath $legacyBackup -PathType Leaf | Should -BeTrue
         Test-Path -LiteralPath $destination -PathType Leaf | Should -BeTrue
-        (Get-NativeAgentBridgeSha256 $legacyBackup) | Should -Be (Get-NativeAgentBridgeSha256 $destination)
+        (Get-FileHash -LiteralPath $legacyBackup -Algorithm SHA256).Hash | Should -Be (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     }
 
     It 'keeps a partial migration ledger across the failure and restores migrated entries' {

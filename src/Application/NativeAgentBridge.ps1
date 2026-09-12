@@ -8,11 +8,6 @@ function Get-NativeAgentBridgeValue($Object, [string]$Name) {
     return $property.Value
 }
 
-function Get-NativeAgentBridgeSha256([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
-    return ([string](Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash).ToLowerInvariant()
-}
-
 function Get-NativeAgentBridgeBytesSha256([byte[]]$Bytes) {
     if ($null -eq $Bytes) { return '' }
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
@@ -255,10 +250,6 @@ function Get-NativeAgentBridgeTemplateRecord($SourcePath, [string]$Name) {
         bytes = [byte[]]$state.bytes
         sha256 = [string]$state.hash
     }
-}
-
-function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
-    return [string](Get-NativeAgentBridgeTemplateRecord $SourcePath $Name).content
 }
 
 function Sync-NativeAgentBridge($Config, $PromotionContext = $null, [switch]$SkipLock) {

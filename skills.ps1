@@ -4023,23 +4023,6 @@ if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyCont
 if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillMetadata.ps1') }
 
-function Test-SkillCatalogCompilerContained {
-    param([string]$Path, [string]$Root)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
-    if (Get-Command Test-OperationPathWithinRoot -ErrorAction SilentlyContinue) { return Test-OperationPathWithinRoot $Path $Root }
-    $fullPath = [IO.Path]::GetFullPath($Path)
-    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    return $fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-SkillCatalogCompilerTextHash([string]$Text) {
-    if (Get-Command Get-OperationSha256 -ErrorAction SilentlyContinue) { return Get-OperationSha256 $Text }
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
-}
-
 function ConvertTo-SkillCatalogCompilerEntry {
     param(
         [Parameter(Mandatory = $true)]$InputEntry,
@@ -4053,7 +4036,7 @@ function ConvertTo-SkillCatalogCompilerEntry {
     $sourceRoot = [string](Get-SkillCatalogProperty $InputEntry @('source_root', 'root'))
     if ([string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = $DefaultRoot }
     if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = [IO.Path]::GetFullPath($sourceRoot) }
-    if (-not [string]::IsNullOrWhiteSpace($path) -and -not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-SkillCatalogCompilerContained $path $sourceRoot)) {
+    if (-not [string]::IsNullOrWhiteSpace($path) -and -not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-OperationPathWithinRoot $path $sourceRoot)) {
         if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'path_outside_source_root' 'error' $path 'Skill entry is outside its declared source root.')) | Out-Null }
         return $null
     }
@@ -4086,9 +4069,9 @@ function ConvertTo-SkillCatalogCompilerEntry {
     if ([string]::IsNullOrWhiteSpace($freshness)) { $freshness = if ($text) { 'fresh' } else { 'unknown' } }
     if ($freshness -notin @('fresh', 'stale', 'unknown')) { $freshness = 'unknown' }
     $contentHash = [string](Get-SkillCatalogProperty $InputEntry @('content_hash', 'entrypoint_sha256'))
-    if ([string]::IsNullOrWhiteSpace($contentHash) -and $text) { $contentHash = Get-SkillCatalogCompilerTextHash $text }
+    if ([string]::IsNullOrWhiteSpace($contentHash) -and $text) { $contentHash = Get-OperationSha256 $text }
     $metadataHash = [string](Get-SkillCatalogProperty $InputEntry @('metadata_hash'))
-    if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = Get-SkillCatalogCompilerTextHash ('{0}|{1}' -f $name.Trim(), $description.Trim()) }
+    if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = Get-OperationSha256 ('{0}|{1}' -f $name.Trim(), $description.Trim()) }
     $provenance = Get-SkillCatalogProperty $InputEntry @('provenance', 'source')
     if ($null -eq $provenance) {
         $provenance = [pscustomobject][ordered]@{ type = 'skill_root'; path = $sourceRoot; revision = 'working-tree' }
@@ -4116,7 +4099,7 @@ function Compile-SkillCatalog {
         $fullRoot = [IO.Path]::GetFullPath($root)
         if (-not $sourceRoots.Contains($fullRoot)) { $sourceRoots.Add($fullRoot) | Out-Null }
         foreach ($file in @(Get-ChildItem -LiteralPath $fullRoot -Recurse -File -Filter 'SKILL.md' -Force -ErrorAction SilentlyContinue)) {
-            if (-not (Test-SkillCatalogCompilerContained $file.FullName $fullRoot)) {
+            if (-not (Test-OperationPathWithinRoot $file.FullName $fullRoot)) {
                 $findings.Add((New-OperationFinding 'skill_path_outside_root' 'error' $file.FullName 'Discovered skill path is outside its root.')) | Out-Null
                 continue
             }
@@ -5373,11 +5356,6 @@ function Get-NativeAgentBridgeValue($Object, [string]$Name) {
     return $property.Value
 }
 
-function Get-NativeAgentBridgeSha256([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
-    return ([string](Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash).ToLowerInvariant()
-}
-
 function Get-NativeAgentBridgeBytesSha256([byte[]]$Bytes) {
     if ($null -eq $Bytes) { return '' }
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
@@ -5620,10 +5598,6 @@ function Get-NativeAgentBridgeTemplateRecord($SourcePath, [string]$Name) {
         bytes = [byte[]]$state.bytes
         sha256 = [string]$state.hash
     }
-}
-
-function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
-    return [string](Get-NativeAgentBridgeTemplateRecord $SourcePath $Name).content
 }
 
 function Sync-NativeAgentBridge($Config, $PromotionContext = $null, [switch]$SkipLock) {
@@ -19386,16 +19360,6 @@ function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
     return @($resolvedSegments)
 }
 
-function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidatePath) {
-    $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $candidatePath
-    $segments = @($relativePath -split '[\\/]')
-    $ignored = @(Get-AuditGeneratedPathSegments $resolvedPath)
-    foreach ($segment in $segments) {
-        if ($segment -in $ignored) { return $true }
-    }
-    return $false
-}
-
 function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
     $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($segment in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $null = $ignored.Add($segment) }
@@ -26423,96 +26387,55 @@ if ($MyInvocation.InvocationName -ne '.') {
             "命令导入安装" { 命令导入安装 }
             "add" { if (-not (Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args))) { exit 1 } }
             "npx" { if (-not (Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)))) { exit 1 } }
-            "迁移" { Invoke-MigrationCommand $args }
-            "migration" { Invoke-MigrationCommand $args }
-            "迁移解锁" { Invoke-MigrationUnlockCommand $args }
-            "migration-unlock" { Invoke-MigrationUnlockCommand $args }
-            "迁移应用" { Invoke-MigrationApplyCommand $args }
-            "migration-apply" { Invoke-MigrationApplyCommand $args }
+            { $_ -in @("迁移", "migration") } { Invoke-MigrationCommand $args }
+            { $_ -in @("迁移解锁", "migration-unlock") } { Invoke-MigrationUnlockCommand $args }
+            { $_ -in @("迁移应用", "migration-apply") } { Invoke-MigrationApplyCommand $args }
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
-            "发行更新" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
-            "release-update" { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
-            "发行更新调度" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
-            "release-update-schedule" { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
+            { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
+            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
             "锁定" { 锁定 }
-            "验证锁定" { 验证锁定 }
-            "verify-lock" { 验证锁定 }
-            "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
-            "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
-            "安装MCP" {
+            { $_ -in @("验证锁定", "verify-lock") } { 验证锁定 }
+            { $_ -in @("清理无效映射", "prune-invalid-mappings") } { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
+            { $_ -in @("安装MCP", "mcp-install") } {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
                 $mcpTokens += @($args)
                 安装MCP $mcpTokens
             }
-            "卸载MCP" {
+            { $_ -in @("卸载MCP", "mcp-uninstall") } {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
                 $mcpTokens += @($args)
                 卸载MCP $mcpTokens
             }
-            "同步MCP" {
+            { $_ -in @("同步MCP", "mcp-sync") } {
                 $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
                 if ($RunPlan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
                 else { 同步MCP }
             }
-            "mcp-install" {
-                $mcpTokens = @()
-                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
-                $mcpTokens += @($args)
-                安装MCP $mcpTokens
-            }
-            "mcp-uninstall" {
-                $mcpTokens = @()
-                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
-                $mcpTokens += @($args)
-                卸载MCP $mcpTokens
-            }
-            "mcp-sync" {
-                $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
-                if ($RunPlan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
-                else { 同步MCP }
-            }
-            "MCP配置" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
-            "mcp-profile" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
-            "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
-            "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
-            "能力清单" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "capability-inventory" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "规则审查" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "rule-audit" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "规则全域审查" { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "rule-estate-audit" { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            "规则全域计划" { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-estate-plan" { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则全域应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-estate-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则全域回滚" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-estate-rollback" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "全局规则检查" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "global-rules-check" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "全局规则计划" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "global-rules-plan" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "全局规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "global-rules-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "全局规则回滚" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "global-rules-rollback" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则计划" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("MCP配置", "mcp-profile") } { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
+            { $_ -in @("审查目标", "audit-targets") } { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
+            { $_ -in @("能力清单", "capability-inventory") } { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则审查", "rule-audit") } { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则全域审查", "rule-estate-audit") } { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则全域计划", "rule-estate-plan") } { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则全域应用", "rule-estate-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则检查", "global-rules-check") } { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则计划", "global-rules-plan") } { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则应用", "global-rules-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则回滚", "global-rules-rollback") } { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则计划", "rule-plan") } { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则应用", "rule-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
-            "帮助" { 帮助 }
-            "help" { 帮助 }
-            "--help" { 帮助 }
-            "-h" { 帮助 }
+            { $_ -in @("帮助", "help", "--help", "-h") } { 帮助 }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }

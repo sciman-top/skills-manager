@@ -3,23 +3,6 @@ if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyCont
 if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillMetadata.ps1') }
 
-function Test-SkillCatalogCompilerContained {
-    param([string]$Path, [string]$Root)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
-    if (Get-Command Test-OperationPathWithinRoot -ErrorAction SilentlyContinue) { return Test-OperationPathWithinRoot $Path $Root }
-    $fullPath = [IO.Path]::GetFullPath($Path)
-    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    return $fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-SkillCatalogCompilerTextHash([string]$Text) {
-    if (Get-Command Get-OperationSha256 -ErrorAction SilentlyContinue) { return Get-OperationSha256 $Text }
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
-}
-
 function ConvertTo-SkillCatalogCompilerEntry {
     param(
         [Parameter(Mandatory = $true)]$InputEntry,
@@ -33,7 +16,7 @@ function ConvertTo-SkillCatalogCompilerEntry {
     $sourceRoot = [string](Get-SkillCatalogProperty $InputEntry @('source_root', 'root'))
     if ([string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = $DefaultRoot }
     if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = [IO.Path]::GetFullPath($sourceRoot) }
-    if (-not [string]::IsNullOrWhiteSpace($path) -and -not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-SkillCatalogCompilerContained $path $sourceRoot)) {
+    if (-not [string]::IsNullOrWhiteSpace($path) -and -not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-OperationPathWithinRoot $path $sourceRoot)) {
         if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'path_outside_source_root' 'error' $path 'Skill entry is outside its declared source root.')) | Out-Null }
         return $null
     }
@@ -66,9 +49,9 @@ function ConvertTo-SkillCatalogCompilerEntry {
     if ([string]::IsNullOrWhiteSpace($freshness)) { $freshness = if ($text) { 'fresh' } else { 'unknown' } }
     if ($freshness -notin @('fresh', 'stale', 'unknown')) { $freshness = 'unknown' }
     $contentHash = [string](Get-SkillCatalogProperty $InputEntry @('content_hash', 'entrypoint_sha256'))
-    if ([string]::IsNullOrWhiteSpace($contentHash) -and $text) { $contentHash = Get-SkillCatalogCompilerTextHash $text }
+    if ([string]::IsNullOrWhiteSpace($contentHash) -and $text) { $contentHash = Get-OperationSha256 $text }
     $metadataHash = [string](Get-SkillCatalogProperty $InputEntry @('metadata_hash'))
-    if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = Get-SkillCatalogCompilerTextHash ('{0}|{1}' -f $name.Trim(), $description.Trim()) }
+    if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = Get-OperationSha256 ('{0}|{1}' -f $name.Trim(), $description.Trim()) }
     $provenance = Get-SkillCatalogProperty $InputEntry @('provenance', 'source')
     if ($null -eq $provenance) {
         $provenance = [pscustomobject][ordered]@{ type = 'skill_root'; path = $sourceRoot; revision = 'working-tree' }
@@ -96,7 +79,7 @@ function Compile-SkillCatalog {
         $fullRoot = [IO.Path]::GetFullPath($root)
         if (-not $sourceRoots.Contains($fullRoot)) { $sourceRoots.Add($fullRoot) | Out-Null }
         foreach ($file in @(Get-ChildItem -LiteralPath $fullRoot -Recurse -File -Filter 'SKILL.md' -Force -ErrorAction SilentlyContinue)) {
-            if (-not (Test-SkillCatalogCompilerContained $file.FullName $fullRoot)) {
+            if (-not (Test-OperationPathWithinRoot $file.FullName $fullRoot)) {
                 $findings.Add((New-OperationFinding 'skill_path_outside_root' 'error' $file.FullName 'Discovered skill path is outside its root.')) | Out-Null
                 continue
             }

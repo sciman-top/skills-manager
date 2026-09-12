@@ -859,16 +859,6 @@ function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
     return @($resolvedSegments)
 }
 
-function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidatePath) {
-    $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $candidatePath
-    $segments = @($relativePath -split '[\\/]')
-    $ignored = @(Get-AuditGeneratedPathSegments $resolvedPath)
-    foreach ($segment in $segments) {
-        if ($segment -in $ignored) { return $true }
-    }
-    return $false
-}
-
 function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
     $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($segment in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $null = $ignored.Add($segment) }
