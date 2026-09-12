@@ -1,103 +1,77 @@
 ---
 name: ai-coding-workflow
-description: Run a compact, evidence-driven coding loop for implementation and maintenance. Choose a tiny/direct, normal, or failure/high-risk path; freeze the goal and write set, use current repository facts, make the smallest source change, resume from verified stop points, run the lowest sufficient proof, and stop at the proven boundary.
+description: Complete implementation and maintenance tasks with repository-grounded scope, proportionate verification, and resumable progress. Use for coding execution; use the dedicated review skill for review-only requests.
 ---
 
 # AI coding workflow
 
-Use this as the default operating method for a normal coding task. It is a
-compact execution contract, not a replacement for the repository's
-`AGENTS.md`, project rules, host policy, or a dedicated specialist skill. It
-does not change provider, model, auth, MCP, session, plugin, or host
-configuration.
+Follow the target repository's engineering contract and the user's intended
+outcome. User instructions take precedence over this skill's guidance, within
+host policy. Reuse authorization already given for the current scope, including
+external actions; ask only for missing required authorization or information
+that materially changes the outcome. If this skill causes a pause, identify the
+exact instruction and unresolved input instead of requesting routine approval.
 
-## Operating posture
+Prefer one primary executor through inspection, implementation and validation.
+Delegate only when authorized, slices can be independently verified, writes do
+not conflict, and coordination costs less than serial work.
 
-Treat a direct request for a scoped read-only review, reversible edit, or fix
-as authorization to do that work. Ask only when required input would materially
-change the result or the next step is an external or irreversible write. User
-instructions take precedence over this skill's guidelines; do not turn an
-authorized, reversible task into an approval pause.
+## 1. Scope the current task
 
-Prefer one primary executor through inspection, implementation, and validation.
-Infer file scope and verification commands from the repository when the user
-only knows the desired behavior; freeze the write set after inspection. Ask
-about material behavior conflicts, not routine implementation choices. Delegate
-only when authorized, independent slices have disjoint writes and useful proof,
-and coordination costs less than serial work.
+Read applicable project rules, current status/diff, the relevant entrypoint and
+nearest tests. Infer files and verification commands when the user only knows
+the desired behavior. Do not invent a target for an unanchored reference such
+as "this file". Separate existing changes from this task's write set.
 
-## 1. Choose the lightest safe path
-
-Classify the request before editing:
-
-- **`tiny/direct`**: one or a few explicit files, no observed failure, no
-  security/data/migration/public-contract/packaging/projection risk, and no
-  external write. Infer a one-sentence Goal/write set/Stop, inspect the seam,
-  make the edit, and run the focused proof. Keep repository rules, dirty-tree
-  protection, and required compatibility checks in force.
-- **`normal`**: ordinary implementation, maintenance, or bounded refactoring.
-  Use the full contract and bounded closure below.
-- **`failure/high-risk`**: a concrete failing test/bug, security or data
-  boundary, migration, public contract, packaging, host projection, or MCP
-  change. Bind the failure or risk first and route to the appropriate
-  specialist; do not let the fast path bypass causal evidence or required
-  gates.
-
-When the user says **continue** or **resume**, start from the last verified stop
-point. Re-read current status, diff, the changed seam, and the latest proof;
-rerun an old gate only when its inputs or environment changed. Do not restart
-the whole workflow merely because the conversation resumed.
-
-## 2. Freeze the task before touching code
-
-Write or infer a short contract from the current request:
+Write or infer the following; a small task needs only a sentence, not a form:
 
 ```text
-Goal: the user-visible or repository outcome
-Context: current repo/cwd, entrypoint, source of truth, and observed evidence
-Constraints: exact write set, compatibility, secrets, dirty worktree, and side-effect limits
-Success: observable behavior and the minimum command that proves it
-Stop: the boundary after which no additional work is required
+Goal: observable outcome
+Context: current repository, caller and relevant evidence
+Constraints: write set, compatibility and side-effect boundaries
+Success: behavior and minimum sufficient verification
+Stop: where the current task ends
 ```
 
-Use fresh repository evidence for facts: read the applicable `AGENTS.md`,
-`git status`/diff, the real entrypoint and source/config seam, and the nearest
-test or verifier. Treat old chat context, generated output, health checks, and
-model claims as hints until they are current and bound to this task. If the
-target is genuinely ambiguous, stop for the parent task's input; do not choose
-"latest", a convenient file, or a broad repository-wide substitute.
+Choose depth by uncertainty and impact:
 
-## 3. Run the bounded closure
+- **tiny/direct**: a clear, local, low-risk change, including a reproducible
+  small bug. Inspect, change and run focused proof without a separate plan.
+- **normal**: resolve meaningful design uncertainty, then implement a bounded
+  slice. Clarify behavior conflicts rather than routine implementation details.
+- **high-risk**: security, data, migration, public contracts or deployment
+  consequences require the target repository's safeguards and rollback proof.
 
-1. **Inspect and diagnose.** Identify the actual caller and causal seam. For an
-   observed failure, bind the error, trace, and current behavior before editing.
-2. **Plan narrowly.** State the smallest change, exact files, minimum proof,
-   and rollback point. Skip ceremony for a trivial one-file change, but do not
-   skip the contract or evidence boundary.
-3. **Implement at the source.** Edit source/config/override inputs, not
-   generated `skills.ps1`, `agent/`, vendor, import, or runtime receipt files.
-   Preserve unrelated dirty work, secrets, and concurrent changes. Do not add a
-   new abstraction, runtime state store, router, telemetry, or compatibility
-   layer without a current failure, stable caller, exact write set, proof, and
-   rollback.
-4. **Prove the change.** Use the lowest sufficient fresh gate in this order:
-   `build -> focused test -> contract/invariant -> hotspot`. For source,
-   config, generated, shared projection, security, data, packaging, or public
-   contract changes, include the repository-required broader gate. Always run
-   `git diff --check` when files changed and inspect the final status/diff.
-5. **Review and stop.** Check behavior, compatibility, security, test intent,
-   generated drift, and the exact write set. Stop when the declared proof is
-   green; extra cleanup, refactoring, or a new audit is not part of completion.
+Diagnosis is separate from risk: reproduce an observed failure and establish
+its cause before editing; a bug alone does not require broader gates or agents.
+Use `systematic-debugging` when the cause needs investigation. After two failed
+attempts on the same issue, summarize facts, rejected hypotheses and attempts,
+then resolve missing input or disputed acceptance before trying another patch.
 
-For the final report, distinguish these boundaries instead of compressing
-them into "done": `repo_verified`, `filesystem_projected`, `host_loaded`, and
-`live_accepted`. A passing test, HTTP 200, health result, synthetic replay,
-static projection, or historical log cannot prove a higher boundary by itself.
+## 2. Implement and verify
+
+Edit the target repository's source of truth and rebuild generated outputs
+when required. Directory names alone do not identify generated or third-party
+content. Add structure only when the current requested feature or demonstrated
+failure needs it; prefer existing interfaces. Preserve unrelated changes and
+secrets, and keep external actions within the authorized scope.
+
+Use the lowest sufficient proof required by the repository, in dependency
+order: build, affected tests, contracts/invariants, then relevant hotspot checks.
+Do not run a full suite merely because source changed. Derive assertions from
+required behavior; do not weaken them to fit the implementation. For a bug,
+show the same regression failing before and passing after when feasible.
+
+Inspect the final diff and run `git diff --check` when applicable. Use
+`verification-before-completion` for evidence-backed completion claims. For
+material risk, use authorized independent review of requirements, diff and
+tests; require concrete triggers, impact and evidence. Stop after the agreed
+proof and required closeout, reporting independent new issues separately.
 
 ### Match observation to the changed behavior
 
-Select only evidence relevant to the current acceptance criterion; project type
-alone does not require all checks below or authorize live access.
+Select only evidence relevant to acceptance; project type alone does not
+require every check below or authorize live access.
 
 | Changed behavior | Useful observation beyond build/unit checks |
 | --- | --- |
@@ -108,81 +82,34 @@ alone does not require all checks below or authorize live access.
 | Data/migration | Transaction boundaries, compatibility, recovery and repeat execution on representative disposable data |
 
 Reuse existing logs, tests and tools. If required observation is unavailable,
-report the missing evidence and proven lower boundary; do not substitute a mock
-or install instrumentation without a demonstrated need and admitted scope.
+report missing evidence and the proven lower boundary. A mock, health check or
+HTTP 200 cannot substitute for the actual user path. Add instrumentation only
+when current acceptance needs it and the change is within scope.
 
-## 4. Prevent the common failures
+Report changed behavior, verification and remaining limitations. Distinguish
+`repo_verified`, `filesystem_projected`, `host_loaded` and `live_accepted` when
+those layers are relevant; do not turn unrelated layers into a mandatory report
+or claim that a lower layer proves a higher one.
 
-- **Scope drift / over-design:** keep Goal, exact write set, and Stop visible;
-  report gaps, not style preferences. Defer work without a current failure or
-  measurable acceptance need.
-- **Stale context / repeated correction:** re-read the current seam after a
-  meaningful change. After the same issue fails twice, summarize confirmed
-  facts, rejected hypotheses and attempts; resolve missing input or conflicting
-  acceptance before retrying. Use fresh context when history is misleading;
-  only then consider a durable rule or skill candidate.
-- **Hallucinated APIs or "best" claims:** inspect the actual source and tests;
-  use authoritative current documentation for unstable facts; label inference
-  and do not invent parameters, model support, or tool behavior.
-- **Dirty-tree and concurrency damage:** separate pre-existing and new diff;
-  never reset, clean, stash, overwrite, or absorb unrelated work. Do not claim
-  a clean baseline from a partial status read.
-- **Generated-file edits:** make the source/config/override change, rebuild,
-  then verify generated drift. A hand-edited generated file is not a fix.
-- **False-green tests:** preserve the behavior contract; do not weaken a test,
-  delete a failing case, or treat a test-only fixture as production acceptance.
-  Derive assertions from required behavior; for a bug, demonstrate the same
-  regression case failing before and passing after when feasible. For material
-  risk, seek authorized independent review grounded in requirements and diff,
-  with concrete trigger, impact and evidence rather than style preferences.
-- **Secrets and external side effects:** never print or invent credentials;
-  do not mutate host/provider/auth/MCP/session state, deploy, send messages,
-  or call live services unless the current request explicitly includes that
-  scope and the required rollback/evidence path.
+## 3. Resume and use capabilities selectively
 
-## 5. Use task-fit capabilities, not model-name routing
+On continue/resume, re-read current status, changed code and latest proof.
+Reuse still-valid evidence; rerun only checks invalidated by changed inputs or
+environment. When history is misleading, hand off a short capsule containing
+Goal, current revision/evidence, decisions, write set, minimum proof and Stop.
+The receiver checks current repository facts before acting.
 
-Choose the currently available host, model, and tools by the capability
-contract the task requires: reasoning depth, context size, tool/MCP support,
-latency or cost, and the need for independent review. Model names and vendor
-rankings are advisory and may drift; they are not workflow branches.
+Choose available tools by the task, not model names. Verify unstable API or
+host behavior against current source/help or authoritative documentation.
+MCP is optional: use relevant connected tools for needed evidence or authorized
+integration, without configuring services or switching providers as a side
+effect. Model ability alone does not prove tool access or host support.
 
-Never force a provider, assume a model feature, or automatically fail over to
-another model. If a required capability is unavailable, report the boundary or
-ask for the smallest decision that materially changes the result.
+Use specialist skills only for their current purpose: review-only requests use
+`code-review-and-quality`; Windows PowerShell automation uses
+`custom-powershell-windows-automation`. Use `capability-router` only when visible
+capabilities are insufficient and cold discovery or validation is needed, not
+as a per-task preflight. Do not chain all workflow skills for every task.
 
-MCP is optional. Use it when the task needs current authoritative external
-documentation or an explicitly authorized integration; do not invoke every
-configured server merely because it is available, and do not mutate host MCP
-configuration as a side effect of ordinary coding work.
-
-Route rather than duplicating procedures:
-
-- concrete observed failure → `systematic-debugging`
-- review-only request → `code-review-and-quality`
-- completion/pass claim → `verification-before-completion`
-- PowerShell 7 Windows automation → `custom-powershell-windows-automation`
-- invisible specialized skill with no sufficient visible match →
-  `capability-router` once, as its narrow read-only fallback
-
-When handing a task between GPT/Codex and GLM/ZCode, pass a compact task
-capsule instead of the full conversation:
-
-```text
-Goal:
-Current status/evidence:
-Decisions already made:
-Exact write set:
-Minimum proof:
-Stop:
-```
-
-The receiving host must re-read the current repository status and changed seam
-before acting. Model name, reasoning effort, and host-specific availability
-are operator choices and evidence-bound facts; never treat the capsule as
-permission to switch provider, widen the write set, or skip verification.
-
-Detailed mappings, budget observations, and the GPT/GLM rationale live in the
-skills-manager repository at `docs/product/ai-coding-playbook.md`. Consult it
-only when working in that repository, and load only the relevant section
-rather than copying the entire reference into every task.
+In skills-manager, consult `docs/product/ai-coding-playbook.md` only for detailed
+usage and architecture background. Other repositories do not depend on it.

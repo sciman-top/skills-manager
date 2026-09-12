@@ -72,7 +72,7 @@ Describe 'Skill projection profiles' {
         $skillPath = Join-Path $repoRoot 'overrides\custom\ai-coding-workflow\SKILL.md'
         $skill = Get-ContentUtf8 $skillPath
 
-        foreach ($anchor in @('tiny/direct', 'normal', 'failure/high-risk', 'continue', 'resume', 'MCP is optional')) {
+        foreach ($anchor in @('tiny/direct', 'normal', 'high-risk', 'continue', 'resume', 'MCP is optional')) {
             $skill | Should -Match ([regex]::Escape($anchor))
         }
         $skill | Should -Not -Match 'GPT and GLM are complementary'
