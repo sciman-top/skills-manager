@@ -61,6 +61,27 @@ BeforeAll {
 
 }
 Describe "Audit target hardening" {
+    It "Accepts explicit usage evidence without upgrading its stage or provenance" {
+        $rec = New-AuditRecommendationsTemplate 'usage-test' '*'
+        $rec.usage_observations = @([pscustomobject]@{
+            name = 'docs'; kind = 'mcp'; task = 'look up an API'; source = 'task://fixture/tool-result'
+            observed_at = '2026-09-13T00:00:00+08:00'; stage = 'load'; result = 'succeeded'; provenance = 'controlled_replay'
+        })
+        { Assert-AuditUsageObservations $rec } | Should -Not -Throw
+        $rec.usage_observations[0].stage | Should -Be 'load'
+        $rec.usage_observations[0].provenance | Should -Be 'controlled_replay'
+        $rec.usage_observations[0].source = ''
+        { Assert-AuditUsageObservations $rec } | Should -Throw '*source*'
+        $rec.usage_observations[0].source = 'task://fixture/tool-result'
+        $rec.usage_observations[0].stage = 'used'
+        { Assert-AuditUsageObservations $rec } | Should -Throw '*stage*'
+    }
+
+    It "Preserves legacy recommendations without usage telemetry" {
+        $rec = [pscustomobject]@{}
+        { Assert-AuditUsageObservations $rec } | Should -Not -Throw
+        @($rec.usage_observations).Count | Should -Be 0
+    }
     It "Preserves ordered-dictionary target names in decision insights" {
         $scan = [pscustomobject]@{
             target = [ordered]@{ name = "ordered-target" }
@@ -301,12 +322,19 @@ Describe "Audit target hardening" {
         ($report.issues -join " ") | Should -Match "缺少 semantic_review"
     }
 
-    It "Allows a host-AI semantic removal candidate, then still blocks its dependency closure" {
+    It "Allows a used capability replacement, then still blocks its dependency closure" {
         $runDir = Join-Path $TestDrive "semantic-removal-preflight"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
-        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-semantic-removal","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"general-review","reason_target_profile":"profile context only","sources":["local reviewed SKILL.md"],"installed":{"vendor":"manual","from":"general-review"},"semantic_review":{"decision_owner":"host_ai","verdict":"removal_candidate","capability_class":"general","independent_of_target_profile":true,"installed_capability":"review implementation changes","retirement_basis":"semantic_replacement","usage_evidence":{"state":"unknown","evidence":"static scan cannot measure task invocation"},"requires_user_confirmation":true,"replacement":{"kind":"skill","name":"review-successor","coverage":"review workflow and output checks were compared","limitations":"interactive approval remains user-controlled"},"migration":{"plan":"run successor on next review task before removal","rollback":"restore manual import from backup"},"uncertainty":"historical task frequency is unknown"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 $recPath '{"schema_version":3,"run_id":"r-semantic-removal","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"general-review","reason_target_profile":"profile context only","sources":["local reviewed SKILL.md"],"installed":{"vendor":"manual","from":"general-review"},"semantic_review":{"decision_owner":"host_ai","verdict":"removal_candidate","capability_class":"general","independent_of_target_profile":true,"installed_capability":"review implementation changes","retirement_basis":"semantic_replacement","usage_evidence":{"state":"observed_used","evidence":"host task ledger records successful use, and replacement comparison covers the same workflow"},"requires_user_confirmation":true,"replacement":{"kind":"skill","name":"review-successor","coverage":"review workflow and output checks were compared","limitations":"interactive approval remains user-controlled"},"migration":{"plan":"run successor on next review task before removal","rollback":"restore manual import from backup"},"uncertainty":"replacement acceptance is still required"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
         New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-semantic-removal"
+        $reviewed = Load-AuditRecommendations $recPath
+        foreach ($state in @('observed_used', 'observed_unused', 'unknown')) {
+            $reviewed.removal_candidates[0].semantic_review.usage_evidence.state = $state
+            { Assert-AuditRemovalCandidate $reviewed.removal_candidates[0] } | Should -Not -Throw
+        }
+        $reviewed.removal_candidates[0].semantic_review.usage_evidence.state = 'assumed_unused'
+        { Assert-AuditRemovalCandidate $reviewed.removal_candidates[0] } | Should -Throw '*usage_evidence.state*'
         Mock Test-AuditRemovalDependencyClosure {
             [pscustomobject]@{
                 ok = $false

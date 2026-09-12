@@ -273,7 +273,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
-        "This is a valid zero-change baseline, not an incomplete example file.",
+        "This is an unreviewed baseline with empty lifecycle categories, not a conclusion that the current inventory is optimal.",
         "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "Use the current query to prioritize the review; all install decisions must also cite scan-derived target-profile evidence. The query alone is not proof of a capability gap.",
@@ -281,7 +281,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
         "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
     )
-    $basisSummary = "Dry-run decision: no skill or MCP lifecycle change is proposed. The current scan confirms a configured-supply/current-profile distinction, but no host invocation ledger exists; user-reported no successful use requires reachability or route-matching validation before any retirement decision."
+    $basisSummary = "Initial semantic review baseline: no lifecycle change is pre-filled. The host AI must decide additions, replacements, and retirements from the current query, capability evidence, reachability, replacement quality, migration, and rollback; missing invocation telemetry remains an explicit uncertainty."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -295,8 +295,9 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        usage_observations = @()
         source_observations = @()
-        empty_recommendation_reasons = @("no_lifecycle_change_without_invocation_or_reachability_evidence")
+        empty_recommendation_reasons = @("semantic_review_required_before_lifecycle_decision")
         new_skills = @()
         overlap_findings = @()
         removal_candidates = @()

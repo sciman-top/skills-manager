@@ -18543,9 +18543,9 @@ function Get-DefaultAuditOuterAiPrompt {
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
-5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
+5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。usage_evidence.state 可为 ``observed_used``、``observed_unused`` 或 ``unknown``；unknown 保留不确定性，不能伪造为未使用，但也不能阻止有明确替代/过时依据的迁移候选。
 6. 用户报告“从未成功调用”时，必须写入 ``overlap_findings`` 的 report-only 观察：注明这是用户报告而非遥测，并将后续动作限定为核对 current profile 投影、宿主可见清单或任务路由。它不能转换为 ``observed_unused``、``removal_candidate`` 或 MCP 卸载结论。
-7. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、当前 profile 的有效能力、调用/可达性证据与审阅来源共同形成明确缺口时，才替换零变更理由并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+7. 初始 ``recommendations.json`` 是未审阅的空基线，不证明名单最优。新增按当前需求、能力缺口、候选收益和可达性判断；退役按替代/过时、迁移和回滚判断。缺少历史调用记录不能单独推出保留或删除。宿主将具名任务证据填入 ``usage_observations``，区分发现、加载、执行和验收，以及实际观察、用户报告和受控重放。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
 8. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
 9. 预检通过后执行：
@@ -18808,7 +18808,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260912.1"
+    return "audit-prompt-v20260913.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -20819,7 +20819,7 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
                 "installed_state.skills contains current-profile selections only; configured supply is source and rollback context, not a live callable inventory."
-                "not_observed invocation evidence cannot establish non-use or justify retirement without reachability or route validation."
+                "not_observed is scanner telemetry absence, not non-use or a veto on additions and supported retirement. Review explicit usage_observations separately; usage affects migration and verification, not whether a candidate may be reviewed."
                 "The aggregate profile is the only user-need decision surface; target_repo_by_target is evidence attribution, not a per-repository recommendation surface."
             )
         })
@@ -21156,7 +21156,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     Need ($normalizedMode -eq "target-repo") ("recommendations 模式必须为 target-repo：{0}" -f $Mode)
     $templateNotes = @(
-        "This is a valid zero-change baseline, not an incomplete example file.",
+        "This is an unreviewed baseline with empty lifecycle categories, not a conclusion that the current inventory is optimal.",
         "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
         "Use the current query to prioritize the review; all install decisions must also cite scan-derived target-profile evidence. The query alone is not proof of a capability gap.",
@@ -21164,7 +21164,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
         "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
     )
-    $basisSummary = "Dry-run decision: no skill or MCP lifecycle change is proposed. The current scan confirms a configured-supply/current-profile distinction, but no host invocation ledger exists; user-reported no successful use requires reachability or route-matching validation before any retirement decision."
+    $basisSummary = "Initial semantic review baseline: no lifecycle change is pre-filled. The host AI must decide additions, replacements, and retirements from the current query, capability evidence, reachability, replacement quality, migration, and rollback; missing invocation telemetry remains an explicit uncertainty."
     return [pscustomobject]([ordered]@{
         schema_version = 3
         run_id = $runId
@@ -21178,8 +21178,9 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        usage_observations = @()
         source_observations = @()
-        empty_recommendation_reasons = @("no_lifecycle_change_without_invocation_or_reachability_evidence")
+        empty_recommendation_reasons = @("semantic_review_required_before_lifecycle_decision")
         new_skills = @()
         overlap_findings = @()
         removal_candidates = @()
@@ -21988,6 +21989,22 @@ function Ensure-AuditArrayProperty($obj, [string]$name) {
     }
 }
 
+function Assert-AuditUsageObservations($rec) {
+    Ensure-AuditArrayProperty $rec "usage_observations"
+    foreach ($observation in @($rec.usage_observations)) {
+        Need ($null -ne $observation -and (Test-AuditObjectLike $observation)) "usage_observations 条目必须是对象"
+        foreach ($field in @('name', 'task', 'source', 'observed_at')) {
+            Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $observation $field))) ("usage_observations 缺少 {0}" -f $field)
+        }
+        Need ([string]$observation.kind -in @('skill', 'mcp')) "usage_observations.kind 必须为 skill/mcp"
+        Need ([string]$observation.stage -in @('discovery', 'load', 'execution', 'acceptance')) "usage_observations.stage 无效"
+        Need ([string]$observation.result -in @('succeeded', 'failed', 'unknown')) "usage_observations.result 无效"
+        Need ([string]$observation.provenance -in @('host_observed', 'user_reported', 'controlled_replay')) "usage_observations.provenance 无效"
+        $observedAt = [datetimeoffset]::MinValue
+        Need ([datetimeoffset]::TryParse([string]$observation.observed_at, [ref]$observedAt)) "usage_observations.observed_at 必须为有效时间"
+    }
+}
+
 function Normalize-AuditStringArray($value) {
     if ($null -eq $value) { return @() }
     $items = if (Assert-IsArray $value) { @($value) } else { @($value) }
@@ -22366,7 +22383,7 @@ function Assert-AuditSemanticRetirementReview($item, [string]$kind) {
     Need ($retirementBasis -in @("semantic_replacement", "obsolete_or_unsupported")) ("{0} semantic_review.retirement_basis 仅支持 semantic_replacement/obsolete_or_unsupported：{1}" -f $kind, [string]$item.name)
     Need ($review.PSObject.Properties.Match("usage_evidence").Count -gt 0 -and (Test-AuditObjectLike $review.usage_evidence)) ("{0} semantic_review 缺少 usage_evidence：{1}" -f $kind, [string]$item.name)
     $usageState = ([string]$review.usage_evidence.state).Trim().ToLowerInvariant()
-    Need ($usageState -in @("observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_unused/unknown；已观察到使用的能力不能列为退役候选：{1}" -f $kind, [string]$item.name)
+    Need ($usageState -in @("observed_used", "observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_used/observed_unused/unknown：{1}" -f $kind, [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$review.usage_evidence.evidence)) ("{0} semantic_review.usage_evidence 缺少 evidence：{1}" -f $kind, [string]$item.name)
     Need ($review.requires_user_confirmation -is [bool] -and [bool]$review.requires_user_confirmation) ("{0} semantic_review.requires_user_confirmation 必须为 true：{1}" -f $kind, [string]$item.name)
     Need ($review.PSObject.Properties.Match("replacement").Count -gt 0 -and (Test-AuditObjectLike $review.replacement)) ("{0} semantic_review 缺少 replacement：{1}" -f $kind, [string]$item.name)
@@ -22476,6 +22493,7 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
     Ensure-AuditArrayProperty $rec "source_observations"
+    Assert-AuditUsageObservations $rec
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
@@ -22627,6 +22645,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
+        usage_observations = @(Convert-AuditObjectArray (Get-CfgObjectProperty $recommendations 'usage_observations'))
         source_observations = @(ConvertTo-AuditJsonArray $recommendations.source_observations)
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)
@@ -22987,7 +23006,7 @@ function Write-AuditThreeFileBundle {
                     "Treat low-confidence or documented-only signals as observations, not automatic install or removal justification.",
                     "installed_state.skills means current_profile_selected_skills, not all configured supply. Read configured_supply_skills only for source identity, rollback, and overlap analysis; it is not current host visibility or invocation evidence.",
                     "A profile absence, same-name implementation, override, or dependency closure is only an overlap fact. Host AI may propose retirement only after reviewing installed behavior, replacement coverage or obsolescence, usage evidence, migration, rollback, uncertainty, and the need for current-user confirmation.",
-                    "installed_state.invocation_evidence=not_observed is not non-use. A user statement of no successful use may indicate a reachability or matching failure and must not be converted directly into a removal candidate.",
+                    "installed_state.invocation_evidence=not_observed describes scanner telemetry only. Record explicit task evidence in recommendations.usage_observations with name, kind (skill/mcp), task, source, observed_at, stage (discovery/load/execution/acceptance), result (succeeded/failed/unknown), and provenance (host_observed/user_reported/controlled_replay). A discovery or load success is not execution or acceptance; user reports and controlled replay are not natural acceptance. Missing records cannot prove non-use or veto an otherwise supported addition or retirement.",
                     "Classify general and specialized skills by the reviewed task trigger and unique behavior, not by whether this scan calls them a primary need.",
                     "Each recommendation must remain reproducible from snapshot facts and current inspected sources."
                     "When scan_coverage.confidence_ceiling is representative_sample, sample-only signals cannot be treated as complete repository coverage."
@@ -24163,6 +24182,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
+        usage_observations = @(Convert-AuditObjectArray (Get-CfgObjectProperty $plan 'usage_observations'))
         source_observations = @(ConvertTo-AuditJsonArray $plan.source_observations)
         rollback = @()
         compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }

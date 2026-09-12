@@ -181,6 +181,10 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 自 `prompt_contract_version=audit-prompt-v20260829.3`（skills 口径改为 current-profile 有效库存 + configured supply 双轨、MCP 指纹纳入 env/header 值域摘要）起，此前所有 run 的 `snapshot.json` 因指纹口径切换必然 stale，预检会 fail closed 要求重扫——这是预期的口径迁移行为，不是环境故障。
 
+使用证据通过 `recommendations.json.usage_observations` 显式提供，不自动读取会话或部署遥测。每条包含 `name`、`kind`（`skill/mcp`）、`task`、`source`、`observed_at`、`stage`（`discovery/load/execution/acceptance`）、`result`（`succeeded/failed/unknown`）和 `provenance`（`host_observed/user_reported/controlled_replay`）。记录的是有来源的观察，不是工具自动认证的调用账本；加载成功不能当成执行成功，受控重放不能当成自然验收。旧文件缺少该数组仍可读取。扫描器的 `not_observed` 仅表示未采集遥测，不会被这些观察覆盖。
+
+`semantic_review.usage_evidence.state` 接受 `observed_used/observed_unused/unknown`：使用情况影响迁移和验证要求，不单独决定保留或退役。替代覆盖、依赖检查、迁移回滚与显式 apply 确认仍适用。默认建议只是未审阅基线，不能据此宣称无需增删。语义契约版本为 `audit-prompt-v20260913.1`；旧快照需要重扫，回滚本次代码后应使用对应版本的快照。
+
 ### 规则审查
 
 ```powershell

@@ -1941,13 +1941,14 @@ $scan.detected.artifact_capabilities | Out-Null
             $rec.schema_version | Should -Be 3
             $rec.recommendation_mode | Should -Be "target-repo"
             $rec.decision_basis.target_scan_used | Should -Be $true
-            $rec.decision_basis.summary | Should -Match "no skill or MCP lifecycle change"
+            $rec.decision_basis.summary | Should -Match "Initial semantic review baseline"
+            $rec.decision_basis.summary | Should -Not -Match "no host invocation ledger exists"
             @($rec.source_observations).Count | Should -Be 0
             @($rec.new_skills).Count | Should -Be 0
             @($rec.removal_candidates).Count | Should -Be 0
             @($rec.mcp_new_servers).Count | Should -Be 0
             @($rec.mcp_removal_candidates).Count | Should -Be 0
-            @($rec.empty_recommendation_reasons) | Should -Be @("no_lifecycle_change_without_invocation_or_reachability_evidence")
+            @($rec.empty_recommendation_reasons) | Should -Be @("semantic_review_required_before_lifecycle_decision")
             (Test-AuditPlaceholderToken ($template | ConvertTo-Json -Depth 20)) | Should -BeFalse
         }
 

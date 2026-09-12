@@ -16,9 +16,9 @@ function Get-DefaultAuditOuterAiPrompt {
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
 4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
-5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。静态扫描不能得知实际使用频率时写 ``usage_evidence.state=unknown``，保留不确定性并等待当前用户在 ``--apply --yes`` 的明确确认，绝不伪造为未使用。
+5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。usage_evidence.state 可为 ``observed_used``、``observed_unused`` 或 ``unknown``；unknown 保留不确定性，不能伪造为未使用，但也不能阻止有明确替代/过时依据的迁移候选。
 6. 用户报告“从未成功调用”时，必须写入 ``overlap_findings`` 的 report-only 观察：注明这是用户报告而非遥测，并将后续动作限定为核对 current profile 投影、宿主可见清单或任务路由。它不能转换为 ``observed_unused``、``removal_candidate`` 或 MCP 卸载结论。
-7. 初始生成的 ``recommendations.json`` 是可预检的零变更裁决，不是待填写的示例。只有在扫描画像、当前 profile 的有效能力、调用/可达性证据与审阅来源共同形成明确缺口时，才替换零变更理由并加入变更项；零变更是完整、有效的结论。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+7. 初始 ``recommendations.json`` 是未审阅的空基线，不证明名单最优。新增按当前需求、能力缺口、候选收益和可达性判断；退役按替代/过时、迁移和回滚判断。缺少历史调用记录不能单独推出保留或删除。宿主将具名任务证据填入 ``usage_observations``，区分发现、加载、执行和验收，以及实际观察、用户报告和受控重放。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
 8. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
 9. 预检通过后执行：
@@ -281,7 +281,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260912.1"
+    return "audit-prompt-v20260913.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -2292,7 +2292,7 @@ function New-AuditDecisionInsights($targetProfile, $scans, $installedSkills, $in
                 "Each add/remove recommendation should keep keyword_trace.target_profile with keywords from decision-insights.keywords.target_profile.",
                 "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
                 "installed_state.skills contains current-profile selections only; configured supply is source and rollback context, not a live callable inventory."
-                "not_observed invocation evidence cannot establish non-use or justify retirement without reachability or route validation."
+                "not_observed is scanner telemetry absence, not non-use or a veto on additions and supported retirement. Review explicit usage_observations separately; usage affects migration and verification, not whether a candidate may be reviewed."
                 "The aggregate profile is the only user-need decision surface; target_repo_by_target is evidence attribution, not a per-repository recommendation surface."
             )
         })

@@ -7,6 +7,22 @@ function Ensure-AuditArrayProperty($obj, [string]$name) {
     }
 }
 
+function Assert-AuditUsageObservations($rec) {
+    Ensure-AuditArrayProperty $rec "usage_observations"
+    foreach ($observation in @($rec.usage_observations)) {
+        Need ($null -ne $observation -and (Test-AuditObjectLike $observation)) "usage_observations 条目必须是对象"
+        foreach ($field in @('name', 'task', 'source', 'observed_at')) {
+            Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $observation $field))) ("usage_observations 缺少 {0}" -f $field)
+        }
+        Need ([string]$observation.kind -in @('skill', 'mcp')) "usage_observations.kind 必须为 skill/mcp"
+        Need ([string]$observation.stage -in @('discovery', 'load', 'execution', 'acceptance')) "usage_observations.stage 无效"
+        Need ([string]$observation.result -in @('succeeded', 'failed', 'unknown')) "usage_observations.result 无效"
+        Need ([string]$observation.provenance -in @('host_observed', 'user_reported', 'controlled_replay')) "usage_observations.provenance 无效"
+        $observedAt = [datetimeoffset]::MinValue
+        Need ([datetimeoffset]::TryParse([string]$observation.observed_at, [ref]$observedAt)) "usage_observations.observed_at 必须为有效时间"
+    }
+}
+
 function Normalize-AuditStringArray($value) {
     if ($null -eq $value) { return @() }
     $items = if (Assert-IsArray $value) { @($value) } else { @($value) }
@@ -385,7 +401,7 @@ function Assert-AuditSemanticRetirementReview($item, [string]$kind) {
     Need ($retirementBasis -in @("semantic_replacement", "obsolete_or_unsupported")) ("{0} semantic_review.retirement_basis 仅支持 semantic_replacement/obsolete_or_unsupported：{1}" -f $kind, [string]$item.name)
     Need ($review.PSObject.Properties.Match("usage_evidence").Count -gt 0 -and (Test-AuditObjectLike $review.usage_evidence)) ("{0} semantic_review 缺少 usage_evidence：{1}" -f $kind, [string]$item.name)
     $usageState = ([string]$review.usage_evidence.state).Trim().ToLowerInvariant()
-    Need ($usageState -in @("observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_unused/unknown；已观察到使用的能力不能列为退役候选：{1}" -f $kind, [string]$item.name)
+    Need ($usageState -in @("observed_used", "observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_used/observed_unused/unknown：{1}" -f $kind, [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$review.usage_evidence.evidence)) ("{0} semantic_review.usage_evidence 缺少 evidence：{1}" -f $kind, [string]$item.name)
     Need ($review.requires_user_confirmation -is [bool] -and [bool]$review.requires_user_confirmation) ("{0} semantic_review.requires_user_confirmation 必须为 true：{1}" -f $kind, [string]$item.name)
     Need ($review.PSObject.Properties.Match("replacement").Count -gt 0 -and (Test-AuditObjectLike $review.replacement)) ("{0} semantic_review 缺少 replacement：{1}" -f $kind, [string]$item.name)
@@ -495,6 +511,7 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
     Ensure-AuditArrayProperty $rec "source_observations"
+    Assert-AuditUsageObservations $rec
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
@@ -646,6 +663,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
+        usage_observations = @(Convert-AuditObjectArray (Get-CfgObjectProperty $recommendations 'usage_observations'))
         source_observations = @(ConvertTo-AuditJsonArray $recommendations.source_observations)
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)

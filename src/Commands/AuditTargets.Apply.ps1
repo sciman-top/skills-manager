@@ -1085,6 +1085,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
+        usage_observations = @(Convert-AuditObjectArray (Get-CfgObjectProperty $plan 'usage_observations'))
         source_observations = @(ConvertTo-AuditJsonArray $plan.source_observations)
         rollback = @()
         compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }
