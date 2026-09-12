@@ -98,6 +98,13 @@ Describe 'Skill projection profiles' {
         @((($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled_tools)) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
     }
 
+    It 'keeps the projected capability-router metadata operational' {
+        $metadata = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
+        foreach ($anchor in @('exactly once', 'complete request', 'one or two functional domain hints', 'host AI semantic selection', 'exact candidate and its dependency closure', 'per-request middleware')) {
+            $metadata | Should -Match ([regex]::Escape($anchor))
+        }
+    }
+
     It 'retains the former nine-skill core set as an explicit compatibility profile' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'

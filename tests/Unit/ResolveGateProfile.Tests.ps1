@@ -85,6 +85,64 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.result.reason | Should -Be 'risk_path'
     }
 
+    It 'classifies projection-only skills.json changes as focused' {
+        $repo = New-ResolveGateFixture
+        Set-Content -LiteralPath (Join-Path $repo 'skills.json') -Value '{"schema_version":1,"skill_projection":{"projection_profiles":{"default_profile":"core"}},"stable":"same"}'
+        & git -C $repo add skills.json
+        & git -C $repo commit -m 'projection baseline' *> $null
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Set-Content -LiteralPath (Join-Path $repo 'skills.json') -Value '{"schema_version":1,"skill_projection":{"projection_profiles":{"default_profile":"design"}},"stable":"same"}'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'focused'
+        $r.result.reason | Should -Be 'config_projection_path'
+        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjection.Tests.ps1'
+        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjectionProfiles.Tests.ps1'
+    }
+
+    It 'keeps MCP skills.json changes on the full path' {
+        $repo = New-ResolveGateFixture
+        Set-Content -LiteralPath (Join-Path $repo 'skills.json') -Value '{"schema_version":1,"mcp_servers":[]}'
+        & git -C $repo add skills.json
+        & git -C $repo commit -m 'mcp baseline' *> $null
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Set-Content -LiteralPath (Join-Path $repo 'skills.json') -Value '{"schema_version":1,"mcp_servers":[{"name":"demo"}]}'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'risk_path'
+    }
+
+    It 'classifies skill markdown and OpenAI metadata changes as focused' {
+        $repo = New-ResolveGateFixture
+        $skillDir = Join-Path $repo 'overrides\custom\demo'
+        New-Item -ItemType Directory -Path (Join-Path $skillDir 'agents') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $skillDir 'SKILL.md') -Value '# demo'
+        Set-Content -LiteralPath (Join-Path $skillDir 'agents\openai.yaml') -Value 'name: demo'
+        & git -C $repo add overrides
+        & git -C $repo commit -m 'skill baseline' *> $null
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $skillDir 'SKILL.md') -Value 'change'
+        Add-Content -LiteralPath (Join-Path $skillDir 'agents\openai.yaml') -Value 'description: changed'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'focused'
+        $r.result.reason | Should -Be 'skill_path'
+        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjection.Tests.ps1'
+        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjectionProfiles.Tests.ps1'
+    }
+
+    It 'fails safe to full for an unknown override file shape' {
+        $repo = New-ResolveGateFixture
+        $unknownPath = Join-Path $repo 'overrides\custom\demo\notes.txt'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $unknownPath) -Force | Out-Null
+        Set-Content -LiteralPath $unknownPath -Value 'baseline'
+        & git -C $repo add overrides
+        & git -C $repo commit -m 'unknown override baseline' *> $null
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath $unknownPath -Value 'changed'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'risk_path'
+    }
+
     It 'classifies scripts/quality changes as full' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
@@ -226,11 +284,16 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $ci.result.reason | Should -Be 'empty_diff'
     }
 
-    It 'keeps the canonical classification regexes verbatim in the script' {
+    It 'keeps the shared classifier boundaries visible in the script' {
         $content = Get-Content -LiteralPath $script:resolverPath -Raw
-        $content | Should -Match ([regex]::Escape('^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$|docs/(product/cross-host-model-orchestration-.*\.md|decision/MOR-.*\.md)$)'))
+        $content | Should -Match 'overrides/\(README\\\.md\|resources/'
+        $content | Should -Match 'overrides/patches/provenance'
+        $content | Should -Match 'skills\\\.lock\\\.json'
+        $content | Should -Match '\$skillFocusedPath'
+        $content | Should -Match '\$skillsConfigPath'
         $content | Should -Match ([regex]::Escape('^(src/|tests/Unit/)'))
         $content | Should -Match ([regex]::Escape('^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'))
         $content | Should -Match ([regex]::Escape('tests/Unit/CiWorkflow.Tests.ps1'))
+        $content | Should -Match 'tests/Unit/SkillProjection.Tests.ps1'
     }
 }

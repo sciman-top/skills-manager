@@ -24,6 +24,9 @@
 - 用户级 Skill 位于 `~/.zcode/skills/<skill-name>/SKILL.md`。frontmatter 必须包含 `name` 和 `description`；description 不超过 1024 字符，正文超过 100KB 会被截断。启用过多 Skill 会挤占元数据预算，保留高频能力并让 description 明确触发场景。
 - 用户级 MCP 原生配置为 `~/.zcode/cli/config.json` 的 `mcp.servers`；工作区 MCP 配置为 `<workspace>/.zcode/config.json` 的同一字段。`.agents/mcp.json` 仅在同作用域原生 `.zcode` 未配置任何 MCP 时作为后备，二者不合并。
 - 工作区 MCP 会在会话启动时自动连接，打开未知仓库前先审查 `<workspace>/.zcode/config.json`。MCP 的写入、网络和命令能力不由“配置存在”自动授权。
+- ZCode 宿主先从当前可见 Skill metadata/native tool 直达；仅当用户明确要求当前不可见本地技能，或宿主判定可见覆盖不足且专门工作流确有必要时，才以完整原始请求和至多两个 functional domain hints 调用 `capability-router` 一次。宿主 AI 负责语义选择，router 只做精确候选及 dependency closure 的 hash/availability/`execution_contract` 校验，不切换 profile、执行候选或写宿主状态。
+- `load_validation.pass=true` 且 `truth_boundary=candidate_load_validated` 后，`one_shot` 仍须先经 parent-side admission；当前 ZCode 执行面不提供本协议可观察的 native child lifecycle，因此只能 parent-mediated 并标注 `not_supported`/`not_observable`。`multi_turn_user_decision` 必须逐轮只向用户提出一个问题并等待回答，`parent_user_input` 必须停在父任务；不得伪造 child 或用摘要/结论替代交互契约。
+- ZCode 若未来暴露 native child，仍必须显式传递原始请求、完整验证结果、精确 write set、minimum proof、stop 和 contract；当前不得把 router receipt 当 `host_loaded`/`live_accepted`，也不得把 router 变成每请求 middleware。
 - ZCode 的全局规则、Skill 和 MCP 文件相等最多证明 `filesystem_projected`；必须在新建 ZCode Workspace 任务中确认可见/加载，才能称 `host_loaded`。实际完成真实任务后才可称 `live_accepted`。
 - ZCode 的执行模式和安全确认属于宿主控制面。任务可给出风险、计划和验证建议，但不得把本规则当成权限绕过或自动批准。
 

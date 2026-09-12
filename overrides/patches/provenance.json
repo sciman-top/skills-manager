@@ -27,7 +27,7 @@
       "base_revision": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
       "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
       "license": "MIT",
-      "local_delta_reason": "Narrow implicit activation to explicit design grilling, preserve local domain-document and Codex invocation boundaries, and carry explicit human/delegate answer provenance without upgrading delegate answers to human acceptance."
+      "local_delta_reason": "Narrow implicit activation to explicit design grilling, preserve local domain-document and Codex invocation boundaries, carry explicit human/delegate answer provenance without upgrading delegate answers to human acceptance, and replace upstream $to-spec/$to-tickets/$improve-codebase-architecture handoffs with a host-neutral explicit-workflow boundary because those skills are absent from this estate."
     },
     {
       "name": "grilling",

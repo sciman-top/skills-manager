@@ -265,6 +265,8 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile foc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
 ```
 
+日常默认使用 `auto`；它只在当前变更确有独立风险时升级到 `full`，不能用“更全面”作为重复门禁或旁路审计的理由。基线、变更集或 untracked 扫描无法确定时选择 `full` 是 fail-safe 行为。
+
 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
 
 ```powershell

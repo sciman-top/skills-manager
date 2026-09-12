@@ -31,6 +31,6 @@ without labeling the decision that would resolve it.
 ## Side-effect boundary
 
 This is a draft-only skill. Do not call an issue tracker, create labels or
-links, invoke `to-spec`/`to-tickets`, or create or modify repository files.
-If the user later asks to publish the draft, hand off to an explicit
-`$to-spec` invocation after the user has reviewed it.
+links, or create or modify repository files. If the user later asks to
+publish the draft, treat publication as a separate, explicitly authorized
+task with its own workflow; this skill implies no publishing command.

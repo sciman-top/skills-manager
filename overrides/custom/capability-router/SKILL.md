@@ -46,7 +46,7 @@ $result.retrieval.candidates
 ```
 
 Use functional domains, not arbitrary task keywords: `decision`, `engineering`,
-`coding`, `frontend`, `writing`, `content`, `presentation`, `diagram`,
+`coding`, `frontend`, `design`, `writing`, `content`, `presentation`, `diagram`,
 `animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, or
 `skill-management`. Existing specialist domains such as `ppt`, `physics`, and
 `coding-strict` remain available. The default maximum is 12. If the unscoped

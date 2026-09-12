@@ -41,6 +41,17 @@ Describe 'Global rule source contract' {
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md)-join"`n")|Should -Match 'eol: lf'
     }
 
+    It 'keeps cold-routing handoff semantics explicit for Claude and ZCode' {
+        $claudeText = [IO.File]::ReadAllText((Join-Path $fixture 'rules\global\claude\CLAUDE.md'))
+        $zcodeText = [IO.File]::ReadAllText((Join-Path $fixture 'rules\global\zcode\AGENTS.md'))
+        foreach ($anchor in @('capability-router', '≤2 domain hint', 'one_shot', 'cold-capability-runner', 'multi_turn_user_decision', 'design-griller', 'parent-mediated', 'not_observable')) {
+            $claudeText | Should -Match ([regex]::Escape($anchor))
+        }
+        foreach ($anchor in @('capability-router', '完整原始请求', '至多两个', 'one_shot', 'multi_turn_user_decision', 'native child lifecycle', 'parent-mediated', 'not_observable')) {
+            $zcodeText | Should -Match ([regex]::Escape($anchor))
+        }
+    }
+
     It 'requires the 1 section' {
         $path=Join-Path $fixture 'rules\global\codex\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('## 1. 阅读指引','## 阅读指引');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_structure_invalid'

@@ -15,7 +15,7 @@ Use this skill for classroom-ready courseware, not marketing decks.
 4. For junior physics, include the physical situation, idealized model, variable relationship, unit discipline, and common misconception.
 5. Keep the lesson arc and assessment aligned: state what students must already know, what they will be able to do, and what the exit ticket will reveal. If a textbook, curriculum, or standard is not supplied, label the basis as an assumption rather than inventing an alignment claim.
 6. Keep student-visible content, teacher prompts, and answer/reveal notes distinct. Do not make a teaching decision depend on speaker notes when the delivery mode will not expose them.
-7. When creating PPTX, use the built-in Presentations capability first and follow its supported `pptx` workflow. Use web slides only when animation or interactive simulation is central; if the executor is unavailable, return the design and mark file generation as pending.
+7. When creating PPTX, use the available native presentation capability first (for example the `pptx` skill; on Windows hosts without it, the `powerpoint-automation` COM route). Use web slides only when animation or interactive simulation is central; if no executor is available, return the design and mark file generation as pending.
 
 ## Deliverable Boundary
 

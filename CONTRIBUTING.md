@@ -35,6 +35,8 @@ git diff --check
 
 `tests/run.ps1` uses the repository bootstrap to fetch hash-pinned Pester 6.1.0 into ignored `reports/test-runtime/`; do not install or mutate a global PowerShell module for this repository.
 
+Use `-Profile auto` for the normal local/CI path. The shared classifier selects `docs` for tracked documentation-only changes, `focused` for source/unit-test changes, recognized skill metadata/reference changes, and `skills.json` changes limited to projection/discovery-inventory sections, and `full` for runtime, governance, supply-chain, MCP/target/source-integrity, unknown override/config shapes, unreadable change sets, or non-ignored untracked files. Other low-risk paths remain `quick`. A fail-safe `full` result is intentional; do not add a second audit or repeat a broader gate after the current independent failure is covered.
+
 For runtime, security, data, migration, public-contract, dependency, packaging, release, or cross-surface risk, run only the full closeout after inputs are frozen; do not pre-run the commands it contains:
 
 ```powershell

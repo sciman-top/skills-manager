@@ -5,7 +5,7 @@ description: Use when auditing or validating PowerPoint/PPTX classroom presentat
 
 # PowerPoint Accessibility
 
-Audit accessibility after the deck content and layout are stable. This skill is a validator: use Presentations to create or edit PPTX files and `powerpoint-automation` only when live Windows PowerPoint or COM operation is required.
+Audit accessibility after the deck content and layout are stable. This skill is a validator: use an available presentation-creation capability such as the `pptx` skill to create or edit PPTX files, and `powerpoint-automation` only when live Windows PowerPoint or COM operation is required.
 
 ## Workflow
 

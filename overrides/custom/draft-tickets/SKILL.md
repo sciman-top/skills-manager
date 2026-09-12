@@ -27,6 +27,7 @@ dependency role.
 ## Side-effect boundary
 
 This is a draft-only skill. Do not call an issue tracker, create labels,
-blocking links, ticket files, or other repository files; do not invoke
-`to-tickets` or `to-spec`. If the user approves the breakdown and wants it
-published, hand off to an explicit `$to-tickets` invocation.
+blocking links, ticket files, or other repository files. If the user approves
+the breakdown and wants it published, treat publication as a separate,
+explicitly authorized task with its own workflow; this skill implies no
+publishing command.

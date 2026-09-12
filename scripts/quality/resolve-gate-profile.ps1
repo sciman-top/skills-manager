@@ -12,14 +12,20 @@ param(
 # only. Classification failure is expressed as profile=full plus a reason and
 # exit code 0; only parameter usage errors exit 1.
 
-$riskPath = '^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$|docs/(product/cross-host-model-orchestration-.*\.md|decision/MOR-.*\.md)$)'
+$riskPath = '^(tests/E2E/|rules/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$|docs/(product/cross-host-model-orchestration-.*\.md|decision/MOR-.*\.md)$)'
 $sourcePath = '^(src/|tests/Unit/)'
 $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'
+$skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml|references/.*\.md)$'
+$skillsConfigPath = '^skills\.json$'
 $fixedFocusedTests = @(
     'tests/Unit/CiWorkflow.Tests.ps1'
     'tests/Unit/InfrastructureSeam.Tests.ps1'
     'tests/Unit/ReadOnlyCli.Tests.ps1'
     'tests/Unit/BuildScript.Tests.ps1'
+)
+$skillFocusedTests = @(
+    'tests/Unit/SkillProjection.Tests.ps1'
+    'tests/Unit/SkillProjectionProfiles.Tests.ps1'
 )
 
 function Resolve-GitOutput([string[]]$GitArgs) {
@@ -38,6 +44,47 @@ function Get-GateProfileResult([string]$Profile, [string]$Reason, [string]$BaseS
         changed_count      = $ChangedCount
         untracked_count    = $UntrackedCount
     }
+}
+
+function Get-GitFileText([string]$Path, [string]$Revision = '') {
+    $show = Resolve-GitOutput @('show', ('{0}:{1}' -f $Revision, $Path))
+    if ($show.exit_code -ne 0) { return $null }
+    return ($show.lines -join "`n")
+}
+
+function Get-CurrentFileText([string]$Path) {
+    try {
+        $file = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if (-not $file.PSIsContainer) { return [IO.File]::ReadAllText($file.FullName) }
+    }
+    catch { return $null }
+    return $null
+}
+
+function Get-SkillsConfigComparableText([string]$Text) {
+    if ($null -eq $Text) { return $null }
+    try { $config = $Text | ConvertFrom-Json }
+    catch { return $null }
+
+    $projection = $config.PSObject.Properties['skill_projection']
+    if ($null -ne $projection -and $null -ne $projection.Value) {
+        $projectionValue = $projection.Value
+        foreach ($safeProperty in @('projection_profiles', 'discovery_catalog', 'external_skill_inventory')) {
+            if ($projectionValue.PSObject.Properties.Name -contains $safeProperty) {
+                $projectionValue.$safeProperty = $null
+            }
+        }
+    }
+    return ($config | ConvertTo-Json -Depth 100 -Compress)
+}
+
+function Test-SkillsConfigFocusedChange([string]$BaseSha, [string]$HeadSha, [string]$Mode) {
+    $baseText = Get-GitFileText 'skills.json' $BaseSha
+    $headText = if ($Mode -eq 'ci') { Get-GitFileText 'skills.json' $HeadSha } else { Get-CurrentFileText 'skills.json' }
+    $baseComparable = Get-SkillsConfigComparableText $baseText
+    $headComparable = Get-SkillsConfigComparableText $headText
+    if ($null -eq $baseComparable -or $null -eq $headComparable) { return $false }
+    return [string]::Equals($baseComparable, $headComparable, [StringComparison]::Ordinal)
 }
 
 $headShaValue = $HeadSha
@@ -104,6 +151,8 @@ $changedCount = $changed.Count
 $riskRegex = [regex]::new($riskPath)
 $sourceRegex = [regex]::new($sourcePath)
 $docsRegex = [regex]::new($docsOnlyPath)
+$skillFocusedRegex = [regex]::new($skillFocusedPath)
+$skillsConfigRegex = [regex]::new($skillsConfigPath)
 
 if ($changedCount -eq 0) {
     $result = Get-GateProfileResult 'docs' 'empty_diff' $baseShaValue $headShaValue $false @() 0 $untrackedCount
@@ -111,10 +160,20 @@ if ($changedCount -eq 0) {
     exit 0
 }
 
-# risk is evaluated before docs-only: the risk regex covers a subset of
+# Risk is evaluated before docs-only: the risk regex covers a subset of
 # docs/*.md (MOR decision and cross-host orchestration governance docs) that
 # must reach full regardless of the rest of the change set being docs-only.
-if (($changed | Where-Object { $riskRegex.IsMatch($_) }).Count -gt 0) {
+# skills.json is content-sensitive: only projection/discovery inventory edits
+# can use the focused path; source, MCP, target, lock, and host-write changes
+# remain full. Unknown override shapes also fail closed to full.
+$riskChanged = @($changed | Where-Object { $riskRegex.IsMatch($_) })
+$unknownOverrideChanged = @($changed | Where-Object {
+        $_ -like 'overrides/*' -and -not $riskRegex.IsMatch($_) -and -not $skillFocusedRegex.IsMatch($_)
+    })
+$configRiskChanged = @($changed | Where-Object {
+        $skillsConfigRegex.IsMatch($_) -and -not (Test-SkillsConfigFocusedChange $baseShaValue $headShaValue $Mode)
+    })
+if ($riskChanged.Count -gt 0 -or $unknownOverrideChanged.Count -gt 0 -or $configRiskChanged.Count -gt 0) {
     $result = Get-GateProfileResult 'full' 'risk_path' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount
     if ($Json) { $result | ConvertTo-Json } else { $result }
     exit 0
@@ -127,10 +186,22 @@ if ($docsOnly) {
     exit 0
 }
 
-if (($changed | Where-Object { $sourceRegex.IsMatch($_) }).Count -gt 0) {
-    $focused = @($fixedFocusedTests) + @($changed | Where-Object { $_ -match '^tests/Unit/.*\.Tests\.ps1$' })
+ $sourceChanged = @($changed | Where-Object { $sourceRegex.IsMatch($_) })
+ $skillFocusedChanged = @($changed | Where-Object { $skillFocusedRegex.IsMatch($_) })
+ $configFocusedChanged = @($changed | Where-Object { $skillsConfigRegex.IsMatch($_) })
+if ($sourceChanged.Count -gt 0 -or $skillFocusedChanged.Count -gt 0 -or $configFocusedChanged.Count -gt 0) {
+    $focused = @()
+    $reason = 'source_path'
+    if ($sourceChanged.Count -gt 0) { $focused += @($fixedFocusedTests) }
+    if ($skillFocusedChanged.Count -gt 0 -or $configFocusedChanged.Count -gt 0) {
+        $focused += @($skillFocusedTests)
+        if ($sourceChanged.Count -eq 0) {
+            $reason = if ($skillFocusedChanged.Count -gt 0) { 'skill_path' } else { 'config_projection_path' }
+        }
+    }
+    $focused += @($changed | Where-Object { $_ -match '^tests/Unit/.*\.Tests\.ps1$' })
     $focused = @($focused | Sort-Object -Unique)
-    $result = Get-GateProfileResult 'focused' 'source_path' $baseShaValue $headShaValue $false $focused $changedCount $untrackedCount
+    $result = Get-GateProfileResult 'focused' $reason $baseShaValue $headShaValue $false $focused $changedCount $untrackedCount
     if ($Json) { $result | ConvertTo-Json } else { $result }
     exit 0
 }

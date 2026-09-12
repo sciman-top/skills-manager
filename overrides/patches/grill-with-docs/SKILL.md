@@ -40,6 +40,6 @@ Only update `CONTEXT.md`, a glossary, or an ADR after the user has confirmed a
 durable decision or explicitly asked for that record. If the interview does not
 produce a durable decision, return a structured summary and do not write files.
 
-Do not publish a spec or tickets and do not start an architecture scan. Use an
-explicit `$to-spec`, `$to-tickets`, or `$improve-codebase-architecture`
-invocation for those operations.
+Do not publish a spec or tickets and do not start an architecture scan. Those
+operations require an explicitly authorized, separately invoked workflow; this
+skill does not imply one.

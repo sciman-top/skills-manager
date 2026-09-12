@@ -152,6 +152,7 @@ before acting. Model name, reasoning effort, and host-specific availability
 are operator choices and evidence-bound facts; never treat the capsule as
 permission to switch provider, widen the write set, or skip verification.
 
-Detailed mappings, budget observations, and the GPT/GLM rationale live in
-`docs/product/ai-coding-playbook.md`; load only the relevant section when
-needed rather than copying the entire reference into every task.
+Detailed mappings, budget observations, and the GPT/GLM rationale live in the
+skills-manager repository at `docs/product/ai-coding-playbook.md`. Consult it
+only when working in that repository, and load only the relevant section
+rather than copying the entire reference into every task.
