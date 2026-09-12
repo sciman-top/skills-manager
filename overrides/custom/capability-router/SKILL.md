@@ -1,11 +1,12 @@
 ---
 name: capability-router
-description: Read-only cold discovery and deterministic validation for local skills. Use only when host-native visible metadata is insufficient, cross-directory discovery is needed, or a host-selected candidate needs containment/availability validation. Treat metadata as insufficient when a request combines an interactive workflow verb (grill, interview, interrogate, one question at a time, multi-turn decision) with evidence grounding that no single visible skill covers. Host AI owns semantic selection; do not use as a normal preflight.
+description: Find an explicitly named skill missing from visible skills, or a specialist workflow absent from them; validate its exact dependency closure before loading. Use for implicit specialist requests too, including evidence-based design interviews. Not a routine preflight.
 ---
 
 # Capability router
 
 This is a narrow fallback, not a normal task preflight and not a second semantic router.
+Do not use as a normal preflight. Treat metadata as insufficient when a request combines an interactive workflow verb with evidence grounding that no single visible skill covers.
 
 ## Cold discovery
 
@@ -81,6 +82,27 @@ Every response also includes a read-only `routing_receipt`. It contains a SHA-25
 
 ## Native cold-capability handoff
 
+For `host_admission_required`, loading and execution are separate decisions.
+Read only the validated closure first. The catalog's `unknown` describes an
+unclassified workflow, not missing user permission. Inspect the actual skill
+instructions, identify the concrete operation, and apply the current user's
+scope, permissions, exact write set, proof and stop. If those already authorize
+the operation, continue in the parent; do not ask again merely because the
+catalog lacks a specialist bridge contract. If the operation remains unknown,
+the target is missing, or a needed external action is unauthorized, stop for
+that specific missing input. Do not relabel the catalog or fabricate a runner
+admission. Report this path as `parent_mediated`; it is not native runner
+execution. A skill requiring a multi-turn decision must preserve its questions
+and wait points; never replace it with a one-shot summary.
+
+For independently bounded work, prefer an available host-native subagent when
+the user or applicable instructions authorize delegation. Pass the exact
+validated closure and task scope. Do not assume a named custom agent exists
+on another host: use that host's available native agent under the same task
+contract, or execute in the parent and report the actual surface. Model and
+effort choices use only the current host's supported tool/schema values;
+inherit defaults when no task-specific choice is justified.
+
 When a matching native skill/tool is already visible, use it directly and do
 not involve this router or a bridge. Otherwise, the host may hand one exact
 candidate to the native `cold-capability-runner` subagent only when this
@@ -91,14 +113,14 @@ router has returned all of the following for the same request:
 - one selected candidate plus its `validated_closure`, with validated paths and
   declared side effects for every member.
 
-Pass the complete validation result, original request, exact selected name, and
+For a supported specialist bridge contract, pass the complete validation result, original request, exact selected name, and
 an admission contract to the child. Once those conditions hold, dispatching to
 the contract's `native_agent` is the execution path, not an option: construct
 the admission (original request, complete validation result, the single
 selected name, `requested_operation`, an empty or exact write set, minimum
 proof, and stop condition) and hand it to the child. The router's `not_granted`
 is permanent by design and is upgraded only by this parent-side admission,
-never by the router. When the host has no native spawn tool, fall back to
+never by the router. When the host has no compatible native spawn tool, fall back to
 parent-mediated execution and record it as parent-mediated - never as a runner
 execution. The child must not treat validation as execution authorization. The
 result and receipt carry the effective `execution_contract` of the **selected
@@ -117,6 +139,28 @@ read-only subset even when a skill's maximum declared side effect is
 additionally records the user's implementation request, exact write set,
 minimum proof, and stop condition. For `external_read`, `unknown`, ambiguity,
 a missing execution contract, or any request to alter host/session/profile state, return an admission request to the parent instead. Never use the bridge as automatic middleware or make every natural-language request cold-discover skills.
+
+The specialist bridge uses the generated `scripts/execution-admission.ps1`
+beside this router script. Dot-source that file after router package validation;
+it contains the deterministic helpers and needs no repository source import.
+Keep `RepoRoot` set to the current
+task repository and `SkillRoot` set to the reviewed physical skill supply root
+for creation, revalidation and continuation. `AllowedReadSet` lists exact task
+inputs under `RepoRoot`; the validated closure separately carries the skill
+files under `SkillRoot`. A consumer project does not need `skills.json`.
+
+```powershell
+. <skill-dir>/scripts/execution-admission.ps1
+$admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal $goal -Validation $result -AllowedReadSet $taskFiles -AuthorityBasis 'current_user_request' -IssuedAt ([datetimeoffset]::UtcNow.ToString('o')) -RepoRoot $taskRoot -SkillRoot $supplyRoot
+$plan = New-ExecutionPlan -Admission $admission
+$check = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $result -RepoRoot $taskRoot -SkillRoot $supplyRoot
+```
+
+For an authorized one-shot implementation, creation additionally takes
+`-RequestedOperation controlled_write -ExactWriteSet $files -MinimumProof $proof`.
+Revalidation checks existing-file hashes and absence of new files before spawn.
+Never dispatch when `$check.pass` is false. These are parent-side checks, not
+an OS sandbox; actual tools must still enforce the task's write boundary.
 
 ## Boundaries
 

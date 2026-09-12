@@ -49,6 +49,87 @@ BeforeAll {
 }
 
 Describe 'Execution admission' {
+    It 'admits exact controlled writes and rejects drift before execution' {
+        $root = Join-Path $TestDrive 'controlled-write'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $contract = [pscustomobject]@{ mode = 'one_shot'; native_agent = 'cold-capability-runner'; conversation_owner = 'runner'; stop_condition = 'parent_contract' }
+        $fixture.validation.execution_contract = $contract
+        $fixture.validation.routing_receipt.execution_contract = $contract
+        $fixture.validation.selected[0].execution_contract = $contract
+        $newPath = Join-Path $root 'new.md'
+        $parameters = @{
+            OriginalRequest = 'Implement the requested model'
+            AdmittedGoal = 'Update exactly two files'
+            Validation = $fixture.validation
+            AllowedReadSet = @($fixture.fixture_path)
+            AuthorityBasis = 'current_user_implementation_request'
+            IssuedAt = '2026-09-12T08:00:00Z'
+            RepoRoot = $root
+            RequestedOperation = 'controlled_write'
+            ExactWriteSet = @($fixture.fixture_path, $newPath)
+            MinimumProof = 'Inspect the two changed files'
+        }
+        $admission = New-ExecutionAdmission @parameters
+        $plan = New-ExecutionPlan -Admission $admission
+        $admission.requested_operation | Should -Be 'controlled_write'
+        @($admission.exact_write_set).Count | Should -Be 2
+        (Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root).pass | Should -BeTrue
+        Set-Content -LiteralPath $newPath -Value 'Concurrent file'
+        $result = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root
+        $result.pass | Should -BeFalse
+        @($result.findings.code) | Should -Contain 'write_snapshot_drift'
+        $parameters.ExactWriteSet = @(Join-Path $TestDrive 'outside.md')
+        { New-ExecutionAdmission @parameters } | Should -Throw '*write_set_path_outside_repo*'
+        $parameters.ExactWriteSet = @()
+        { New-ExecutionAdmission @parameters } | Should -Throw '*controlled_write_scope_incomplete*'
+    }
+
+    It 'admits a validated skill supply independently from the consumer repository' {
+        $supply = Join-Path $TestDrive 'external-supply'
+        $fixture = New-ExecutionAdmissionFixture $supply
+        $consumer = Join-Path $TestDrive 'consumer'
+        New-Item -ItemType Directory -Path $consumer -Force | Out-Null
+        $inputPath = Join-Path $consumer 'input.md'
+        Set-Content -LiteralPath $inputPath -Value 'Consumer proposal'
+        $parameters = @{
+            OriginalRequest = 'Review the consumer proposal'
+            AdmittedGoal = 'Review only'
+            Validation = $fixture.validation
+            AllowedReadSet = @($inputPath)
+            AuthorityBasis = 'current_user_request'
+            IssuedAt = '2026-09-12T08:00:00Z'
+            RepoRoot = $consumer
+            SkillRoot = $supply
+        }
+        $admission = New-ExecutionAdmission @parameters
+        $plan = New-ExecutionPlan -Admission $admission
+        (Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $consumer -SkillRoot $supply).pass | Should -BeTrue
+        $runtimePath = Join-Path $supply 'execution-admission.ps1'
+        Set-Content -LiteralPath $runtimePath -Value (Get-ExecutionAdmissionRuntimeContent)
+        $inputFile = Join-Path $supply 'parameters.clixml'
+        $parameters | Export-Clixml -LiteralPath $inputFile
+        $runnerPath = Join-Path $supply 'run.ps1'
+        Set-Content -LiteralPath $runnerPath -Value @'
+param($RuntimePath, $InputFile)
+$ErrorActionPreference = 'Stop'
+. $RuntimePath
+$parameters = Import-Clixml -LiteralPath $InputFile
+$admission = New-ExecutionAdmission @parameters
+$plan = New-ExecutionPlan -Admission $admission
+$check = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $parameters.Validation -RepoRoot $parameters.RepoRoot -SkillRoot $parameters.SkillRoot
+if (-not $check.pass) { throw ($check | ConvertTo-Json -Depth 10) }
+'portable_admission_pass'
+'@
+        $output = & pwsh -NoProfile -File $runnerPath $runtimePath $inputFile
+        $LASTEXITCODE | Should -Be 0
+        $output | Should -Contain 'portable_admission_pass'
+        $parameters.AllowedReadSet = @($fixture.fixture_path)
+        { New-ExecutionAdmission @parameters } | Should -Throw '*allowed_read_set_path_outside_repo*'
+        $parameters.AllowedReadSet = @($inputPath)
+        $parameters.SkillRoot = $consumer
+        { New-ExecutionAdmission @parameters } | Should -Throw '*validated_closure_path_outside_repo*'
+    }
+
     It 'creates a content-addressed read-only admission and a content-addressed one-question plan' {
         $root = Join-Path $TestDrive 'valid'
         $fixture = New-ExecutionAdmissionFixture $root

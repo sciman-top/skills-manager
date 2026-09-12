@@ -27,6 +27,7 @@ BeforeAll {
 Describe 'Cold skill routing scenario matrix' {
     It 'pins provenance to the approved user-supplied attachment hash' {
         $matrix.schema_version | Should -Be 1
+        $matrix.projection_profile | Should -Be 'core-lean'
         $matrix.source_provenance.source_kind | Should -Be 'user_supplied_attachment'
         $matrix.source_provenance.source_sha256 | Should -Be $ExpectedSourceSha256
         $matrix.source_provenance.source_description | Should -Not -BeNullOrEmpty
@@ -99,13 +100,38 @@ Describe 'Cold skill routing scenario matrix' {
         $implicit.execution_contract | Should -Be 'deferred_to_candidate'
     }
 
-    It 'forbids cold discovery for visible-direct, target-bound, write-plan and deferred-image groups' {
-        $forbiddenGroups = @(2, 3, 4, 5, 6, 7, 8, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+    It 'forbids cold discovery for core-lean visible, target-bound, write-plan and deferred-image groups' {
+        $forbiddenGroups = @(3, 4, 5, 6, 8, 10, 11, 16, 17, 18, 19, 20, 21, 22)
         foreach ($group in $forbiddenGroups) {
             foreach ($scenario in (Get-ScenarioGroup $group)) {
                 $scenario.cold_discovery | Should -Be 'forbidden' -Because ("group {0} scenario {1}" -f $group, $scenario.id)
                 $scenario.forbidden_events | Should -Contain 'cold_discovery' -Because ("group {0} scenario {1} must forbid the router event" -f $group, $scenario.id)
             }
+        }
+    }
+
+    It 'routes skills excluded from core-lean through bounded cold discovery' {
+        $explicitExpectations = @{
+            'S02-explicit' = 'grill-me'
+            'S07-explicit' = 'codebase-design'
+            'S36-live-derived' = 'grill-me'
+        }
+        foreach ($entry in $explicitExpectations.GetEnumerator()) {
+            $scenario = @($matrix.scenarios | Where-Object id -eq $entry.Key)
+            @($scenario).Count | Should -Be 1
+            $scenario[0].route_class | Should -Be 'cold_candidate'
+            $scenario[0].cold_discovery | Should -Be 'required'
+            @($scenario[0].allowed_candidate_names) | Should -Be @($entry.Value)
+            $scenario[0].forbidden_events | Should -Contain 'second_discovery'
+        }
+
+        foreach ($id in @('S02-implicit', 'S07-implicit', 'S23-explicit', 'S23-implicit', 'S24-explicit', 'S24-implicit')) {
+            $scenario = @($matrix.scenarios | Where-Object id -eq $id)
+            @($scenario).Count | Should -Be 1
+            $scenario[0].route_class | Should -Be 'cold_candidate'
+            $scenario[0].cold_discovery | Should -Be 'conditional'
+            @($scenario[0].allowed_candidate_names).Count | Should -Be 0
+            $scenario[0].forbidden_events | Should -Contain 'second_discovery'
         }
     }
 
@@ -210,8 +236,9 @@ Describe 'Cold skill routing scenario matrix' {
             $byId[$id].forbidden_events | Should -Contain 'cold_discovery'
         }
 
-        $byId['S36-live-derived'].route_class | Should -Be 'visible_direct'
-        $byId['S36-live-derived'].cold_discovery | Should -Be 'forbidden'
+        $byId['S36-live-derived'].route_class | Should -Be 'cold_candidate'
+        $byId['S36-live-derived'].cold_discovery | Should -Be 'required'
+        @($byId['S36-live-derived'].allowed_candidate_names) | Should -Be @('grill-me')
         $byId['S36-live-derived'].execution_contract | Should -Be 'multi_turn_user_decision'
     }
 }

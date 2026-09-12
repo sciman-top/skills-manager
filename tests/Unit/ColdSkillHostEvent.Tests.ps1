@@ -55,7 +55,7 @@ Describe 'Cold skill raw host-event verifier' {
             @{ Fixture = 'invalid-s30-bare-wait.jsonl'; Scenario = 'S30-live-derived'; Code = 'H005_NATIVE_CHILD_SPAWN_MISSING' }
             @{ Fixture = 'invalid-s30-repeat-discovery.jsonl'; Scenario = 'S30-live-derived'; Code = 'H004_MULTIPLE_DISCOVERY_ATTEMPTS' }
             @{ Fixture = 'invalid-s31-no-spawn.jsonl'; Scenario = 'S31-live-derived'; Code = 'H005_NATIVE_CHILD_SPAWN_MISSING' }
-            @{ Fixture = 'invalid-s36-router.jsonl'; Scenario = 'S36-live-derived'; Code = 'H003_FORBIDDEN_DISCOVERY_OBSERVED' }
+            @{ Fixture = 'invalid-s36-router.jsonl'; Scenario = 'S03-explicit'; Code = 'H003_FORBIDDEN_DISCOVERY_OBSERVED' }
         )
 
         foreach ($case in $cases) {

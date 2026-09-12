@@ -2393,6 +2393,17 @@ $script:ExecutionAdmissionProfiles = [ordered]@{
     }
 }
 
+function Get-ExecutionAdmissionRuntimeContent {
+    # Export the already-loaded source functions so portable installations do
+    # not need src/ or a consumer repository's skills.json at execution time.
+    $names = @('Get-OperationObjectProperty', 'Test-OperationObjectProperty', 'Test-OperationArray', 'Test-OperationRfc3339', 'Get-OperationSha256', 'Normalize-OperationPathKey', 'Test-OperationPathWithinRoot')
+    $functions = @(Get-Command -CommandType Function -Name (@('*-ExecutionAdmission*', '*-ExecutionPlan*') + $names) | Where-Object Name -ne 'Get-ExecutionAdmissionRuntimeContent' | Sort-Object Name -Unique)
+    $profiles = ($script:ExecutionAdmissionProfiles | ConvertTo-Json -Depth 10 -Compress).Replace("'", "''")
+    $parts = @('#requires -Version 7.0', '# Generated from skills-manager source; do not edit.', ('$script:ExecutionAdmissionSchemaVersion = {0}' -f $script:ExecutionAdmissionSchemaVersion), ('$script:ExecutionAdmissionProfiles = ConvertFrom-Json -AsHashtable ''{0}''' -f $profiles))
+    $parts += @($functions | ForEach-Object { 'function {0} {{ {1} }}' -f $_.Name, $_.Definition })
+    return ($parts -join "`n")
+}
+
 function Get-ExecutionAdmissionProfile([string]$Mode) {
     if ([string]::IsNullOrWhiteSpace($Mode) -or -not $script:ExecutionAdmissionProfiles.Contains($Mode)) { return $null }
     return $script:ExecutionAdmissionProfiles[$Mode]
@@ -2531,7 +2542,8 @@ function Get-ExecutionAdmissionPackageHash([string]$SkillEntrypointPath) {
 function Get-ExecutionAdmissionValidationSnapshot {
     param(
         [Parameter(Mandatory = $true)]$Validation,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$SkillRoot = $RepoRoot
     )
 
     if (-not [bool](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $Validation 'load_validation') 'pass')) { throw 'load_validation_failed' }
@@ -2578,7 +2590,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
             dependencies = @((Get-ExecutionAdmissionProperty $member 'dependencies') | ForEach-Object { [string]$_ } | Sort-Object)
         }) | Out-Null
     }
-    $entrypointSnapshots = Get-ExecutionAdmissionFileSnapshot -Paths $closurePaths.ToArray() -RepoRoot $RepoRoot -FieldName 'validated_closure'
+    $entrypointSnapshots = Get-ExecutionAdmissionFileSnapshot -Paths $closurePaths.ToArray() -RepoRoot $SkillRoot -FieldName 'validated_closure'
     $snapshotsByPath = @{}
     foreach ($snapshot in @($entrypointSnapshots)) { $snapshotsByPath[[string]$snapshot.path] = [string]$snapshot.sha256 }
     $closureSnapshot = @($closureRows.ToArray() | ForEach-Object {
@@ -2606,7 +2618,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
 }
 
 function Get-ExecutionAdmissionPayload($Admission) {
-    return [pscustomobject][ordered]@{
+    $payload = [pscustomobject][ordered]@{
         schema_version = Get-ExecutionAdmissionProperty $Admission 'schema_version'
         kind = Get-ExecutionAdmissionProperty $Admission 'kind'
         attempt_id = Get-ExecutionAdmissionProperty $Admission 'attempt_id'
@@ -2623,6 +2635,30 @@ function Get-ExecutionAdmissionPayload($Admission) {
         prior_admission_id = Get-ExecutionAdmissionProperty $Admission 'prior_admission_id'
         attributable_user_answer_sha256 = Get-ExecutionAdmissionProperty $Admission 'attributable_user_answer_sha256'
     }
+    foreach ($field in @('workspace_root', 'write_snapshots')) {
+        if (Test-OperationObjectProperty $Admission $field) { $payload | Add-Member -NotePropertyName $field -NotePropertyValue (Get-OperationObjectProperty $Admission $field) }
+    }
+    return $payload
+}
+
+function Get-ExecutionAdmissionWriteSnapshots([string[]]$Paths, [string]$RepoRoot) {
+    $root = [IO.Path]::GetFullPath($RepoRoot)
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or $path -match '[*?\[\]]' -or -not [IO.Path]::IsPathFullyQualified($path)) { throw 'write_set_path_invalid' }
+        $full = [IO.Path]::GetFullPath($path)
+        if (-not (Test-OperationPathWithinRoot $full $root) -or $full -eq $root -or -not $seen.Add($full)) { throw 'write_set_path_outside_repo_or_duplicate' }
+        $current = $full
+        while (Test-OperationPathWithinRoot $current $root) {
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'write_set_reparse_point' }
+            if ($current -eq $root) { break }
+            $current = Split-Path -Parent $current
+        }
+        if (Test-Path -LiteralPath $full -PathType Container) { throw 'write_set_directory_not_file' }
+        $exists = Test-Path -LiteralPath $full -PathType Leaf
+        [pscustomobject]@{ path = $full; exists = [bool]$exists; sha256 = if ($exists) { (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' } }
+    }
 }
 
 function New-ExecutionAdmission {
@@ -2634,6 +2670,10 @@ function New-ExecutionAdmission {
         [Parameter(Mandatory = $true)][string]$AuthorityBasis,
         [Parameter(Mandatory = $true)][string]$IssuedAt,
         [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$SkillRoot = $RepoRoot,
+        [ValidateSet('read_only', 'controlled_write')][string]$RequestedOperation = 'read_only',
+        [string[]]$ExactWriteSet = @(),
+        [string]$MinimumProof = '',
         [string]$PriorAdmissionId = '',
         [string]$AttributableUserAnswer = ''
     )
@@ -2642,10 +2682,17 @@ function New-ExecutionAdmission {
     if (-not (Test-OperationRfc3339 $IssuedAt)) { throw 'admission_issued_at_invalid' }
     if (-not [string]::IsNullOrWhiteSpace($PriorAdmissionId) -and $PriorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { throw 'prior_admission_id_invalid' }
 
-    $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot
+    $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     $profile = Get-ExecutionAdmissionProfile ([string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $validationSnapshot 'effective_execution_contract') 'mode'))
     if ($null -eq $profile) { throw 'execution_contract_invalid' }
-    $allowedReadSet = Get-ExecutionAdmissionFileSnapshot -Paths $AllowedReadSet -RepoRoot $RepoRoot -FieldName 'allowed_read_set'
+    $allowedReadSet = @(Get-ExecutionAdmissionFileSnapshot -Paths $AllowedReadSet -RepoRoot $RepoRoot -FieldName 'allowed_read_set')
+    if ($RequestedOperation -eq 'read_only' -and $ExactWriteSet.Count -gt 0) { throw 'read_only_write_set_not_empty' }
+    if ($RequestedOperation -eq 'controlled_write') {
+        if ($profile.mode -ne 'one_shot' -or $ExactWriteSet.Count -eq 0 -or [string]::IsNullOrWhiteSpace($MinimumProof)) { throw 'controlled_write_scope_incomplete' }
+        $selectedMember = @($validationSnapshot.validated_closure | Where-Object name -eq $validationSnapshot.selected_candidate)[0]
+        if ($selectedMember.side_effect -ne 'controlled_write') { throw 'controlled_write_not_declared' }
+    }
+    $writeSnapshots = @(Get-ExecutionAdmissionWriteSnapshots -Paths $ExactWriteSet -RepoRoot $RepoRoot)
     $admission = [pscustomobject][ordered]@{
         schema_version = $script:ExecutionAdmissionSchemaVersion
         kind = 'execution_admission'
@@ -2654,14 +2701,18 @@ function New-ExecutionAdmission {
         admitted_goal = $AdmittedGoal.Trim()
         authority_basis = $AuthorityBasis.Trim()
         issued_at = ([datetimeoffset]::Parse($IssuedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)).ToUniversalTime().ToString('o')
-        requested_operation = 'read_only'
-        exact_write_set = @()
+        requested_operation = $RequestedOperation
+        exact_write_set = @($writeSnapshots | ForEach-Object path)
         allowed_read_set = $allowedReadSet
-        minimum_proof = $profile.minimum_proof
+        minimum_proof = if ([string]::IsNullOrWhiteSpace($MinimumProof)) { $profile.minimum_proof } else { $MinimumProof }
         stop_condition = $profile.stop_condition
         validation_snapshot = $validationSnapshot
         prior_admission_id = $PriorAdmissionId
         attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
+    }
+    if ($RequestedOperation -eq 'controlled_write') {
+        $admission | Add-Member -NotePropertyName workspace_root -NotePropertyValue ([IO.Path]::GetFullPath($RepoRoot))
+        $admission | Add-Member -NotePropertyName write_snapshots -NotePropertyValue $writeSnapshots
     }
     $admission | Add-Member -NotePropertyName admission_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'adm' (Get-ExecutionAdmissionPayload $admission))
     $contract = Test-ExecutionAdmissionContract -Admission $admission
@@ -2684,13 +2735,14 @@ function Test-ExecutionAdmissionContract {
     if ([string](Get-ExecutionAdmissionProperty $Admission 'attempt_id') -notmatch '^[a-f0-9]{32}$') { $findings.Add((New-ExecutionAdmissionFinding 'attempt_id_invalid' '$.attempt_id' 'Attempt identity must be a 32-character lowercase hex nonce.')) | Out-Null }
     if ([string](Get-ExecutionAdmissionProperty $Admission 'request_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'request_hash_invalid' '$.request_sha256' 'Request hash must be SHA-256.')) | Out-Null }
     if (-not (Test-OperationRfc3339 (Get-ExecutionAdmissionProperty $Admission 'issued_at'))) { $findings.Add((New-ExecutionAdmissionFinding 'issued_at_invalid' '$.issued_at' 'Issued timestamp must be RFC3339.')) | Out-Null }
-    if ([string](Get-ExecutionAdmissionProperty $Admission 'requested_operation') -ne 'read_only') { $findings.Add((New-ExecutionAdmissionFinding 'requested_operation_invalid' '$.requested_operation' 'P0 only admits read_only.')) | Out-Null }
-    $writeSet = Get-ExecutionAdmissionProperty $Admission 'exact_write_set'
+    $operation = [string](Get-ExecutionAdmissionProperty $Admission 'requested_operation')
+    if ($operation -notin @('read_only', 'controlled_write')) { $findings.Add((New-ExecutionAdmissionFinding 'requested_operation_invalid' '$.requested_operation' 'Unsupported operation.')) | Out-Null }
+    $writeSet = Get-OperationObjectProperty $Admission 'exact_write_set'
     if ($null -ne $writeSet -and -not (Test-ExecutionAdmissionArray $writeSet)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$writeSet)) { $findings.Add((New-ExecutionAdmissionFinding 'read_only_write_set_not_empty' '$.exact_write_set' 'Read-only admission must carry an empty write set.')) | Out-Null }
         else { $findings.Add((New-ExecutionAdmissionFinding 'write_set_type_invalid' '$.exact_write_set' 'Write set must be an array.')) | Out-Null }
     }
-    elseif (@($writeSet).Count -ne 0) { $findings.Add((New-ExecutionAdmissionFinding 'read_only_write_set_not_empty' '$.exact_write_set' 'Read-only admission must carry an empty write set.')) | Out-Null }
+    elseif ($operation -eq 'read_only' -and @($writeSet).Count -ne 0) { $findings.Add((New-ExecutionAdmissionFinding 'read_only_write_set_not_empty' '$.exact_write_set' 'Read-only admission must carry an empty write set.')) | Out-Null }
     $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
     $mode = if ($null -eq $snapshot) { '' } else { [string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $snapshot 'effective_execution_contract') 'mode') }
     $profile = Get-ExecutionAdmissionProfile $mode
@@ -2702,7 +2754,7 @@ function Test-ExecutionAdmissionContract {
     if ([string]::IsNullOrWhiteSpace($priorAdmissionId) -and -not [string]::IsNullOrWhiteSpace($answerHash)) { $findings.Add((New-ExecutionAdmissionFinding 'initial_admission_has_user_answer' '$.attributable_user_answer_sha256' 'Only a successor admission may bind a user answer.')) | Out-Null }
     if (-not [string]::IsNullOrWhiteSpace($priorAdmissionId) -and $answerHash -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'successor_user_answer_missing' '$.attributable_user_answer_sha256' 'A successor admission must bind one attributable user answer hash.')) | Out-Null }
 
-    $readSet = Get-ExecutionAdmissionProperty $Admission 'allowed_read_set'
+    $readSet = Get-OperationObjectProperty $Admission 'allowed_read_set'
     if (-not (Test-ExecutionAdmissionArray $readSet) -or @($readSet).Count -eq 0) { $findings.Add((New-ExecutionAdmissionFinding 'allowed_read_set_invalid' '$.allowed_read_set' 'Read set must be a non-empty array.')) | Out-Null }
     else {
         foreach ($entry in @($readSet)) {
@@ -2711,6 +2763,22 @@ function Test-ExecutionAdmissionContract {
     }
     if ($null -eq $snapshot -or [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate') -eq '' -or [string](Get-ExecutionAdmissionProperty $snapshot 'catalog_fingerprint') -notmatch '^[a-f0-9]{64}$' -or $null -eq $profile) { $findings.Add((New-ExecutionAdmissionFinding 'validation_snapshot_invalid' '$.validation_snapshot' 'Validated selection snapshot is incomplete or has the wrong contract.')) | Out-Null }
     $closure = if ($null -eq $snapshot) { @() } else { @(Get-ExecutionAdmissionProperty $snapshot 'validated_closure') }
+    if ($operation -eq 'controlled_write') {
+        $root = [string](Get-ExecutionAdmissionProperty $Admission 'workspace_root')
+        $writeSnapshots = @(Get-ExecutionAdmissionProperty $Admission 'write_snapshots')
+        $selectedMember = @($closure | Where-Object name -eq $snapshot.selected_candidate)
+        if ($mode -ne 'one_shot' -or $selectedMember.Count -ne 1 -or $selectedMember[0].side_effect -ne 'controlled_write' -or @($writeSet).Count -eq 0 -or [string]::IsNullOrWhiteSpace($root) -or $writeSnapshots.Count -ne @($writeSet).Count) {
+            $findings.Add((New-ExecutionAdmissionFinding 'controlled_write_scope_invalid' '$.exact_write_set' 'Controlled writes require a declared one-shot root and exact workspace snapshots.')) | Out-Null
+        }
+        else {
+            for ($i = 0; $i -lt $writeSnapshots.Count; $i++) {
+                $entry = $writeSnapshots[$i]
+                if ($entry.path -ne $writeSet[$i] -or -not (Test-OperationPathWithinRoot $entry.path $root) -or ($entry.exists -and $entry.sha256 -notmatch '^[a-f0-9]{64}$') -or (-not $entry.exists -and $entry.sha256 -ne '')) {
+                    $findings.Add((New-ExecutionAdmissionFinding 'write_snapshot_invalid' '$.write_snapshots' 'Write snapshot paths and hashes must match the exact write set.')) | Out-Null; break
+                }
+            }
+        }
+    }
     if ($closure.Count -eq 0) { $findings.Add((New-ExecutionAdmissionFinding 'validated_closure_invalid' '$.validation_snapshot.validated_closure' 'Validated closure is required.')) | Out-Null }
     foreach ($entry in @($closure)) {
         if ([string](Get-ExecutionAdmissionProperty $entry 'entrypoint_sha256') -notmatch '^[a-f0-9]{64}$' -or [string](Get-ExecutionAdmissionProperty $entry 'package_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'closure_entry_hash_invalid' '$.validation_snapshot.validated_closure' 'Closure entries require entrypoint and package SHA-256 snapshots.')) | Out-Null; break }
@@ -2751,22 +2819,8 @@ function New-ExecutionPlan {
     $readSet = @(Get-ExecutionAdmissionProperty $Admission 'allowed_read_set')
     if ($readSet.Count -eq 0) { throw 'execution_plan_read_set_missing' }
 
-    # The read set has already been containment-checked when the immutable
-    # admission was created. Locate the actual repository root instead of
-    # assuming a fixed number of parent directories from its first file.
-    $currentDirectory = Split-Path -Path ([string](Get-ExecutionAdmissionProperty $readSet[0] 'path')) -Parent
-    $repoRoot = ''
-    while (-not [string]::IsNullOrWhiteSpace($currentDirectory)) {
-        if (Test-Path -LiteralPath (Join-Path $currentDirectory 'skills.json') -PathType Leaf) {
-            $repoRoot = $currentDirectory
-            break
-        }
-        $parentDirectory = Split-Path -Path $currentDirectory -Parent
-        if ([string]::Equals($parentDirectory, $currentDirectory, [StringComparison]::OrdinalIgnoreCase)) { break }
-        $currentDirectory = $parentDirectory
-    }
-    if ([string]::IsNullOrWhiteSpace($repoRoot)) { throw 'execution_plan_repo_root_unresolved' }
-
+    # Admission already snapshots the exact inputs. Consumer projects need no
+    # skills-manager manifest to create a plan from that immutable snapshot.
     $admissionContract = Test-ExecutionAdmissionContract -Admission $Admission
     if (-not $admissionContract.pass) { throw ('execution_admission_invalid: {0}' -f ((@($admissionContract.findings | ForEach-Object code) -join ','))) }
     $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
@@ -2861,7 +2915,8 @@ function Test-ExecutionAdmissionRevalidation {
         [Parameter(Mandatory = $true)]$Admission,
         [Parameter(Mandatory = $true)]$Plan,
         [Parameter(Mandatory = $true)]$Validation,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$SkillRoot = $RepoRoot
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
@@ -2870,8 +2925,16 @@ function Test-ExecutionAdmissionRevalidation {
     if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
 
     $storedSnapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
+    if ([string]$Admission.requested_operation -eq 'controlled_write') {
+        try {
+            if ([IO.Path]::GetFullPath($RepoRoot) -ne [string]$Admission.workspace_root) { throw 'workspace_root_mismatch' }
+            $currentWrites = @(Get-ExecutionAdmissionWriteSnapshots -Paths @($Admission.exact_write_set) -RepoRoot $RepoRoot)
+            if ((ConvertTo-ExecutionAdmissionCanonicalJson $currentWrites) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $Admission.write_snapshots)) { throw 'write_snapshot_drift' }
+        }
+        catch { $findings.Add((New-ExecutionAdmissionFinding 'write_snapshot_drift' '$.write_snapshots' $_.Exception.Message)) | Out-Null }
+    }
     try {
-        $currentSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot
+        $currentSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
         if ((ConvertTo-ExecutionAdmissionCanonicalJson $currentSnapshot) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $storedSnapshot)) { $findings.Add((New-ExecutionAdmissionFinding 'validation_snapshot_drift' '$.validation_snapshot' 'Current router validation differs from the admitted snapshot.')) | Out-Null }
     }
     catch { $findings.Add((New-ExecutionAdmissionFinding 'current_validation_invalid' '$.validation' $_.Exception.Message)) | Out-Null }
@@ -2905,15 +2968,16 @@ function Test-ExecutionAdmissionContinuation {
         [Parameter(Mandatory = $true)]$SuccessorAdmission,
         [Parameter(Mandatory = $true)]$SuccessorPlan,
         [Parameter(Mandatory = $true)]$Validation,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$SkillRoot = $RepoRoot
     )
 
     $findings = New-Object System.Collections.Generic.List[object]
     $priorSnapshot = Get-ExecutionAdmissionProperty $PriorAdmission 'validation_snapshot'
     $priorContract = if ($null -eq $priorSnapshot) { $null } else { Get-ExecutionAdmissionProperty $priorSnapshot 'effective_execution_contract' }
     if (-not (Test-ExecutionAdmissionMultiTurnContract $priorContract)) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_contract_invalid' '$.validation_snapshot.effective_execution_contract' 'Only a multi-turn design-griller admission may continue.')) | Out-Null }
-    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
-    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $SuccessorAdmission -Plan $SuccessorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot).findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $SuccessorAdmission -Plan $SuccessorPlan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot).findings)) { $findings.Add($finding) | Out-Null }
     if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
 
     $priorId = [string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')
@@ -2944,19 +3008,20 @@ function New-ExecutionAdmissionSuccessor {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$AttributableUserAnswer,
         [Parameter(Mandatory = $true)]$Validation,
         [Parameter(Mandatory = $true)][string]$IssuedAt,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$SkillRoot = $RepoRoot
     )
 
     if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { throw 'attributable_user_answer_missing' }
     $priorSnapshot = Get-ExecutionAdmissionProperty $PriorAdmission 'validation_snapshot'
     if ($null -eq $priorSnapshot -or -not (Test-ExecutionAdmissionMultiTurnContract (Get-ExecutionAdmissionProperty $priorSnapshot 'effective_execution_contract'))) { throw 'continuation_contract_invalid' }
-    $priorRevalidation = Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot
+    $priorRevalidation = Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     if (-not $priorRevalidation.pass) { throw ('continuation_predecessor_not_revalidated: {0}' -f ((@($priorRevalidation.findings | ForEach-Object code) -join ','))) }
     if ((Get-OperationSha256 $OriginalRequest) -ne [string](Get-ExecutionAdmissionProperty $PriorAdmission 'request_sha256')) { throw 'continuation_request_mismatch' }
 
-    $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer
+    $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -SkillRoot $SkillRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer
     $successorPlan = New-ExecutionPlan -Admission $successor
-    $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $successorPlan -Validation $Validation -RepoRoot $RepoRoot
+    $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $successorPlan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     if (-not $continuation.pass) { throw ('execution_admission_continuation_invalid: {0}' -f ((@($continuation.findings | ForEach-Object code) -join ','))) }
     return [pscustomobject][ordered]@{
         admission = $successor
@@ -13123,6 +13188,10 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
                 Write-Host ("❌ 应用覆盖层失败 [{0}]: {1}" -f $d.Name, $_.Exception.Message) -ForegroundColor Red
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
             }
+        }
+        $routerScripts = Join-Path $AgentDir 'capability-router/scripts'
+        if (-not $DryRun -and (Test-Path -LiteralPath $routerScripts -PathType Container)) {
+            Write-Utf8FileAtomic -Path (Join-Path $routerScripts 'execution-admission.ps1') -Content (Get-ExecutionAdmissionRuntimeContent)
         }
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {

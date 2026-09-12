@@ -38,7 +38,7 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 ### 1.2 宿主能力差异
 
 - Codex Desktop、CLI、IDE：支持 custom agent / native child 时，只有可观察 child id、model、effort、lifecycle 才能达到 host_specific_live_accepted。
-- ZCode 或不暴露 native child lifecycle 的宿主：parent 可按 contract 代行交互，但 native_child 必须是 not_supported 或 not_observable；最高只能报告 parent-mediated observation。
+- Claude Code 与 ZCode 也支持原生子代理；必须按当前工具/schema 检查具体 agent、model、effort 与 lifecycle，不把 Codex 的 TOML 自定义角色当作跨宿主通用配置。确实不支持或不暴露 lifecycle 的入口才记录 not_supported 或 not_observable；parent 代行时只报告 parent-mediated observation。
 - 工具、catalog reader、测试 harness 或 assistant prose：只可当较低层证据，不能作为 native host evidence。
 
 ### 1.3 多轮回答归因
@@ -223,7 +223,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 ### 6.4 可见直达对照
 
-在 fresh session 运行 S01。记录 grill-me 的 native 交互事件，同时验证 cold_discovery=not_observed、candidate_load_validation=not_observed。它是避免“所有 explicit skill 都被 router”这一回归的对照。
+在 fresh session 运行 S03-explicit（systematic-debugging）。它在 core-lean 常驻，应记录直接加载，同时验证 cold_discovery=not_observed、candidate_load_validation=not_observed。grill-me 和 codebase-design 在 core-lean 属于冷技能，不再充当可见直达对照。
 
 ### 6.5 隐式三正三负样本
 

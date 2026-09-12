@@ -114,11 +114,18 @@
       "fallback_domain": "other",
       "fallback_purpose": "Unclassified cold skills. Do not rely on bounded implicit discovery until a narrower functional domain is assigned.",
       "side_effects": {
+        "grill-me": "read_only",
         "domain-modeling": "controlled_write",
         "grill-with-docs": "controlled_write",
         "grilling": "read_only"
       },
       "execution_contracts": {
+        "grill-me": {
+          "mode": "multi_turn_user_decision",
+          "native_agent": "design-griller",
+          "conversation_owner": "parent",
+          "stop_condition": "one_question_then_wait"
+        },
         "domain-modeling": {
           "mode": "one_shot",
           "native_agent": "cold-capability-runner",

@@ -2256,6 +2256,10 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
             }
         }
+        $routerScripts = Join-Path $AgentDir 'capability-router/scripts'
+        if (-not $DryRun -and (Test-Path -LiteralPath $routerScripts -PathType Container)) {
+            Write-Utf8FileAtomic -Path (Join-Path $routerScripts 'execution-admission.ps1') -Content (Get-ExecutionAdmissionRuntimeContent)
+        }
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
