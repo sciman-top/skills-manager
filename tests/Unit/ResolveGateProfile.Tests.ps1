@@ -97,6 +97,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.result.reason | Should -Be 'config_projection_path'
         @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjection.Tests.ps1'
         @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjectionProfiles.Tests.ps1'
+        $r.result.requires_locked_sources | Should -BeTrue
     }
 
     It 'keeps MCP skills.json changes on the full path' {
@@ -125,8 +126,8 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'focused'
         $r.result.reason | Should -Be 'skill_path'
-        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjection.Tests.ps1'
-        @($r.result.focused_test_paths) | Should -Contain 'tests/Unit/SkillProjectionProfiles.Tests.ps1'
+        @($r.result.focused_test_paths) | Should -Be @('tests/Unit/SkillContent.Tests.ps1')
+        $r.result.requires_locked_sources | Should -BeFalse
     }
 
     It 'fails safe to full for an unknown override file shape' {
@@ -194,7 +195,8 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         Add-Content -LiteralPath (Join-Path $repo 'AGENTS.md') -Value 'rule change'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'focused'
-        $r.result.focused_test_paths | Should -Contain 'tests/Unit/GlobalRuleProjection.Tests.ps1'
+        @($r.result.focused_test_paths) | Should -Be @('tests/Unit/RuleContent.Tests.ps1')
+        $r.result.requires_locked_sources | Should -BeFalse
     }
 
     It 'does not let a mapped source hide an unknown file in a mixed change' {
@@ -277,11 +279,63 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         }
     }
 
-    It 'fails safe to full when no base can be derived' {
+    It 'fails safe to full when CI has no base' {
         $repo = New-ResolveGateFixture
-        $r = Invoke-Resolver $repo @{}
+        $r = Invoke-Resolver $repo @{ Mode = 'ci' }
         $r.result.profile | Should -Be 'full'
         $r.result.reason | Should -Be 'no_base'
+    }
+
+    It 'does not repeat a committed risk change during the next local docs edit' {
+        $repo = New-ResolveGateFixture
+        & git -C $repo update-ref refs/remotes/origin/main HEAD
+        Add-Content -LiteralPath (Join-Path $repo 'scripts/quality/x.ps1') -Value '# committed risk'
+        & git -C $repo add scripts/quality/x.ps1
+        & git -C $repo commit -m risk *> $null
+        $clean = Invoke-Resolver $repo @{}
+        $clean.result.reason | Should -Be 'empty_diff'
+        Add-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'next edit'
+        $local = Invoke-Resolver $repo @{}
+        $local.result.profile | Should -Be 'docs'
+        $local.result.changed_count | Should -Be 1
+        $local.result.requires_locked_sources | Should -BeFalse
+        $integration = Invoke-Resolver $repo @{ BaseSha = 'origin/main' }
+        $integration.result.profile | Should -Be 'full'
+        $integration.result.requires_locked_sources | Should -BeTrue
+    }
+
+    It 'checks skill reference prose without projection tests or materialization' {
+        $repo = New-ResolveGateFixture
+        $dir = Join-Path $repo 'overrides/custom/demo/references'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'example.md') -Value '# reference'
+        $r = Invoke-Resolver $repo @{}
+        $r.result.profile | Should -Be 'docs'
+        $r.result.requires_locked_sources | Should -BeFalse
+    }
+
+    It 'selects existing behavior suites for frequent read and planning modules' -TestCases @(
+        @{ Source = 'src/Application/CapabilityInventory.ps1'; Expected = @('CapabilityInventory', 'ReadOnlyCli') }
+        @{ Source = 'src/Commands/AuditTargets.Bundle.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
+        @{ Source = 'src/Commands/AuditTargets.Template.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
+    ) {
+        param($Source, $Expected)
+        $repo = New-ResolveGateFixture
+        $path = Join-Path $repo $Source
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value '# source change'
+        $r = Invoke-Resolver $repo @{}
+        $r.result.profile | Should -Be 'focused'
+        @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
+        $r.result.requires_locked_sources | Should -BeFalse
+    }
+
+    It 'retains materialization for an unreviewed focused test suite' {
+        $repo = New-ResolveGateFixture
+        Set-Content -LiteralPath (Join-Path $repo 'tests/Unit/New.Tests.ps1') -Value '# new test'
+        $r = Invoke-Resolver $repo @{}
+        $r.result.profile | Should -Be 'focused'
+        $r.result.requires_locked_sources | Should -BeTrue
     }
 
     It 'fails safe to full for an unresolvable explicit base' {

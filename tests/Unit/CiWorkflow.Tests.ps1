@@ -8,7 +8,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match '(?ms)^  test:\s*\r?\n    runs-on: windows-latest\s*\r?\n    timeout-minutes:\s*45'
         $script:workflow | Should -Match '(?ms)^  release:.*?runs-on: windows-latest\s*\r?\n    timeout-minutes:\s*30'
         $script:workflow | Should -Match 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
-        $script:workflow | Should -Match 'ensure-test-runtime\.ps1 -CacheRoot \$env:RUNNER_TEMP -ExportToGitHubEnv'
+        $script:workflow | Should -Not -Match 'ensure-test-runtime\.ps1'
         $bootstrap = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\ensure-test-runtime.ps1') -Raw
         $bootstrap | Should -Match 'Pester/\$version'
         $bootstrap | Should -Match '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
@@ -17,7 +17,6 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $bootstrap | Should -Match '\$moduleRoot = Join-Path \$moduleParent \("\{0\}-\{1\}" -f \$version, \$expectedSha256\)'
         $bootstrap | Should -Not -Match '(?m)^\$moduleRoot[^\r\n]+NewGuid'
         $bootstrap | Should -Match '(?m)^\s*\$extractRoot[^\r\n]+NewGuid'
-        $bootstrap | Should -Match 'PESTER_610_MANIFEST'
         $script:workflow | Should -Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked -SkipHostProjection.*Run repository proportional quality gate'
         $script:workflow | Should -Not -Match 'SkipPublisherCheck'
     }
@@ -36,7 +35,9 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match 'CI_FOCUSED_TEST_PATHS'
         # The final gate invocation must splat a hashtable: array splat is
         # positional-only and turned CI red by binding '-Profile' as a value.
-        $script:workflow | Should -Match '\$gateArgs = @\{ Profile = \$env:CI_GATE_PROFILE \}'
+        $script:workflow | Should -Match 'CheckGenerated = \$true'
+        $script:workflow | Should -Match 'CI_REQUIRES_LOCKED_SOURCES -eq ''True'''
+        $script:workflow | Should -Match 'requires_locked_sources'
         $script:workflow | Should -Not -Match "\['Verifier'\]"
         $script:workflow | Should -Not -Match "'mor'"
         $script:workflow | Should -Not -Match "\`$gateArgs = @\('-Profile'"
@@ -58,7 +59,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
             $riskPath.IsMatch($path) | Should -Be $false
         }
         $resolver | Should -Match '\$skillFocusedPath'
-        $resolver | Should -Match 'tests/Unit/SkillProjection.Tests.ps1'
+        $resolver | Should -Match 'tests/Unit/SkillContent.Tests.ps1'
         $resolver | Should -Match 'Test-SkillsConfigFocusedChange'
     }
 

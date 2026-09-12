@@ -26,10 +26,10 @@
 - 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。
 
 ## C. 最低门禁
-- 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，与 CI 共用分类器：含未跟踪文件，文档轻量、规则专项、已映射源码按行为测试，未知路径或风险选 full；可用 `-TestPath` 追加当前回归证明，显式 focused 仅用于已确定范围的验证。
+- 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，检查 `HEAD` 后编辑（含未跟踪文件）；集成范围显式用 `-DiffBase <revision>`。具体选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；可用 `-TestPath` 追加回归证明，显式 focused 用于已确定范围。
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
-- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`；脏树显式加 `-AllowDirtyWorktree`。
+- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 

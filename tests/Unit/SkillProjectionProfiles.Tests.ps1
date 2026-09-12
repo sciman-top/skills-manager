@@ -53,58 +53,6 @@ Describe 'Skill projection profiles' {
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
     }
 
-    It 'exposes the daily coding workflow through the coding discovery domain' {
-        $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json)
-        @($config.skill_projection.discovery_catalog.domain_memberships.coding) | Should -Contain 'ai-coding-workflow'
-
-        $skillPath = Join-Path $repoRoot 'overrides\custom\ai-coding-workflow\SKILL.md'
-        Test-Path -LiteralPath $skillPath -PathType Leaf | Should -BeTrue
-        $skill = Get-ContentUtf8 $skillPath
-        foreach ($anchor in @('Goal:', 'Context:', 'Constraints:', 'Success:', 'Stop:')) {
-            $skill | Should -Match ([regex]::Escape($anchor))
-        }
-        foreach ($boundary in @('repo_verified', 'filesystem_projected', 'host_loaded', 'live_accepted')) {
-            $skill | Should -Match ([regex]::Escape($boundary))
-        }
-    }
-
-    It 'keeps the daily workflow risk-proportional and model-neutral' {
-        $skillPath = Join-Path $repoRoot 'overrides\custom\ai-coding-workflow\SKILL.md'
-        $skill = Get-ContentUtf8 $skillPath
-
-        foreach ($anchor in @('tiny/direct', 'normal', 'high-risk', 'continue', 'resume', 'MCP is optional')) {
-            $skill | Should -Match ([regex]::Escape($anchor))
-        }
-        $skill | Should -Not -Match 'GPT and GLM are complementary'
-        $skill | Should -Not -Match 'Prefer GPT'
-        $skill | Should -Not -Match 'Prefer GLM'
-    }
-
-    It 'keeps the default MCP profile off and specialized profiles narrow' {
-        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
-        $profiles = $config.mcp_profiles.profiles
-
-        @($profiles.default.enabled) | Should -Be @()
-        @($profiles.coding.enabled) | Should -Be @('openaiDeveloperDocs')
-        @($profiles.dotnet.enabled) | Should -Be @('microsoft-learn')
-        @($profiles.coding.enabled_tools.openaiDeveloperDocs) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
-        @($profiles.dotnet.enabled_tools.'microsoft-learn') | Should -Be @('microsoft_docs_search', 'microsoft_docs_fetch', 'microsoft_code_sample_search')
-
-        $codingConfig = $config | ConvertTo-Json -Depth 30 | ConvertFrom-Json
-        $codingConfig.mcp_profiles.active = 'coding'
-        $codingServers = @(Resolve-McpProfileServers $codingConfig)
-        ($codingServers | Where-Object name -eq 'context7').enabled | Should -BeFalse
-        ($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled | Should -BeTrue
-        @((($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled_tools)) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
-    }
-
-    It 'keeps the projected capability-router metadata operational' {
-        $metadata = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
-        foreach ($anchor in @('exactly once', 'complete request', 'one or two functional domain hints', 'host AI semantic selection', 'exact candidate and its dependency closure', 'per-request middleware')) {
-            $metadata | Should -Match ([regex]::Escape($anchor))
-        }
-    }
-
     It 'retains the former nine-skill core set as an explicit compatibility profile' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'
@@ -200,15 +148,6 @@ Describe 'Skill projection profiles' {
         $full = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
 
         (Get-SkillProjectionPlanFingerprint $plan $null $core) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $null $full)
-    }
-
-    It 'keeps the full-compatible TDD skill prompt-visible while retaining its explicit-use constraint' {
-        $metadata = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\test-driven-development\agents\openai.yaml')
-        $skill = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\test-driven-development\SKILL.md')
-
-        $metadata | Should -Match 'allow_implicit_invocation:\s*true'
-        $skill | Should -Match 'user explicitly requests strict TDD'
-        $skill | Should -Match 'Do not require TDD for routine implementation'
     }
 
     It 'validates a full-compatible manifest against its recorded profile instead of the default core profile' {

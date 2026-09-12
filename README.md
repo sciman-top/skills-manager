@@ -265,18 +265,20 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile doc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
-本地入口默认 auto：与 CI 共用分类器，未跟踪文件参与同一选档。文档走轻量检查、规则走专项测试、已映射源码选行为测试；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
+本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
 ```
 
-未知路径、未映射源码、风险变更或分类失败会选 full；明确影响范围时可使用现有 focused 入口。main push 和 PR 使用同一分类策略，发布标签运行 full。当前输入已有充分证据后停止，不重复审计；源码映射不等于所有行为都已被证明。
+集成检查显式加 `-DiffBase <revision>`；CI 使用事件基线，发布标签运行 full。未知路径、未映射源码、风险变更或分类失败仍选 full；明确影响范围时可使用 focused。具体映射以 `scripts/quality/resolve-gate-profile.ps1` 为准。当前输入已有充分证据后停止，不重复审计。
+
+本地 gate 构建生成物，允许正常的未提交修改；CI 使用 `-CheckGenerated` 在测试前只读核对提交的生成物，漂移立即失败。也可单独运行 `build.ps1 -Check`。`-AllowDirtyWorktree` 仅保留参数兼容，不再需要。CI 只为实际需要物化资产的检查恢复锁定来源；Pester 由测试入口按需准备一次，纯文档检查不安装测试依赖。
 
 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
 ```
 
 测试入口会在 ignored `reports/test-runtime/` 中按固定 SHA-256 准备 Pester 6.1.0，不要求全局安装模块；CI 复用同一 bootstrap。

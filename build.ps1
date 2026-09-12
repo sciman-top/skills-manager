@@ -1,4 +1,7 @@
 #requires -Version 7.0
+[CmdletBinding()]
+param([switch]$Check)
+
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 $Src = Join-Path $Root "src"
@@ -89,5 +92,14 @@ $payload = $utf8NoBom.GetBytes($payloadText)
 $bytes = New-Object byte[] ($bom.Length + $payload.Length)
 [Array]::Copy($bom, 0, $bytes, 0, $bom.Length)
 [Array]::Copy($payload, 0, $bytes, $bom.Length, $payload.Length)
-[System.IO.File]::WriteAllBytes($Dist, $bytes)
-Write-Host "Build success: $Dist" -ForegroundColor Green
+if ($Check) {
+    if (-not [IO.File]::Exists($Dist) -or
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($Dist)) -cne [Convert]::ToBase64String($bytes)) {
+        throw 'generated_bundle_drift: run build.ps1 and include skills.ps1 in the change.'
+    }
+    Write-Host "Build check passed: $Dist" -ForegroundColor Green
+}
+else {
+    [System.IO.File]::WriteAllBytes($Dist, $bytes)
+    Write-Host "Build success: $Dist" -ForegroundColor Green
+}

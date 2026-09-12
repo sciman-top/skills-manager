@@ -11,7 +11,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1'
 $manifest = & $bootstrap
-Import-Module -Name $manifest -Force | Out-Null
 
 $paths = if ($TestPath.Count -eq 0) { @($UnitTestPath, $E2ETestPath) } else { @($TestPath) }
 foreach ($path in $paths) {

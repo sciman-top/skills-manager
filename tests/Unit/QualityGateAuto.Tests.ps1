@@ -68,11 +68,11 @@ Describe 'Local quality gate -Profile auto routing' {
         ($out | Out-String) | Should -Match 'auto -> full \(reason=risk_path'
     }
 
-    It 'fails safe to full when no base can be derived' {
+    It 'uses HEAD without requiring a remote for local checks' {
         $repo = New-AutoGateFixture
         Push-Location $repo
         try { $out = Invoke-TempGate $repo @{ Profile = 'auto'; ResolveOnly = $true } } finally { Pop-Location }
-        ($out | Out-String) | Should -Match 'auto -> full \(reason=no_base'
+        ($out | Out-String) | Should -Match 'auto -> docs \(reason=empty_diff'
     }
 
     It 'docs auto checks the current worktree, not a derived base' {
@@ -115,6 +115,35 @@ Describe 'Local quality gate -Profile auto routing' {
             $LASTEXITCODE | Should -Be 0
             ($out | Out-String) | Should -Match 'Local quality gates passed \(docs\)'
             ($out | Out-String) | Should -Match 'Gate diff-check elapsed=\d+\.\d{3}s'
+        }
+        finally { Pop-Location }
+    }
+
+    It 'regenerates an uncommitted local bundle and rejects submitted drift before tests' {
+        $repo = New-AutoGateFixture
+        $sourceRoot = Split-Path (Split-Path (Split-Path $script:gateSource -Parent) -Parent) -Parent
+        Copy-Item -LiteralPath (Join-Path $sourceRoot 'build.ps1') -Destination $repo
+        Copy-Item -LiteralPath (Join-Path $sourceRoot 'src') -Destination $repo -Recurse -Force
+        New-Item -ItemType Directory -Path (Join-Path $repo 'tests') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'tests/run.ps1') -Value @'
+param([string[]]$TestPath)
+Set-Content -LiteralPath (Join-Path $PSScriptRoot 'ran.txt') -Value 'ran'
+$global:LASTEXITCODE = 0
+'@
+        Push-Location $repo
+        try {
+            Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('fixture') } *> $null
+            $bundle = Join-Path $repo 'skills.ps1'
+            $hash = (Get-FileHash -LiteralPath $bundle).Hash
+            Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('fixture'); CheckGenerated = $true } *> $null
+            Remove-Item -LiteralPath (Join-Path $repo 'tests/ran.txt')
+            Add-Content -LiteralPath (Join-Path $repo 'src/Version.ps1') -Value '# source changed'
+            { Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('fixture'); CheckGenerated = $true } *> $null } | Should -Throw '*generated_bundle_drift*'
+            (Get-FileHash -LiteralPath $bundle).Hash | Should -Be $hash
+            Test-Path -LiteralPath (Join-Path $repo 'tests/ran.txt') | Should -BeFalse
+            Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('fixture') } *> $null
+            (Get-FileHash -LiteralPath $bundle).Hash | Should -Not -Be $hash
+            Test-Path -LiteralPath (Join-Path $repo 'tests/ran.txt') | Should -BeTrue
         }
         finally { Pop-Location }
     }

@@ -3,6 +3,7 @@ param(
     [ValidateSet('docs', 'quick', 'focused', 'full', 'auto')]
     [string]$Profile = 'auto',
     [switch]$AllowDirtyWorktree,
+    [switch]$CheckGenerated,
     [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
     [string[]]$TestName = @(),
@@ -98,9 +99,13 @@ try {
         return
     }
 
-    Invoke-QualityGate 'build' { & .\build.ps1 }
+    if ($Profile -eq 'focused' -and $TestPath.Count -eq 0 -and $TestName.Count -eq 0) {
+        throw 'Focused profile requires -TestPath or -TestName.'
+    }
+    # Local builds regenerate the bundle; CI checks the submitted bytes before tests.
+    # AllowDirtyWorktree remains accepted for existing callers.
+    Invoke-QualityGate 'build' { & .\build.ps1 -Check:$CheckGenerated }
     if ($Profile -eq 'focused') {
-        if ($TestPath.Count -eq 0 -and $TestName.Count -eq 0) { throw 'Focused profile requires -TestPath or -TestName.' }
         if ($TestPath.Count -gt 0 -and $TestName.Count -gt 0) {
             Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestPath $TestPath -TestName $TestName }
         }
@@ -113,9 +118,6 @@ try {
     }
     elseif ($Profile -eq 'full') {
         Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
-    }
-    if (-not $AllowDirtyWorktree) {
-        Invoke-QualityGate 'generated-bundle-committed' { & git diff --quiet HEAD -- skills.ps1 }
     }
     $selectedVerifiers = if ($Verifier.Count -gt 0) {
         @($Verifier)

@@ -18,7 +18,7 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 3. Select one proportional closeout path below.
 
 For a new feature or module, the change description must also name the current
-real failure, a stable caller, why the existing interface cannot carry it, the
+explicit requirement or demonstrated failure, a caller, why the existing interface cannot carry it, the
 exact write set, minimum proof, and rollback. Missing evidence means the change
 is not admitted; do not add a speculative runtime, adapter, state store, or
 governance layer. Once the independent failure is covered, stop and do not
@@ -35,12 +35,12 @@ git diff --check
 
 `tests/run.ps1` uses the repository bootstrap to fetch hash-pinned Pester 6.1.0 into ignored `reports/test-runtime/`; do not install or mutate a global PowerShell module for this repository.
 
-Use `-Profile auto` for the normal local/CI path. The shared classifier selects `docs` for tracked documentation-only changes, `focused` for source/unit-test changes, recognized skill metadata/reference changes, and `skills.json` changes limited to projection/discovery-inventory sections, and `full` for runtime, governance, supply-chain, MCP/target/source-integrity, unknown override/config shapes, unreadable change sets, or non-ignored untracked files. Other low-risk paths remain `quick`. A fail-safe `full` result is intentional; do not add a second audit or repeat a broader gate after the current independent failure is covered.
+Use `-Profile auto` for local edits since `HEAD`; use `-DiffBase <revision>` when intentionally validating an integration range. Untracked files participate in the same classification. See the authoritative selection rules in `scripts/quality/resolve-gate-profile.ps1` and the usage examples in README. Reuse evidence for unchanged inputs instead of repeating a broader gate.
 
 For runtime, security, data, migration, public-contract, dependency, packaging, release, or cross-surface risk, run only the full closeout after inputs are frozen; do not pre-run the commands it contains:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
 ```
 
 `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.

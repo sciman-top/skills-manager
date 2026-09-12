@@ -15,8 +15,8 @@ param(
 $riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
 $rulePath = '^(?:rules/global/(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS)\.md|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
 $sourcePath = '^(src/|tests/Unit/)'
-$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'
-$skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml|references/.*\.md)$'
+$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
+$skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml)$'
 $skillsConfigPath = '^skills\.json$'
 # Explicit behavior coverage, not a smoke-test substitute. Unmapped source
 # falls back to full until its affected tests are known.
@@ -26,11 +26,24 @@ $sourceTests = @{
     'src/Commands/ReleaseUpdate.ps1' = @('ReleaseUpdate', 'ReleaseUpdateWorker')
     'src/Domain/SkillMetadata.ps1' = @('SkillMetadata')
     'src/Infrastructure/AtomicFile.ps1' = @('InfrastructureSeam')
+    'src/Application/CapabilityInventory.ps1' = @('CapabilityInventory', 'ReadOnlyCli')
+    'src/Commands/AuditTargets.ps1' = @('AuditTargets', 'AuditTargetsHardening')
+    'src/Commands/AuditTargets.Bundle.ps1' = @('AuditTargets', 'AuditTargetsHardening')
+    'src/Commands/AuditTargets.Template.ps1' = @('AuditTargets', 'AuditTargetsHardening')
+    'src/Commands/AuditTargets.Plan.ps1' = @('AuditTargets', 'AuditTargetsHardening')
+    'src/Application/RuleDiagnostics.ps1' = @('RuleDiagnostics', 'RuleContent', 'ReadOnlyCli')
 }
 $skillFocusedTests = @(
     'tests/Unit/SkillProjection.Tests.ps1'
     'tests/Unit/SkillProjectionProfiles.Tests.ps1'
 )
+# Only suites known to use source files and disposable fixtures can skip source
+# materialization. New or unreviewed suites retain the conservative CI setup.
+$assetFreeTests = @('AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
+    'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
+    'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
+    'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
+    ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 
 function Resolve-GitOutput([string[]]$GitArgs) {
     $output = & git @GitArgs 2>$null
@@ -45,6 +58,8 @@ function Get-GateProfileResult([string]$Profile, [string]$Reason, [string]$BaseS
         head_sha           = $HeadSha
         docs_only          = $DocsOnly
         focused_test_paths = @($FocusedTestPaths)
+        requires_locked_sources = ($Profile -notin @('docs', 'focused') -or
+            ($Profile -eq 'focused' -and @($FocusedTestPaths | Where-Object { $_ -notin $assetFreeTests }).Count -gt 0))
         changed_count      = $ChangedCount
         untracked_count    = $UntrackedCount
     }
@@ -93,8 +108,10 @@ function Test-SkillsConfigFocusedChange([string]$BaseSha, [string]$HeadSha, [str
 
 $headShaValue = $HeadSha
 
-# Base resolution: explicit BaseSha wins; otherwise derive origin/main then @{u}.
+# Local checks cover edits since HEAD. Integration checks supply their base;
+# CI without an explicit base retains the upstream fallback.
 $baseShaValue = ''
+if ($Mode -eq 'local' -and [string]::IsNullOrWhiteSpace($BaseSha)) { $BaseSha = 'HEAD' }
 if (-not [string]::IsNullOrWhiteSpace($BaseSha)) {
     $verify = Resolve-GitOutput @('rev-parse', '--verify', ('{0}^{{commit}}' -f $BaseSha))
     if ($verify.exit_code -ne 0) {
@@ -166,7 +183,7 @@ if ($changedCount -eq 0) {
 # remain full. Unknown override shapes also fail closed to full.
 $riskChanged = @($changed | Where-Object { $riskRegex.IsMatch($_) })
 $unknownOverrideChanged = @($changed | Where-Object {
-        $_ -like 'overrides/*' -and -not $riskRegex.IsMatch($_) -and -not $skillFocusedRegex.IsMatch($_)
+        $_ -like 'overrides/*' -and -not $riskRegex.IsMatch($_) -and -not $skillFocusedRegex.IsMatch($_) -and -not $docsRegex.IsMatch($_)
     })
 $configRiskChanged = @($changed | Where-Object {
         $skillsConfigRegex.IsMatch($_) -and -not (Test-SkillsConfigFocusedChange $baseShaValue $headShaValue $Mode)
@@ -208,11 +225,16 @@ if ($sourceChanged.Count -gt 0 -or $skillFocusedChanged.Count -gt 0 -or $configF
         $focused += @($sourceTests[$path] | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
     }
     if ($ruleChanged.Count -gt 0) {
-        $focused += @('tests/Unit/GlobalRuleProjection.Tests.ps1', 'tests/Unit/RuleDiagnostics.Tests.ps1')
+        $focused += @('tests/Unit/RuleContent.Tests.ps1')
         if ($sourceChanged.Count -eq 0) { $reason = 'rule_path' }
     }
-    if ($skillFocusedChanged.Count -gt 0 -or $configFocusedChanged.Count -gt 0) {
+    if ($skillFocusedChanged.Count -gt 0) {
+        $focused += 'tests/Unit/SkillContent.Tests.ps1'
+        if ($sourceChanged.Count -eq 0) { $reason = 'skill_path' }
+    }
+    if ($configFocusedChanged.Count -gt 0) {
         $focused += @($skillFocusedTests)
+        $focused += 'tests/Unit/SkillContent.Tests.ps1'
         if ($sourceChanged.Count -eq 0) {
             $reason = if ($skillFocusedChanged.Count -gt 0) { 'skill_path' } else { 'config_projection_path' }
         }

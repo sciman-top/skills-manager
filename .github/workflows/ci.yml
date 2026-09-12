@@ -21,10 +21,6 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Ensure pinned Pester test runtime
-        shell: pwsh
-        run: .\scripts\quality\ensure-test-runtime.ps1 -CacheRoot $env:RUNNER_TEMP -ExportToGitHubEnv
-
       - name: Select proportional quality gate profile
         shell: pwsh
         run: |
@@ -32,6 +28,7 @@ jobs:
           $docsOnly = $false
           $baseSha = ''
           $focusedTests = @()
+          $requiresLockedSources = $true
           if ('${{ github.ref }}'.StartsWith('refs/tags/')) {
             $profile = 'full'
           }
@@ -53,10 +50,12 @@ jobs:
                 $profile = [string]$resolved.profile
                 $docsOnly = [bool]$resolved.docs_only
                 $focusedTests = @($resolved.focused_test_paths)
+                $requiresLockedSources = [bool]$resolved.requires_locked_sources
               }
             }
           }
           "CI_GATE_PROFILE=$profile" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CI_REQUIRES_LOCKED_SOURCES=$requiresLockedSources" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           "CI_DIFF_BASE_SHA=$baseSha" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           "CI_FOCUSED_TEST_PATHS=$($focusedTests | ConvertTo-Json -Compress)" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Selected CI quality gate profile: $profile"
@@ -65,7 +64,7 @@ jobs:
       - name: Rebuild locked skill sources
         shell: pwsh
         run: |
-          if ($env:CI_GATE_PROFILE -ne 'docs') {
+          if ($env:CI_REQUIRES_LOCKED_SOURCES -eq 'True') {
             .\skills.ps1 更新 -Locked -SkipHostProjection
           }
 
@@ -75,7 +74,7 @@ jobs:
           # Hashtable splat: array splat passes elements positionally, so a
           # literal '-Profile' token would land in the Profile parameter and
           # fail ValidateSet (the regression that turned CI red).
-          $gateArgs = @{ Profile = $env:CI_GATE_PROFILE }
+          $gateArgs = @{ Profile = $env:CI_GATE_PROFILE; CheckGenerated = $true }
           if (-not [string]::IsNullOrWhiteSpace($env:CI_DIFF_BASE_SHA)) { $gateArgs['DiffBase'] = $env:CI_DIFF_BASE_SHA }
           if ($env:CI_GATE_PROFILE -eq 'focused') {
             $gateArgs['TestPath'] = @($env:CI_FOCUSED_TEST_PATHS | ConvertFrom-Json)
