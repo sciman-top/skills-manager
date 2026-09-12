@@ -3,6 +3,8 @@
 **状态**：design-only；目标为独立的 host-local runtime，不修改 skills-manager runtime
 **关联**：[PRD](cross-host-model-orchestration-prd.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-001 自动故障切换模拟准入规格](../decision/MOR-001-automatic-failover-simulation.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
+**原生投影切片**：独立工具位于 `D:\CODE\model-orchestration`，默认 Astra-only，按明确可用集合中的 Astra → Sol → Terra → Luna 顺序选整套 preset。仅覆盖 model/effort、五槽位和可回滚文件投影，不实现本设计的完整 state/receipt/identity 控制面，也不选择网关。严格单族约束通过 `Start-ModelSlot.ps1` 受控入口实现：冻结整套 preset 路由并禁用原生 delegation；已证实可绕过的 hook 不再作为强制边界。
+
 ## 1. 架构结论
 
 实现一个小而深的 **Model Orchestration Module**，只处理“指定宿主和身份的新任务，应使用哪个已批准的 model/effort route”。它不是 gateway、provider manager、账号管理器或第二套任务执行器。
@@ -221,7 +223,7 @@ Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max
 
 ### 5.2 最终推荐：当前三条基础 route key
 
-| 基础 route key | `gpt6_astra_only` | `gpt56_sol_only`（日常默认） | `gpt56_terra_only` | `gpt56_luna_only` |
+| 基础 route key | `gpt6_astra_only`（日常默认） | `gpt56_sol_only` | `gpt56_terra_only` | `gpt56_luna_only` |
 | --- | --- | --- | --- | --- |
 | 轻量只读：定位、摘要、日志归纳、简单 diff | Astra/low | Sol/low | Terra/high | Luna/high，`constrained` |
 | 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Astra/medium | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
@@ -230,7 +232,7 @@ Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max
 
 这三档是**基础 route key**，并非宣称跨模型的同 effort 能力等价。它有四个设计目的：
 
-1. Sol 正常可用时，默认只需认识 `high / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/high 承接深度实现或获批高风险工作。Astra-only 与 Sol-only 同形（`low/medium/high`），仅更换为 GPT-6-Astra 单族 map。
+1. Astra 为默认、Sol 为下一候选，两者都只需认识 `high / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/high 承接深度实现或获批高风险工作。Astra-only 与 Sol-only 同形（`low/medium/high`），仅更换为 GPT-6-Astra 单族 map。
 2. Terra-only 与 Luna-only 保持相同三个基础 route key，但每个 preset 同时更换**完整的同族 model/effort map**，按 `high/xhigh/max` 承接轻量、有界和深度工作。
 3. Sol/xhigh 不进入 Sol-only 日常编排；Terra/Luna 的 `max` 只属于各自 preset 的 deep route，不能外推为跨模型能力等价。
 4. Luna/max 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/high 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。

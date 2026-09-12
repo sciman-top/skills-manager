@@ -1,7 +1,7 @@
 # 跨宿主模型编排控制面 PRD
 
-**状态**：design-only；未进入 skills-manager runtime 范围
-**目标实现归属**：待用户选择独立 host-local runtime 根目录；可作为受控 Cockpit 扩展或既有治理 runtime 的独立模块，不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链
+**状态**：完整 MOR 控制面仍为 design-only；用户已授权独立的原生 preset 投影工具，落点 `D:\CODE\model-orchestration`，不进入 skills-manager runtime。
+**目标实现归属**：用户已选择独立 host-local runtime `D:\CODE\model-orchestration`；不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链。
 **关联**：[架构](cross-host-model-orchestration-architecture.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
 ## 1. 产品决策
@@ -16,7 +16,7 @@
   -> 用户说“恢复默认”：只删除该 scope 的 override
 ```
 
-`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/high 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt6_astra_only`、`gpt56_terra_only` 或 `gpt56_luna_only`。四者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；GPT-6-Astra 的 openai_api 面词表（`low/medium/high/xhigh/max`，无 `none`）已由官方模型页直证（MOR-090 C8，2026-09-12），其 Codex config 面 fixture 同样未做。slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
+`gpt6_astra_only` 是用户选定的 Codex 默认 preset（high/medium/low）。候选顺序固定为 Astra → Sol → Terra → Luna，只在当前已确认的可用集合中选择第一套完整 preset；没有可用候选时阻断，不跨模型族补单个槽位，不重放已开始的任务。可用集合由明确声明或独立验证提供，静态模型目录不等于真实可用。四套 GPT preset 共用三个 route key 和五个槽位。本项目不选择或探测网关，不修改 provider、端点或凭据。
 
 ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。2026-09-12 起 DeepSeek 侧 exact slug 改为 `deepseek-flash`（V4.1-Flash；旧名 `deepseek-v4-flash` 退役、`deepseek-v4-pro` 续供但退出默认模板，MOR-090 D5）；`deepseek_flash_only` 只使用 max/high 两档（light 与 standard 复用 Flash/high，deep=Flash/max），Pro 不在模板内。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
@@ -100,7 +100,7 @@ workload + risk + exact host/identity
 | 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Astra/high | Sol/high | Terra/max | Luna/max，`constrained` |
 | 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Astra/high + high-risk policy | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
 
-`gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/high`、`Sol/medium`、`Sol/low` 三档。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
+`gpt6_astra_only` 是 Codex 的 intended policy default，采用用户指定的 high/medium/low；`gpt56_sol_only` 为顺序中的下一候选，使用相同三档。宿主加载和真实调用仍须分别核验。
 
 `gpt6_astra_only`（2026-09-12 增补）与 Sol-only 同形，使用 `high/medium/low` 三档；其 openai_api 面词表已直证（C8），Codex config 面 fixture 未做，取证前同为 `manual_mapping_required`。`gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `max/xhigh/high`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
 
@@ -232,14 +232,14 @@ preset_used_efforts:
 ### 5.4 人工切换语句
 
 ```text
-当前 Codex 只使用 GPT-5.6 Sol，切换 Sol-only 三档编排并落盘。
+当前 Codex 默认使用 GPT-6-Astra；可用集合按 Astra → Sol → Terra → Luna 选择整套 preset，并通过受控槽位入口执行。
 当前 Codex 只有 GPT-5.6 Terra 可用，切换 Terra-only 三档编排并落盘。
 当前 Codex 只有 GPT-5.6 Luna 可用，切换 Luna-only 三档编排并落盘。
 当前 Codex 只有 GPT-6 Astra 可用，切换 Astra-only 三档（low/medium/high）编排并落盘。
 当前 Codex 恢复默认模型编排。
 ```
 
-前四句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Sol-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
+前四句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Astra-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
 
 ### 5.5 六套 preset 的五槽位映射
 
@@ -347,7 +347,7 @@ preset_used_efforts:
 - Windows-first、PowerShell 7-first、local-first；首期不引入常驻进程。
 - policy/default/override/receipt 均 schema-validated、unknown-property fail closed、单写者、原子替换。
 - 默认 CI 和日常 control-plane 命令零供应商调用。
-- 目标 runtime 由用户在 R0 明确选择；未选择时本仓只保留设计文档。
+- 目标 runtime 已由用户选择为 `D:\CODE\model-orchestration`；本仓继续只保存设计与规则，不承载其运行时。
 - 每个启用宿主需提供可脱敏的本机 help/schema/source evidence，以及人工复核的 target ownership/rollback entry。
 - Adapter static contract 的取证顺序固定为：官方产品/CLI 文档与 schema -> 当前机器的只读 help/schema -> 已映射、可审查源码 -> 许可清楚的社区项目结构启发。社区资料只能影响模块/事务结构，不能证明 model/effort 可用、参数被当前 gateway 接受或拥有写入目标。
 - 一手资料不可获取或结论不完整时，记录 `platform_na`/`unknown`，保持 dry-run/manual；不得以网页片段、模型名相似、社区配置或 OAuth/gateway 探查补齐。

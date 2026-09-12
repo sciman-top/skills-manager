@@ -1,6 +1,6 @@
 # MOR-000：runtime 归属与控制面边界决议
 
-**状态**：decided_deferred（2026-08-28）：**暂不实现，保持 design-only**——§3 替代决定生效；不创建 `D:\CODE\model-orchestration`，不填充未经确认的 owner，不进入 MOR-010 runtime 写入。MOR-090 static-fact 基线保留；只读审查与文档修订车道持续开放。当 owner 明确指定已有 runtime 或新的独立项目根、以及真实人类/团队 owner 后，再依 §3 基线启动 MOR-010。
+**状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `D:\CODE\model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
 **依据**：[PRD](../product/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
 **回滚**：删除本文件即回滚本决议；不影响任何已提交设计文档或宿主状态
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
@@ -11,7 +11,7 @@
 | --- | --- |
 | 首期 host | `codex_cli`（唯一首期宿主；ZCode/Claude 等各自静态合同取证后再接入） |
 | GPT preset invariant | 每次仅选择一个命名 preset——**2026-09-12 修订后为六套单族预设**：`gpt6_astra_only`（GPT-6-Astra，low/medium/high；openai_api 词表 C8 直证、config fixture 未做）、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`、`glm53_flash_only`（ZCode，low/high/max，原 `zcode_glm_candidate` 升格命名）、`deepseek_flash_only`（Claude Code，`deepseek-flash`=V4.1-Flash，light/standard 复用 Flash/high、deep=Flash/max 两档复用，Pro 退出模板，原 `claude_deepseek_candidate` 升格命名）；该 preset 恰含 `light/standard/deep` 三个同族 route key（实际档位 2–3 个，不足三个时 route key 复用同档，2026-09-12 二次修订），五个 execution slot 可复用这些 key（允许重复），禁止跨模型族混搭；六套 `*_only` 约束本次编排全部五槽位（含委派任务），冻结同一 map/revision，替代旧 `parent_route_only`；固定角色 pin 不匹配对应槽位时阻断调度，不静默改写宿主配置；private default/override 仅保存 map 引用，完整 map 只从 tracked policy 解引用；high-risk 是额外 gate，不是第四档 |
-| 首期 intended policy default | `gpt56_sol_only`（Sol/low、Sol/medium、Sol/high；高风险=Sol/high + policy），以用户明确偏好选定，非测量最优；只有 Codex config surface 的三项 exact tuple fixture 均通过后才可写作实际 host default |
+| 首期 intended policy default | `gpt6_astra_only`（Astra/low、Astra/medium、Astra/high）；已确认可用集合中的顺序为 Astra → Sol → Terra → Luna，只切完整 preset，不改网关、不重放任务。实际 host load、模型调用与单族强制各自验收 |
 | 其他 preset baseline | `gpt56_terra_only` 与 `gpt56_luna_only` 均为 high/xhigh/max；当前宿主九个 profile 已投影并由 `codex-cli 0.150.1` strict-load，其他宿主仍须各自 exact fixture，且不得把 profile load 外推为 provider/live acceptance；`gpt6_astra_only` 为 low/medium/high（2026-09-12 增补，Astra 未纳入 C7 本机探测轮） |
 | identity binding | 必须使用不可伪造、可审计的绑定来源；无法绑定时状态 `identity_unbound`，禁止持久 override 与 projection，仅允许 offline resolve 与 dry-run/manual handoff |
 | native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 不被通用 route resolver 改写；进入编排槽位前必须匹配选定 preset 的 exact model/effort，否则阻断**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |
