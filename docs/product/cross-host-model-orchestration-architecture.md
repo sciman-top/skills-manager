@@ -118,7 +118,7 @@ RecordTaskOutcome(RouteReceipt, Outcome) -> ReceiptReference
 }
 ```
 
-私有 state **不得**保存 `route_keys`、`model_family` 或任一 model/effort 副本。resolver 必须以 `route_map_id + policy_revision` 从同 revision 的 `policy_source` 解引用完整 map；引用不存在、revision 不匹配、选择种类未知或 map 不能通过同族/完整性校验均 fail closed。`selection_kind=named_preset` 只允许三个 `gpt56_*_only` id；将来经 reviewed patch 加入的 `selection_kind=reviewed_custom_single_family_map` 也只能引用 policy source 的版本化 map，不能存入 private state。
+私有 state **不得**保存 `route_keys`、`model_family` 或任一 model/effort 副本。resolver 必须以 `route_map_id + policy_revision` 从同 revision 的 `policy_source` 解引用完整 map；引用不存在、revision 不匹配、选择种类未知或 map 不能通过同族/完整性校验均 fail closed。`selection_kind=named_preset` 只允许六个命名 preset id（2026-09-12 修订）：`gpt6_astra_only`、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`（Codex/GPT）与 `glm53_flash_only`（ZCode/GLM）、`deepseek_flash_only`（Claude Code/DeepSeek；后两者启用仍受各自静态合同取证约束）；将来经 reviewed patch 加入的 `selection_kind=reviewed_custom_single_family_map` 也只能引用 policy source 的版本化 map，不能存入 private state。
 
 每次 persistent write 必须执行：`canonical scope check -> single-writer lock -> target recheck -> before-hash -> backup -> atomic replace -> after-hash -> private receipt`。lock 必须先于 before-hash，hash 在锁内重验；lock 是本 runtime 的协作写者语义，其范围、stale-lock 崩溃检测与释放机制由 MOR-140 定义，不约束非协作外部写者，防漂移由锁内 before-hash 重验兜底。未知字段、scope 不匹配、并发、reparse escape、hash 漂移或无 backup 均 fail closed。恢复默认只删除当前 scope 的 `operator_override`，不变更 `host_default`，不触及任何其他 host/identity。
 
@@ -200,38 +200,40 @@ adapter_supported_efforts:          # 人工复核、按 surface 分列、版本
     gpt-5.6-sol:   [low, medium, high, xhigh, max]
     gpt-5.6-terra: [low, medium, high, xhigh, max]
     gpt-5.6-luna:  [low, medium, high, xhigh, max]
+    gpt-6-astra:   [low, medium, high, xhigh, max]   # API 面 C8 直证（无 none）；config 面 candidate 待 fixture
   codex_security_cli_surface:       # 独立 surface；max 为 candidate，MOR-090 取证后单列
     max: candidate
 
 preset_used_efforts:               # 当前日常方案只选实际需要的三档
+  gpt6_astra_only:    [low, medium, high]
   gpt56_sol_only:      [low, medium, high]
   gpt56_terra_only:   [high, xhigh, max]
   gpt56_luna_only:    [high, xhigh, max]
 ```
 
-`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前三个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
+`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前四个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
-Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max` profiles 已由 `codex-cli 0.150.1` strict-load，作为 C7/current-host partial 证据；其他宿主仍须 MOR-100 exact fixture，不得静默 clamp 为 `xhigh`。新增某档仍必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch。
+Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max` profiles 已由 `codex-cli 0.150.1` strict-load，作为 C7/current-host partial 证据；其他宿主仍须 MOR-100 exact fixture，不得静默 clamp 为 `xhigh`。GPT-6-Astra（`gpt-6-astra`，2026-09-12 增补）的 openai_api 面词表 `low/medium/high/xhigh/max`（无 `none`）已由官方模型页直证（C8）；其 Codex config 面未 fixture，取证前 Astra-only 一律 `manual_mapping_required`。新增某档仍必须有明确 workload、operation/risk 限制、对应 surface 的静态 Adapter 合同和 reviewed policy patch。
 
 ### 5.2 最终推荐：当前三条基础 route key
 
-| 基础 route key | `gpt56_sol_only`（日常默认） | `gpt56_terra_only` | `gpt56_luna_only` |
-| --- | --- | --- | --- |
-| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/high | Luna/high，`constrained` |
-| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
-| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/max | Luna/max，`constrained` |
-| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
+| 基础 route key | `gpt6_astra_only` | `gpt56_sol_only`（日常默认） | `gpt56_terra_only` | `gpt56_luna_only` |
+| --- | --- | --- | --- | --- |
+| 轻量只读：定位、摘要、日志归纳、简单 diff | Astra/low | Sol/low | Terra/high | Luna/high，`constrained` |
+| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Astra/medium | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
+| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Astra/high | Sol/high | Terra/max | Luna/max，`constrained` |
+| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Astra/high + high-risk policy | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
 
 这三档是**基础 route key**，并非宣称跨模型的同 effort 能力等价。它有四个设计目的：
 
-1. Sol 正常可用时，默认只需认识 `high / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/high 承接深度实现或获批高风险工作。
+1. Sol 正常可用时，默认只需认识 `high / medium / low` 三个努力档；Sol/low 仅承接轻量只读，Sol/medium 承接有界写入或标准审查，Sol/high 承接深度实现或获批高风险工作。Astra-only 与 Sol-only 同形（`low/medium/high`），仅更换为 GPT-6-Astra 单族 map。
 2. Terra-only 与 Luna-only 保持相同三个基础 route key，但每个 preset 同时更换**完整的同族 model/effort map**，按 `high/xhigh/max` 承接轻量、有界和深度工作。
 3. Sol/xhigh 不进入 Sol-only 日常编排；Terra/Luna 的 `max` 只属于各自 preset 的 deep route，不能外推为跨模型能力等价。
 4. Luna/max 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/high 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。
 
-route-key 命名空间不是 schema 上限；但当前 `gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这三个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
+route-key 命名空间不是 schema 上限；但当前 `gpt6_astra_only`、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这四个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
 
 三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
 
@@ -260,6 +262,12 @@ execution_slots:                 # 五个语义 slot 稳定；未来新模型不
   deep_investigation_or_implementation: { route_key: deep, operations: [read_only, workspace_write] }
 
 preset_route_maps:               # Resolve 只读取 selected preset 的完整同族 map
+  gpt6_astra_only:
+    model_family: gpt-6-astra
+    route_keys:
+      light:    { model: gpt-6-astra, effort: low }
+      standard: { model: gpt-6-astra, effort: medium }
+      deep:     { model: gpt-6-astra, effort: high }
   gpt56_sol_only:
     model_family: gpt-5.6-sol
     route_keys:
@@ -293,7 +301,7 @@ preset_route_maps:               # Resolve 只读取 selected preset 的完整�
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
-Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/high，绝不能混入 Terra/Luna。`risk_level=high` 必须在 high-risk gate 通过后使用 `route_key=deep`；如果 selected preset 的 deep route 不允许当前 operation，直接 `blocked`。这不创建第四个 route key，也不能借机换用另一 preset。
+Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/high，绝不能混入 Astra/Terra/Luna。`risk_level=high` 必须在 high-risk gate 通过后使用 `route_key=deep`；如果 selected preset 的 deep route 不允许当前 operation，直接 `blocked`。这不创建第四个 route key，也不能借机换用另一 preset。
 
 ### 5.4 ZCode 与 Claude 的静态三 route-key 映射
 
@@ -301,10 +309,10 @@ Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 ex
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
-| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/max），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
+| `glm53_flash_only`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
+| `deepseek_flash_only`（`deepseek-flash`=V4.1-Flash；须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked`（Pro 已退出模板，Flash 不继承高风险权限） |
 
-每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。Claude 映射的 exact model 分别为 `deepseek-v4-pro` 与 `deepseek-v4-flash`；`Pro/max` 的高风险 route 还要求 policy、当前 operation、明确写集、独立 verifier 与当次授权，它并非模型名称带 `Pro`/`max` 就自然获得的权限。
+每个精确 model/effort token 都必须同时出现在该 host/identity、该 surface 的 Adapter allowlist 中；candidate 未取证前一律 `manual_mapping_required`。Claude 映射的 exact model 为 `deepseek-flash`（V4.1-Flash；旧名 `deepseek-v4-flash` 2026-09-12 起退役，`deepseek-v4-pro` 续供但已退出默认模板，MOR-090 D5）；`deepseek_flash_only` 只用 max/high 两档（light 与 standard 复用 Flash/high），其高风险门固定 `blocked`——若未来经 reviewed policy patch 重新纳入 Pro/max 高风险 route，仍要求 policy、当前 operation、明确写集、独立 verifier 与当次授权，它并非模型名称带 `Pro`/`max` 就自然获得的权限。
 
 ## 6. 确定性 Resolve 算法
 

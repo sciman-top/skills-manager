@@ -1,6 +1,6 @@
 # MOR-090：静态 Adapter 事实证据包（Codex / ZCode / Claude+DeepSeek）
 
-**状态**：static-fact evidence；采集日期 2026-08-28。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
+**状态**：static-fact evidence；采集日期 2026-08-28（C8/D5 为 2026-09-12 增量直抓）。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
 **证据状态词表**：`verified`（官方文档/本机 help 直证）｜`operator_declared`（操作者一手声明/界面证据，无独立附件复核）｜`inferred`（由命名/公告推断的精确值）｜`unknown`（无一手来源）。**只有 `verified` 条目可进 Adapter allowlist**。
 **消费方**：未来 `<runtime-root>` runtime 的 Adapter contract/fixture（MOR-100/MOR-300/MOR-400）；runtime 未选定前 fixtures 不创建
 **方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取用户配置、凭据或运行状态（`~/.codex`、`~/.zcode` 配置、`CLAUDE_CONFIG_DIR` 等均未触碰）；Z3 引用的 UI 截图为**操作者提供的 artifact**，不属读取用户目录运行状态；未发送任何模型请求；社区资料仅作结构启发/secondary corroboration，不作为能力证据
@@ -16,6 +16,7 @@
 | C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
 | C6 | GPT-5.6 三档 slug 全部经官方 exact model page 直证：`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna`，且 **openai_api 面**（Responses/Chat Completions）`Reasoning.effort supports: none, low, medium (default), high, xhigh, and max`（sol/luna 页 2026-08-28 本轮抓取；terra 页同型） | developers.openai.com/api/docs/models/gpt-5.6-{sol,terra,luna} + Security workbench | `verified`（openai_api 面逐项）；注意：**API 面词表不外推到 codex_config_surface**（后者仍以 C1 为准） |
 | C7 | 本机 `codex-cli 0.150.1` 的 `codex debug models` 对 Sol/Terra/Luna 均列出 `max`；九个独立 profile（Sol high/medium/low、Terra max/xhigh/high、Luna max/xhigh/high）均通过 `codex --profile <name> --strict-config --version` | 本机只读 model catalog + strict profile load，2026-08-31 | `partial`（current-host config acceptance）；证明当前 profile 文件可加载，不证明 provider 调用或其他 host |
+| C8 | GPT-6-Astra（2026-09-02/03 发布）官方模型页存在，slug `gpt-6-astra`；openai_api（Responses）`reasoning.effort` 词表 `low / medium / high / xhigh / max`——**无 `none`**（与 GPT-5.6 系页面的 none..max 不同） | developers.openai.com/api/docs/models/gpt-6-astra，2026-09-12 直连抓取（curl 旁路，WebSearch 配额外） | `verified`（openai_api 面逐项）；不外推到 codex_config_surface（仍以 C1 为准，fixture 待 MOR-100）；chat_completions 面未抓，不做跨 surface 外推 |
 
 **未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
 
@@ -56,6 +57,7 @@
 | D2 | exact 模型名 `deepseek-v4-flash` / `deepseek-v4-pro`；未识别模型名**自动回落 flash**；`claude-opus*`→pro、`claude-haiku/sonnet*`→flash | 同上 | verified；回落行为必须建 fixture，模型串钉死精确拼写 |
 | D3 | effort 透传：`output_config` "Only effort is supported"；`thinking` 支持但 `budget_tokens` 被忽略；`redacted_thinking` 不支持 | 同上 | verified |
 | D4 | 原生 API `reasoning_effort` 词表 `low / high / max`（legacy `deepseek-chat`/`deepseek-reasoner` 名 2026-07-24 停用） | api-docs.deepseek.com updates + V4 公告，2026-08-28 | verified |
+| D5 | **2026-09-12 增量**：Anthropic 兼容端点示例与 claude-* 映射均改用 `deepseek-flash`（claude-opus*→`deepseek-v4-pro`、claude-haiku/sonnet*→`deepseek-flash`；`output_config` 仍 "Only `effort` is supported"）；pricing 页确认 `deepseek-flash`=V4.1-Flash，旧名 `deepseek-v4-flash`/`-vision-exp` 退役（请求按 Flash 价承接），`v4-pro`（V4-Pro-0813）2026-09-14 后继续供 API | api-docs.deepseek.com/guides/anthropic_api + /quick_start/pricing，2026-09-12 直连抓取（pricing 记录另见 ai-coding-playbook 第三方景观） | verified（slug/映射/退役事实）；V4.1-Flash 的 effort 取值词表未逐项直证——`deepseek-flash` tuple 列 candidate |
 
 **未决**：Claude Code `effortLevel` 是否向自定义 base URL 透传为 `output_config.effort`（A2×D3 的端到端链路，官方无明文）——维持"集成时 fixture 验证"，不得按"应当透传"写合同；组织策略 clamp（无法静态取证，归入 observed 证据纪律）；Claude 桌面应用（非 CLI）的模型选择/投影面（A6）。
 
@@ -65,12 +67,12 @@
 
 **三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。**协议面按 wire contract 分列**（`output_config.effort` / `reasoning_effort` / `reasoning.effort` 是三个不同字段，不合并）。
 
-canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 73 tuples，verified 48（openai_responses 18 + openai_chat_completions 18 + deepseek_anthropic_messages 6 + deepseek_chat_completions 6）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
+canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 84 tuples，verified 47（openai_responses 23 + openai_chat_completions 18 + deepseek_anthropic_messages 3 + deepseek_chat_completions 3；2026-09-12 增量：Astra 5 行入 openai_responses allowlist、deepseek-v4-flash 6 行因旧名退役降 candidate）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
 
-- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 48 行；由 validate 脚本计算，不人工写死）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
-- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
+- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 47 行；由 validate 脚本计算，不人工写死）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial + 3 行 gpt-6-astra candidate（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek-v4-flash 6 行 candidate（2026-09-12 旧名退役，D5）、deepseek-flash 3 行 candidate（slug/透传已证，effort 取值词表未逐项直证）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
 
-## 6. 来源 URL 清单（全部抓取于 2026-08-28）
+## 6. 来源 URL 清单（2026-08-28；末三条为 2026-09-12）
 
 - Codex Configuration Reference：https://learn.chatgpt.com/docs/config-file/config-reference
 - Codex Security CLI quickstart：https://learn.chatgpt.com/docs/security/cli
@@ -92,5 +94,8 @@ canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**�
 - DeepSeek Claude Code 集成：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/
 - DeepSeek 更新日志：https://api-docs.deepseek.com/updates/
 - claude-code issue #65782（fallbackModel）：https://github.com/anthropics/claude-code/issues/65782
+- gpt-6-astra 官方模型页（C8，2026-09-12 直连）：https://developers.openai.com/api/docs/models/gpt-6-astra
+- DeepSeek Anthropic API（D5，2026-09-12 直连）：https://api-docs.deepseek.com/guides/anthropic_api/
+- DeepSeek Models & Pricing（D5，2026-09-12 直连）：https://api-docs.deepseek.com/quick_start/pricing
 - 拒绝：GLM-3.5-Flash 旧名；把 provider 方言可表达性当作宿主生效证明；以社区配置补齐任何 token。
 - fixtures（`tests/fixtures/<host>-static/`）待 `<runtime-root>` 选定后随 MOR-100/300/400 创建；本证据包为其唯一输入底稿。

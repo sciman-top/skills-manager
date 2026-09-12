@@ -6,7 +6,7 @@
 
 ## 1. 产品决策
 
-本产品采用 **人工声明、宿主内更新、三套 GPT-5.6 常用预设**，不实现自动可用性探测。
+本产品采用 **人工声明、宿主内更新、六套单族预设**（2026-09-12 修订），不实现自动可用性探测。编排规则固定：同一 `(host, identity)` 同时只能激活一套 preset；每套 preset 只提供本模型族的 **2–3 个档位**（2026-09-12 二次修订：GPT 四套各三档，`deepseek_flash_only` 两档），五个 execution slot 从这 2–3 个档位映射、允许重复（档位不足三个时 route key 复用同档，如 `deepseek_flash_only` 的 light 与 standard 同用 Flash/high）；同一 preset 内禁止混用模型族（如启用 Sol-only 时任何槽位不得解析为 Astra/Terra/Luna）。
 
 ```text
 每个 (host, identity) 先有一个稳定日常 default
@@ -16,9 +16,9 @@
   -> 用户说“恢复默认”：只删除该 scope 的 override
 ```
 
-`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/high 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt56_terra_only` 或 `gpt56_luna_only`。三者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
+`gpt56_sol_only` 是 Codex 的**intended policy default**；只有当前 `(host, identity, surface)` 对 Sol/low、Sol/medium、Sol/high 的逐项 static Adapter fixture 均获证实后，才可成为实际 `host_default`。证实前 Resolve 必须 `manual_mapping_required` 或 `blocked`，不得把 API 面能力外推为 Codex config 面可用。用户可在同一证据门槛下切换 `gpt6_astra_only`、`gpt56_terra_only` 或 `gpt56_luna_only`。四者都保留相同的三条**基础 route key**，并共享首版固定的五个 execution slot；GPT-6-Astra 的 openai_api 面词表（`low/medium/high/xhigh/max`，无 `none`）已由官方模型页直证（MOR-090 C8，2026-09-12），其 Codex config 面 fixture 同样未做。slot 可复用 route key，未来如确有证据需要扩展，必须走独立的 policy major change。普通切换只改变模型族和 route map，不要求用户重学一套任务分类。
 
-ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
+ZCode、Claude Code 各自维护独立 `host_default`，但两者的模型/effort 模板当前均为 **candidate**，不是可用事实：`GLM-3.5-Flash` 未见于当前 GLM Coding Plan 官方阵容（2026-08-28 检索；当前为 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）。GLM 侧 surface 词表已证实：bigmodel Chat Completion API 的 `reasoning_effort` 为枚举参数，GLM-5.2+ 支持 `low / high / max`（默认 `max`），ZCode 选择面提供 低/高/最高 三档与之对应；但 `thinking` 不可关闭（GLM-5.3+ 不再支持 `thinking.type: disabled`），且 ZCode 宿主投影面（UI/计划层之外能否由控制面表达）未取证，故仍为 candidate。2026-09-12 起 DeepSeek 侧 exact slug 改为 `deepseek-flash`（V4.1-Flash；旧名 `deepseek-v4-flash` 退役、`deepseek-v4-pro` 续供但退出默认模板，MOR-090 D5）；`deepseek_flash_only` 只使用 max/high 两档（light 与 standard 复用 Flash/high，deep=Flash/max），Pro 不在模板内。DeepSeek 组合虽在 provider 面词表内，仍须分别通过 ClaudeCodeHostAdapter 与 DeepSeekProviderDialect 双重静态证据后才可启用。它们不继承 Codex 的路由，也不因 Codex 的可用性声明发生变化。
 
 ## 2. 问题、目标与成功定义
 
@@ -74,7 +74,7 @@ workload + risk + exact host/identity
 
 - 用稳定 workload/risk 选择模型与 effort，不让项目规则硬编码 provider。
 - 读取 versioned policy、private `host_default`/`operator_override` 与人工维护的 Adapter static contract。
-- 提供三套 GPT-5.6 可手动切换预设：`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`。
+- 提供六套单族可手动切换预设：`gpt6_astra_only`、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`（Codex/GPT）与 `glm53_flash_only`（ZCode/GLM）、`deepseek_flash_only`（Claude Code/DeepSeek）；同一 scope 同时只能激活一套。
 - 让 ZCode、Claude Code 使用其独立 default/override；可在将来用静态 Adapter contract 接入 GLM、DeepSeek 等模型。
 - 生成 route、launch、projection 和 rollback receipt；不含 secret。
 - 在 Adapter target ownership 已证实且有当前授权时，以 plan/token/backup/hash/rollback 方式投影模型选择字段。
@@ -89,20 +89,20 @@ workload + risk + exact host/identity
 - 不将 `max`、`xhigh`、供应商宣传或一次成功，解释成跨模型等价、全宿主有效或高风险授权。
 - 不将实现嵌入 skills-manager runtime；本仓只保存设计、规则和未来投影接口边界。
 
-## 5. GPT-5.6 三套三档预设
+## 5. GPT 四套三档预设（Astra/Sol/Terra/Luna）
 
 ### 5.1 基础 route-key 矩阵（用户选定的初始 baseline，非性能最优结论）
 
-| 基础 route key | `gpt56_sol_only` | `gpt56_terra_only` | `gpt56_luna_only` |
-| --- | --- | --- | --- |
-| 轻量只读：定位、摘要、日志归纳、简单 diff | Sol/low | Terra/high | Luna/high，`constrained` |
-| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
-| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Sol/high | Terra/max | Luna/max，`constrained` |
-| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
+| 基础 route key | `gpt6_astra_only` | `gpt56_sol_only` | `gpt56_terra_only` | `gpt56_luna_only` |
+| --- | --- | --- | --- | --- |
+| 轻量只读：定位、摘要、日志归纳、简单 diff | Astra/low | Sol/low | Terra/high | Luna/high，`constrained` |
+| 有界实现 / 标准审查：小写集修复、单模块实现、多文件常规 review | Astra/medium | Sol/medium | Terra/xhigh | Luna/xhigh，`constrained` |
+| 深度实现：复杂调试、跨模块重构、隔离复杂实现 | Astra/high | Sol/high | Terra/max | Luna/max，`constrained` |
+| 高风险门：安全、迁移、发布、公开契约、高扇出变更 | Astra/high + high-risk policy | Sol/high + high-risk policy | Terra/max + 当前 emergency approval | `blocked` |
 
 `gpt56_sol_only` 是 Codex 的 intended policy default；它采用用户提出的 `Sol/high`、`Sol/medium`、`Sol/low` 三档。只有 Codex config surface 对这三项 exact tuple 的 static Adapter fixture 全部通过后，它才可成为实际 host default。
 
-`gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `max/xhigh/high`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
+`gpt6_astra_only`（2026-09-12 增补）与 Sol-only 同形，使用 `high/medium/low` 三档；其 openai_api 面词表已直证（C8），Codex config 面 fixture 未做，取证前同为 `manual_mapping_required`。`gpt56_terra_only` 和 `gpt56_luna_only` 是直接替换相同三条基础 route key 的应急日常预设。Terra/Luna 使用 `max/xhigh/high`，不是因为它们和 Sol 的同名 effort 等价，而是为了在单一模型族时以更保守的推理投入承接深度、有界和轻量只读任务。
 
 Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/max 可以执行有明确写集、独立验证和回滚入口的深度任务；它不能自动解锁安全裁决、迁移、发布、公开契约或高扇出变更。
 
@@ -124,7 +124,7 @@ Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/max 可以执
 
 规范化规则固定为：`risk_level=high -> route_key=deep`；它只在 high-risk gate 通过后成立，Luna-only 的 high-risk block 和自动故障切换的更严格阻断不被该规则绕过。
 
-路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前三个命名 preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
+路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前四个命名 GPT preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Astra/Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
 
 ```yaml
 execution_slots:
@@ -136,6 +136,12 @@ execution_slots:
 
 # 当前 GPT 常用预设：5 slot 复用 selected preset 的 3 条 route key
 preset_route_maps:
+  gpt6_astra_only:
+    model_family: gpt-6-astra
+    route_keys:
+      light:    { model: gpt-6-astra, effort: low }
+      standard: { model: gpt-6-astra, effort: medium }
+      deep:     { model: gpt-6-astra, effort: high }
   gpt56_sol_only:
     model_family: gpt-5.6-sol
     route_keys:
@@ -171,11 +177,11 @@ preset_route_maps:
 # 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
 ```
 
-Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的三个档位；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。`risk_level=high` 在 high-risk gate 通过后强制把 route key 提升为 `deep`；若该 preset/宿主的 deep route 不允许当前 operation，仍然 `blocked`。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这三个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
+Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的 2–3 个档位（档位不足三个时 route key 复用同档）；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。`risk_level=high` 在 high-risk gate 通过后强制把 route key 提升为 `deep`；若该 preset/宿主的 deep route 不允许当前 operation，仍然 `blocked`。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这四个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
-静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。旧 C1 官方快照未列 config/max，但当前宿主的 `codex-cli 0.150.1` model catalog 已对 Sol/Terra/Luna 列出 `max`，且九个目标 profile 均 strict-load 成功（C7）。这只建立当前宿主的 config-load 证据；其他 host 仍须独立 fixture，不得借用 API/security surface，也不得把 profile load 外推为 provider 调用。一个 preset 只应使用工作真正需要的 2–4 个 effort；本版 GPT baseline 固定只用三档。
+静态 Adapter contract 按 **surface** 记录模型可表达的 effort 词表；不同 surface 词表不同，不得合并为一个 allowlist。旧 C1 官方快照未列 config/max，但当前宿主的 `codex-cli 0.150.1` model catalog 已对 Sol/Terra/Luna 列出 `max`，且九个目标 profile 均 strict-load 成功（C7；Astra 未纳入该轮本机探测，其 config 面取证待 MOR-100）。这只建立当前宿主的 config-load 证据；其他 host 仍须独立 fixture，不得借用 API/security surface，也不得把 profile load 外推为 provider 调用。一个 preset 只应使用工作真正需要的 2–3 个 effort；本版 GPT baseline 固定只用三档，`deepseek_flash_only` 只用两档。
 
 ```yaml
 adapter_supported_efforts:           # 人工维护、按 surface 分列的静态事实；示例，不是运行期发现
@@ -183,10 +189,12 @@ adapter_supported_efforts:           # 人工维护、按 surface 分列的静�
     gpt-5.6-sol:   [low, medium, high, xhigh, max]   # max 为 C7 current-host partial
     gpt-5.6-terra: [low, medium, high, xhigh, max]
     gpt-5.6-luna:  [low, medium, high, xhigh, max]
+    gpt-6-astra:   [low, medium, high, xhigh, max]   # API 面 C8 直证（无 none）；config 面 candidate 待 fixture
   codex_security_cli_surface:        # 独立 surface；candidate，MOR-090 取证后单列
     max: candidate
 
 preset_used_efforts:
+  gpt6_astra_only:  [low, medium, high]
   gpt56_sol_only:   [low, medium, high]
   gpt56_terra_only: [high, xhigh, max]
   gpt56_luna_only:  [high, xhigh, max]
@@ -200,10 +208,11 @@ preset_used_efforts:
 当前 Codex 只使用 GPT-5.6 Sol，切换 Sol-only 三档编排并落盘。
 当前 Codex 只有 GPT-5.6 Terra 可用，切换 Terra-only 三档编排并落盘。
 当前 Codex 只有 GPT-5.6 Luna 可用，切换 Luna-only 三档编排并落盘。
+当前 Codex 只有 GPT-6 Astra 可用，切换 Astra-only 三档（low/medium/high）编排并落盘。
 当前 Codex 恢复默认模型编排。
 ```
 
-前三句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Sol-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
+前四句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Sol-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
 
 ## 6. 功能需求
 
@@ -257,18 +266,18 @@ preset_used_efforts:
 
 | host / identity | 日常 default | 人工变化动作 | 隔离边界 |
 | --- | --- | --- | --- |
-| Codex / 当前 API gateway 或 OAuth identity | `gpt56_sol_only` intended policy default；三项 config tuple 证实前无实际 default | 切 Sol-only、Terra-only、Luna-only；未审查新 map 只生成 manual plan | 仅当前 Codex identity |
-| ZCode / 当前 identity | 无已证实 default（GLM 模板为 candidate） | MOR-090 钉定 exact model/effort 后按 ZCode 模板生成 default | 不影响 Codex/Claude |
-| Claude Code / 当前 identity | 无已证实 default（DeepSeek 模板为 candidate） | Claude host adapter 与 DeepSeek provider dialect 双合同取证后启用 | 不影响 Codex/ZCode |
+| Codex / 当前 API gateway 或 OAuth identity | `gpt56_sol_only` intended policy default；三项 config tuple 证实前无实际 default | 切 Astra-only、Sol-only、Terra-only、Luna-only；未审查新 map 只生成 manual plan | 仅当前 Codex identity |
+| ZCode / 当前 identity | 无已证实 default（`glm53_flash_only` 为 candidate） | MOR-090 钉定 exact model/effort 与投影面后启用 `glm53_flash_only` | 不影响 Codex/Claude |
+| Claude Code / 当前 identity | 无已证实 default（`deepseek_flash_only` 为 candidate） | Claude host adapter 与 DeepSeek provider dialect 双合同取证后启用 `deepseek_flash_only` | 不影响 Codex/ZCode |
 
-建议将另两宿主也配置为同一“三槽位 + 风险门”形状；这是静态骨架与用户选定的初始 baseline，不是当前网关可用性断言，更不是性能最优结论：
+建议将另两宿主也配置为同一“五个 execution slot 复用三 route key + 风险门”形状；这是静态骨架与用户选定的初始 baseline，不是当前网关可用性断言，更不是性能最优结论：
 
 | host default（均 candidate，启用前一律 `manual_mapping_required`） | 轻量只读 | 有界实现 / 标准审查 | 深度实现 | 高风险门 |
 | --- | --- | --- | --- | --- |
-| `zcode_glm_candidate`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
-| `claude_deepseek_candidate`（须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/max），`constrained` | candidate（Pro/max） | candidate（Pro/max + high-risk policy） |
+| `glm53_flash_only`（`glm-5.3-flash`；ZCode 投影面未取证） | candidate（Flash/low） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked` |
+| `deepseek_flash_only`（`deepseek-flash`=V4.1-Flash；须过 ClaudeCodeHostAdapter + DeepSeekProviderDialect 双合同） | candidate（Flash/high） | candidate（Flash/high），`constrained` | candidate（Flash/max），`constrained` | `blocked`（Pro 已退出模板，Flash 不继承高风险权限） |
 
-实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。Claude 侧必须分别取证 `ClaudeCodeHostAdapter`（宿主 model/effortLevel/fallback/clamp 面与 fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名、未知名回落、effort 透传）；provider 方言可表达不等于宿主当前环境生效。尤其 DeepSeek V4 Pro/max 进入高风险门并不表示“Pro/max 自动安全”；仍需当前 policy、明确 operation/写集和独立验证。GLM 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。
+实施阶段仅在静态 Adapter contract 已证实精确模型名、effort token 与选择面时启用。Claude 侧必须分别取证 `ClaudeCodeHostAdapter`（宿主 model/effortLevel/fallback/clamp 面与 fresh-session 可观察性）与 `DeepSeekProviderDialect`（exact 模型名、未知名回落、effort 透传）；provider 方言可表达不等于宿主当前环境生效。`deepseek_flash_only` 只使用 max/high 两档：light 与 standard 复用 Flash/high，deep=Flash/max；2026-09-12 起 exact slug 为 `deepseek-flash`（V4.1-Flash；旧名 `deepseek-v4-flash` 退役、`deepseek-v4-pro` 续供但退出默认模板，MOR-090 D5）。若未来要把 Pro 重新纳入深度或高风险 route，必须另行 reviewed policy patch，且仍要求当前 policy、明确 operation/写集和独立验证——它并非模型名称带 `Pro`/`max` 就自然获得的权限。GLM 或 DeepSeek Flash 不从 GPT 三档模板自动继承高风险权限。
 
 ## 8. Preset Review 和提升门槛
 
@@ -277,6 +286,7 @@ preset_used_efforts:
 | 检查对象 | 当前保守建议 | 必要补证 |
 | --- | --- | --- |
 | `gpt56_sol_only` | `keep`，前提是 Sol/low、medium、high 均为静态可表达项 | 同 workload 的 host 采用与 verifier 证据 |
+| `gpt6_astra_only` | `insufficient_evidence`（openai_api 面词表 C8 已直证；Codex config 面 fixture 与同 workload verifier 未证） | MOR-100 exact fixture + 同 workload 采用与 verifier 证据 |
 | `gpt56_terra_only` critical | `keep_emergency`，不是 Sol 等价 | 当前 emergency approval + 高风险验证 |
 | `gpt56_luna_only` critical | `block` | 独立风险决策；单次表现不能解除 |
 | GLM Flash `max` | `constrained` 或 `insufficient_evidence` | ZCode 内同类 bounded-write 与 verifier 证据 |
@@ -299,6 +309,6 @@ preset_used_efforts:
 - 每个启用宿主需提供可脱敏的本机 help/schema/source evidence，以及人工复核的 target ownership/rollback entry。
 - Adapter static contract 的取证顺序固定为：官方产品/CLI 文档与 schema -> 当前机器的只读 help/schema -> 已映射、可审查源码 -> 许可清楚的社区项目结构启发。社区资料只能影响模块/事务结构，不能证明 model/effort 可用、参数被当前 gateway 接受或拥有写入目标。
 - 一手资料不可获取或结论不完整时，记录 `platform_na`/`unknown`，保持 dry-run/manual；不得以网页片段、模型名相似、社区配置或 OAuth/gateway 探查补齐。
-- 首期建议只实现一个宿主（Codex CLI）和三套 GPT preset；ZCode、Claude 必须等各自静态合同清楚后再接入。
+- 首期建议只实现一个宿主（Codex CLI）和四套 GPT preset；ZCode、Claude 必须等各自静态合同清楚后再接入。
 
 本 PRD 的任何 `repo_verified` 结果都不证明 provider 可用、host 已读取设置、模型实际被接受或真实任务已经成功。
