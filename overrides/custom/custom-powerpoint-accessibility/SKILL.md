@@ -1,11 +1,14 @@
 ---
 name: custom-powerpoint-accessibility
-description: Use when auditing or validating PowerPoint/PPTX classroom presentations for accessibility, including titles, alt text, reading order, tables, links, captions, contrast, color cues, motion, and native Accessibility Checker evidence.
+description: Audit existing PowerPoint classroom presentations for accessibility using editable structure, visual review, and available native checks. Use for accessibility validation, not slide creation, general redesign, or format-only conversion.
 ---
 
 # PowerPoint Accessibility
 
-Audit accessibility after the deck content and layout are stable. This skill is a validator: use an available presentation-creation capability such as the `pptx` skill to create or edit PPTX files, and `powerpoint-automation` only when live Windows PowerPoint or COM operation is required.
+Audit accessibility after the deck content and layout are stable. This skill is
+a validator: report findings by default. When fixes are requested, use an
+available presentation-editing capability and re-audit the resulting artifact.
+Use live PowerPoint automation only when required and supported by the host.
 
 ## Workflow
 
@@ -23,7 +26,10 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 - Check presentation and slide language metadata when the target delivery tool supports it. Record a missing or unknown setting as a finding; do not infer the language from the visible text.
 - Give the deck a meaningful title and use meaningful section names for long presentations. Treat these as navigation and discoverability checks, not proof of screen-reader behavior.
 - Provide concise, purposeful alt text for informative images, diagrams, charts, equations, and grouped visual explanations. Do not leave image filenames or file extensions as the description. Mark purely decorative objects as decorative.
-- Verify reading order in the Selection Pane or an equivalent structure view. The sequence must make sense without visual position, including grouped objects and off-slide elements.
+- Prefer the Reading Order pane, which lists objects in reading sequence. If
+  using the Selection Pane, account for its bottom-to-top reading order rather
+  than treating its displayed top-to-bottom stack as the reading sequence.
+  Inspect grouped and off-slide elements in either view.
 - Use tables only when they communicate data that needs tabular structure; give real tables a header row and simple structure. Avoid merged cells, blank spacer cells, and tables used only for layout.
 - Use hyperlink text that describes the destination or action without surrounding context. Avoid bare URLs and repeated `click here` labels.
 - Provide synchronized captions for meaningful video and transcripts for audio or narration. Identify any media whose accessibility depends on external playback controls, and verify captions in the actual delivery format because media compression or video export can remove them.
@@ -42,6 +48,12 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 - Do not claim screen-reader or assistive-technology compatibility unless it was exercised with the named technology and version. Otherwise report `not_verified` and the required manual check.
 - If PowerPoint's Accessibility Checker cannot be run, report it as an open validation gap rather than inferring a pass from file inspection.
 - A deck passes this audit only when no blockers remain, all major findings are resolved or explicitly accepted, and the evidence identifies both the editable-structure review and rendered-preview review.
+- Assign `needs_fixes` when concrete unresolved findings remain. Use
+  `not_verifiable` when required inspection cannot be completed, even if the
+  inspected subset has no findings. Reserve `passed` for the completed audit
+  scope; it is not certification of every player or assistive technology.
+  Mark absent features such as narration or tables `not_applicable` with a reason
+  instead of treating them as missing accessibility content.
 
 ## Output
 
@@ -52,7 +64,7 @@ Return a compact table with `slide`, `severity`, `criterion`, `finding`, `recomm
 - `checker_findings`: raw `error`/`warning`/`tip`/`intelligent-service` findings or `not_run`
 - `reading_order`: `verified` or `not_verified`
 - `presentation_metadata`: `verified`, `needs_fixes`, or `not_verified`
-- `speaker_notes_or_transcript`: `verified`, `needs_fixes`, or `not_verified`
+- `speaker_notes_or_transcript`: `verified`, `needs_fixes`, `not_verified`, or `not_applicable` with reason
 - `assistive_technology`: tested tool/version, or `not_verified`
 - `residual_risks`: remaining manual, live, or audience-specific checks
 

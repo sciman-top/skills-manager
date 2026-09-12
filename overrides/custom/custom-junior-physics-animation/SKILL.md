@@ -11,8 +11,9 @@ Use this skill when the goal is teaching a concept through motion or interaction
 
 - Choose from delivery constraints first: offline or online use, editable source,
   runtime and file-size limits, projector conditions, and the required level of
-  interaction. Use a medium only when its toolchain is available; otherwise
-  return the design and state the delivery limitation.
+  interaction. Preserve a requested format. If its toolchain is unavailable,
+  check supported generation routes before reporting the exact blocker; an
+  implementation request remains incomplete until the artifact is delivered.
 - SVG/HTML/CSS/JS: best for lightweight classroom web demos, force diagrams, ray diagrams, circuit toggles, graphs, and drag interactions.
 - D3: best for data, graphs, coordinate systems, and variable relationships.
 - Manim: best for formula derivation, geometry, vector decomposition, and exported short videos.
@@ -50,6 +51,15 @@ Use this skill when the goal is teaching a concept through motion or interaction
 - Check physics correctness before visual polish.
 - Verify claims, symbols, sign conventions, and expected observations against the named textbook/standard or another identified authoritative teaching source.
 - Verify initial and final states, labels, and any numerical approximation against the model; disclose idealizations and not-to-scale choices.
+- For interactive models, check representative parameter changes and boundary
+  values against independent expected results. For example, with fixed nonzero
+  resistance, doubling voltage should double current; zero resistance needs an
+  explicit domain rule rather than an infinite or invalid displayed value.
+- For time-based models, derive state from simulation time rather than frame
+  count. Check pause/resume, stepping, and reset: pause must freeze the model and
+  reset must restore parameters, time, and traces consistently.
 - Run in desktop and classroom projector aspect ratios.
 - For web/SVG output, verify the real entrypoint loads, the animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit. Exercise touch or pen input when the interaction contract requires it.
+- If offline delivery is required, open the delivered artifact without network
+  access and verify that fonts, media, libraries, and controls still work.
 - Provide a short textual explanation or caption that preserves the teaching point when motion is unavailable.

@@ -10,7 +10,7 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 ## Rules
 
 1. Prefer native PowerShell cmdlets end-to-end for file operations.
-2. Before recursive move/delete, resolve and verify the absolute target path.
+2. Before recursive move/delete, resolve and verify the absolute target path against the intended root, including junction or symbolic-link targets. A string prefix alone does not establish containment.
 3. Use `-LiteralPath` for filesystem paths, especially Chinese paths and paths with spaces.
 4. Keep generated config writes idempotent and backup-aware.
 5. For scheduled tasks or startup helpers, use hidden wrappers when visible consoles would disturb the desktop.
@@ -24,6 +24,10 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 - For CLIs, capture `cmd`, `exit_code`, redacted key output, and timestamp; never place secrets or tokens in commands, output, or receipts.
 - For agent/MCP config, separate source of truth from generated projection files.
 - For file replacement, write and validate the candidate before an atomic replace when the target format or consumer makes partial writes risky.
+- For commands that expose `-WhatIf`, use `SupportsShouldProcess` and guard the
+  actual mutation with `$PSCmdlet.ShouldProcess(...)`. Do not assume a native
+  executable or another module inherits dry-run behavior; keep those calls
+  behind the guard and verify that preview leaves files and external state intact.
 - When collections cross a pipeline or function boundary, preserve the required
   empty, single-item, or multi-item shape with `@(...)`, an explicit collection,
   or `.ToArray()` and verify all three cases when shape is part of the contract.
@@ -33,7 +37,9 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 ## Verification
 
 - Run a dry-run path first when available.
-- Re-run the command after writes to prove idempotence.
+- Re-run repeat-safe writes against disposable or authorized targets to prove
+  idempotence. For sending, publishing, deletion, or other non-repeatable effects,
+  verify the resulting state or receipt instead of replaying the operation.
 - Check encoding, path, native-process exit, and locked-file behavior under the supported PowerShell 7 runtime.
 - Verify non-zero exit codes and durable receipts separately from stderr; preserve diagnostic output without retrying an ambiguous write.
 - When an explicitly scoped external legacy consumer requires Windows PowerShell 5.1, isolate that compatibility path and verify it separately; do not weaken the primary PS7 contract.

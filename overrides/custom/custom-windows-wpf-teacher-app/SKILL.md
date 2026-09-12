@@ -17,11 +17,19 @@ Use this skill for practical classroom software on Windows machines.
 ## Engineering Checks
 
 - Keep domain/application logic away from WPF views and interop.
-- Use explicit dispatcher boundaries for UI thread work.
+- Keep UI work on its owning Dispatcher; avoid blocking it with `.Wait()` or
+  `.Result`. Move expensive non-UI work off the UI thread and cancel or ignore
+  stale results when the view closes or its active document changes.
 - Treat second-screen, full-screen, topmost, slideshow control, and overlay behavior as contracts with tests or probes.
 - For settings and startup, verify load latency and corrupt-config fallback.
 - For file workflows, test Chinese paths, OneDrive paths, locked files, and removable media.
 - Separate preferences, session state, and recoverable classroom artifacts. For persisted state, define the write, interruption, corruption, and version-migration behavior before treating serialization as complete.
+- For input changes, trace stylus/touch-to-mouse promotion and pointer capture
+  so one gesture cannot create duplicate ink or commands. Exercise capture loss,
+  focus changes, and cancellation when they affect the changed path.
+- For overlays or display changes, distinguish device pixels from WPF DIPs and
+  verify placement while moving between monitors with different DPI. Release
+  hooks, event subscriptions, capture, and timers through the owning lifecycle.
 
 ## Desktop UI Observation
 
@@ -30,7 +38,9 @@ Use this skill for practical classroom software on Windows machines.
 - For WPF/.NET apps, prefer Microsoft UI Automation based probes, then FlaUI for .NET test code, or pywinauto for ad-hoc Python inspection when a repo already supports Python.
 - WinAppDriver/Appium-style routes are acceptable only when the project already carries that dependency or the user explicitly wants a broader desktop E2E harness.
 - Do not treat Playwright browser success as proof that a native Windows desktop surface works. Browser automation only verifies web/Electron/webview surfaces.
-- Ask before starting, stopping, rebuilding, or replacing a long-running desktop app when that could interrupt the user's current session.
+- Before interrupting a long-running desktop app, check current-task authorization.
+  Ask only if that interruption is not already authorized; ordinary source builds
+  that do not replace or stop the running app can follow the repository contract.
 
 ## Desktop UI Operation
 

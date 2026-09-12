@@ -1,6 +1,6 @@
 interface:
   display_name: "Junior Physics Teaching Visuals"
   short_description: "Design accurate classroom physics visuals"
-  default_prompt: "Use $custom-junior-physics-animation to define the teaching goal, misconception, physics checks, medium, and classroom verification for this junior physics visual."
+  default_prompt: "Use $custom-junior-physics-animation to design or implement this junior physics visual with an explicit physical model, teaching objective, and classroom checks; deliver and verify the working artifact when implementation is requested."
 policy:
   allow_implicit_invocation: true
