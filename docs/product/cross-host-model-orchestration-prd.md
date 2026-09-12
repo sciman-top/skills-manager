@@ -1,7 +1,7 @@
 # 跨宿主模型编排控制面 PRD
 
-**状态**：完整 MOR 控制面仍为 design-only；用户已授权独立的原生 preset 投影工具，落点 `D:\CODE\model-orchestration`，不进入 skills-manager runtime。
-**目标实现归属**：用户已选择独立 host-local runtime `D:\CODE\model-orchestration`；不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链。
+**状态**：完整 MOR 控制面仍为 design-only；用户已授权独立的原生 preset 投影工具，落点 `skills-manager/src/model-orchestration`，不进入 skills-manager runtime。
+**目标实现归属**：用户已选择本仓功能目录 `skills-manager/src/model-orchestration`；不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链。
 **关联**：[架构](cross-host-model-orchestration-architecture.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
 
 ## 1. 产品决策
@@ -347,7 +347,7 @@ preset_used_efforts:
 - Windows-first、PowerShell 7-first、local-first；首期不引入常驻进程。
 - policy/default/override/receipt 均 schema-validated、unknown-property fail closed、单写者、原子替换。
 - 默认 CI 和日常 control-plane 命令零供应商调用。
-- 目标 runtime 已由用户选择为 `D:\CODE\model-orchestration`；本仓继续只保存设计与规则，不承载其运行时。
+- 目标 runtime 已由用户选择为 `skills-manager/src/model-orchestration`；本仓继续只保存设计与规则，不承载其运行时。
 - 每个启用宿主需提供可脱敏的本机 help/schema/source evidence，以及人工复核的 target ownership/rollback entry。
 - Adapter static contract 的取证顺序固定为：官方产品/CLI 文档与 schema -> 当前机器的只读 help/schema -> 已映射、可审查源码 -> 许可清楚的社区项目结构启发。社区资料只能影响模块/事务结构，不能证明 model/effort 可用、参数被当前 gateway 接受或拥有写入目标。
 - 一手资料不可获取或结论不完整时，记录 `platform_na`/`unknown`，保持 dry-run/manual；不得以网页片段、模型名相似、社区配置或 OAuth/gateway 探查补齐。

@@ -1,6 +1,6 @@
 # MOR-000：runtime 归属与控制面边界决议
 
-**状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `D:\CODE\model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
+**状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `skills-manager/src/model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
 **依据**：[PRD](../product/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
 **回滚**：删除本文件即回滚本决议；不影响任何已提交设计文档或宿主状态
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
@@ -31,7 +31,7 @@
 
 | 项 | 推荐值 |
 | --- | --- |
-| `runtime_root` | `D:\CODE\model-orchestration`（新建；三归宿选项中的新 host-local runtime） |
+| `runtime_root` | `skills-manager/src/model-orchestration`（新建；三归宿选项中的新 host-local runtime） |
 | `owner` | `<待 owner 填写明确个人/团队标识>` |
 | first-host | `codex_cli` |
 | state-root / receipt-root | `<runtime_root>\.ai\state` / `<runtime_root>\.ai\receipts` |
@@ -41,7 +41,7 @@
 
 **决策输入句模板**（填入 owner 后即构成 MOR-000 正式决议）：
 
-> 批准将跨宿主模型编排 runtime 放在 `D:\CODE\model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high，进入编排槽位前必须匹配选定 preset 的 exact route，否则阻断。
+> 批准将跨宿主模型编排 runtime 放在 `skills-manager/src/model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high，进入编排槽位前必须匹配选定 preset 的 exact route，否则阻断。
 
 **同等合法的替代决定**：暂不选择 runtime-root，继续保持 design-only；不进入 MOR-010 实现，但保留只读 MOR-090 事实审查车道。
 
