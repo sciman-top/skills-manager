@@ -10,11 +10,11 @@
 | 决议项 | 内容 |
 | --- | --- |
 | 首期 host | `codex_cli`（唯一首期宿主；ZCode/Claude 等各自静态合同取证后再接入） |
-| GPT preset invariant | 每次仅选择一个命名 preset——**2026-09-12 修订后为六套单族预设**：`gpt6_astra_only`（GPT-6-Astra，low/medium/high；openai_api 词表 C8 直证、config fixture 未做）、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`、`glm53_flash_only`（ZCode，low/high/max，原 `zcode_glm_candidate` 升格命名）、`deepseek_flash_only`（Claude Code，`deepseek-flash`=V4.1-Flash，light/standard 复用 Flash/high、deep=Flash/max 两档复用，Pro 退出模板，原 `claude_deepseek_candidate` 升格命名）；该 preset 恰含 `light/standard/deep` 三个同族 route key（实际档位 2–3 个，不足三个时 route key 复用同档，2026-09-12 二次修订），五个 execution slot 可复用这些 key（允许重复），禁止跨模型族混搭；`*_only` 作用域固定为 `parent_route_only`，只约束当前 Resolve 的父任务 route，不自动覆盖 native bridge 或其他 custom subagent；private default/override 仅保存 map 引用，完整 map 只从 tracked policy 解引用；high-risk 是额外 gate，不是第四档 |
+| GPT preset invariant | 每次仅选择一个命名 preset——**2026-09-12 修订后为六套单族预设**：`gpt6_astra_only`（GPT-6-Astra，low/medium/high；openai_api 词表 C8 直证、config fixture 未做）、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only`、`glm53_flash_only`（ZCode，low/high/max，原 `zcode_glm_candidate` 升格命名）、`deepseek_flash_only`（Claude Code，`deepseek-flash`=V4.1-Flash，light/standard 复用 Flash/high、deep=Flash/max 两档复用，Pro 退出模板，原 `claude_deepseek_candidate` 升格命名）；该 preset 恰含 `light/standard/deep` 三个同族 route key（实际档位 2–3 个，不足三个时 route key 复用同档，2026-09-12 二次修订），五个 execution slot 可复用这些 key（允许重复），禁止跨模型族混搭；六套 `*_only` 约束本次编排全部五槽位（含委派任务），冻结同一 map/revision，替代旧 `parent_route_only`；固定角色 pin 不匹配对应槽位时阻断调度，不静默改写宿主配置；private default/override 仅保存 map 引用，完整 map 只从 tracked policy 解引用；high-risk 是额外 gate，不是第四档 |
 | 首期 intended policy default | `gpt56_sol_only`（Sol/low、Sol/medium、Sol/high；高风险=Sol/high + policy），以用户明确偏好选定，非测量最优；只有 Codex config surface 的三项 exact tuple fixture 均通过后才可写作实际 host default |
 | 其他 preset baseline | `gpt56_terra_only` 与 `gpt56_luna_only` 均为 high/xhigh/max；当前宿主九个 profile 已投影并由 `codex-cli 0.150.1` strict-load，其他宿主仍须各自 exact fixture，且不得把 profile load 外推为 provider/live acceptance；`gpt6_astra_only` 为 low/medium/high（2026-09-12 增补，Astra 未纳入 C7 本机探测轮） |
 | identity binding | 必须使用不可伪造、可审计的绑定来源；无法绑定时状态 `identity_unbound`，禁止持久 override 与 projection，仅允许 offline resolve 与 dry-run/manual handoff |
-| native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 优先于通用 route resolver 且完全排除在其外**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |
+| native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 不被通用 route resolver 改写；进入编排槽位前必须匹配选定 preset 的 exact model/effort，否则阻断**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |
 | 普通任务 ingress | 常规入口为上游调用方/用户确认产生的结构化 RouteRequest（workload/risk_level/operation/workspace_root）；宿主 AI 不得从 prompt 私自推断；AI 分类仅可为标注建议并需确认（PRD `MOR-FR-045`） |
 | override 重确认 | 持久 override 支持可选 `requires_reconfirm_after`，仅在下一次显式 resolve 检查（无 watcher），过期返回 `manual_mapping_required`（PRD `MOR-FR-026`） |
 | private state/receipt root | canonical path：`<runtime-root>/.ai/state/` 与 `<runtime-root>/.ai/receipts/<yyyy-mm-dd>/<run-id>/`（ignored、仅当前用户可读；runbook §2 同此约定） |
@@ -37,11 +37,11 @@
 | state-root / receipt-root | `<runtime_root>\.ai\state` / `<runtime_root>\.ai\receipts` |
 | 首期 projection | `none`（仅 offline resolve + dry-run launch；`~/.codex`、Claude、ZCode、provider、gateway 均不触碰） |
 | identity binding | manual binding required；未完成可审计绑定前禁止持久 override |
-| native bridge | `design-griller`/`cold-capability-runner` 继续 `gpt-5.6-terra/high`，排除于通用 preset 覆盖外 |
+| native bridge | `design-griller`/`cold-capability-runner` 继续 `gpt-5.6-terra/high`；进入编排槽位前检查与选定 map 一致，不匹配则阻断 |
 
 **决策输入句模板**（填入 owner 后即构成 MOR-000 正式决议）：
 
-> 批准将跨宿主模型编排 runtime 放在 `D:\CODE\model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high 并排除在通用 route 覆盖之外。
+> 批准将跨宿主模型编排 runtime 放在 `D:\CODE\model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high，进入编排槽位前必须匹配选定 preset 的 exact route，否则阻断。
 
 **同等合法的替代决定**：暂不选择 runtime-root，继续保持 design-only；不进入 MOR-010 实现，但保留只读 MOR-090 事实审查车道。
 

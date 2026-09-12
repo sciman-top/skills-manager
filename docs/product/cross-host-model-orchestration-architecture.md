@@ -204,14 +204,16 @@ adapter_supported_efforts:          # 人工复核、按 surface 分列、版本
   codex_security_cli_surface:       # 独立 surface；max 为 candidate，MOR-090 取证后单列
     max: candidate
 
-preset_used_efforts:               # 当前日常方案只选实际需要的三档
+preset_used_efforts:               # 各 preset 只使用两档或三档
   gpt6_astra_only:    [low, medium, high]
   gpt56_sol_only:      [low, medium, high]
   gpt56_terra_only:   [high, xhigh, max]
   gpt56_luna_only:    [high, xhigh, max]
+  glm53_flash_only:   [low, high, max]
+  deepseek_flash_only: [high, max]
 ```
 
-`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前四个命名 GPT preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
+`preset_used_efforts` 只是显示/审计集合，不能单独用于 Resolve。唯一可解析的 policy object 是下文的 `preset_route_maps[preset_id]`：当前六个命名 preset 各自恰有 `light | standard | deep` 三个 route key，三者必须引用同一个精确 model slug，且 slug 必须匹配 preset 所属 model family。`reviewed_custom_single_family_map` 也必须在同一 policy source 中版本化，并满足同一完整性检查；它不是用户私有 map。resolver 不得从另一 preset 借 model/effort 补洞、不得跨族合并，也不得因为某个 effort 在 Adapter 词表出现而自行加入 key。缺 key、额外 key、未知 preset、slug 与 preset family 不匹配、或任一 slot 的 resolved model/effort 不等于选定 preset 对应 key，均为 `blocked`。
 
 任何列表都只是样例合同形状；实际 host/identity 必须先有相应 static Adapter allowlist。若 `Sol/low` 未被合同证实，`gpt56_sol_only` 不可启用，必须 `manual_mapping_required` 或选择已有日常 default；不能降默认为另一个参数。
 
@@ -233,9 +235,9 @@ Sol 的 `xhigh` 保持为预设未使用候选。当前宿主的 Terra/Luna `max
 3. Sol/xhigh 不进入 Sol-only 日常编排；Terra/Luna 的 `max` 只属于各自 preset 的 deep route，不能外推为跨模型能力等价。
 4. Luna/max 只能进入有明确写集和验证的深度工作；它绝不成为 Sol/high 等价，也不能自动解锁安全、迁移、发布、公开契约或 high-risk adjudication。
 
-route-key 命名空间不是 schema 上限；但当前 `gpt6_astra_only`、`gpt56_sol_only`、`gpt56_terra_only`、`gpt56_luna_only` 的合同固定为三 key。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这四个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
+route-key 命名空间不是 schema 上限；但当前六套命名 preset 的合同固定为三 key、2–3 个 effort。若未来静态 Adapter contract 与同类 verifier 同时证明必要性，必须创建新的、版本化的 preset/map revision（可含 `review`、`max_depth` 等 key），并走 policy major change；不得向这六个命名 preset 追加第四/第五 key。slot 不重命名，自然语言 intent、receipt 和 projection transaction 形状保持兼容。
 
-三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
+六套 `*_only` preset 统一约束本次编排的全部五个槽位，包括承接这些槽位的父任务和委派任务。一次编排冻结同一个 `route_map_id + policy_revision`，切换仅对下一次编排生效；不得逐槽位选择不同 preset。此规则替代旧 `parent_route_only` 边界。native bridge/custom subagent 的独立配置不被静默改写，但进入槽位前必须核对其 exact model/effort 与选定 map 的对应 route 完全一致；pin 不匹配或无法观察时阻断该槽位调度，不能以角色独立为由跨族执行。
 
 ### 5.3 固定五个 execution slot、可扩展 route key
 
@@ -296,12 +298,37 @@ preset_route_maps:               # Resolve 只读取 selected preset 的完整�
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
+  glm53_flash_only:
+    model_family: glm-5.3-flash
+    route_keys:
+      light:    { model: glm-5.3-flash, effort: low }
+      standard:
+        { model: glm-5.3-flash, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: glm-5.3-flash, effort: max, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
+  deepseek_flash_only:
+    model_family: deepseek-flash
+    route_keys:
+      light:    { model: deepseek-flash, effort: high }
+      standard:
+        { model: deepseek-flash, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: deepseek-flash, effort: max, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
+
 # 后续经过审查的新 preset/map revision 可新增 review/max_depth，而不改变五个 execution_slots。
 # max_depth 是 route-key 命名空间；其宿主表达须经 surface adapter 显式映射，
-# 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
+# 不得假设内部档位名等于宿主 effort token（以对应 surface 的已验证词表为准）。
 ```
 
-Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三个 exact route，但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/high，绝不能混入 Astra/Terra/Luna。`risk_level=high` 必须在 high-risk gate 通过后使用 `route_key=deep`；如果 selected preset 的 deep route 不允许当前 operation，直接 `blocked`。这不创建第四个 route key，也不能借机换用另一 preset。
+Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 exact route`。因此五个 slot 可以重复使用 selected preset 的三条 route key（2–3 个 exact model/effort），但任意一次 Resolve 都只能得到该 preset 的 model family；例如 `gpt56_sol_only` 的五 slot 只能是 Sol/low、Sol/medium 或 Sol/high，绝不能混入 Astra/Terra/Luna。`risk_level=high` 必须在 high-risk gate 通过后使用 `route_key=deep`；如果 selected preset 的 deep route 不允许当前 operation，直接 `blocked`。这不创建第四个 route key，也不能借机换用另一 preset。
 
 ### 5.4 ZCode 与 Claude 的静态三 route-key 映射
 
@@ -320,17 +347,20 @@ Resolve 顺序固定为：`execution_slot -> route_key -> selected preset 的 ex
 1. Validate request schema, exact host/identity scope, workload, operation, workspace policy and risk.
 2. Load the exact scoped host_default selection reference.
 3. If one-task manual_override exists, validate its one exact candidate first; it applies only to this request,
-   cannot define a route map or persist into host_default/operator_override, and expires with the request.
-4. Else if exact scoped operator_override exists, check `requires_reconfirm_after` first: if expired（`requires_reconfirm_after <= now`），return `manual_mapping_required` with reason `override_reconfirmation_required`——不自动切换、不静默续期；未过期才 select its policy map reference.
+   must equal the selected preset's exact slot route, cannot define a route map or persist,
+   and expires with the request; a mismatch is blocked, never a preset bypass.
+4. Independently select the preset map: if exact scoped operator_override exists, check `requires_reconfirm_after` first: if expired（`requires_reconfirm_after <= now`），return `manual_mapping_required` with reason `override_reconfirmation_required`——不自动切换、不静默续期；未过期才 select its policy map reference.
 5. Else select the host_default policy map reference.
 6. Dereference the selected `(selection_kind, route_map_id, policy_revision)` only from policy_source;
    validate complete keys, one exact model family, static Adapter allowlist, allowed data class,
    operation, maximum risk and any required emergency approval.
 7. Return selected, blocked, manual_host_selection_required or manual_mapping_required.
-8. Freeze the candidate fingerprint; launch/projection cannot re-resolve or mutate it.
+8. Freeze one route_map_id + policy_revision for all five slots in this orchestration;
+   validate each parent/delegated slot against that map before launch. Reject conflicting role pins.
+   Freeze the candidate fingerprint; launch/projection cannot re-resolve or mutate it.
 ```
 
-precedence 固定为 `manual_override -> operator_override -> host_default`。没有运行时 fallback chain：缺 route、参数不兼容、超过风险、或缺 approval 就 block。跨 profile substitute 只在**当前用户明确批准**且 reviewed policy 同时携带 `reason/owner/expires_at` 时成立，receipt 要记录原档、替代档与有效期。
+precedence 固定为 `manual_override -> operator_override -> host_default`。没有运行时 fallback chain：缺 route、参数不兼容、超过风险、或缺 approval 就 block。当前命名 preset 禁止跨 profile substitute；用户批准更换 preset 时，必须在下一次编排选择完整 map，不能改写本次已冻结的单个槽位。
 
 ```text
 task failure -> append outcome receipt -> no reroute / no retry / no mutation

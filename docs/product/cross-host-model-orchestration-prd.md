@@ -106,7 +106,7 @@ workload + risk + exact host/identity
 
 Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/max 可以执行有明确写集、独立验证和回滚入口的深度任务；它不能自动解锁安全裁决、迁移、发布、公开契约或高扇出变更。
 
-三个 `*_only` preset 的作用域固定为 `parent_route_only`：它只约束当前 Resolve 产生的父任务 route 和该 route 的 model family，不自动重写或约束 native bridge、custom subagent 或宿主已有的其他角色。现有 bridge pin 继续由独立角色合同管理；未来若要约束父子任务使用同一模型族，必须另行增加 versioned policy、迁移和 fresh-session 验证，不能从 `*_only` 名称推导。
+六套 `*_only` preset 统一约束本次编排的全部五个槽位，包括承接这些槽位的父任务和委派任务。一次编排冻结同一个 `route_map_id + policy_revision`，切换仅对下一次编排生效；不得逐槽位选择不同 preset。此规则替代旧 `parent_route_only` 边界。native bridge/custom subagent 的独立配置不被静默改写，但进入槽位前必须核对其 exact model/effort 与选定 map 的对应 route 完全一致；pin 不匹配或无法观察时阻断该槽位调度，不能以角色独立为由跨族执行。
 
 ### 5.2 固定五个 execution slot、可扩展 route key
 
@@ -124,7 +124,7 @@ Luna-only 的 `high_risk_adjudication=blocked` 是硬边界。Luna/max 可以执
 
 规范化规则固定为：`risk_level=high -> route_key=deep`；它只在 high-risk gate 通过后成立，Luna-only 的 high-risk block 和自动故障切换的更严格阻断不被该规则绕过。
 
-路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前四个命名 GPT preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Astra/Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
+路由数据需显式分层，便于将来把五个可表达 effort 用在五个不同 route key，而不改变执行槽位、用户口令或 receipt 形状。`preset_route_maps` 是唯一 Resolve 输入：当前六个命名 preset 各自恰有 `light | standard | deep` 三 key，三 key 的精确 model 必须同属该 preset 的 model family；不得跨 Astra/Sol/Terra/Luna 拼接，也不得从其他 preset 补充缺失 key：
 
 ```yaml
 execution_slots:
@@ -134,7 +134,7 @@ execution_slots:
   bounded_implementation: { route_key: standard, operations: [workspace_write] }
   deep_investigation_or_implementation: { route_key: deep, operations: [read_only, workspace_write] }
 
-# 当前 GPT 常用预设：5 slot 复用 selected preset 的 3 条 route key
+# 六套单族预设：5 slot 复用 selected preset 的 3 条 route key（2–3 个 effort）
 preset_route_maps:
   gpt6_astra_only:
     model_family: gpt-6-astra
@@ -170,14 +170,39 @@ preset_route_maps:
           constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
           allowed_operations: [workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
 
+  glm53_flash_only:
+    model_family: glm-5.3-flash
+    route_keys:
+      light:    { model: glm-5.3-flash, effort: low }
+      standard:
+        { model: glm-5.3-flash, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: glm-5.3-flash, effort: max, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
+  deepseek_flash_only:
+    model_family: deepseek-flash
+    route_keys:
+      light:    { model: deepseek-flash, effort: high }
+      standard:
+        { model: deepseek-flash, effort: high, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [independent_review], max_risk_level: normal }
+      deep:
+        { model: deepseek-flash, effort: max, constrained: true,
+          constraint_reasons: [no_high_risk_adjudication, bounded_write_set_only, independent_verifier_required],
+          allowed_operations: [read_only, workspace_write], required_verifiers: [focused_test, independent_review], max_risk_level: normal }
+
 # 将来的经审查新 preset/map revision 可以增加 review/max_depth，而不重写 slot 目录
 # route_keys.review:    { model: <approved>, effort: high }
 # route_keys.max_depth: { model: <approved>, control: <surface-specific> }
 # 注意：max_depth 是 route-key 命名空间；其宿主表达必须经 surface adapter 显式映射，
-# 不得假设内部档位名等于宿主 effort token（config 面当前无 max）。
+# 不得假设内部档位名等于宿主 effort token（以对应 surface 的已验证词表为准）。
 ```
 
-Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的 2–3 个档位（档位不足三个时 route key 复用同档）；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。`risk_level=high` 在 high-risk gate 通过后强制把 route key 提升为 `deep`；若该 preset/宿主的 deep route 不允许当前 operation，仍然 `blocked`。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这四个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
+Resolve 固定先从 slot 得到 route key，再从**选定** preset 的同名 key 读取 exact model/effort。五个 slot 可以重复使用该 preset 的 2–3 个档位（档位不足三个时 route key 复用同档）；任何未知 preset、缺/多 key、跨族 slug、或 resolved route 偏离选定 preset map 的结果都必须 `blocked`，不能静默降级或换用另一个 preset。`risk_level=high` 在 high-risk gate 通过后强制把 route key 提升为 `deep`；若该 preset/宿主的 deep route 不允许当前 operation，仍然 `blocked`。若将来确需第四/第五 key，必须创建版本化的新的 preset/map revision，不能修改这六个命名 preset。high-risk 是额外 policy gate，不是第四个模型档位。
 
 ### 5.3 “支持五档”与“日常只用三通道”
 
@@ -198,6 +223,8 @@ preset_used_efforts:
   gpt56_sol_only:   [low, medium, high]
   gpt56_terra_only: [high, xhigh, max]
   gpt56_luna_only:  [high, xhigh, max]
+  glm53_flash_only: [low, high, max]
+  deepseek_flash_only: [high, max]
 ```
 
 若当前 `(host, identity, surface)` 的 static contract 没有 `Sol/low`、Terra/max、Luna/max 或其他所需项，该预设不能静默近似；resolver 必须返回 `manual_mapping_required` 或 `blocked`。当前宿主的 C7/profile hash 只对本机有效；未来模型档位数增减仍只能创建版本化的新 preset/map revision，五个 execution slot 保持不变。
@@ -213,6 +240,21 @@ preset_used_efforts:
 ```
 
 前四句都只影响 current Codex/current identity。第四句只删除该 scope 的 override，重新使用该 scope 已获证实的 host default；若 Sol-only 的三个 Codex config tuple 尚未取证，结果为 `manual_mapping_required` 或 `blocked`，而不是把 intended policy default 当作已生效默认。若用户说“落盘/应用配置”，默认授权 private override 更新；只有在已验证 Adapter target、standing projection authorization 和 plan token 都满足时，才允许继续写 native host target。
+
+### 5.5 六套 preset 的五槽位映射
+
+| preset（展示名） | exact model | 定位 light | 日常维护 standard | 常规审查 standard | 有界实现 standard | 深度任务 deep |
+| --- | --- | --- | --- | --- | --- | --- |
+| Astra-only（用户输入 Astra-onliy） | `gpt-6-astra` | low | medium | medium | medium | high |
+| Sol-only | `gpt-5.6-sol` | low | medium | medium | medium | high |
+| Terra-only | `gpt-5.6-terra` | high | xhigh | xhigh | xhigh | max |
+| Luna-only | `gpt-5.6-luna` | high | xhigh | xhigh | xhigh | max |
+| glm-5.3-flash（ZCode） | `glm-5.3-flash` | low | high | high | high | max |
+| DeepSeek V4.1 Flash（Claude Code） | `deepseek-flash` | high | high | high | high | max |
+
+展示名不改变 canonical preset id。每列仍遵循对应槽位的 operation/verifier 约束；DeepSeek 的 light/standard 虽复用 high，仍保留不同任务语义。映射是用户选定的设计合同，宿主未取证的 tuple 继续 fail closed。
+
+验收必须覆盖：六套 preset × 五个槽位全部解析、每套仅一个 exact model、effort 集合严格相等、DeepSeek 两档复用；多 preset 输入、缺/多 key、跨族角色 pin、越档 manual override、执行中更换 revision 均拒绝。仅有文档或离线断言不能证明运行时已强制执行。
 
 ## 6. 功能需求
 
@@ -236,8 +278,8 @@ preset_used_efforts:
 ### 6.3 人工声明与“运行时有效路由”
 
 - `MOR-FR-020`：`host_default` 是每个 `(host, identity)` 的私有日常**选择引用**；它只保存 `selection_kind`、`route_map_id` 与 `policy_revision`，完整 route map 只能从该 revision 的 tracked policy source 解引用。没有 override 时，resolver 使用这个引用，不要求任何环境事实。
-- `MOR-FR-021`：人工声明可选择命名 GPT preset，或选择已由 reviewed patch 加入 policy source 的 `reviewed_custom_single_family_map`。两类 map 均须完整覆盖 `light|standard|deep`，每一 key 的 exact model 必须等于同一个 model family，且每个 tuple 都在静态 allowlist 中；private state 不得保存其 `route_keys` 副本。用户临时提出未审查的模型/effort 集合时，只能生成 `manual_mapping_required` 计划，不能落盘为 default/override。
-- `MOR-FR-022`：`manual_override` 仅为当前 RouteRequest 的一条 exact model/effort 候选，必须通过同一 static allowlist、operation/risk/constraint 校验；它不能定义五槽位 map、不能持久化、不能成为 preset 或 host default。model/effort 集合不能无歧义覆盖当前 slot 所需 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
+- `MOR-FR-021`：人工声明可选择当前宿主对应的六套命名 preset 之一，或选择已由 reviewed patch 加入 policy source 的 `reviewed_custom_single_family_map`。两类 map 均须完整覆盖 `light|standard|deep`，每一 key 的 exact model 必须等于同一个 model family，且每个 tuple 都在静态 allowlist 中；private state 不得保存其 `route_keys` 副本。用户临时提出未审查的模型/effort 集合时，只能生成 `manual_mapping_required` 计划，不能落盘为 default/override。
+- `MOR-FR-022`：`manual_override` 仅为当前 RouteRequest 的一条 exact model/effort 候选，必须通过同一 static allowlist、operation/risk/constraint 校验；它必须等于本次选定 preset 对应槽位的 exact model/effort，否则 `blocked`；不能通过单次 override 激活另一套 preset 或引入第四档。它不能定义五槽位 map、不能持久化、不能成为 preset 或 host default。model/effort 集合不能无歧义覆盖当前 slot 所需 route key 时，产出可审查的 route plan 或 `manual_mapping_required`；不得猜测 effort。
 - `MOR-FR-023`：人工声明只写当前 `(host, identity)` 的 `operator_override` **选择引用**，并随下一次显式 resolve 产生新的 `resolved_route` receipt；不广播到 peer host。
 - `MOR-FR-024`：用户说“恢复默认”时，只删除相同 scope 的 override；任务结果、错误、时间流逝或 assistant 建议都不能自动恢复默认。
 - `MOR-FR-025`：成功 action receipt 必须标 `verification=operator_declared_unverified`，说明控制面没有检测任何 runtime/provider/gateway/auth 状态。
