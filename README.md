@@ -261,13 +261,13 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile doc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
-本地收口优先使用 auto 档位：它与 CI 共享同一分类器（含 non-ignored untracked fail-safe），按可解析基线与当前工作区自动选档，无需人工选择 docs/focused/full：
+本地入口默认 auto：与 CI 共用分类器，未跟踪文件参与同一选档。文档走轻量检查、规则走专项测试、已映射源码选行为测试；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
 ```
 
-日常默认使用 `auto`；它只在当前变更确有独立风险时升级到 `full`，不能用“更全面”作为重复门禁或旁路审计的理由。基线、变更集或 untracked 扫描无法确定时选择 `full` 是 fail-safe 行为。
+未知路径、未映射源码、风险变更或分类失败会选 full；明确影响范围时可使用现有 focused 入口。main push 和 PR 使用同一分类策略，发布标签运行 full。当前输入已有充分证据后停止，不重复审计；源码映射不等于所有行为都已被证明。
 
 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
 

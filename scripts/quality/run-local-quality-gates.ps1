@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('docs', 'quick', 'focused', 'full', 'auto')]
-    [string]$Profile = 'quick',
+    [string]$Profile = 'auto',
     [switch]$AllowDirtyWorktree,
     [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
@@ -72,7 +72,7 @@ try {
         Write-Host ("Gate profile auto -> {0} (reason={1}, base={2})" -f $resolved.profile, $resolved.reason, $resolved.base_sha)
         if ($ResolveOnly) { return }
         $Profile = [string]$resolved.profile
-        if ($Profile -eq 'focused') { $TestPath = @($resolved.focused_test_paths) }
+        if ($Profile -eq 'focused') { $TestPath = @(@($resolved.focused_test_paths) + $TestPath | Sort-Object -Unique) }
         # The docs gate must check the current worktree; a resolver-derived base
         # would narrow `git diff --check` to the committed range only.
         if ($Profile -eq 'docs') { $DiffBase = '' }
@@ -80,7 +80,16 @@ try {
 
     if ($Profile -eq 'docs') {
         if ([string]::IsNullOrWhiteSpace($DiffBase)) {
-            Invoke-QualityGate 'diff-check' { & git diff --check }
+            Invoke-QualityGate 'diff-check' {
+                & git diff --check HEAD --
+                if ($LASTEXITCODE -ne 0) { throw 'Tracked whitespace check failed.' }
+                $untrackedDocs = @(& git ls-files --others --exclude-standard)
+                if ($LASTEXITCODE -ne 0) { throw 'Untracked file enumeration failed.' }
+                foreach ($path in $untrackedDocs) {
+                    & git diff --no-index --check -- /dev/null $path
+                    if ($LASTEXITCODE -ne 0) { throw "Untracked whitespace check failed: $path" }
+                }
+            }
         }
         else {
             Invoke-QualityGate 'diff-check' { & git diff --check $DiffBase HEAD -- }

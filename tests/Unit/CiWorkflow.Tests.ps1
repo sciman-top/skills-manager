@@ -26,9 +26,9 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
     }
 
-    It 'runs focused smoke tests for ordinary PR source changes and full for integration or risk paths' {
+    It 'shares proportional classification for pushes and PRs and reserves unconditional full for tags' {
         $script:workflow | Should -Match 'github\.ref.*refs/tags/'
-        $script:workflow | Should -Match "github\.event_name.*-eq 'push'"
+        $script:workflow | Should -Not -Match "github\.event_name.*-eq 'push'"
         $script:workflow | Should -Match 'github\.event_name.*pull_request'
         $script:workflow | Should -Match 'resolve-gate-profile\.ps1 -BaseSha \$baseSha -Mode ci -Json'
         $script:workflow | Should -Match 'CI_GATE_PROFILE=\$profile'
@@ -37,7 +37,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
         # The final gate invocation must splat a hashtable: array splat is
         # positional-only and turned CI red by binding '-Profile' as a value.
         $script:workflow | Should -Match '\$gateArgs = @\{ Profile = \$env:CI_GATE_PROFILE \}'
-        $script:workflow | Should -Match ([regex]::Escape("`$gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler')"))
+        $script:workflow | Should -Not -Match "\['Verifier'\]"
         $script:workflow | Should -Not -Match "'mor'"
         $script:workflow | Should -Not -Match "\`$gateArgs = @\('-Profile'"
         # The classifier must stay in the shared resolver; CI keeps no inline copy.
@@ -47,12 +47,11 @@ Describe 'GitHub CI workflow supply-chain contract' {
         @([regex]::Matches($script:workflow, 'run-local-quality-gates\.ps1')).Count | Should -Be 1
 
         $resolver = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1') -Raw
-        $resolver | Should -Match 'tests/Unit/CiWorkflow\.Tests\.ps1'
         $resolver | Should -Match 'tests/E2E/'
         $riskMatch = [regex]::Match($resolver, '\$riskPath = ''([^'']+)''')
         $riskMatch.Success | Should -Be $true
         $riskPath = [regex]::new($riskMatch.Groups[1].Value)
-        foreach ($path in @('tests/E2E/Workflow.Tests.ps1', 'rules/global/codex/AGENTS.md', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.lock.json', 'overrides/resources/native-agent-bridge/design-griller.toml', 'overrides/patches/provenance.json', 'audit-targets.json')) {
+        foreach ($path in @('tests/E2E/Workflow.Tests.ps1', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.lock.json', 'overrides/resources/native-agent-bridge/design-griller.toml', 'overrides/patches/provenance.json', 'audit-targets.json')) {
             $riskPath.IsMatch($path) | Should -Be $true
         }
         foreach ($path in @('src/Core.ps1', 'tests/Unit/Core.Tests.ps1', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'docs/product/README.md')) {

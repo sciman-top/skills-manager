@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.79
-**最后更新**: 2026-08-27
+**全局规则复核**: 9.80
+**最后更新**: 2026-09-12
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 同时是 Codex、Claude 与 ZCode 的项目级规则源；ZCode 仅读取当前 Workspace 根文件。
@@ -17,16 +17,16 @@
 - runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
 
 ## B. 执行边界
-- 日常合同只冻结 `Goal / Exact write set / Minimum proof / Stop`；仅扩展能防止当前真实失败的范围。
+- 日常合同只冻结 `Goal / Exact write set / Minimum proof / Stop`；覆盖当前明确需求或真实失败，验收满足即停止，不把额外优化吸收为任务。
 - 先用 `git diff` 分界用户/并发改动；不回退、不重排、不混入本次回滚，禁止批量改写第三方 import。
 - 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。
 - 更新 vendor/import/MCP 前记录来源、锁定、影响与回滚；宿主/provider/auth/session/plugin/MCP mutation 需要当前明确授权。
 - `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
-- 新增功能或 module 必须先证明当前真实失败、稳定 caller、现有 interface 无法承载、精确 write set、最低充分 proof 与 rollback；任一项缺失即 `not_admitted`，不得以未来可能需要扩展范围。
+- 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。
 
 ## C. 最低门禁
-- 本地收口优先 `run-local-quality-gates.ps1 -Profile auto`（与 CI 共享分类器，含 non-ignored untracked fail-safe，无法判定时选 full）；显式档位仅用于复现或覆盖。
+- 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，与 CI 共用分类器：含未跟踪文件，文档轻量、规则专项、已映射源码按行为测试，未知路径或风险选 full；可用 `-TestPath` 追加当前回归证明，显式 focused 仅用于已确定范围的验证。
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
 - 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`；脏树显式加 `-AllowDirtyWorktree`。

@@ -63,7 +63,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.exit_code | Should -Be 0
     }
 
-    It 'classifies pure MOR decision-doc changes as full, not docs' {
+    It 'classifies design-only MOR documents as docs' {
         $repo = New-ResolveGateFixture
         New-Item -ItemType Directory -Path (Join-Path $repo 'docs\decision') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value '# mor'
@@ -72,8 +72,8 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $base = (& git -C $repo rev-parse HEAD).Trim()
         Add-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value 'change'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
-        $r.result.profile | Should -Be 'full'
-        $r.result.reason | Should -Be 'risk_path'
+        $r.result.profile | Should -Be 'docs'
+        $r.result.reason | Should -Be 'docs_only'
     }
 
     It 'classifies risk-path changes as full' {
@@ -154,9 +154,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
 
     It 'classifies governance and integrity contract changes as full' {
         foreach ($relativePath in @(
-            'AGENTS.md',
-            'CLAUDE.md',
-            'GEMINI.md',
             'config/skills.schema.json',
             'config/skill-dependency-closure.json'
         )) {
@@ -169,16 +166,45 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         }
     }
 
-    It 'classifies src changes as focused with the fixed smoke tests' {
+    It 'selects behavior tests for mapped source changes' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
         Add-Content -LiteralPath (Join-Path $repo 'src\Core.ps1') -Value '# touched'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'focused'
         $r.result.reason | Should -Be 'source_path'
-        foreach ($fixed in @('tests/Unit/CiWorkflow.Tests.ps1', 'tests/Unit/InfrastructureSeam.Tests.ps1', 'tests/Unit/ReadOnlyCli.Tests.ps1', 'tests/Unit/BuildScript.Tests.ps1')) {
+        foreach ($fixed in @('tests/Unit/Core.Tests.ps1', 'tests/Unit/InfrastructureSeam.Tests.ps1', 'tests/Unit/ReadOnlyCli.Tests.ps1')) {
             $r.result.focused_test_paths | Should -Contain $fixed
         }
+    }
+
+    It 'selects migration behavior tests even when the tests were not edited' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        New-Item -ItemType Directory -Path (Join-Path $repo 'src/Commands') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'src/Commands/Migration.ps1') -Value '# migration change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'focused'
+        @($r.result.focused_test_paths) | Should -Be @('tests/Unit/Migration.Tests.ps1')
+    }
+
+    It 'routes rule documents to rule tests instead of the entire suite' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $repo 'AGENTS.md') -Value 'rule change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'focused'
+        $r.result.focused_test_paths | Should -Contain 'tests/Unit/GlobalRuleProjection.Tests.ps1'
+    }
+
+    It 'does not let a mapped source hide an unknown file in a mixed change' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $repo 'src/Core.ps1') -Value '# change'
+        Set-Content -LiteralPath (Join-Path $repo 'unknown.config') -Value 'change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'unknown_path'
     }
 
     It 'adds changed unit test files to the focused set without duplicates' {
@@ -194,13 +220,13 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $paths.Count | Should -Be ($paths | Select-Object -Unique).Count
     }
 
-    It 'classifies non-risk script changes as quick default' {
+    It 'does not silently skip behavior tests for an unmapped script' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
         Add-Content -LiteralPath (Join-Path $repo 'scripts\weekly-skills-update.ps1') -Value '# touched'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
-        $r.result.profile | Should -Be 'quick'
-        $r.result.reason | Should -Be 'default'
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'unknown_path'
     }
 
     It 'classifies an empty diff as docs empty_diff' {
@@ -217,17 +243,18 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         Set-Content -LiteralPath (Join-Path $repo 'src\New.ps1') -Value '# untracked'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'full'
-        $r.result.reason | Should -Be 'untracked_file'
+        $r.result.reason | Should -Be 'unmapped_source'
         $r.result.untracked_count | Should -Be 1
     }
 
-    It 'fails safe to full even for untracked docs files' {
+    It 'classifies untracked documentation without escalating to full' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
         Set-Content -LiteralPath (Join-Path $repo 'docs\new.md') -Value 'untracked'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
-        $r.result.profile | Should -Be 'full'
-        $r.result.reason | Should -Be 'untracked_file'
+        $r.result.profile | Should -Be 'docs'
+        $r.result.reason | Should -Be 'docs_only'
+        $r.result.changed_count | Should -Be 1
     }
 
     It 'fails safe to full when the untracked scan fails' {
@@ -284,16 +311,4 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $ci.result.reason | Should -Be 'empty_diff'
     }
 
-    It 'keeps the shared classifier boundaries visible in the script' {
-        $content = Get-Content -LiteralPath $script:resolverPath -Raw
-        $content | Should -Match 'overrides/\(README\\\.md\|resources/'
-        $content | Should -Match 'overrides/patches/provenance'
-        $content | Should -Match 'skills\\\.lock\\\.json'
-        $content | Should -Match '\$skillFocusedPath'
-        $content | Should -Match '\$skillsConfigPath'
-        $content | Should -Match ([regex]::Escape('^(src/|tests/Unit/)'))
-        $content | Should -Match ([regex]::Escape('^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'))
-        $content | Should -Match ([regex]::Escape('tests/Unit/CiWorkflow.Tests.ps1'))
-        $content | Should -Match 'tests/Unit/SkillProjection.Tests.ps1'
-    }
 }

@@ -31,7 +31,7 @@
 - 可由宿主/operator 调度的 skills-only maintenance runner
 - 通过隔离 POC 证明后，向 Hermes 一类外部宿主提供可选、只读优先的 skill consumer contract；该 contract 复用现有 source、package hash、projection receipt 与 rollback 语义，不接管其 runtime
 - 通过 reviewed Git change-set 准入的受控 skill evolution：宿主 AI 可以提出、草拟、测试技能候选；skills-manager 只负责确定性检查、显式准入、受控投影与回滚
-- build、focused tests、contract/invariant checks、risk-triggered full gate；CI 与本地门禁共用同一 gate profile 分类器（`Resolve-QualityGateProfile`），本地支持 `-Profile auto`，base 缺失、变更集不可读或 non-ignored untracked file 出现时 fail-safe 选择 full。该实现由 [HSM-GAT-100/110/120](skills-manager-hardening-implementation-plan.md) 落地，后续修改必须继续保持分类器单一权威副本
+- build、focused tests、contract/invariant checks、risk-triggered full gate；CI 与本地共用 `resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件参与同一分类：文档走 docs，规则走专项测试，已映射源码走行为测试；未知路径、未映射源码、风险变更或分类失败才选 full。main push 与 PR 共用策略，发布标签运行 full。
 
 ### 不包含
 

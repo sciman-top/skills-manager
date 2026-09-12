@@ -34,9 +34,9 @@ Describe 'Global rule source contract' {
     It 'validates the tracked source family, shared A/C/D sections, and budgets' {
         $result=Test-GlobalRuleSourceFamily $fixture $codex $claude
         $result.pass|Should -BeTrue
-        $result.facts.codex.version|Should -Be '9.79'
+        $result.facts.codex.version|Should -Be '9.80'
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
-        $result.facts.zcode.version|Should -Be '9.79'
+        $result.facts.zcode.version|Should -Be '9.80'
         @($result.observations).Count|Should -Be 0
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md)-join"`n")|Should -Match 'eol: lf'
     }
@@ -80,7 +80,7 @@ Describe 'Global rule source contract' {
     }
 
     It 'rejects a ZCode global-rule version that differs from the shared release' {
-        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.79','**版本**: 9.80');[IO.File]::WriteAllText($path,$text)
+        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.80','**版本**: 9.81');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_version_mismatch'
     }
 

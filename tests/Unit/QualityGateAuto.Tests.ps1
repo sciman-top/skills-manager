@@ -89,6 +89,22 @@ Describe 'Local quality gate -Profile auto routing' {
         finally { Pop-Location }
     }
 
+    It 'the default profile checks untracked and staged docs whitespace' {
+        $repo = New-AutoGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Set-Content -LiteralPath (Join-Path $repo 'docs.md') -Value 'new document   '
+        # Use a recognized documentation path while leaving it untracked.
+        New-Item -ItemType Directory -Path (Join-Path $repo 'docs') | Out-Null
+        Move-Item -LiteralPath (Join-Path $repo 'docs.md') -Destination (Join-Path $repo 'docs/new.md')
+        Push-Location $repo
+        try {
+            { Invoke-TempGate $repo @{ DiffBase = $base } *> $null } | Should -Throw '*Untracked whitespace*'
+            & git add docs/new.md
+            { Invoke-TempGate $repo @{ DiffBase = $base } *> $null } | Should -Throw '*Tracked whitespace*'
+        }
+        finally { Pop-Location }
+    }
+
     It 'docs auto passes for a clean docs-only change end to end' {
         $repo = New-AutoGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

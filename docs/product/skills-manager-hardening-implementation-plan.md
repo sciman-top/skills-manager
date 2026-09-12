@@ -1,5 +1,7 @@
 # skills-manager 加固实施计划与任务清单（2026-08 审计共识）
 
+> HSM-GAT-100/110/120 的旧选档矩阵已由现行 [构建与验证](skills-manager-vnext-architecture.md#5-构建与验证) 和 `resolve-gate-profile.ps1` 替代：不再执行任意未跟踪文件或 main push 一律 full、源码固定四项 smoke 的旧策略。以下任务卡保留为历史设计输入，不作为日常门禁指令。
+
 **文档角色**：versioned design input；动态执行状态与 receipt 只存于 ignored `reports/` 或其所属 POC 仓，本文件只保留稳定的任务合同与可复核指针，不充当状态库。本文件合并后冻结，未出现新的真实失败前不追加任务。
 **来源**：2026-08-23 两份独立审计（GLM-5.3 / GPT-5.6）经五轮对抗性交叉评审收敛的 P0–P3 共识；裁决证据见各任务卡 Current evidence。
 **执行原则**：沿用 [Hermes 实施计划](skills-manager-hermes-implementation-plan.md) 的执行合同、执行类别（`auto_evidence` / `auto_stop` / `human_decision`）与授权域划分；每个任务是独立授权单元；LOC 统计不作为任何裁剪决定依据；不新增第二套治理系统、任务数据库或候选清单。

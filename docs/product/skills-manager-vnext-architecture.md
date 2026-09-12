@@ -170,7 +170,7 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。
 
-CI 与本地共用 `scripts/quality/resolve-gate-profile.ps1`（`Resolve-QualityGateProfile`），本地提供 `-Profile auto`。分类按可解析基线与当前工作区执行；base 缺失、变更集不可读、untracked 枚举失败或出现 non-ignored untracked file 时 fail-safe 选择 full。分类正则的唯一权威副本驻留在该脚本，CI 不维护第二份内联副本；[HSM-GAT-100/110/120](skills-manager-hardening-implementation-plan.md) 是该 seam 的实现与迁移记录。
+CI 与本地共用 `scripts/quality/resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件与 tracked diff 合并分类；文档走 docs，规则走专项测试，已映射源码选择行为测试，未知路径、未映射源码、风险或分类失败走 full。源码映射是明确的覆盖选择，不用固定 smoke tests 代替功能验证；新增映射需有行为覆盖依据。`-TestPath` 可追加回归测试，显式 focused 用于已确认的切片。main push 与 PR 使用同一分类器，标签保留 full；focused CI 不额外叠加全套 verifier。文档检查覆盖本地暂存、未暂存及未跟踪内容。分类器是唯一权威副本，历史实施计划不覆盖当前脚本。
 
 ## 6. 删除原则
 
