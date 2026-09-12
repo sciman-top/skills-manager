@@ -37,7 +37,7 @@
 | Claude Code | 技能元数据约 1% 上下文预算 + 最少调用驱逐 + 长 description 1536 字符截断 | code.claude.com/docs/en/skills；2026-09-03 核实记录 |
 | Codex | 技能/工具预算约 2% prompt，超限压缩/省略+警告；project_doc_max_bytes 默认 32KiB | github.com/openai/codex issue #19679；2026-09-03 核实记录 |
 | ZCode | 固定元数据预算；description ≤1024 字符、正文 >100KB 截断 | 用户级 AGENTS.md 契约；2026-09-10 核对 |
-| GLM（经由 Coding Plan） | GLM-5.3：1M 上下文；coding 建议 `reasoning_effort: "max"`；temperature 1.0 仅见于官方 Quick Start 示例（页面无显式 coding 温度推荐）；thinking `disabled` 已彻底不支持（enabled 唯一值），迁移须先设 enabled+effort 再改模型 ID；GLM-5.3-Flash 已不在模型页（如需用须另核入口） | docs.z.ai/guides/llm/glm-5.3；2026-09-10 直抓、2026-09-12 复核 |
+| GLM（经由 Coding Plan） | GLM-5.3：1M 上下文；coding 建议 `reasoning_effort: "max"`；temperature 1.0 仅见于官方 Quick Start 示例（页面无显式 coding 温度推荐）；thinking `disabled` 已彻底不支持（enabled 唯一值），迁移须先设 enabled+effort 再改模型 ID；GLM-5.3-Flash 为多模态视觉编码变体，已迁至 VLM 分区（旧 llm 路径 308 重定向；1M 上下文、文本参数同 5.3、attention/KV cache 较 5.3 降 3.01×/4.44×） | docs.z.ai/guides/llm/glm-5.3、docs.z.ai/guides/vlm/glm-5.3-flash；2026-09-10 直抓、2026-09-12 复核+直抓 VLM 页 |
 
 **测量法**（本仓 2026-09-10 起内建，纯观测、无阈值、不影响 pass）：
 
@@ -56,7 +56,8 @@
 ## 4. GPT + GLM 双模型分工
 
 - **契约写一次、两边吃**：AGENTS.md 是宿主中立开放规范（Codex/Claude Code/ZCode 同读）；稳定工程事实进 AGENTS.md，宿主差异进各自配置层。
-- **分工而非二选一**：GLM 承接大批量机械任务与长程端到端任务（GLM-5.3 定位 long-horizon agent、多阶段任务收益最大、Coding Plan 非高峰点数半价）；GPT 高推理档承接架构决策、疑难 debug、安全审查（reasoning 分 low/medium/high/extra-high 四档，extra-high 为长程 agentic 推理重任务档；Codex 官方 2026-09-12 复核）。
+- **分工而非二选一**：GLM 承接大批量机械任务与长程端到端任务（GLM-5.3 定位 long-horizon agent、多阶段任务收益最大、Coding Plan 非高峰点数半价）；截图/视频→UI 的视觉编码另有 GLM-5.3-Flash 变体（VLM 分区，1M 上下文，2026-09-12 直抓）；GPT 高推理档承接架构决策、疑难 debug、安全审查（reasoning 分 low/medium/high/extra-high 四档，extra-high 为长程 agentic 推理重任务档；Codex 官方 2026-09-12 复核）。
+- **第三方景观（未接入，仅记录）**：DeepSeek-V4.1-Flash（API 名 `deepseek-flash`）——1M 上下文/384K 输出、thinking 默认开、OpenAI 与 Anthropic 双格式端点、off-peak 输出 $0.6/1M tok（peak $1.2、cache-hit $0.003）、并发 2500；旧名 deepseek-v4-flash/-vision-exp 已退役、请求由其按 Flash 价承接；v4-pro（V4-Pro-0813）宣布 2026-09-14 后继续供 API。模型发布不改本仓机制结论：三宿主技能/MCP 预算未动，task-fit 路由不含模型名分支、零改动。
 - **交叉审查必须 fresh context**：新会话/子代理独立审再合并发现，防继承被审者盲区；审查输出要求 "Report gaps, not style preferences"。
 - **资产积累节奏**：AI 同类错第 2 次→AGENTS.md 候选规则或 skill 候选（先过 retrospective + 准入门）；手动重复同一流程第 3 次→scheduled task 候选（先手工跑稳）。
 
@@ -117,5 +118,7 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - AGENTS.md 开放规范 — agents.md（2026-09-10）
 - OpenAI Prompt Engineering Guide — developers.openai.com/api/docs/guides/prompt-engineering（2026-09-10）
 - GLM-5.3 模型文档 / Coding Plan 端点 — docs.z.ai/guides/llm/glm-5.3、docs.z.ai/devpack/quick-start（2026-09-10 直抓、2026-09-12 复核）
+- GLM-5.3-Flash（VLM 分区）— docs.z.ai/guides/vlm/glm-5.3-flash（2026-09-12 直抓；旧 /guides/llm/ 路径 308 重定向至此）
+- DeepSeek Models & Pricing — api-docs.deepseek.com/quick_start/pricing（2026-09-12 直抓：deepseek-flash=V4.1-Flash、旧名退役承接脚注、v4-pro 续供公告）
 - GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对，30+ agent 可用）— github.com/github/spec-kit（raw README 2026-09-12）
 - Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
