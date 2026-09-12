@@ -6451,14 +6451,17 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     foreach ($name in @('A', 'C', 'D')) {
         $codexText = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) $name }
         $claudeText = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) $name }
+        $zcodeText = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) $name }
         $aligned = -not [string]::IsNullOrWhiteSpace($codexText) -and $codexText -ceq $claudeText
+        if ($zcodeConfigured) { $aligned = $aligned -and $codexText -ceq $zcodeText }
         $sections.Add([pscustomobject][ordered]@{
             section = $name
             aligned = $aligned
             codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-RulePatchTextHash $codexText }
             claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
+            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-RulePatchTextHash $zcodeText }
         }) | Out-Null
-        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex and Claude global common section {0} is absent or different.' -f $name) }) | Out-Null }
+        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex, Claude, or configured ZCode global common section {0} is absent or different.' -f $name) }) | Out-Null }
         if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
             $tokens = @([regex]::Matches($codexText, '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
             $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'error'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
@@ -6472,6 +6475,8 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     if ($zcodeConfigured -and $null -eq $zcode) { $findings.Add([pscustomobject]@{ code = 'zcode_global_rule_missing'; severity = 'error'; path = (Join-Path $zcodeRoot 'AGENTS.md'); disposition = 'adapt'; message = 'Configured ZCode user root has no non-empty AGENTS.md global rule.' }) | Out-Null }
     if ($zcodeConfigured -and [string]::IsNullOrWhiteSpace($zcodeDelta)) { $findings.Add([pscustomobject]@{ code = 'zcode_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'ZCode global platform delta section B is missing.' }) | Out-Null }
     if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
+    $zcodeDeltaDistinct = (-not $zcodeConfigured) -or (-not [string]::IsNullOrWhiteSpace($zcodeDelta) -and $zcodeDelta -cne $codexDelta -and $zcodeDelta -cne $claudeDelta)
+    if ($zcodeConfigured -and -not [string]::IsNullOrWhiteSpace($zcodeDelta) -and -not $zcodeDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'ZCode platform delta is identical to Codex or Claude; preserve host-specific loading and enforcement facts.' }) | Out-Null }
 
     $budgets = New-Object System.Collections.Generic.List[object]
     foreach ($document in @($codex, $claude, $zcode)) {
@@ -6509,7 +6514,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
         claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
         zcode_delta_present = -not [string]::IsNullOrWhiteSpace($zcodeDelta)
-        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta)
+        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta -and $zcodeDeltaDistinct)
         releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; aligned = $releaseAligned }
         budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
@@ -7086,6 +7091,14 @@ function Test-GlobalRuleSourceFamily {
     if($facts.ContainsKey('zcode')-and$facts.zcode.exists-and$sections.ContainsKey('zcode')-and$null-ne$sections.zcode){
         $zcodePlatformBody=[regex]::Replace($sections.zcode.b,'^[^\n]*\n?','').Trim()
         if([string]::IsNullOrWhiteSpace($zcodePlatformBody)){$findings.Add((New-GlobalRuleFinding 'source_platform_section_empty' '$.B' 'ZCode B section must be non-empty.'))|Out-Null}
+        foreach($otherHost in @('codex','claude')){
+            if($sections.ContainsKey($otherHost)-and$null-ne$sections[$otherHost]-and$sections.zcode.b-ceq$sections[$otherHost].b){$findings.Add((New-GlobalRuleFinding 'source_platform_sections_identical' '$.B' ('ZCode and {0} B sections must express distinct platform deltas.' -f $otherHost)))|Out-Null}
+        }
+        if($sections.ContainsKey('codex')-and$null-ne$sections.codex){
+            foreach($name in @('a','c','d')){
+                if($sections.codex.$name-cne$sections.zcode.$name){$findings.Add((New-GlobalRuleFinding 'source_common_sections_drift' '$' ('Codex and ZCode common section {0} must be byte-equivalent after newline normalization.' -f $name.ToUpperInvariant())))|Out-Null}
+            }
+        }
     }
     return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
 }

@@ -34,9 +34,9 @@ Describe 'Global rule source contract' {
     It 'validates the tracked source family, shared A/C/D sections, and budgets' {
         $result=Test-GlobalRuleSourceFamily $fixture $codex $claude
         $result.pass|Should -BeTrue
-        $result.facts.codex.version|Should -Be '9.80'
+        $result.facts.codex.version|Should -Be '9.81'
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
-        $result.facts.zcode.version|Should -Be '9.80'
+        $result.facts.zcode.version|Should -Be '9.81'
         @($result.observations).Count|Should -Be 0
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md)-join"`n")|Should -Match 'eol: lf'
     }
@@ -80,8 +80,34 @@ Describe 'Global rule source contract' {
     }
 
     It 'rejects a ZCode global-rule version that differs from the shared release' {
-        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.80','**版本**: 9.81');[IO.File]::WriteAllText($path,$text)
+        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.81','**版本**: 9.82');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_version_mismatch'
+    }
+
+    It 'rejects ZCode platform sections copied from another host' -TestCases @(
+        @{ HostSource = 'codex/AGENTS.md' }, @{ HostSource = 'claude/CLAUDE.md' }
+    ) {
+        param($HostSource)
+        $source = [IO.File]::ReadAllText((Join-Path $fixture "rules/global/$HostSource"))
+        $platform = [regex]::Match($source, '(?s)## B\..*?(?=## C\.)').Value
+        $path = Join-Path $fixture 'rules/global/zcode/AGENTS.md'
+        [IO.File]::WriteAllText($path, [regex]::Replace([IO.File]::ReadAllText($path), '(?s)## B\..*?(?=## C\.)', $platform))
+        @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code) | Should -Contain 'source_platform_sections_identical'
+    }
+
+    It 'rejects ZCode common-section drift even without a configured ZCode target' -TestCases @(
+        @{ Heading = '### A.1 三层职责' },
+        @{ Heading = '### C.1 边界与版本' },
+        @{ Heading = '## D. 维护校验清单' }
+    ) {
+        param($Heading)
+        $path = Join-Path $fixture 'rules\global\zcode\AGENTS.md'
+        [IO.File]::WriteAllText($path, ([IO.File]::ReadAllText($path).Replace($Heading, "$Heading drift")))
+        $result = Test-GlobalRuleSourceFamily $fixture $codex $claude
+        $result.pass | Should -BeFalse
+        @($result.findings.code) | Should -Contain 'source_common_sections_drift'
+        { New-GlobalRuleProjectionPlan $fixture $codex $claude } | Should -Throw
+        [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
     }
 
     It 'rejects a drive root as a user projection root' {

@@ -131,6 +131,28 @@ verify drift
         @($result.findings).Count | Should -Be 0
     }
 
+    It 'rejects configured ZCode common-section drift with matching releases' {
+        $f = New-RuleEstateFixture
+        $path = Join-Path $f.zcode 'AGENTS.md'
+        [IO.File]::WriteAllText($path, ([IO.File]::ReadAllText($path).Replace('verify drift', 'different authorization')))
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude $f.zcode
+        $result.releases.aligned | Should -BeTrue
+        $result.common_aligned | Should -BeFalse
+        @($result.findings.code) | Should -Contain 'global_common_section_drift'
+    }
+
+    It 'rejects configured ZCode platform copied from another host' -TestCases @(
+        @{ OtherHost = 'codex' }, @{ OtherHost = 'claude' }
+    ) {
+        param($OtherHost)
+        $f = New-RuleEstateFixture
+        $path = Join-Path $f.zcode 'AGENTS.md'
+        [IO.File]::WriteAllText($path, ([IO.File]::ReadAllText($path).Replace('zcode host delta', "$OtherHost host delta")))
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude $f.zcode
+        $result.platform_deltas_distinct | Should -BeFalse
+        @($result.findings.code) | Should -Contain 'platform_delta_not_distinct'
+    }
+
     It 'fails closed when configured ZCode global release drifts' {
         $f = New-RuleEstateFixture
         $path = Join-Path $f.zcode 'AGENTS.md'

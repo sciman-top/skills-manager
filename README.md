@@ -202,7 +202,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 global-rules-rollback --receipt .\reports\global-rule-projection\receipt.json --token <receipt.rollback.required_token> --json
 ```
 
-投影事务使用 schema v2：apply 会从当前显式 roots 重新推导唯一的 Codex/Claude/ZCode source-target action 集；三份受管源的版本必须一致，但各宿主 B 段保留真实加载与安全差异。若 `~/.zcode` 存在，或通过 `--zcode-user-root` 指定，则会一并加入 ZCode `AGENTS.md` action，并在任何用户规则写入前落盘 journal。中断后仅可用同一 plan、receipt、roots 和显式 `--resume` 续跑。plan/receipt 只能位于 `reports/global-rule-projection/`（`backups/` 保留给内部备份），schema v1 产物 fail closed，需重新执行 plan。默认 Codex 用户根优先使用 `CODEX_HOME`，未设置时使用 `~/.codex`；Claude 用户根优先使用 `CLAUDE_CONFIG_DIR`，未设置时使用 `~/.claude`；ZCode 默认根为 `~/.zcode`；CLI 显式 root 优先级最高。文件相等只证明 `filesystem_projected`，fresh run/session 探针才可证明 `host_loaded`。
+投影事务使用 schema v2：apply 会从当前显式 roots 重新推导唯一的 Codex/Claude/ZCode source-target action 集；三份受管源的版本与 A/C/D 共性正文必须一致，各宿主 B 段保留真实加载与安全差异。若 `~/.zcode` 存在，或通过 `--zcode-user-root` 指定，则会一并加入 ZCode `AGENTS.md` action，并在任何用户规则写入前落盘 journal。中断后仅可用同一 plan、receipt、roots 和显式 `--resume` 续跑。plan/receipt 只能位于 `reports/global-rule-projection/`（`backups/` 保留给内部备份），schema v1 产物 fail closed，需重新执行 plan。默认 Codex 用户根优先使用 `CODEX_HOME`，未设置时使用 `~/.codex`；Claude 用户根优先使用 `CLAUDE_CONFIG_DIR`，未设置时使用 `~/.claude`；ZCode 默认根为 `~/.zcode`；CLI 显式 root 优先级最高。文件相等只证明 `filesystem_projected`，fresh run/session 探针才可证明 `host_loaded`。
 
 ### ZCode
 

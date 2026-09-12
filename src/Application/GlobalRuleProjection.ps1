@@ -128,6 +128,14 @@ function Test-GlobalRuleSourceFamily {
     if($facts.ContainsKey('zcode')-and$facts.zcode.exists-and$sections.ContainsKey('zcode')-and$null-ne$sections.zcode){
         $zcodePlatformBody=[regex]::Replace($sections.zcode.b,'^[^\n]*\n?','').Trim()
         if([string]::IsNullOrWhiteSpace($zcodePlatformBody)){$findings.Add((New-GlobalRuleFinding 'source_platform_section_empty' '$.B' 'ZCode B section must be non-empty.'))|Out-Null}
+        foreach($otherHost in @('codex','claude')){
+            if($sections.ContainsKey($otherHost)-and$null-ne$sections[$otherHost]-and$sections.zcode.b-ceq$sections[$otherHost].b){$findings.Add((New-GlobalRuleFinding 'source_platform_sections_identical' '$.B' ('ZCode and {0} B sections must express distinct platform deltas.' -f $otherHost)))|Out-Null}
+        }
+        if($sections.ContainsKey('codex')-and$null-ne$sections.codex){
+            foreach($name in @('a','c','d')){
+                if($sections.codex.$name-cne$sections.zcode.$name){$findings.Add((New-GlobalRuleFinding 'source_common_sections_drift' '$' ('Codex and ZCode common section {0} must be byte-equivalent after newline normalization.' -f $name.ToUpperInvariant())))|Out-Null}
+            }
+        }
     }
     return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
 }
