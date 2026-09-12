@@ -9,6 +9,10 @@ Use this skill when the goal is teaching a concept through motion or interaction
 
 ## Choose The Medium
 
+- Choose from delivery constraints first: offline or online use, editable source,
+  runtime and file-size limits, projector conditions, and the required level of
+  interaction. Use a medium only when its toolchain is available; otherwise
+  return the design and state the delivery limitation.
 - SVG/HTML/CSS/JS: best for lightweight classroom web demos, force diagrams, ray diagrams, circuit toggles, graphs, and drag interactions.
 - D3: best for data, graphs, coordinate systems, and variable relationships.
 - Manim: best for formula derivation, geometry, vector decomposition, and exported short videos.
@@ -22,6 +26,11 @@ Use this skill when the goal is teaching a concept through motion or interaction
 4. Use color consistently, but never make color the only carrier of force/vector, path/ray, measured quantity, or result.
 5. Provide pause/replay/step controls for classroom pacing, plus a reduced-motion or static fallback.
 6. Use physically meaningful scales or clearly label schematic/not-to-scale scenes.
+7. Before animating, write the minimal model: variables and units, assumptions,
+   coordinate/sign convention, initial or boundary conditions, and the expected
+   relationship or invariant.
+8. Check the model with dimensional analysis, a hand-worked expected observation,
+   and simple or limiting cases before trusting a visually plausible render.
 
 ## Deliverable Boundary
 
@@ -40,6 +49,7 @@ Use this skill when the goal is teaching a concept through motion or interaction
 
 - Check physics correctness before visual polish.
 - Verify claims, symbols, sign conventions, and expected observations against the named textbook/standard or another identified authoritative teaching source.
+- Verify initial and final states, labels, and any numerical approximation against the model; disclose idealizations and not-to-scale choices.
 - Run in desktop and classroom projector aspect ratios.
-- For web/SVG output, verify the real entrypoint loads, the animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit.
+- For web/SVG output, verify the real entrypoint loads, the animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit. Exercise touch or pen input when the interaction contract requires it.
 - Provide a short textual explanation or caption that preserves the teaching point when motion is unavailable.

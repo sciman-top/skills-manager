@@ -1,6 +1,6 @@
 ---
 name: ai-coding-workflow
-description: Run a compact, evidence-driven coding loop for normal implementation, maintenance, debugging, and review tasks. Freeze the goal and write set, use current repository facts, make the smallest source change, run the lowest sufficient proof, and stop at the proven boundary; route concrete failures, reviews, PowerShell automation, and cold-skill discovery to their dedicated skills.
+description: Run a compact, evidence-driven coding loop for implementation and maintenance. Choose a tiny/direct, normal, or failure/high-risk path; freeze the goal and write set, use current repository facts, make the smallest source change, resume from verified stop points, run the lowest sufficient proof, and stop at the proven boundary.
 ---
 
 # AI coding workflow
@@ -11,7 +11,37 @@ compact execution contract, not a replacement for the repository's
 does not change provider, model, auth, MCP, session, plugin, or host
 configuration.
 
-## 1. Freeze the task before touching code
+## Operating posture
+
+Treat a direct request for a scoped read-only review, reversible edit, or fix
+as authorization to do that work. Ask only when required input would materially
+change the result or the next step is an external or irreversible write. User
+instructions take precedence over this skill's guidelines; do not turn an
+authorized, reversible task into an approval pause.
+
+## 1. Choose the lightest safe path
+
+Classify the request before editing:
+
+- **`tiny/direct`**: one or a few explicit files, no observed failure, no
+  security/data/migration/public-contract/packaging/projection risk, and no
+  external write. Infer a one-sentence Goal/write set/Stop, inspect the seam,
+  make the edit, and run the focused proof. Keep repository rules, dirty-tree
+  protection, and required compatibility checks in force.
+- **`normal`**: ordinary implementation, maintenance, or bounded refactoring.
+  Use the full contract and bounded closure below.
+- **`failure/high-risk`**: a concrete failing test/bug, security or data
+  boundary, migration, public contract, packaging, host projection, or MCP
+  change. Bind the failure or risk first and route to the appropriate
+  specialist; do not let the fast path bypass causal evidence or required
+  gates.
+
+When the user says **continue** or **resume**, start from the last verified stop
+point. Re-read current status, diff, the changed seam, and the latest proof;
+rerun an old gate only when its inputs or environment changed. Do not restart
+the whole workflow merely because the conversation resumed.
+
+## 2. Freeze the task before touching code
 
 Write or infer a short contract from the current request:
 
@@ -30,7 +60,7 @@ model claims as hints until they are current and bound to this task. If the
 target is genuinely ambiguous, stop for the parent task's input; do not choose
 "latest", a convenient file, or a broad repository-wide substitute.
 
-## 2. Run the bounded closure
+## 3. Run the bounded closure
 
 1. **Inspect and diagnose.** Identify the actual caller and causal seam. For an
    observed failure, bind the error, trace, and current behavior before editing.
@@ -57,7 +87,7 @@ them into "done": `repo_verified`, `filesystem_projected`, `host_loaded`, and
 `live_accepted`. A passing test, HTTP 200, health result, synthetic replay,
 static projection, or historical log cannot prove a higher boundary by itself.
 
-## 3. Prevent the common failures
+## 4. Prevent the common failures
 
 - **Scope drift / over-design:** keep Goal, exact write set, and Stop visible;
   report gaps, not style preferences. Defer work without a current failure or
@@ -80,20 +110,21 @@ static projection, or historical log cannot prove a higher boundary by itself.
   or call live services unless the current request explicitly includes that
   scope and the required rollback/evidence path.
 
-## 4. Choose the model and specialist path by task fit
+## 5. Use task-fit capabilities, not model-name routing
 
-GPT and GLM are complementary, not an automatic failover or routing mandate:
+Choose the currently available host, model, and tools by the capability
+contract the task requires: reasoning depth, context size, tool/MCP support,
+latency or cost, and the need for independent review. Model names and vendor
+rankings are advisory and may drift; they are not workflow branches.
 
-- Prefer GPT's stronger reasoning/review context for architecture decisions,
-  ambiguous root-cause analysis, security/data boundaries, and independent
-  final review.
-- Prefer GLM for a clearly bounded batch, mechanical transformation, or long
-  multi-step implementation after the contract and acceptance checks are
-  explicit. Keep the change narrow and obtain a fresh independent review for
-  consequential work.
-- Do not force a provider/model, assume a current model feature, or change
-  host configuration to make the split happen. Use the current host/model
-  documentation and actual CLI/config evidence when a capability matters.
+Never force a provider, assume a model feature, or automatically fail over to
+another model. If a required capability is unavailable, report the boundary or
+ask for the smallest decision that materially changes the result.
+
+MCP is optional. Use it when the task needs current authoritative external
+documentation or an explicitly authorized integration; do not invoke every
+configured server merely because it is available, and do not mutate host MCP
+configuration as a side effect of ordinary coding work.
 
 Route rather than duplicating procedures:
 

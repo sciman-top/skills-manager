@@ -1037,33 +1037,30 @@
     "active": "default",
     "profiles": {
       "default": {
+        "enabled": []
+      },
+      "coding": {
         "enabled": [
-          "microsoft-learn",
           "openaiDeveloperDocs"
         ],
         "enabled_tools": {
-          "microsoft-learn": [
-            "microsoft_docs_search",
-            "microsoft_docs_fetch",
-            "microsoft_code_sample_search"
-          ],
           "openaiDeveloperDocs": [
             "search_openai_docs",
             "fetch_openai_doc"
           ]
         }
       },
-      "coding": {
-        "enabled": [
-          "context7",
-          "openaiDeveloperDocs"
-        ]
-      },
       "dotnet": {
         "enabled": [
-          "microsoft-learn",
-          "openaiDeveloperDocs"
-        ]
+          "microsoft-learn"
+        ],
+        "enabled_tools": {
+          "microsoft-learn": [
+            "microsoft_docs_search",
+            "microsoft_docs_fetch",
+            "microsoft_code_sample_search"
+          ]
+        }
       },
       "browser": {
         "enabled": [

@@ -14,7 +14,8 @@ Use this skill for classroom-ready courseware, not marketing decks.
 3. Prefer dense but readable teacher utility over decorative pages. Use large diagrams, clear labels, and one main teaching action per slide.
 4. For junior physics, include the physical situation, idealized model, variable relationship, unit discipline, and common misconception.
 5. Keep the lesson arc and assessment aligned: state what students must already know, what they will be able to do, and what the exit ticket will reveal. If a textbook, curriculum, or standard is not supplied, label the basis as an assumption rather than inventing an alignment claim.
-6. When creating PPTX, use the built-in Presentations capability first and follow its supported `pptx` workflow. Use web slides only when animation or interactive simulation is central.
+6. Keep student-visible content, teacher prompts, and answer/reveal notes distinct. Do not make a teaching decision depend on speaker notes when the delivery mode will not expose them.
+7. When creating PPTX, use the built-in Presentations capability first and follow its supported `pptx` workflow. Use web slides only when animation or interactive simulation is central; if the executor is unavailable, return the design and mark file generation as pending.
 
 ## Deliverable Boundary
 
@@ -33,8 +34,8 @@ Use this skill for classroom-ready courseware, not marketing decks.
 
 ## Verification
 
-- Check that every page can be taught verbally in 1-3 minutes.
+- Check that each substantive teaching beat fits the stated pace, allocating separate time for title, demonstration, student work, transitions, and the exit ticket.
 - Verify formulas, units, and diagrams against the target textbook/standard.
 - Check prerequisite knowledge, learning targets, activities, and the formative exit ticket for alignment. Keep the stated period realistic, including transitions.
 - Render or preview the deck before completion; ensure Chinese text does not overflow.
-- After content and layout stabilize, hand the deck to `custom-powerpoint-accessibility` for titles, alternative text, reading order, contrast, captions, and motion review. Report structural or assistive-technology checks that cannot be performed as `not_verified`.
+- After content and layout stabilize, hand the deck to `custom-powerpoint-accessibility` when it is available for titles, alternative text, reading order, contrast, captions, and motion review. If that validator or live PowerPoint is unavailable, keep the manual checklist and report structural or assistive-technology checks as `not_verified`.

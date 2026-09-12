@@ -49,9 +49,11 @@ Use functional domains, not arbitrary task keywords: `decision`, `engineering`,
 `coding`, `frontend`, `writing`, `content`, `presentation`, `diagram`,
 `animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, or
 `skill-management`. Existing specialist domains such as `ppt`, `physics`, and
-`coding-strict` remain available. The default maximum is 12. If the requested
-domains exceed that limit, the router returns `domain_hint_required` with no
-arbitrary alphabetical subset; do not retry as middleware. Refine the host's
+`coding-strict` remain available. The default maximum is 12. If the unscoped
+discovery candidate set exceeds that limit, the router returns
+`domain_hint_required` with no arbitrary alphabetical subset; an explicit
+candidate may still be validated
+without a domain hint. Do not retry as middleware. Refine the host's
 single discovery decision only when its original semantic conclusion supports
 a narrower domain; otherwise return to ordinary reasoning. The host AI selects
 the smallest sufficient candidate set from names, descriptions, and the

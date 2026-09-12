@@ -21,6 +21,7 @@ Use this skill for practical classroom software on Windows machines.
 - Treat second-screen, full-screen, topmost, slideshow control, and overlay behavior as contracts with tests or probes.
 - For settings and startup, verify load latency and corrupt-config fallback.
 - For file workflows, test Chinese paths, OneDrive paths, locked files, and removable media.
+- Separate preferences, session state, and recoverable classroom artifacts. For persisted state, define the write, interruption, corruption, and version-migration behavior before treating serialization as complete.
 
 ## Desktop UI Observation
 
@@ -42,7 +43,7 @@ Use this skill for practical classroom software on Windows machines.
 
 - Verify touch targets at the intended Windows scaling and classroom hardware; a desktop screenshot at 100% DPI is not sufficient touch evidence.
 - Avoid tiny toolbar-only affordances for core teaching actions.
-- Support presenter view, navigation/search/bookmarks, richer ink tools, and accessible labels where relevant.
+- Derive feature checks from the declared classroom flows; test presenter view, navigation/search/bookmarks, ink tools, and accessible labels only when they are part of the product contract.
 - Verify keyboard-only access, visible focus, high-contrast behavior, and meaningful UI Automation names for core teaching controls. Treat automated UIA inspection as structural evidence, not proof of a complete screen-reader experience.
 
 ## Deliverable Boundary
@@ -54,4 +55,5 @@ Use this skill for practical classroom software on Windows machines.
 
 - Run the target repository's real build and focused test gates. Only fall back to `dotnet build` when the repository defines no build contract.
 - Use `-p:UseSharedCompilation=false` when compiler server locks cause noisy local failures.
+- For persistence or recovery changes, exercise clean restart and interrupted or corrupt state, plus version-upgrade paths when applicable; report runtime and classroom hardware gaps separately.
 - For UI changes, capture before/after screenshots or run a manual classroom-flow probe.

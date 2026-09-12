@@ -68,6 +68,36 @@ Describe 'Skill projection profiles' {
         }
     }
 
+    It 'keeps the daily workflow risk-proportional and model-neutral' {
+        $skillPath = Join-Path $repoRoot 'overrides\custom\ai-coding-workflow\SKILL.md'
+        $skill = Get-ContentUtf8 $skillPath
+
+        foreach ($anchor in @('tiny/direct', 'normal', 'failure/high-risk', 'continue', 'resume', 'MCP is optional')) {
+            $skill | Should -Match ([regex]::Escape($anchor))
+        }
+        $skill | Should -Not -Match 'GPT and GLM are complementary'
+        $skill | Should -Not -Match 'Prefer GPT'
+        $skill | Should -Not -Match 'Prefer GLM'
+    }
+
+    It 'keeps the default MCP profile off and specialized profiles narrow' {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $profiles = $config.mcp_profiles.profiles
+
+        @($profiles.default.enabled) | Should -Be @()
+        @($profiles.coding.enabled) | Should -Be @('openaiDeveloperDocs')
+        @($profiles.dotnet.enabled) | Should -Be @('microsoft-learn')
+        @($profiles.coding.enabled_tools.openaiDeveloperDocs) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
+        @($profiles.dotnet.enabled_tools.'microsoft-learn') | Should -Be @('microsoft_docs_search', 'microsoft_docs_fetch', 'microsoft_code_sample_search')
+
+        $codingConfig = $config | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+        $codingConfig.mcp_profiles.active = 'coding'
+        $codingServers = @(Resolve-McpProfileServers $codingConfig)
+        ($codingServers | Where-Object name -eq 'context7').enabled | Should -BeFalse
+        ($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled | Should -BeTrue
+        @((($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled_tools)) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
+    }
+
     It 'retains the former nine-skill core set as an explicit compatibility profile' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'

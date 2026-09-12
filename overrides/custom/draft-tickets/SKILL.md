@@ -14,12 +14,15 @@ Return a numbered Markdown list. For every ticket include:
 - a short title;
 - the end-to-end behavior it delivers;
 - acceptance criteria that can be verified independently;
+- the exact source/config write set, minimum proof, and stop condition;
 - blockers and the reason each blocker is real; and
 - the suggested execution order.
 
 Prefer the smallest complete vertical slices that fit one fresh context. Keep
 wide mechanical refactors as expand/migrate/contract sequences. Mark uncertain
-scope and unresolved dependencies instead of inventing them.
+scope and unresolved dependencies instead of inventing them. Do not create a
+standalone ticket for work that has no independent behavior, proof, or proven
+dependency role.
 
 ## Side-effect boundary
 

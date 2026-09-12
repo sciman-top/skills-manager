@@ -1,6 +1,6 @@
 interface:
   display_name: "AI Coding Workflow"
   short_description: "Run a bounded, evidence-driven coding loop"
-  default_prompt: "Use $ai-coding-workflow for normal coding work: freeze Goal/Context/Constraints/Success/Stop, inspect current repository facts, make the smallest source change, run the lowest sufficient proof, preserve unrelated work, and report repo_verified, filesystem_projected, host_loaded, and live_accepted separately. Route concrete failures, reviews, PowerShell automation, and cold discovery to their dedicated skills."
+  default_prompt: "Use $ai-coding-workflow for coding work: choose tiny/direct, normal, or failure/high-risk; freeze Goal/Context/Constraints/Success/Stop, inspect current repository facts, make the smallest source change, resume from verified stop points, run the lowest sufficient proof, preserve unrelated work, keep MCP/model choice task-fit and optional, and report repo_verified, filesystem_projected, host_loaded, and live_accepted separately. Route concrete failures, reviews, PowerShell automation, and cold discovery to their dedicated skills."
 policy:
   allow_implicit_invocation: true

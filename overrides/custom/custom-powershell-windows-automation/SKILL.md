@@ -21,14 +21,20 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 
 - Use structured JSON/TOML/CSV parsing instead of text replacement when practical.
 - For environment variables, distinguish Process/User/Machine scopes in logs.
-- For CLIs, capture `cmd`, `exit_code`, short key output, and timestamp.
+- For CLIs, capture `cmd`, `exit_code`, redacted key output, and timestamp; never place secrets or tokens in commands, output, or receipts.
 - For agent/MCP config, separate source of truth from generated projection files.
 - For file replacement, write and validate the candidate before an atomic replace when the target format or consumer makes partial writes risky.
+- When collections cross a pipeline or function boundary, preserve the required
+  empty, single-item, or multi-item shape with `@(...)`, an explicit collection,
+  or `.ToArray()` and verify all three cases when shape is part of the contract.
+- Log environment-variable scope and name rather than values; redact credentials,
+  cookies, tokens, and other secret-bearing arguments before recording output.
 
 ## Verification
 
 - Run a dry-run path first when available.
 - Re-run the command after writes to prove idempotence.
 - Check encoding, path, native-process exit, and locked-file behavior under the supported PowerShell 7 runtime.
+- Verify non-zero exit codes and durable receipts separately from stderr; preserve diagnostic output without retrying an ambiguous write.
 - When an explicitly scoped external legacy consumer requires Windows PowerShell 5.1, isolate that compatibility path and verify it separately; do not weaken the primary PS7 contract.
 - Report changed paths, backup/rollback location, commands run, and the lowest truth layer actually verified. A successful source edit or scheduled-task definition is not proof that a new process or future trigger loaded it.

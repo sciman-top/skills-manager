@@ -11,7 +11,7 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 
 1. Establish the audience, PowerPoint version, delivery mode, and whether the deck includes narration, video, tables, charts, equations, or interactive links. Record the presentation language, title-slide metadata, section structure for long decks, and whether speaker notes are delivered to the audience.
 2. Inspect the editable slide structure before relying on rendered images. Record blockers when only a PDF, screenshot, or flattened deck is available.
-3. Audit every slide against the checklist below and classify findings as `blocker`, `major`, `minor`, or `verified`.
+3. Audit every slide against the checklist below and classify findings as `blocker`, `major`, `minor`, or `verified`; preserve the native checker category (`error`, `warning`, `tip`, or `intelligent-service`) when one exists.
 4. Run PowerPoint's native Accessibility Checker when live PowerPoint is available. Preserve its warnings and errors as evidence; do not treat an empty checker result as proof of full accessibility.
 5. Render or preview the final deck and inspect visual contrast, clipping, captions, focus cues, and non-color communication.
 6. When live PowerPoint and the task scope permit, exercise the deck with a named screen reader such as Narrator and record the version and observed navigation. Keep this separate from the native checker result.
@@ -22,20 +22,21 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 - Give every content slide a meaningful title. Titles should be unique when they identify distinct topics; repeated section titles need a distinguishing phrase.
 - Check presentation and slide language metadata when the target delivery tool supports it. Record a missing or unknown setting as a finding; do not infer the language from the visible text.
 - Give the deck a meaningful title and use meaningful section names for long presentations. Treat these as navigation and discoverability checks, not proof of screen-reader behavior.
-- Provide concise alt text for informative images, diagrams, charts, equations, and grouped visual explanations. Mark purely decorative objects as decorative.
+- Provide concise, purposeful alt text for informative images, diagrams, charts, equations, and grouped visual explanations. Do not leave image filenames or file extensions as the description. Mark purely decorative objects as decorative.
 - Verify reading order in the Selection Pane or an equivalent structure view. The sequence must make sense without visual position, including grouped objects and off-slide elements.
-- Use real tables with a header row. Avoid merged cells, blank spacer cells, and tables used only for layout when they impede navigation.
+- Use tables only when they communicate data that needs tabular structure; give real tables a header row and simple structure. Avoid merged cells, blank spacer cells, and tables used only for layout.
 - Use hyperlink text that describes the destination or action without surrounding context. Avoid bare URLs and repeated `click here` labels.
 - Provide synchronized captions for meaningful video and transcripts for audio or narration. Identify any media whose accessibility depends on external playback controls, and verify captions in the actual delivery format because media compression or video export can remove them.
 - When narration is present, inspect speaker notes or a separate transcript as a possible content fallback. Notes are not synchronized captions and cannot prove that a delivered video is accessible.
 - Check text and essential graphics for sufficient contrast. Never encode meaning by color alone; add labels, patterns, shapes, or text cues.
 - Remove non-essential animation, rapid flashing, and motion that obscures reading. Prefer simple, user-controlled sequences and a usable reduced-motion/static path.
 - Treat 18 pt as the Microsoft baseline floor for ordinary slide text, not an automatic pass. Confirm that text remains readable at the intended classroom scale and that zoom, high contrast, or enlarged text does not hide critical content.
-- Run the native Accessibility Checker and triage every error, warning, and intelligent-service suggestion relevant to the deck.
+- Run the native Accessibility Checker and triage every relevant error, warning, tip, and intelligent-service suggestion. Preserve the raw category and the version used.
 
 ## Evidence And Fail-Closed Rules
 
 - Treat rendered previews as visual evidence only. They cannot prove object semantics, reading order, alt text, table headers, or assistive-technology behavior.
+- Treat the native checker as coverage of known rules, not a complete accessibility pass; keep the visual and editable-structure reviews even when it reports no findings.
 - Treat title, language, section-name, speaker-note, and transcript observations as artifact evidence only. They do not prove that a host player or screen reader exposes the information correctly.
 - Do not claim reading order is verified unless the editable object sequence was inspected in PowerPoint or an equivalent structural representation.
 - Do not claim screen-reader or assistive-technology compatibility unless it was exercised with the named technology and version. Otherwise report `not_verified` and the required manual check.
@@ -48,6 +49,7 @@ Return a compact table with `slide`, `severity`, `criterion`, `finding`, `recomm
 
 - `accessibility_status`: `passed`, `needs_fixes`, or `not_verifiable`
 - `native_checker`: version and result, or `not_run` with reason
+- `checker_findings`: raw `error`/`warning`/`tip`/`intelligent-service` findings or `not_run`
 - `reading_order`: `verified` or `not_verified`
 - `presentation_metadata`: `verified`, `needs_fixes`, or `not_verified`
 - `speaker_notes_or_transcript`: `verified`, `needs_fixes`, or `not_verified`
