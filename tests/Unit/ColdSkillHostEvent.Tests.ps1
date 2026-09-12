@@ -28,6 +28,35 @@ Describe 'Cold skill raw host-event verifier' {
         $result.Output | Should -Match 'findings=0'
     }
 
+    It 'rejects a plausible answer without required cold discovery' {
+        $result = Invoke-HostEventVerifier 'valid-s35.jsonl' 'S01-explicit'
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'H009_REQUIRED_DISCOVERY_MISSING'
+    }
+
+    It 'checks specialist history boundaries from a bound parent rollout' {
+        $parentPath = Join-Path $TestDrive 'parent.jsonl'
+        foreach ($case in @(
+            @{ Fork = 'all'; Exit = 1 }
+            @{ Fork = $null; Exit = 1 }
+            @{ Fork = '0'; Exit = 1 }
+            @{ Fork = 'none'; Exit = 0 }
+            @{ Fork = '2'; Exit = 0 }
+        )) {
+            $spawnArgs = @{ agent_type = 'cold-capability-runner' }
+            if ($null -ne $case.Fork) { $spawnArgs.fork_turns = $case.Fork }
+            $call = @{ type = 'response_item'; payload = @{ type = 'function_call'; name = 'spawn_agent'; arguments = ($spawnArgs | ConvertTo-Json -Compress) } }
+            @(
+                '{"type":"session_meta","payload":{"id":"fixture-root"}}'
+                ($call | ConvertTo-Json -Depth 5 -Compress)
+            ) | Set-Content -LiteralPath $parentPath
+            $output = & pwsh -NoProfile -File $verifierPath -EventsPath (Join-Path $fixturesRoot 'valid-s31.jsonl') -ScenarioId 'S31-live-derived' -ParentRolloutPath $parentPath 2>&1
+            $LASTEXITCODE | Should -Be $case.Exit -Because ("fork_turns={0}" -f $case.Fork)
+            if ($case.Exit -eq 1) { ($output -join "`n") | Should -Match 'H010_SPECIALIST_HISTORY_NOT_ISOLATED' }
+        }
+    }
+
     It 'accepts a one-shot runner stream only with a native child identifier' {
         $result = Invoke-HostEventVerifier 'valid-s31.jsonl' 'S31-live-derived'
 

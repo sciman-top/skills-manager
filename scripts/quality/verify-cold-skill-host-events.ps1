@@ -24,13 +24,16 @@ Stable finding codes:
   H006_BARE_WAIT_WITHOUT_CHILD
   H007_SPAWN_IDENTIFIER_MISSING
   H008_ROLLOUT_CHILD_EVIDENCE_INVALID
+  H009_REQUIRED_DISCOVERY_MISSING
+  H010_SPECIALIST_HISTORY_NOT_ISOLATED
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$EventsPath,
     [Parameter(Mandatory = $true)][string]$ScenarioId,
     [string]$ScenarioMatrixPath,
-    [string]$ChildRolloutPath
+    [string]$ChildRolloutPath,
+    [string]$ParentRolloutPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,6 +130,22 @@ function Get-ChildRolloutEvidence {
 }
 
 if ($null -ne $scenario -and $events.Count -gt 0) {
+    if (-not [string]::IsNullOrWhiteSpace($ParentRolloutPath)) {
+        try {
+            $parentRecords = @(Get-Content -LiteralPath $ParentRolloutPath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
+            $parentMetas = @($parentRecords | Where-Object type -eq 'session_meta')
+            $streamIds = @($events | Where-Object type -eq 'thread.started' | ForEach-Object { [string]$_.thread_id } | Select-Object -Unique)
+            if ($parentMetas.Count -ne 1 -or $streamIds.Count -ne 1 -or [string]$parentMetas[0].payload.id -ne $streamIds[0]) { throw 'parent rollout is not bound to the host stream' }
+            foreach ($record in $parentRecords) {
+                if ($record.type -ne 'response_item' -or $record.payload.type -ne 'function_call' -or $record.payload.name -notmatch '(^|[._])spawn_agent$') { continue }
+                $spawnArgs = $record.payload.arguments | ConvertFrom-Json
+                if (-not [string]::IsNullOrWhiteSpace([string]$spawnArgs.agent_type) -and [string]$spawnArgs.agent_type -ne 'default' -and [string]$spawnArgs.fork_turns -notmatch '^(none|[1-9][0-9]*)$') {
+                    Add-Finding 'H010_SPECIALIST_HISTORY_NOT_ISOLATED' ("{0}: specialist spawn must set fork_turns to none or a positive integer" -f $ScenarioId)
+                }
+            }
+        }
+        catch { Add-Finding 'H001_EVENTS_SCHEMA_INVALID' ("parent rollout: {0}" -f $_.Exception.Message) }
+    }
     $completedItems = @($events | Where-Object {
         $_.type -eq 'item.completed' -and $null -ne $_.item
     } | ForEach-Object { $_.item })
@@ -140,6 +159,9 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
 
     if ([string]$scenario.cold_discovery -eq 'forbidden' -and $routerCommands.Count -gt 0) {
         Add-Finding 'H003_FORBIDDEN_DISCOVERY_OBSERVED' ("{0}: {1} router invocation(s) occurred in a discovery-forbidden scenario" -f $ScenarioId, $routerCommands.Count)
+    }
+    if ([string]$scenario.cold_discovery -eq 'required' -and $routerCommands.Count -eq 0) {
+        Add-Finding 'H009_REQUIRED_DISCOVERY_MISSING' ("{0}: required cold discovery has no observed router command" -f $ScenarioId)
     }
     if ($discoveryCommands.Count -gt 1) {
         Add-Finding 'H004_MULTIPLE_DISCOVERY_ATTEMPTS' ("{0}: observed {1} AutoDiscover calls without a selected candidate" -f $ScenarioId, $discoveryCommands.Count)

@@ -216,14 +216,14 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 ### 6.3 单轮只读 runner 路径
 
-1. 在独立 fresh Codex session 运行 S03。
+1. 在独立 fresh Codex session 运行 S31-live-derived；需要显式委派意图时使用矩阵中对应的 runner dispatch 请求，保存实际原文，不把改写请求计作原样通过。
 2. parent 必须用确定性的 `ExecutionAdmission` helper 生成并重验证 schema-v2 `execution_admission` 与 `execution_plan`；两者绑定原始请求、完整 router validation、唯一 selected entry、validated closure、entrypoint/package hash、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop、同一 admission id 与 `run_once` action。raw router JSON 或手写 prose contract 不算 admission。
 3. 记录 cold-capability-runner child id、Terra/high、completed 事件、输入/输出 evidence reference。
 4. 最后用文件变更/工具 event 核对实际 write set 为空。任何写入、外部调用、第二候选或 contract mismatch 都是 fail。
 
 ### 6.4 可见直达对照
 
-在 fresh session 运行 S03-explicit（systematic-debugging）。它在 core-lean 常驻，应记录直接加载，同时验证 cold_discovery=not_observed、candidate_load_validation=not_observed。grill-me 和 codebase-design 在 core-lean 属于冷技能，不再充当可见直达对照。
+在 fresh session 运行 S03-explicit（code-review-and-quality）。它在 core-lean 常驻，应记录直接加载，同时验证 cold_discovery=not_observed、candidate_load_validation=not_observed。grill-me 和 codebase-design 在 core-lean 属于冷技能，不再充当可见直达对照。
 
 ### 6.5 隐式三正三负样本
 
@@ -234,6 +234,19 @@ CSR-R5 使用六个互不复用的 fresh-host session：
 - #12–#15/#19–#20 的 artifact 一律单独创建 run 目录并按对应 documents/pdf/presentations/spreadsheets/image 的 render/inspection contract 审核。冷路由 pass 不代表格式/视觉/公式 pass，反向亦然。
 
 ## 7. 失败分类与停止条件
+
+必须冷发现的场景若没有实际 router 命令，host-event verifier 返回
+`H009_REQUIRED_DISCOVERY_MISSING`。父代理给出合理答案不能替代冷发现证据。
+Codex 专门角色的隔离验收同时传入 `-ParentRolloutPath`，其 session id 必须
+与 host stream 一致；省略该证据不能声称已核验 fork 参数。实际 spawn 使用
+非默认 `agent_type` 时，缺失 `fork_turns` 或值为 `all` 返回
+`H010_SPECIALIST_HISTORY_NOT_ISOLATED`。子代理身份、执行模型与终态仍须另外核验。
+
+Claude 可使用显式入口作诊断对照：
+`/capability-router 请用 codebase-design 只读分析当前项目 README 中的产品边界，不改文件。`
+普通请求、显式入口请求分别记录，后者成功不覆盖前者绕过路由的失败。
+Skill 可见、目录存在或最终文本声称“已校验”均不足；必须核对实际工具调用、
+校验返回值及随后读取的准确路径。该入口不构成权限或 hook 强制层。
 
 | 发现 | 分类 | 当次行动 | 不要做什么 |
 | --- | --- | --- | --- |

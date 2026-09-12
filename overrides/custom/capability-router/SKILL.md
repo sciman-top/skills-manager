@@ -113,6 +113,14 @@ router has returned all of the following for the same request:
 - one selected candidate plus its `validated_closure`, with validated paths and
   declared side effects for every member.
 
+On Codex, a named specialist handoff must explicitly set `fork_turns="none"`
+(or a positive number when that specific history is necessary). Never omit
+`fork_turns` or use `"all"` with a nondefault `agent_type`: full-history forks
+inherit the parent model and context. Put the complete admission and validated
+closure in the child message so isolation does not discard required inputs.
+Verify the actual spawn arguments and child events; a receipt alone cannot
+prove isolation or the model and effort that executed the task.
+
 For a supported specialist bridge contract, pass the complete validation result, original request, exact selected name, and
 an admission contract to the child. Once those conditions hold, dispatching to
 the contract's `native_agent` is the execution path, not an option: construct
