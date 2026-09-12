@@ -24,6 +24,9 @@
 | 测试迁就实现 | 不许改测试迁就实现；行为变化显式走契约迁移 | 审计快照 fixture 契约迁移先例（stale_snapshot fail-closed） |
 | 权限过大/并行互踩 | 默认最小权限、信任后再放开；并行用 git worktree | doctor config risks；scheduler 契约扫描（禁 RunLevel Highest）；git diff 分界并发改动 |
 | 规则膨胀反噬 | 每条规则过"删掉会致错吗"；重复失效下沉机制层 | mechanism-over-prose 裁决；9.79 瘦身 |
+| 逐步微管理、盯着 agent 看 | 主上下文保持专注；探索/测试/triage 交子代理或专用技能并行 | ai-coding-workflow skill 的 task-fit 路由节 |
+| 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | Claude 官方 2026-09-12 警告；ai-coding-workflow skill §4（report gaps, not style preferences） |
+| 不告知 build/test 命令（多数质量问题=配置问题） | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md A 节 entrypoint、C 节最低门禁 |
 
 ## 3. 宿主元数据预算：观测口径
 
@@ -34,7 +37,7 @@
 | Claude Code | 技能元数据约 1% 上下文预算 + 最少调用驱逐 + 长 description 1536 字符截断 | code.claude.com/docs/en/skills；2026-09-03 核实记录 |
 | Codex | 技能/工具预算约 2% prompt，超限压缩/省略+警告；project_doc_max_bytes 默认 32KiB | github.com/openai/codex issue #19679；2026-09-03 核实记录 |
 | ZCode | 固定元数据预算；description ≤1024 字符、正文 >100KB 截断 | 用户级 AGENTS.md 契约；2026-09-10 核对 |
-| GLM（经由 Coding Plan） | GLM-5.3：1M 上下文；coding 建议 `reasoning_effort: "max"`、temperature 1.0；thinking 关→开须先设 enabled+effort 再改模型 ID | docs.z.ai/guides/llm/glm-5.3；2026-09-10 直抓 |
+| GLM（经由 Coding Plan） | GLM-5.3：1M 上下文；coding 建议 `reasoning_effort: "max"`；temperature 1.0 仅见于官方 Quick Start 示例（页面无显式 coding 温度推荐）；thinking `disabled` 已彻底不支持（enabled 唯一值），迁移须先设 enabled+effort 再改模型 ID；GLM-5.3-Flash 已不在模型页（如需用须另核入口） | docs.z.ai/guides/llm/glm-5.3；2026-09-10 直抓、2026-09-12 复核 |
 
 **测量法**（本仓 2026-09-10 起内建，纯观测、无阈值、不影响 pass）：
 
@@ -53,14 +56,16 @@
 ## 4. GPT + GLM 双模型分工
 
 - **契约写一次、两边吃**：AGENTS.md 是宿主中立开放规范（Codex/Claude Code/ZCode 同读）；稳定工程事实进 AGENTS.md，宿主差异进各自配置层。
-- **分工而非二选一**：GLM 承接大批量机械任务与长程端到端任务（GLM-5.3 定位 long-horizon agent、多阶段任务收益最大、Coding Plan 非高峰点数半价）；GPT 高推理档承接架构决策、疑难 debug、安全审查。
+- **分工而非二选一**：GLM 承接大批量机械任务与长程端到端任务（GLM-5.3 定位 long-horizon agent、多阶段任务收益最大、Coding Plan 非高峰点数半价）；GPT 高推理档承接架构决策、疑难 debug、安全审查（reasoning 分 low/medium/high/extra-high 四档，extra-high 为长程 agentic 推理重任务档；Codex 官方 2026-09-12 复核）。
 - **交叉审查必须 fresh context**：新会话/子代理独立审再合并发现，防继承被审者盲区；审查输出要求 "Report gaps, not style preferences"。
 - **资产积累节奏**：AI 同类错第 2 次→AGENTS.md 候选规则或 skill 候选（先过 retrospective + 准入门）；手动重复同一流程第 3 次→scheduled task 候选（先手工跑稳）。
 
-## 5. 实践来源（直抓日期）
+## 5. 实践来源（直抓/复核日期）
 
-- Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
-- Codex Best Practices — learn.chatgpt.com/guides/best-practices（2026-09-10）
+- Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=/goal+Stop hook 四档验证门禁、/batch、gap-hunting 审查警告；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
+- Codex Best Practices — learn.chatgpt.com/guides/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=extra-high 档、/fork、子目录 AGENTS.md nearest-wins）
 - AGENTS.md 开放规范 — agents.md（2026-09-10）
 - OpenAI Prompt Engineering Guide — developers.openai.com/api/docs/guides/prompt-engineering（2026-09-10）
-- GLM-5.3 模型文档 / Coding Plan 端点 — docs.z.ai/guides/llm/glm-5.3、docs.z.ai/devpack/quick-start（2026-09-10）
+- GLM-5.3 模型文档 / Coding Plan 端点 — docs.z.ai/guides/llm/glm-5.3、docs.z.ai/devpack/quick-start（2026-09-10 直抓、2026-09-12 复核）
+- GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对，30+ agent 可用）— github.com/github/spec-kit（raw README 2026-09-12）
+- Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
