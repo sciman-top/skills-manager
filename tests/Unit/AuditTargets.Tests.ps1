@@ -1339,12 +1339,34 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $scan.scan_coverage.confidence_ceiling | Should -Be "representative_sample"
         }
 
+        It "Preserves later source and target evidence when documentation fills the sample" {
+            $requirements = New-AuditRequirementSignalAccumulator
+            $artifacts = New-AuditArtifactCapabilityAccumulator
+            foreach ($number in 1..60) {
+                Add-AuditRequirementEvidence $requirements workflow ocr recognize documentation README.md "line$number" docs
+                Add-AuditArtifactEvidence $artifacts pdf process documentation README.md "line$number" docs
+            }
+            foreach ($target in @('product-a', 'product-b')) {
+                foreach ($number in 1..60) {
+                    Add-AuditRequirementEvidence $requirements workflow ocr recognize source_code src/ocr.py "line$number" $target
+                    Add-AuditArtifactEvidence $artifacts pdf process source_code src/pdf.py "line$number" $target
+                }
+            }
+            foreach ($entry in @((ConvertTo-AuditRequirementSignalArray $requirements)[0], (ConvertTo-AuditArtifactCapabilityArray $artifacts)[0])) {
+                $entry.evidence.Count | Should -Be 48
+                $entry.evidence_status | Should -Be 'implemented'
+                (Get-AuditNeedEvidenceCoverage $entry).source_code_target_count | Should -Be 2
+                @($entry.evidence | Where-Object kind -eq documentation).Count | Should -BeGreaterThan 0
+            }
+        }
+
         It "Separates direct AI content generation from model integration and supporting diagnostic code" {
             $repo = Join-Path $TestDrive "target-repo-ai-intent-roles"
             New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $repo "tools") -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $repo ".artifacts\release") -Force | Out-Null
             Set-ContentUtf8 (Join-Path $repo "src\poster.py") 'def generate_image_poster(topic): return create_image(topic)'
+            Set-ContentUtf8 (Join-Path $repo "src\http.cs") 'var content = JsonContent.Create(payload);'
             Set-ContentUtf8 (Join-Path $repo "tools\provider_diagnostic.py") 'provider = "OpenAI" # model provider diagnostic'
             Set-ContentUtf8 (Join-Path $repo ".artifacts\release\generated.py") 'def generate_image_poster(topic): return create_image(topic)'
 
@@ -1355,6 +1377,7 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
 
             $generation.Count | Should -Be 1
             $generation[0].evidence_coverage.source_code_target_count | Should -Be 1
+            @($scan.detected.requirement_signals | Where-Object { $_.domain -eq "ai" -and $_.subject -eq "content_generation" } | ForEach-Object { $_.evidence } | Where-Object { $_.path -eq "src\http.cs" }).Count | Should -Be 0
             $modelIntegration.Count | Should -Be 1
             $modelIntegration[0].evidence_coverage.source_code_target_count | Should -Be 0
             $modelIntegration[0].evidence_coverage.supporting_code_target_count | Should -Be 1

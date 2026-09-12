@@ -281,7 +281,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260829.3"
+    return "audit-prompt-v20260912.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -959,6 +959,38 @@ function New-AuditArtifactCapabilityAccumulator {
     return @{}
 }
 
+function Add-AuditBoundedEvidence($Evidence, $Item) {
+    if ($Evidence.Count -lt 48) {
+        $Evidence.Add($Item) | Out-Null
+        return
+    }
+    # Keep representative target/kind groups before retaining more hits from one group.
+    $ranks = @{ source_code = 0; test = 1; supporting_code = 2; dependency = 3; project_file = 3; documentation = 4 }
+    $counts = @{}
+    foreach ($existing in $Evidence) {
+        $group = '{0}|{1}' -f $existing.target, $existing.kind
+        $counts[$group] = [int]$counts[$group] + 1
+    }
+    $incomingGroup = '{0}|{1}' -f $Item.target, $Item.kind
+    $incomingRound = [int]$counts[$incomingGroup] + 1
+    $incomingRank = if ($ranks.ContainsKey([string]$Item.kind)) { $ranks[[string]$Item.kind] } else { 5 }
+    $victim = -1
+    $worstRound = $incomingRound
+    $worstRank = $incomingRank
+    for ($index = 0; $index -lt $Evidence.Count; $index++) {
+        $existing = $Evidence[$index]
+        $group = '{0}|{1}' -f $existing.target, $existing.kind
+        $round = [int]$counts[$group]
+        $rank = if ($ranks.ContainsKey([string]$existing.kind)) { $ranks[[string]$existing.kind] } else { 5 }
+        if ($round -gt $worstRound -or ($round -eq $worstRound -and $rank -gt $worstRank)) {
+            $victim = $index
+            $worstRound = $round
+            $worstRank = $rank
+        }
+    }
+    if ($victim -ge 0) { $Evidence[$victim] = $Item }
+}
+
 function Add-AuditArtifactEvidence {
     param(
         $Accumulator,
@@ -988,14 +1020,13 @@ function Add-AuditArtifactEvidence {
         $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
         if ($existingKey -eq $evidenceKey) { return }
     }
-    if ($entry.evidence.Count -ge 48) { return }
     $evidence = [ordered]@{
         kind = $Kind
         path = $Path
         signal = $Signal
     }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
 }
 
 function Get-AuditArtifactConfidence($entry) {
@@ -1066,10 +1097,9 @@ function Add-AuditRequirementEvidence {
         $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
         if ($existingKey -eq $evidenceKey) { return }
     }
-    if ($entry.evidence.Count -ge 48) { return }
     $evidence = [ordered]@{ kind = $Kind; path = $Path; signal = $Signal }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
 }
 
 function Get-AuditRequirementSignalConfidence($entry) {
@@ -1163,7 +1193,7 @@ function Add-AuditRequirementFactsFromText {
         [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; pattern = "(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])" },
         [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; pattern = "(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr" },
         [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; pattern = "(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计" },
-        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|create|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|create|produce)\w*" },
+        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*" },
         [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; pattern = "(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
         [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
         [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b" }

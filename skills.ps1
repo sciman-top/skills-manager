@@ -18808,7 +18808,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260829.3"
+    return "audit-prompt-v20260912.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -19486,6 +19486,38 @@ function New-AuditArtifactCapabilityAccumulator {
     return @{}
 }
 
+function Add-AuditBoundedEvidence($Evidence, $Item) {
+    if ($Evidence.Count -lt 48) {
+        $Evidence.Add($Item) | Out-Null
+        return
+    }
+    # Keep representative target/kind groups before retaining more hits from one group.
+    $ranks = @{ source_code = 0; test = 1; supporting_code = 2; dependency = 3; project_file = 3; documentation = 4 }
+    $counts = @{}
+    foreach ($existing in $Evidence) {
+        $group = '{0}|{1}' -f $existing.target, $existing.kind
+        $counts[$group] = [int]$counts[$group] + 1
+    }
+    $incomingGroup = '{0}|{1}' -f $Item.target, $Item.kind
+    $incomingRound = [int]$counts[$incomingGroup] + 1
+    $incomingRank = if ($ranks.ContainsKey([string]$Item.kind)) { $ranks[[string]$Item.kind] } else { 5 }
+    $victim = -1
+    $worstRound = $incomingRound
+    $worstRank = $incomingRank
+    for ($index = 0; $index -lt $Evidence.Count; $index++) {
+        $existing = $Evidence[$index]
+        $group = '{0}|{1}' -f $existing.target, $existing.kind
+        $round = [int]$counts[$group]
+        $rank = if ($ranks.ContainsKey([string]$existing.kind)) { $ranks[[string]$existing.kind] } else { 5 }
+        if ($round -gt $worstRound -or ($round -eq $worstRound -and $rank -gt $worstRank)) {
+            $victim = $index
+            $worstRound = $round
+            $worstRank = $rank
+        }
+    }
+    if ($victim -ge 0) { $Evidence[$victim] = $Item }
+}
+
 function Add-AuditArtifactEvidence {
     param(
         $Accumulator,
@@ -19515,14 +19547,13 @@ function Add-AuditArtifactEvidence {
         $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
         if ($existingKey -eq $evidenceKey) { return }
     }
-    if ($entry.evidence.Count -ge 48) { return }
     $evidence = [ordered]@{
         kind = $Kind
         path = $Path
         signal = $Signal
     }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
 }
 
 function Get-AuditArtifactConfidence($entry) {
@@ -19593,10 +19624,9 @@ function Add-AuditRequirementEvidence {
         $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
         if ($existingKey -eq $evidenceKey) { return }
     }
-    if ($entry.evidence.Count -ge 48) { return }
     $evidence = [ordered]@{ kind = $Kind; path = $Path; signal = $Signal }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    $entry.evidence.Add([pscustomobject]$evidence) | Out-Null
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
 }
 
 function Get-AuditRequirementSignalConfidence($entry) {
@@ -19690,7 +19720,7 @@ function Add-AuditRequirementFactsFromText {
         [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; pattern = "(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])" },
         [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; pattern = "(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr" },
         [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; pattern = "(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计" },
-        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|create|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|create|produce)\w*" },
+        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*" },
         [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; pattern = "(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
         [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
         [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b" }
@@ -21012,7 +21042,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             )
             scoring = [ordered]@{
                 authority = "Prefer first-party documentation and maintained source repositories."
-                fit = "Match only the scan-derived target profile and concrete repository scan facts."
+                fit = "Use the current query to choose task focus and priorities, then validate capability fit against the scan-derived target profile and concrete repository evidence. The query alone does not prove a capability gap."
                 duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
                 maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
@@ -21129,7 +21159,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "This is a valid zero-change baseline, not an incomplete example file.",
         "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
-        "All install decisions must cite scan-derived target-profile reasons only.",
+        "Use the current query to prioritize the review; all install decisions must also cite scan-derived target-profile evidence. The query alone is not proof of a capability gap.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
         "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
         "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
@@ -22950,7 +22980,7 @@ function Write-AuditThreeFileBundle {
                 required_output_properties = @("reason_target_profile", "sources", "confidence", "keyword_trace", "uncertainty_or_do_not_install", "semantic_review_for_each_retirement")
                 evidence_rules = @(
                     "Reconcile contradictory source, dependency, test, and documentation evidence; do not silently choose the most optimistic interpretation.",
-                    "Start from target_profile.user_need_summary and target_profile.prioritized_needs.primary_needs. Raw hit counts and large-repository file volume do not prove user priority.",
+                    "First read scan_contract.query to identify the current task focus and priorities, then use target_profile.user_need_summary and target_profile.prioritized_needs to validate repository capabilities. The query does not rewrite scan facts or prove a capability gap. Raw hit counts and large-repository file volume do not prove user priority.",
                     "The portfolio image is the only user-need decision surface; target_scans are evidence partitions, not separate user-need profiles.",
                     "Promote a secondary or technical-context signal only after inspecting source evidence that establishes a core user journey; record the reason and uncertainty in recommendations.json.",
                     "Treat interface, persistence, testing, and operations signals as delivery context by default, not as direct product intent.",

@@ -159,7 +159,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             )
             scoring = [ordered]@{
                 authority = "Prefer first-party documentation and maintained source repositories."
-                fit = "Match only the scan-derived target profile and concrete repository scan facts."
+                fit = "Use the current query to choose task focus and priorities, then validate capability fit against the scan-derived target profile and concrete repository evidence. The query alone does not prove a capability gap."
                 duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
                 maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
@@ -276,7 +276,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         "This is a valid zero-change baseline, not an incomplete example file.",
         "Keep lifecycle categories empty unless the current scan, current-profile inventory, and reviewed sources establish a specific change.",
         "Every added change needs one or more real sources and matching source_observations; local fixtures and local paths are valid only when they are the actual input.",
-        "All install decisions must cite scan-derived target-profile reasons only.",
+        "Use the current query to prioritize the review; all install decisions must also cite scan-derived target-profile evidence. The query alone is not proof of a capability gap.",
         "Removal candidates require a host_ai semantic_review independent_of_target_profile=true; profile absence, same name, override, and dependency closure are never sufficient on their own.",
         "Every removal requires current user confirmation at apply time; not_observed invocation evidence and a user statement of no successful use remain uncertainty or reachability-risk signals, never fabricated as non-use.",
         "If the user reports no successful skill/MCP use, record it as a report-only no-successful-invocation finding: first verify profile projection or route matching; do not turn it into a lifecycle removal without that evidence."
