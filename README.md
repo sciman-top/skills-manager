@@ -145,9 +145,11 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### AI 编码快速用法
 
-跨 ChatGPT/Codex 与 ZCode/GLM 协作时，先调用 `$ai-coding-workflow`，并在任务中明确 `Goal`、`Context`、`Constraints`、`Exact write set`、`Minimum proof` 和 `Stop`。GPT/Codex 可优先承担架构、根因分析和 fresh-context 审查；GLM/ZCode 可优先承担已冻结写集内的长程、多文件实现——这是任务适配建议，不是模型自动路由。
+日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；跨 ChatGPT/Codex 与 ZCode/GLM 的分工按实际任务表现选择。
 
 不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT→GLM 交接和独立审查模板见 [`docs/product/ai-coding-playbook.md`](D:/CODE/skills-manager/docs/product/ai-coding-playbook.md)。
+
+工作流技能按受影响行为选择观察证据：Web 交互、桌面输入、服务交付、自动化与数据迁移各有不同验收路径；项目类型本身不触发全量测试或外部访问。日常执行方式、项目观察矩阵和工程终态见该手册第 7–9 节。修改技能源后通过既有 `构建生效` 流程物化和投影；源码落盘不等于宿主已加载，也不等于真实任务已验收。
 
 `full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
 

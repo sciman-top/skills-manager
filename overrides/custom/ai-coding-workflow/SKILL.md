@@ -19,6 +19,13 @@ change the result or the next step is an external or irreversible write. User
 instructions take precedence over this skill's guidelines; do not turn an
 authorized, reversible task into an approval pause.
 
+Prefer one primary executor through inspection, implementation, and validation.
+Infer file scope and verification commands from the repository when the user
+only knows the desired behavior; freeze the write set after inspection. Ask
+about material behavior conflicts, not routine implementation choices. Delegate
+only when authorized, independent slices have disjoint writes and useful proof,
+and coordination costs less than serial work.
+
 ## 1. Choose the lightest safe path
 
 Classify the request before editing:
@@ -87,14 +94,33 @@ them into "done": `repo_verified`, `filesystem_projected`, `host_loaded`, and
 `live_accepted`. A passing test, HTTP 200, health result, synthetic replay,
 static projection, or historical log cannot prove a higher boundary by itself.
 
+### Match observation to the changed behavior
+
+Select only evidence relevant to the current acceptance criterion; project type
+alone does not require all checks below or authorize live access.
+
+| Changed behavior | Useful observation beyond build/unit checks |
+| --- | --- |
+| Web UI | Rendered page, affected interaction, viewport and console errors |
+| Desktop/input integration | Actual window, focus/input events and affected lifecycle; hardware checks when relevant |
+| API/service/bot delivery | Request-to-effect trace; timeout, idempotency and real acknowledgement when delivery is in scope |
+| Automation/config/deployment | Repeat execution, partial failure, rollback and target-loaded version when projection is in scope |
+| Data/migration | Transaction boundaries, compatibility, recovery and repeat execution on representative disposable data |
+
+Reuse existing logs, tests and tools. If required observation is unavailable,
+report the missing evidence and proven lower boundary; do not substitute a mock
+or install instrumentation without a demonstrated need and admitted scope.
+
 ## 4. Prevent the common failures
 
 - **Scope drift / over-design:** keep Goal, exact write set, and Stop visible;
   report gaps, not style preferences. Defer work without a current failure or
   measurable acceptance need.
 - **Stale context / repeated correction:** re-read the current seam after a
-  meaningful change. After the same issue fails twice, use a fresh context and
-  rewrite the contract; only then consider a durable rule or skill candidate.
+  meaningful change. After the same issue fails twice, summarize confirmed
+  facts, rejected hypotheses and attempts; resolve missing input or conflicting
+  acceptance before retrying. Use fresh context when history is misleading;
+  only then consider a durable rule or skill candidate.
 - **Hallucinated APIs or "best" claims:** inspect the actual source and tests;
   use authoritative current documentation for unstable facts; label inference
   and do not invent parameters, model support, or tool behavior.
@@ -105,6 +131,10 @@ static projection, or historical log cannot prove a higher boundary by itself.
   then verify generated drift. A hand-edited generated file is not a fix.
 - **False-green tests:** preserve the behavior contract; do not weaken a test,
   delete a failing case, or treat a test-only fixture as production acceptance.
+  Derive assertions from required behavior; for a bug, demonstrate the same
+  regression case failing before and passing after when feasible. For material
+  risk, seek authorized independent review grounded in requirements and diff,
+  with concrete trigger, impact and evidence rather than style preferences.
 - **Secrets and external side effects:** never print or invent credentials;
   do not mutate host/provider/auth/MCP/session state, deploy, send messages,
   or call live services unless the current request explicitly includes that

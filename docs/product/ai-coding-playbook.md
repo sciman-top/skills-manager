@@ -18,13 +18,15 @@
 | 坑 | 防法 | 本仓锚点 |
 | --- | --- | --- |
 | 范围蔓延/过度设计 | 冻结 Goal/write set/Stop；审查 prompt 用 "Report gaps, not style preferences" | AGENTS.md B 节 not_admitted 准入门 |
-| 长会话退化（重复犯错、忘约束） | 两次纠正失败→新会话+重写 prompt | 宿主侧行为；关键决策写文件不靠会话记忆 |
+| 长会话退化（重复犯错、忘约束） | 同一问题失败两次后整理事实、假设和尝试，澄清缺口；历史误导时换新上下文 | 宿主侧行为；复用已有任务记录，不另建状态库 |
 | 幻觉 API/最优主张 | 强制一手来源+核实日期 | references/reference-shelf 只读缓存政策、一手资料核实纪律 |
 | 汇报与实态不符 | 只认命令输出；收口附 `git status` 快照 | verification-before-completion skill |
 | 测试迁就实现 | 不许改测试迁就实现；行为变化显式走契约迁移 | 审计快照 fixture 契约迁移先例（stale_snapshot fail-closed） |
 | 权限过大/并行互踩 | 默认最小权限、信任后再放开；并行用 git worktree | doctor config risks；scheduler 契约扫描（禁 RunLevel Highest）；git diff 分界并发改动 |
 | 规则膨胀反噬 | 每条规则过"删掉会致错吗"；重复失效下沉机制层 | mechanism-over-prose 裁决；9.79 瘦身 |
-| 逐步微管理、盯着 agent 看 | 主上下文保持专注；探索/测试/triage 交子代理或专用技能并行 | ai-coding-workflow skill 的 task-fit 路由节 |
+| 逐步微管理、盯着 agent 看 | 单主执行者自主完成闭环；仅在已授权、写集互斥、能独立验证且净收益为正时并行 | ai-coding-workflow skill 的执行姿态与 task-fit 节 |
+| 做错目标或自证正确 | 用具体用户操作定义验收；重要改动独立复核需求、diff、反例 | 任务合同与已有 review skill |
+| 看不到真实行为 | 按受影响行为选观察证据；缺失时报告未验收边界 | 本文第 8 节；已有测试、日志和宿主工具 |
 | 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | Claude 官方 2026-09-12 警告；ai-coding-workflow skill §4（report gaps, not style preferences） |
 | 不告知 build/test 命令（多数质量问题=配置问题） | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md A 节 entrypoint、C 节最低门禁 |
 
@@ -82,6 +84,9 @@ Stop: <达到什么条件后停止，不做额外重构>
 host_loaded / live_accepted，四层不要合并表述。
 ```
 
+用户不必预先知道精确文件或验证命令：可以只给目标、现场、约束和验收结果，
+由执行者调查后确定写集和最低验证。字段用于固定执行边界，不应成为例行审批表。
+
 ### 5.2 GPT/Codex → GLM/ZCode 交接
 
 ```text
@@ -122,3 +127,40 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - DeepSeek Models & Pricing — api-docs.deepseek.com/quick_start/pricing（2026-09-12 直抓：deepseek-flash=V4.1-Flash、旧名退役承接脚注、v4-pro 续供公告）
 - GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对，30+ agent 可用）— github.com/github/spec-kit（raw README 2026-09-12）
 - Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
+
+## 7. 日常执行与反馈
+
+默认单主执行者完成“理解目标 → 检查当前事实 → 实现 → 验证 → 收口”。用户提供业务取舍和可观察结果，AI 调查文件、调用链与命令；复杂或模糊任务先校准方案，小改动直接推进。执行中发现独立新问题只报告，不自动吸收。
+
+- 上下文以当前相关源码、复现步骤、日志和参考实现为主；旧对话作为线索，既有决定和验证结果用短交接胶囊传递。
+- 普通任务由 GPT 或 GLM 完整承担；模型分工是可调整的假设。以任务难度、工具可用性、总耗时和返工选择配置，避免每一步跨宿主交接。
+- 重要改动的独立审查从需求、diff 和相关测试寻找反例；报告触发条件、影响与证据。第二个模型的同意不能替代验证。
+- 失败用原始错误和当前状态反馈。同一问题连续失败两次，先整理已证实事实、失败尝试和未决问题，再决定澄清或换上下文；不盲目连续打补丁。
+- 效率观察可复用已有任务/PR记录，记录任务类型、宿主与模型、总耗时、人工纠错、验收后缺陷及可取得的费用。比较时保持任务类型和验收标准可比，不据少量非对照样本宣称模型优劣，不新建遥测或自动评分门禁。
+
+## 8. 按行为选择观察能力
+
+下表是验收选项，不是每个项目的必跑清单。只选择能证明当前改动的行与检查；权限、数据与外部副作用仍服从当前任务范围。
+
+| 受影响行为 | 优先复用的观察入口 | 要证明的结果与限制 |
+| --- | --- | --- |
+| Web/前端交互 | 开发服务器、浏览器、截图、控制台、现有交互测试 | 页面可见且操作路径正确；相关窄屏/错误状态得到验证，编译成功不能替代 |
+| WPF/桌面/输入集成 | 实际窗口、焦点和输入事件、生命周期日志、目标设备 | 受影响的触控、焦点、多屏或关闭行为；无设备时明确硬件验收未完成 |
+| API/服务/机器人交付 | 请求标识、入口到外部效果的日志、测试服务、实际 ACK | 当前超时/重试/幂等/交付行为；mock、HTTP 200 或健康探针不等于真实交付 |
+| 自动化/配置/部署 | 既有 dry-run、隔离目录、备份、目标版本/hash回读 | 重复执行与部分失败符合约定；部署在范围内时再证明目标加载和回滚 |
+| 数据/迁移 | 有代表性的可丢弃数据、事务与兼容测试、备份恢复入口 | 当前迁移的事务、重复执行、恢复与兼容；不自动访问生产数据 |
+
+先复用已有日志、测试和宿主工具。观察缺失时写明“已验证到哪里、缺什么、下一步怎样验证”；仅当现有入口无法验证当前失败时，再承认最小 instrumentation 或测试改动。自动化证据与自然用户验收分别记录。
+
+## 9. 本项目的工程终态与改进边界
+
+目标是一个宿主中立、可验证、可回滚的本地能力管理器：工程事实和方法在唯一源维护，按需进入宿主，验证证据与真实使用结果分层。日常调用方是现有 `ai-coding-workflow`；详细说明留在本参考件，跨仓所需的最小观察选择已内置技能正文，不要求其他项目读取本仓文档。
+
+现有职责链继续使用：`src/ → build.ps1 → skills.ps1` 承载 CLI；`skills.json + overrides/ → 构建生效 → agent/与受控投影` 承载技能配置和资产。本文改进落在工作流技能与使用说明，现有接口足够承载，无需新增命令、模型调度服务或状态数据库。
+
+- 技术栈保持 PowerShell 7；本次没有跨平台运行约束、性能测量或部署失败证明需要换栈。
+- 根 `AGENTS.md` 保留仓库入口、不变量、最低门禁和回滚；方法进现有技能，详细场景进本文，确定性约束继续由现有脚本与测试承担。
+- 共享工程约定不表示宿主加载方式相同。ZCode 当前仅加载用户全局和 Workspace 的 `AGENTS.md`，不递归合并子目录或展开 import；关键项目约定须在 Workspace 根可见，规则变更按宿主新会话验证。
+- 只有当前调用方的真实失败无法被现有接口承载时，才重新评估架构；先证明失败、改动范围、最低验证和仅回滚本次切片的入口。
+
+补充来源（2026-09-12 已读取官方/项目原文）：[OpenAI 最佳实践](https://learn.chatgpt.com/guides/best-practices)、[ZCode 指令与工具能力](https://zcode.z.ai/cn/docs/agents)、[Aider 使用建议](https://aider.chat/docs/usage/tips.html)、[Anthropic 长程代理实践](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)。本文执行取舍为适用于本仓的工程判断，不是模型能力实测排名。
