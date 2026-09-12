@@ -143,6 +143,12 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 默认 7 项中的 `ai-coding-workflow` 是日常实现、调试、审查与收口的薄闭环入口：它只携带高频稳定方法，详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
 
+### AI 编码快速用法
+
+跨 ChatGPT/Codex 与 ZCode/GLM 协作时，先调用 `$ai-coding-workflow`，并在任务中明确 `Goal`、`Context`、`Constraints`、`Exact write set`、`Minimum proof` 和 `Stop`。GPT/Codex 可优先承担架构、根因分析和 fresh-context 审查；GLM/ZCode 可优先承担已冻结写集内的长程、多文件实现——这是任务适配建议，不是模型自动路由。
+
+不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT→GLM 交接和独立审查模板见 [`docs/product/ai-coding-playbook.md`](D:/CODE/skills-manager/docs/product/ai-coding-playbook.md)。
+
 `full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
 
 ### MCP

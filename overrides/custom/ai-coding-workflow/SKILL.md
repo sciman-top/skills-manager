@@ -135,6 +135,23 @@ Route rather than duplicating procedures:
 - invisible specialized skill with no sufficient visible match →
   `capability-router` once, as its narrow read-only fallback
 
+When handing a task between GPT/Codex and GLM/ZCode, pass a compact task
+capsule instead of the full conversation:
+
+```text
+Goal:
+Current status/evidence:
+Decisions already made:
+Exact write set:
+Minimum proof:
+Stop:
+```
+
+The receiving host must re-read the current repository status and changed seam
+before acting. Model name, reasoning effort, and host-specific availability
+are operator choices and evidence-bound facts; never treat the capsule as
+permission to switch provider, widen the write set, or skip verification.
+
 Detailed mappings, budget observations, and the GPT/GLM rationale live in
 `docs/product/ai-coding-playbook.md`; load only the relevant section when
 needed rather than copying the entire reference into every task.

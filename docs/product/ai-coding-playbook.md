@@ -60,7 +60,57 @@
 - **交叉审查必须 fresh context**：新会话/子代理独立审再合并发现，防继承被审者盲区；审查输出要求 "Report gaps, not style preferences"。
 - **资产积累节奏**：AI 同类错第 2 次→AGENTS.md 候选规则或 skill 候选（先过 retrospective + 准入门）；手动重复同一流程第 3 次→scheduled task 候选（先手工跑稳）。
 
-## 5. 实践来源（直抓/复核日期）
+## 5. 可直接复制的任务模板
+
+以下模板是输入辅助，不是新的规则或授权层。把占位内容换成当前任务事实；
+跨宿主交接时传递任务胶囊，不复制整段历史对话。
+
+### 5.1 普通实现或修复
+
+```text
+$ai-coding-workflow
+Goal: <要实现或修复的用户可见结果>
+Context: <仓库根、相关文件/模块、当前错误或复现步骤>
+Constraints: <兼容性、不得触碰的目录、秘密和并发改动约束>
+Exact write set: <允许修改的精确文件/目录>
+Minimum proof: <build、受影响测试、contract 或其他最低充分验证>
+Stop: <达到什么条件后停止，不做额外重构>
+
+先读取当前 git status、相关源码和测试；如果事实不足，先报告缺口。
+完成后报告改动、命令输出和 repo_verified / filesystem_projected /
+host_loaded / live_accepted，四层不要合并表述。
+```
+
+### 5.2 GPT/Codex → GLM/ZCode 交接
+
+```text
+Task capsule:
+Goal: <目标>
+Current status/evidence: <当前分支、失败证据、已确认事实>
+Decisions already made: <已确定的接口、行为和取舍>
+Exact write set: <精确写集>
+Minimum proof: <最低验证>
+Stop: <停止条件>
+
+请重新读取当前仓库状态和改动 seam，再在上述写集内实现。
+不要根据模型名称猜测 API、provider、权限或宿主能力；不要扩大写集。
+如果发现契约冲突或真实失败与胶囊不符，先停下并报告证据。
+```
+
+### 5.3 Fresh-context 审查
+
+```text
+请只审查当前 diff/commit 的正确性、回归、安全、兼容和测试充分性。
+先读取当前仓库状态、实际源码、相关测试和项目规则。
+Report gaps, not style preferences；不要为了提出建议而扩大范围。
+只报告可由证据支持的 actionable findings，并标明文件、原因和风险。
+除非明确授权，不修改文件。
+```
+
+模型分工仍是任务适配推断，不是固定优劣或自动故障切换：GPT/Codex
+可承担架构、根因和独立复核；GLM/ZCode 可承担有界的长程、多文件实现。
+
+## 6. 实践来源（直抓/复核日期）
 
 - Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=/goal+Stop hook 四档验证门禁、/batch、gap-hunting 审查警告；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
 - Codex Best Practices — learn.chatgpt.com/guides/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=extra-high 档、/fork、子目录 AGENTS.md nearest-wins）
