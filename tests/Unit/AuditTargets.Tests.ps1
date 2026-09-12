@@ -103,6 +103,15 @@ BeforeAll {
 
 }
 Describe "Audit Targets" {
+    It "Excludes dependency files while retaining nested source in pruned enumeration" {
+        $repo = Join-Path $TestDrive 'pruned-enumeration'
+        $null = New-Item -ItemType Directory -Path "$repo/src/nested", "$repo/node_modules/deep" -Force
+        Set-ContentUtf8 "$repo/src/nested/main.py" 'print(1)'
+        Set-ContentUtf8 "$repo/node_modules/deep/ignored.py" 'print(2)'
+        $files = @(Get-AuditPrunedFiles $repo '*.py')
+        $files.Count | Should -Be 1
+        $files[0].Name | Should -Be 'main.py'
+    }
     BeforeEach {
         Mock Get-AuditLiveInstalledState {
             [pscustomobject]([ordered]@{

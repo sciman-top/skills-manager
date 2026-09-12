@@ -19396,10 +19396,26 @@ function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidat
     return $false
 }
 
+function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
+    $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($segment in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $null = $ignored.Add($segment) }
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($resolvedPath)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        # Prune before descending, so excluded dependency trees are never enumerated.
+        Get-ChildItem -LiteralPath $directory -Filter $filter -File -ErrorAction SilentlyContinue |
+            Where-Object { -not $ignored.Contains($_.Name) }
+        $children = @(Get-ChildItem -LiteralPath $directory -Directory -ErrorAction SilentlyContinue |
+            Where-Object { -not $ignored.Contains($_.Name) -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+            Sort-Object Name -Descending)
+        foreach ($child in $children) { $pending.Push($child.FullName) }
+    }
+}
+
 function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
     return @(
-        Get-ChildItem -LiteralPath $resolvedPath -Filter $filter -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
+        Get-AuditPrunedFiles $resolvedPath $filter |
             Select-Object -First $limit
     )
 }
@@ -19418,21 +19434,9 @@ function Get-AuditSourceFileIndex([string]$resolvedPath) {
         $null = $extensions.Add($extension)
     }
     $files = New-Object System.Collections.Generic.List[object]
-    try {
-        foreach ($fullPath in [System.IO.Directory]::EnumerateFiles($resolvedPath, '*', [System.IO.SearchOption]::AllDirectories)) {
-            if (Test-AuditIgnoredRecursivePath $resolvedPath $fullPath) { continue }
-            if (-not $extensions.Contains([System.IO.Path]::GetExtension($fullPath))) { continue }
-            try { $files.Add([System.IO.FileInfo]::new($fullPath)) | Out-Null } catch { continue }
-        }
-    }
-    catch {
-        # Preserve the previous best-effort behaviour if a provider/ACL blocks
-        # .NET enumeration part-way through a tree.
-        $files.Clear()
-        foreach ($file in @(Get-ChildItem -LiteralPath $resolvedPath -File -Recurse -ErrorAction SilentlyContinue)) {
-            if ((Test-AuditIgnoredRecursivePath $resolvedPath $file.FullName) -or -not $extensions.Contains($file.Extension)) { continue }
-            $files.Add($file) | Out-Null
-        }
+    foreach ($file in @(Get-AuditPrunedFiles $resolvedPath)) {
+        if (-not $extensions.Contains($file.Extension)) { continue }
+        $files.Add($file) | Out-Null
     }
     $result = @($files.ToArray() | Sort-Object FullName)
     $script:AuditSourceFileIndexCache[$cacheKey] = $result
@@ -23090,7 +23094,10 @@ function Invoke-AuditTargetsScan {
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
     $scans = @($targets | ForEach-Object {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
+        Write-Host ("Scanning {0} ..." -f $_.name)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
+        Write-Host ("Scanned {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
     })
     return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" ([string]$Query) $cfg $scans
 }

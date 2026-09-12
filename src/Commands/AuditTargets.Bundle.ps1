@@ -185,7 +185,10 @@ function Invoke-AuditTargetsScan {
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
     $scans = @($targets | ForEach-Object {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
+        Write-Host ("Scanning {0} ..." -f $_.name)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
+        Write-Host ("Scanned {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
     })
     return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" ([string]$Query) $cfg $scans
 }
