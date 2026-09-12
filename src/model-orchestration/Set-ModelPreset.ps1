@@ -63,7 +63,9 @@ function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
         $start = $headers[0] + 1
     }
     for ($i=$start; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end=$i; break } }
-    $hits = @($start..($end-1) | Where-Object { $lines[$_] -match ('^\s*' + [regex]::Escape($Key) + '\s*=') })
+    $hits = @(for ($i=$start; $i -lt $end; $i++) {
+        if ($lines[$i] -match ('^\s*' + [regex]::Escape($Key) + '\s*=')) { $i }
+    })
     if ($hits.Count -gt 1) { throw "Duplicate scalar: $Key" }
     $newLine = "$Key = $Value"
     if ($hits.Count -eq 1) { $lines[$hits[0]] = $newLine } else { $lines.Insert($end, $newLine) }

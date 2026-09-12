@@ -4,8 +4,8 @@
 **最后更新**: 2026-09-12
 
 ## 1. 产品边界与入口
-- `skills.ps1` 是唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 同时是 Codex、Claude 与 ZCode 的项目级规则源；ZCode 仅读取当前 Workspace 根文件。
-- 本仓管理本地技能/MCP、目标仓规则审查、原生技能投影，以及 `rules/global/` 中的全局规则源和受控投影；不接管宿主 runtime、auth、provider、模型、权限、会话或插件缓存。
+- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 同时是 Codex、Claude 与 ZCode 的项目级规则源；ZCode 仅读取当前 Workspace 根文件。
+- 主 CLI 管理本地技能/MCP、目标仓规则审查、原生技能投影及 `rules/global/` 的受控投影，不接管模型或宿主 runtime。独立的 `src/model-orchestration/` 仅提供显式 preset 配置和受控启动，遵循其局部 `AGENTS.md`，不进入主 CLI 构建链；两者均不接管 auth、provider、权限、会话或插件缓存。
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
 
 ## A. 仓库真值与领域不变量

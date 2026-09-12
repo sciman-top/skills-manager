@@ -4,7 +4,7 @@ A Windows-first, local-first PowerShell 7 manager for AI skills and MCP servers.
 
 It is aimed at individuals and teams that want the same skill set across Windows machines, auditable repository rules, and a shared MCP inventory without handing model, account, or runtime ownership to another framework.
 
-This repository is not a second AI runtime. It does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
+The main CLI does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. The [independent preset tool](src/model-orchestration/README.md) provides explicit model configuration and controlled launches; it is outside the skills/MCP build and does not automate failover or task replay. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
 
 This project is licensed under the [MIT License](LICENSE). Third-party skills and dependencies remain subject to their original licenses.
 

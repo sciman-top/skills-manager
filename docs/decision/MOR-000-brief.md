@@ -2,7 +2,7 @@
 
 **状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `skills-manager/src/model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
 **依据**：[PRD](../product/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
-**回滚**：删除本文件即回滚本决议；不影响任何已提交设计文档或宿主状态
+**回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
 ## 1. 已钉定决议
@@ -45,13 +45,13 @@
 
 **同等合法的替代决定**：暂不选择 runtime-root，继续保持 design-only；不进入 MOR-010 实现，但保留只读 MOR-090 事实审查车道。
 
-## 4. 未决字段（root 选定时一并钉定）
+## 4. 独立工具与后续完整控制面
 
 | 项 | 状态 |
 | --- | --- |
-| `<runtime-root>` / owner | `blocked: awaiting owner decision`（见 §3 基线） |
-| native projection target / rollback entry | 仅记录为待证实事实；首期 projection=none 使其不阻断 R1 |
-| 首期授权边界 | 随决议句一并生效：零网络、零 OAuth、零模型调用；host write 为独立授权域 |
+| 独立 preset 工具 / owner | `src/model-orchestration` / 当前用户 sciman；入口、配置真源和回滚见该目录 `AGENTS.md` |
+| 原生投影 / 受控启动 | 由用户显式调用独立脚本；不接入 `skills.ps1`，不自动改写运行中的会话；ZCode 投影仍阻断 |
+| 完整 MOR 控制面 | 继续 `decided_deferred`；§3 是未来实现的历史设计输入，不限制已授权的独立工具，也不授权新增 runtime、自动故障切换或任务重放 |
 
 ## 5. 与既有资产的边界
 

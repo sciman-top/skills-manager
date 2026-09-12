@@ -4,7 +4,7 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
 
-本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex、Claude、ZCode 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
+主 CLI 不选择模型、不管理 provider/auth/session、不接管宿主语义路由或插件缓存。[独立 preset 工具](src/model-orchestration/README.md) 提供显式模型配置和受控启动，不参与技能/MCP 构建，也不自动故障切换或重放任务。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
 
 本项目采用 [MIT License](LICENSE)。第三方技能与依赖仍各自遵循其原始许可证。
 

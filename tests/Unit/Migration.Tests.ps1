@@ -24,6 +24,11 @@ Describe 'Migration bundles' {
             New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'rules\global') -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $fixtureAgent 'demo-skill\SKILL.md') -Value '# demo'
             Set-Content -LiteralPath (Join-Path $fixtureRoot 'rules\global\AGENTS.md') -Value '# fixture rules'
+            foreach ($relative in @('src/model-orchestration/.state/run/backup.json', 'src/model-orchestration/.generated/codex/role.toml', 'src/model-orchestration/presets.json')) {
+                $path = Join-Path $fixtureRoot $relative
+                New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+                Set-Content -LiteralPath $path -Value 'fixture-only'
+            }
             $Root = $fixtureRoot
             $AgentDir = $fixtureAgent
             $CfgPath = Join-Path $fixtureRoot 'skills.json'
@@ -58,6 +63,9 @@ Describe 'Migration bundles' {
         Test-Path -LiteralPath (Join-Path $packageRoot 'MIGRATION-MCP-CREDENTIALS.json') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $packageRoot 'agent\demo-skill\SKILL.md') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $packageRoot 'rules\global\AGENTS.md') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/presets.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/.state') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/.generated') | Should -BeFalse
     }
 
     It 'requires a version number for a default delivery path' {

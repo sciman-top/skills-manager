@@ -3,6 +3,48 @@ BeforeAll {
 }
 
 Describe 'Skill package safety' {
+    Context 'Staged directory replacement' {
+        BeforeEach {
+            $fixture = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $source = Join-Path $fixture 'source'
+            $target = Join-Path $fixture 'target'
+            New-Item -ItemType Directory -Path $source, $target -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $source 'value.txt') -Value 'new'
+            Set-Content -LiteralPath (Join-Path $target 'value.txt') -Value 'old'
+            Mock Log {}
+        }
+
+        It 'preserves the original directory when its backup move fails' {
+            Mock Invoke-MoveItem { throw 'backup move blocked' }
+            { Install-StagedDirectoryAtomic $source $target } | Should -Throw '*backup move blocked*'
+            Get-Content -LiteralPath (Join-Path $target 'value.txt') | Should -Be 'old'
+            Get-Content -LiteralPath (Join-Path $source 'value.txt') | Should -Be 'new'
+        }
+
+        It 'restores the original directory when publishing the new one fails' {
+            Mock Invoke-MoveItem {
+                if ($src -eq $source) { throw 'publish blocked' }
+                Move-Item -LiteralPath $src -Destination $dst
+            }
+            { Install-StagedDirectoryAtomic $source $target } | Should -Throw '*publish blocked*'
+            Get-Content -LiteralPath (Join-Path $target 'value.txt') | Should -Be 'old'
+        }
+
+        It 'keeps the published directory when backup cleanup partially fails' {
+            Mock Invoke-RemoveItemWithRetry {
+                Remove-Item -LiteralPath $path -Recurse
+                return $true
+            }
+            Mock Invoke-RemoveItemWithRetry {
+                Remove-Item -LiteralPath (Join-Path $path 'value.txt')
+                if ($IgnoreFailure) { return $false }
+                throw 'backup cleanup blocked'
+            } -ParameterFilter { $path -like '*.previous-*' }
+            Install-StagedDirectoryAtomic $source $target
+            Get-Content -LiteralPath (Join-Path $target 'value.txt') | Should -Be 'new'
+        }
+    }
+
     It 'accepts an ordinary package contained by its source root' {
         $root = Join-Path $TestDrive 'ordinary'
         $skill = Join-Path $root 'skills\demo'

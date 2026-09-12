@@ -7674,15 +7674,16 @@ function Install-StagedDirectoryAtomic([string]$SourcePath,[string]$TargetPath,[
     EnsureDir (Split-Path $TargetPath -Parent)
     $backupPath=("{0}.previous-{1}" -f $TargetPath,[guid]::NewGuid().ToString('N'))
     $movedOld=$false
+    # A failed backup move must leave the original outside the rollback cleanup.
+    if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
     try{
-        if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
         Invoke-MoveItem $SourcePath $TargetPath
-        if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse}
     }catch{
-        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse -IgnoreFailure|Out-Null}
+        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse|Out-Null}
         if($movedOld -and (Test-Path -LiteralPath $backupPath)){Invoke-MoveItem $backupPath $TargetPath}
         throw
     }
+    if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse -IgnoreFailure|Out-Null}
 }
 
 function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean = $true) {
@@ -17472,7 +17473,7 @@ function Unprotect-MigrationCredentialPayload($Encrypted, [System.Security.Secur
     finally { [Array]::Clear($key, 0, $key.Length); [Array]::Clear($plainBytes, 0, $plainBytes.Length) }
 }
 
-function Copy-MigrationTree([string]$Source, [string]$Destination) {
+function Copy-MigrationTree([string]$Source, [string]$Destination, [string[]]$ExcludedRelativePaths = @()) {
     if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return $false }
     $sourceRoot = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
     # The walker skips reparse entries inside the tree, but a source root that
@@ -17484,6 +17485,15 @@ function Copy-MigrationTree([string]$Source, [string]$Destination) {
         if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
         $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
         if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
+        $pathKey = $relative.Replace('\', '/')
+        $excluded = $false
+        foreach ($prefix in $ExcludedRelativePaths) {
+            if ($pathKey -eq $prefix -or $pathKey.StartsWith(($prefix + '/'), [StringComparison]::OrdinalIgnoreCase)) {
+                $excluded = $true
+                break
+            }
+        }
+        if ($excluded) { continue }
         $target = Join-Path $Destination $relative
         if ($entry.PSIsContainer) {
             if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
@@ -17777,13 +17787,11 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 $source = Join-Path $Root $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
-            foreach ($directory in @('src','config','tests','scripts','docs','rules')) {
+            foreach ($directory in @('src','config','tests','scripts','docs','rules','references','.github')) {
                 $source = Join-Path $Root $directory
-                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
-            }
-            foreach ($directory in @('references','.github')) {
-                $source = Join-Path $Root $directory
-                if (Test-Path -LiteralPath $source -PathType Container) { Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null }
+                # The independent preset tool stores host-config backups under src/.
+                $excluded = if ($directory -eq 'src') { @('model-orchestration/.state', 'model-orchestration/.generated') } else { @() }
+                Copy-MigrationTree $source (Join-Path $packageRoot $directory) $excluded | Out-Null
             }
             if (Test-Path -LiteralPath (Join-Path $Root 'overrides') -PathType Container) { Copy-MigrationTree (Join-Path $Root 'overrides') (Join-Path $packageRoot 'overrides') | Out-Null }
             $sourceRoots = @('vendor','imports')

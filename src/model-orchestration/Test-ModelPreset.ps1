@@ -49,6 +49,14 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
+    $emptyRoot = "[agents]`n[unrelated]`nmodel = `"preserve-other-section`""
+    [IO.File]::WriteAllText($cfg, $emptyRoot)
+    $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $emptyRootResult = Get-Content -LiteralPath $cfg -Raw
+    Assert ($emptyRootResult.StartsWith('model = "gpt-6-astra"')) 'Empty root must receive its own model key'
+    Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $emptyRootReceipt.receipt | Out-Null
+    Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $emptyRoot) 'Empty-root rollback must restore original content'
     $claudeTarget = Join-Path $fixture 'claude'
     [IO.Directory]::CreateDirectory($claudeTarget) | Out-Null
     $settings = Join-Path $claudeTarget 'settings.json'

@@ -279,15 +279,16 @@ function Install-StagedDirectoryAtomic([string]$SourcePath,[string]$TargetPath,[
     EnsureDir (Split-Path $TargetPath -Parent)
     $backupPath=("{0}.previous-{1}" -f $TargetPath,[guid]::NewGuid().ToString('N'))
     $movedOld=$false
+    # A failed backup move must leave the original outside the rollback cleanup.
+    if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
     try{
-        if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
         Invoke-MoveItem $SourcePath $TargetPath
-        if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse}
     }catch{
-        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse -IgnoreFailure|Out-Null}
+        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse|Out-Null}
         if($movedOld -and (Test-Path -LiteralPath $backupPath)){Invoke-MoveItem $backupPath $TargetPath}
         throw
     }
+    if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse -IgnoreFailure|Out-Null}
 }
 
 function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean = $true) {
