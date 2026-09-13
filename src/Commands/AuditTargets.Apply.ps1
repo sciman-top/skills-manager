@@ -874,13 +874,25 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
 function New-AuditApplyTransactionSnapshot {
     $exists = Test-Path -LiteralPath $CfgPath -PathType Leaf
     [byte[]]$bytes = if ($exists) { [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($CfgPath)) } else { [byte[]]::new(0) }
-    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes }
+    $hashes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($exists) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$hashes.Add([Convert]::ToHexString($sha.ComputeHash($bytes)).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
+    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes; config_write_hashes=$hashes }
 }
 
 function Restore-AuditApplyTransaction {
     param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted,[string[]]$OverrideBackupPaths=@())
     $errors = New-Object System.Collections.Generic.List[string]
     try {
+        $configPath = [string]$Snapshot.config_path
+        if (Test-AncestorChainHasReparse $configPath) { throw 'config_restore_conflict:reparse_path' }
+        if ([IO.File]::Exists($configPath)) {
+            if (-not $Snapshot.config_write_hashes.Contains([string](Get-FileContentHash $configPath))) { throw 'config_restore_conflict:external_change' }
+        }
+        elseif ([bool]$Snapshot.config_existed -or [IO.Directory]::Exists($configPath)) { throw 'config_restore_conflict:external_deletion_or_replacement' }
         if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
         elseif ([IO.File]::Exists([string]$Snapshot.config_path)) { [IO.File]::Delete([string]$Snapshot.config_path) }
     }
@@ -1113,6 +1125,7 @@ function Invoke-AuditRecommendationsApply {
     $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
     if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
     $transaction = New-AuditApplyTransactionSnapshot
+    $AuditApplyConfigSnapshot = $transaction
     $skillMutationAttempted = $false
     $mcpMutationAttempted = $false
     $overrideBackupPaths = @()

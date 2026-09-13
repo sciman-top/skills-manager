@@ -2238,6 +2238,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $CfgPath = $script:CfgPath
                 Set-ContentUtf8 $script:CfgPath '{"before":true}'
                 $snapshot = New-AuditApplyTransactionSnapshot
+                $AuditApplyConfigSnapshot = $snapshot
                 Set-ContentUtf8 $script:CfgPath '{"after":true}'
                 Mock 构建生效 { throw 'build restore failed' }
                 Mock 同步MCP { }

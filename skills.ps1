@@ -77,6 +77,16 @@ function Write-BytesAtomic {
         [ValidateRange(0, 60000)][int]$DelayMs = 200
     )
 
+    # Audit compensation must recognize intended config bytes even if the
+    # writer throws after replacement. The caller-scoped snapshot expires
+    # with that apply call; ordinary writes have no transaction to record.
+    $auditConfigTransaction = Get-Variable -Name AuditApplyConfigSnapshot -ValueOnly -ErrorAction Ignore
+    if ($null -ne $auditConfigTransaction -and [IO.Path]::GetFullPath($Path) -eq [string]$auditConfigTransaction.config_path) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$auditConfigTransaction.config_write_hashes.Add([Convert]::ToHexString($sha.ComputeHash($Bytes)).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
+
     $parent = Split-Path $Path -Parent
     if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
         [System.IO.Directory]::CreateDirectory($parent) | Out-Null
@@ -24080,13 +24090,25 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
 function New-AuditApplyTransactionSnapshot {
     $exists = Test-Path -LiteralPath $CfgPath -PathType Leaf
     [byte[]]$bytes = if ($exists) { [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($CfgPath)) } else { [byte[]]::new(0) }
-    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes }
+    $hashes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($exists) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$hashes.Add([Convert]::ToHexString($sha.ComputeHash($bytes)).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
+    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes; config_write_hashes=$hashes }
 }
 
 function Restore-AuditApplyTransaction {
     param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted,[string[]]$OverrideBackupPaths=@())
     $errors = New-Object System.Collections.Generic.List[string]
     try {
+        $configPath = [string]$Snapshot.config_path
+        if (Test-AncestorChainHasReparse $configPath) { throw 'config_restore_conflict:reparse_path' }
+        if ([IO.File]::Exists($configPath)) {
+            if (-not $Snapshot.config_write_hashes.Contains([string](Get-FileContentHash $configPath))) { throw 'config_restore_conflict:external_change' }
+        }
+        elseif ([bool]$Snapshot.config_existed -or [IO.Directory]::Exists($configPath)) { throw 'config_restore_conflict:external_deletion_or_replacement' }
         if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
         elseif ([IO.File]::Exists([string]$Snapshot.config_path)) { [IO.File]::Delete([string]$Snapshot.config_path) }
     }
@@ -24319,6 +24341,7 @@ function Invoke-AuditRecommendationsApply {
     $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
     if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
     $transaction = New-AuditApplyTransactionSnapshot
+    $AuditApplyConfigSnapshot = $transaction
     $skillMutationAttempted = $false
     $mcpMutationAttempted = $false
     $overrideBackupPaths = @()

@@ -44,6 +44,16 @@ function Write-BytesAtomic {
         [ValidateRange(0, 60000)][int]$DelayMs = 200
     )
 
+    # Audit compensation must recognize intended config bytes even if the
+    # writer throws after replacement. The caller-scoped snapshot expires
+    # with that apply call; ordinary writes have no transaction to record.
+    $auditConfigTransaction = Get-Variable -Name AuditApplyConfigSnapshot -ValueOnly -ErrorAction Ignore
+    if ($null -ne $auditConfigTransaction -and [IO.Path]::GetFullPath($Path) -eq [string]$auditConfigTransaction.config_path) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$auditConfigTransaction.config_write_hashes.Add([Convert]::ToHexString($sha.ComputeHash($Bytes)).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
+
     $parent = Split-Path $Path -Parent
     if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
         [System.IO.Directory]::CreateDirectory($parent) | Out-Null
