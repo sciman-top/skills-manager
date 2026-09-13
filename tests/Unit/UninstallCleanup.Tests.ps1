@@ -3,6 +3,131 @@ BeforeAll {
 
 }
 Describe "Uninstall cleanup" {
+    It 'preserves data after build outcome <Outcome> for <Kind>' -ForEach @(
+        @{ Kind = 'manual'; Outcome = 'failure' },
+        @{ Kind = 'overrides'; Outcome = 'failure' },
+        @{ Kind = 'manual'; Outcome = 'config-drift' },
+        @{ Kind = 'overrides'; Outcome = 'source-drift' },
+        @{ Kind = 'manual'; Outcome = 'success' }
+    ) {
+        $CfgPath = Join-Path $TestDrive "$Kind-$Outcome.json"
+        $ManualDir = Join-Path $TestDrive "$Kind-$Outcome-manual"
+        $OverridesDir = Join-Path $TestDrive "$Kind-$Outcome-overrides"
+        $source = if ($Kind -eq 'manual') { Join-Path $ManualDir 'demo' } else { Join-Path $OverridesDir 'custom/demo' }
+        New-Item -ItemType Directory -Path $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'original source'
+        [IO.File]::WriteAllText($CfgPath, '{"original":true}')
+        $item = [pscustomobject]@{ vendor = $Kind; from = 'demo'; full = $source }
+        $cfg = [pscustomobject]@{
+            vendors = @(); targets = @(); mcp_servers = @(); mcp_targets = @()
+            mappings = @(); imports = @()
+        }
+        if ($Kind -eq 'manual') {
+            $cfg.mappings = @([pscustomobject]@{ vendor = 'manual'; from = 'demo'; to = 'demo' })
+            $cfg.imports = @([pscustomobject]@{ name = 'demo'; mode = 'manual' })
+        }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock 收集ManualSkills { @() }
+        Mock 收集OverridesSkills { ,@($item) }
+        Mock 收集Skills { ,@($item) }
+        Mock SaveCfg { [IO.File]::WriteAllText($CfgPath, '{"saved":true}') }
+        Mock Clear-SkillsCache {}
+        Mock 构建生效 {
+            if ($Kind -eq 'manual') { Test-Path -LiteralPath $source | Should -BeTrue }
+            if ($Outcome -eq 'config-drift') { [IO.File]::WriteAllText($CfgPath, '{"concurrent":true}') }
+            if ($Outcome -eq 'source-drift') {
+                New-Item -ItemType Directory -Path $source -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'concurrent source'
+            }
+            if ($Outcome -ne 'success') { throw 'build failed' }
+        }
+        if ($Outcome -eq 'success') {
+            { 卸载 @('demo', '--yes') } | Should -Not -Throw
+            Test-Path -LiteralPath $source | Should -BeFalse
+            [IO.File]::ReadAllText($CfgPath) | Should -Be '{"saved":true}'
+        }
+        else {
+            $expected = if ($Outcome -eq 'config-drift') { '*uninstall_config_restore_stale*' } elseif ($Outcome -eq 'source-drift') { '*override_restore_target_exists*' } else { '*build failed*' }
+            { 卸载 @('demo', '--yes') } | Should -Throw $expected
+            $expectedConfig = if ($Outcome -eq 'config-drift') { '{"concurrent":true}' } else { '{"original":true}' }
+            [IO.File]::ReadAllText($CfgPath) | Should -Be $expectedConfig
+            $expectedSource = if ($Outcome -eq 'source-drift') { 'concurrent source' } else { 'original source' }
+            Get-Content -LiteralPath (Join-Path $source 'SKILL.md') | Should -Be $expectedSource
+            if ($Outcome -eq 'source-drift') {
+                $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $OverridesDir '.bak') -Filter SKILL.md -Recurse)
+                $backupFiles.Count | Should -Be 1
+                Get-Content -LiteralPath $backupFiles[0].FullName | Should -Be 'original source'
+            }
+        }
+    }
+
+    It 'preserves selected source directories when saving the uninstall configuration fails' -ForEach @(
+        @{ Kind = 'manual' }, @{ Kind = 'overrides' }
+    ) {
+        $ManualDir = Join-Path $TestDrive 'manual'
+        $OverridesDir = Join-Path $TestDrive 'overrides'
+        $source = if ($Kind -eq 'manual') { Join-Path $ManualDir 'demo' } else { Join-Path $OverridesDir 'custom/demo' }
+        New-Item -ItemType Directory -Path $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'original source'
+        $item = [pscustomobject]@{ vendor = $Kind; from = 'demo'; full = $source }
+        $cfg = [pscustomobject]@{
+            vendors = @(); targets = @(); mcp_servers = @(); mcp_targets = @()
+            mappings = @([pscustomobject]@{ vendor = $Kind; from = 'demo'; to = 'demo' })
+            imports = @([pscustomobject]@{ name = 'demo'; mode = 'manual' })
+        }
+        if ($Kind -eq 'overrides') { $cfg.mappings = @() }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock 收集ManualSkills { @() }
+        Mock 收集OverridesSkills { ,@($item) }
+        Mock 收集Skills { ,@($item) }
+        Mock SaveCfg { throw 'config save failed' }
+        Mock 构建生效 { throw 'build must not run' }
+        { 卸载 @('demo', '--yes') } | Should -Throw '*config save failed*'
+        Test-Path -LiteralPath (Join-Path $source 'SKILL.md') | Should -BeTrue
+        Should -Invoke 构建生效 -Times 0 -Exactly
+    }
+
+    It 'keeps two backups made within the same second separate' {
+        $OverridesDir = Join-Path $TestDrive 'same-second-overrides'
+        $source = Join-Path $OverridesDir 'custom/demo'
+        Mock Log {}
+        Mock Get-Date { '20260913-120000' } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        New-Item -ItemType Directory -Path $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'first'
+        $first = Backup-OverrideDir 'demo'
+        New-Item -ItemType Directory -Path $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'second'
+        $second = Backup-OverrideDir 'demo'
+        $first | Should -Not -Be $second
+        Get-Content -LiteralPath (Join-Path $first 'SKILL.md') | Should -Be 'first'
+        Get-Content -LiteralPath (Join-Path $second 'SKILL.md') | Should -Be 'second'
+    }
+
+    It 'uninstalls one mapping while preserving a still-mapped output and its profile references' {
+        $cfg = [pscustomobject]@{
+            vendors = @(); imports = @(); targets = @(); mcp_servers = @(); mcp_targets = @()
+            mappings = @(
+                [pscustomobject]@{ vendor='one'; from='demo'; to='shared' },
+                [pscustomobject]@{ vendor='two'; from='other'; to='shared' }
+            )
+            skill_projection = [pscustomobject]@{ discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{ test = @('shared') } } }
+        }
+        $item = [pscustomobject]@{ vendor='one'; from='demo'; full=$TestDrive }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock 收集ManualSkills { @() }
+        Mock 收集OverridesSkills { @() }
+        Mock 收集Skills { ,@($item) }
+        Mock SaveCfg {}
+        Mock 构建生效 {}
+        { 卸载 @('demo', '--yes') } | Should -Not -Throw
+        $cfg.mappings.Count | Should -Be 1
+        $cfg.skill_projection.discovery_catalog.domain_memberships.test | Should -Be @('shared')
+        Should -Invoke 构建生效 -Times 1 -Exactly
+    }
+
     It "ignores empty override directories" {
         $oldOverridesDir = $OverridesDir
         try {

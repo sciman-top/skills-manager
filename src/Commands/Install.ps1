@@ -1689,6 +1689,8 @@ function 卸载([string[]]$tokens = @()) {
     $deletedOverrides = 0
     $backedOverrides = 0
     $removedOutputNames = [Collections.Generic.List[string]]::new()
+    $legacyPaths = [Collections.Generic.List[string]]::new()
+    $overrideNames = [Collections.Generic.List[string]]::new()
     foreach ($item in $selectedItems) {
         if ($item.vendor -eq "manual") {
             foreach ($mapping in @($cfg.mappings | Where-Object { $_.vendor -eq 'manual' -and $_.from -eq $item.from })) {
@@ -1703,17 +1705,12 @@ function 卸载([string[]]$tokens = @()) {
             $deletedManualImports += ($before - @($cfg.imports).Count)
 
             $legacyPath = Join-Path $ManualDir $item.from
-            if (Test-Path $legacyPath) {
-                Invoke-RemoveItem $legacyPath -Recurse
-                $deletedLegacyManualDirs++
-            }
+            if (Test-Path -LiteralPath $legacyPath) { $legacyPaths.Add($legacyPath) }
             $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") })
         }
         elseif ($item.vendor -eq "overrides") {
             $removedOutputNames.Add([string]$item.from) | Out-Null
-            $bak = Backup-OverrideDir $item.from
-            if ($bak) { $backedOverrides++ }
-            $deletedOverrides++
+            $overrideNames.Add([string]$item.from)
         }
         else {
             # mapping 技能：从 mappings 移除
@@ -1743,9 +1740,59 @@ function 卸载([string[]]$tokens = @()) {
         }
     }
 
-    $retiredOutputNames = Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames $removedOutputNames.ToArray()
+    $retiredOutputNames = @(Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames $removedOutputNames.ToArray())
     $removedReferences = Remove-RetiredSkillProjectionReferences -Config $cfg -SkillNames $retiredOutputNames
-    SaveCfg $cfg
+    $configExisted = [IO.File]::Exists($CfgPath)
+    $configBefore = if ($configExisted) { [IO.File]::ReadAllBytes($CfgPath) } else { [byte[]]::new(0) }
+    $configSaved = $false
+    $overrideBackups = [Collections.Generic.List[object]]::new()
+    try {
+        SaveCfg $cfg
+        $savedConfigHash = Get-FileContentHash $CfgPath
+        $configSaved = $true
+        foreach ($name in $overrideNames) {
+            $source = [string](@(Resolve-OverrideDir $name)[0].FullName)
+            $bak = Backup-OverrideDir $name
+            Need (-not [string]::IsNullOrWhiteSpace($bak)) ("卸载源目录已变化：{0}" -f $name)
+            $snapshot = [pscustomobject]@{ source = $source; backup = $bak; fingerprint = '' }
+            $overrideBackups.Add($snapshot)
+            $snapshot.fingerprint = Get-DirectoryFingerprint $bak
+            $backedOverrides++
+            $deletedOverrides++
+        }
+        Clear-SkillsCache
+        构建生效
+    }
+    catch {
+        $failure = $_
+        $rollbackErrors = [Collections.Generic.List[string]]::new()
+        foreach ($snapshot in $overrideBackups) {
+            try {
+                Need (-not (Test-PathEntry $snapshot.source)) ("override_restore_target_exists:{0}" -f $snapshot.source)
+                Need (-not (Test-AncestorChainHasReparse $snapshot.source) -and -not (Test-AncestorChainHasReparse $snapshot.backup)) 'override_restore_path_reparse'
+                Need (-not [string]::IsNullOrWhiteSpace($snapshot.fingerprint) -and (Get-DirectoryFingerprint $snapshot.backup) -eq $snapshot.fingerprint) ("override_restore_backup_stale:{0}" -f $snapshot.backup)
+                [IO.Directory]::Move($snapshot.backup, $snapshot.source)
+            }
+            catch { $rollbackErrors.Add($_.Exception.Message) }
+        }
+        if ($configSaved) {
+            try {
+                Need (-not (Test-AncestorChainHasReparse $CfgPath)) 'uninstall_config_restore_path_reparse'
+                Need ((Get-FileContentHash $CfgPath) -eq $savedConfigHash) 'uninstall_config_restore_stale'
+                if ($configExisted) { Write-BytesAtomic -Path $CfgPath -Bytes $configBefore }
+                elseif ([IO.File]::Exists($CfgPath)) { [IO.File]::Delete($CfgPath) }
+            }
+            catch { $rollbackErrors.Add($_.Exception.Message) }
+        }
+        Clear-SkillsCache
+        if ($rollbackErrors.Count -gt 0) { throw ("{0}; uninstall rollback incomplete: {1}" -f $failure.Exception.Message, ($rollbackErrors -join '; ')) }
+        throw $failure
+    }
+    # Legacy sources are no longer referenced only after the build succeeds.
+    foreach ($legacyPath in $legacyPaths) {
+        Invoke-RemoveItem $legacyPath -Recurse
+        $deletedLegacyManualDirs++
+    }
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
     if ($removedVendorImports -gt 0) { $parts += "删除 vendor 导入 $removedVendorImports 项" }
@@ -1754,12 +1801,10 @@ function 卸载([string[]]$tokens = @()) {
     if ($deletedOverrides -gt 0) { $parts += "删除 overrides $deletedOverrides 项（已备份 $backedOverrides 项）" }
     if ($removedReferences.discovery_memberships -gt 0) { $parts += "清理 discovery catalog 引用 $($removedReferences.discovery_memberships) 项" }
     if ($removedReferences.profile_entries -gt 0) { $parts += "清理投影 profile 引用 $($removedReferences.profile_entries) 项" }
-    Write-Host ("已完成：{0}。开始【构建生效】..." -f ($parts -join "，"))
+    Write-Host ("卸载与构建已完成：{0}。" -f ($parts -join "，"))
     if ($backedOverrides -gt 0) {
         Write-Host "提示：overrides 备份已保存到 overrides/.bak/，如需彻底清理可手动删除该目录或其中备份。"
     }
-    Clear-SkillsCache
-    构建生效
 }
 
 function 选择 {

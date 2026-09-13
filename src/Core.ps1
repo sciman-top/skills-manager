@@ -763,7 +763,7 @@ function Backup-DirIfNeeded([string]$path) {
     if (Is-ReparsePoint $path) { return $null }
     $parent = Split-Path $path -Parent
     $leaf = Split-Path $path -Leaf
-    $bak = Join-Path $parent ("{0}.bak.{1}" -f $leaf, (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $bak = Join-Path $parent ("{0}.bak.{1}-{2}" -f $leaf, (Get-Date -Format "yyyyMMdd-HHmmss"), [guid]::NewGuid().ToString('N'))
     Invoke-MoveItem $path $bak
     return $bak
 }
@@ -777,7 +777,7 @@ function Backup-OverrideDir([string]$overrideName) {
     $bakRoot = Join-Path (Join-Path $OverridesDir ".bak") $category
     EnsureDir $bakRoot
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $bakName = "{0}.bak.{1}" -f $overrideName, $stamp
+    $bakName = "{0}.bak.{1}-{2}" -f $overrideName, $stamp, [guid]::NewGuid().ToString('N')
     $bakPath = Join-Path $bakRoot $bakName
     Invoke-MoveItem $src $bakPath
     return $bakPath
