@@ -99,28 +99,33 @@ function Copy-MigrationTree([string]$Source, [string]$Destination, [string[]]$Ex
     # is itself a junction would pull the target tree into the private snapshot.
     if (Is-ReparsePoint $sourceRoot) { throw ("迁移源目录不允许是链接/junction：{0}" -f $sourceRoot) }
     if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop)) {
-        # Migration contains package payload only: never follow links and never copy Git history.
-        if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
-        $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
-        if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
-        $pathKey = $relative.Replace('\', '/')
-        $excluded = $false
-        foreach ($prefix in $ExcludedRelativePaths) {
-            if ($pathKey -eq $prefix -or $pathKey.StartsWith(($prefix + '/'), [StringComparison]::OrdinalIgnoreCase)) {
-                $excluded = $true
-                break
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($sourceRoot)
+    while ($pending.Count -gt 0) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop)) {
+            # Migration contains package payload only: never follow links and never copy Git history.
+            if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
+            $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
+            if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
+            $pathKey = $relative.Replace('\', '/')
+            $excluded = $false
+            foreach ($prefix in $ExcludedRelativePaths) {
+                if ($pathKey -eq $prefix -or $pathKey.StartsWith(($prefix + '/'), [StringComparison]::OrdinalIgnoreCase)) {
+                    $excluded = $true
+                    break
+                }
             }
+            if ($excluded) { continue }
+            $target = Join-Path $Destination $relative
+            if ($entry.PSIsContainer) {
+                if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
+                $pending.Push($entry.FullName)
+                continue
+            }
+            $parent = Split-Path -Parent $target
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            Copy-Item -LiteralPath $entry.FullName -Destination $target -Force
         }
-        if ($excluded) { continue }
-        $target = Join-Path $Destination $relative
-        if ($entry.PSIsContainer) {
-            if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
-            continue
-        }
-        $parent = Split-Path -Parent $target
-        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        Copy-Item -LiteralPath $entry.FullName -Destination $target -Force
     }
     return $true
 }

@@ -4,6 +4,22 @@ BeforeAll {
 }
 
 Describe 'Migration bundles' {
+    It 'prunes excluded trees before enumeration and preserves empty payload directories' {
+        $source = Join-Path $TestDrive 'prune-source'
+        $destination = Join-Path $TestDrive 'prune-output'
+        New-Item -ItemType Directory -Path (Join-Path $source '.git/objects'), (Join-Path $source 'private/cache'), (Join-Path $source 'empty') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'visible.txt') -Value 'payload'
+        Mock Get-ChildItem { param($LiteralPath) [IO.DirectoryInfo]::new($LiteralPath).GetFileSystemInfos() }
+        Mock Get-ChildItem { throw 'excluded tree must not be enumerated' } -ParameterFilter {
+            $Recurse -or $LiteralPath -match '[\\/](\.git|private)([\\/]|$)'
+        }
+        Copy-MigrationTree $source $destination @('private') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $destination 'empty') | Should -BeTrue
+        Get-Content -LiteralPath (Join-Path $destination 'visible.txt') | Should -Be 'payload'
+        Test-Path -LiteralPath (Join-Path $destination '.git') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $destination 'private') | Should -BeFalse
+    }
+
     It 'admits only the private snapshot and auxiliary rescan modes' {
         (Get-MigrationTokens @()).mode | Should -Be 'private-all'
         (Get-MigrationTokens @('--mode', 'private-all')).mode | Should -Be 'private-all'

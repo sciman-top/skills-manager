@@ -59,21 +59,28 @@ function Assert-StagedPayloadIntegrity([string]$StagedRoot, [string]$ExpectedMan
     $manifestSha = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($manifestSha -ne $ExpectedManifestSha) { throw 'Staged RELEASE-MANIFEST.json changed after handoff.' }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    $manifestPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $manifestPaths = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in @($manifest.files)) {
-        [void]$manifestPaths.Add(([string]$entry.path).Replace('\', '/'))
+        $relative = ([string]$entry.path).Replace('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq 'RELEASE-MANIFEST.json' -or -not $manifestPaths.TryAdd($relative, $entry)) {
+            throw "Staged manifest contains an invalid or duplicate path: $relative"
+        }
     }
-    [void]$manifestPaths.Add('RELEASE-MANIFEST.json')
+    $manifestPaths.Add('RELEASE-MANIFEST.json', $null)
     $rootFull = [IO.Path]::GetFullPath($StagedRoot)
-    $actual = @(Get-ChildItem -LiteralPath $StagedRoot -Recurse -File -Force)
+    $entries = @(Get-ChildItem -LiteralPath $StagedRoot -Recurse -Force -ErrorAction Stop)
+    foreach ($entry in $entries) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Staged payload contains a reparse point: $($entry.FullName)" }
+    }
+    $actual = @($entries | Where-Object { -not $_.PSIsContainer })
     if ($actual.Count -ne $manifestPaths.Count) { throw 'Staged payload file set does not match the manifest.' }
     foreach ($file in $actual) {
         $relative = [IO.Path]::GetRelativePath($rootFull, $file.FullName).Replace('\', '/')
-        if (-not $manifestPaths.Contains($relative)) { throw "Staged payload contains an unmanifested file: $relative" }
+        if (-not $manifestPaths.ContainsKey($relative)) { throw "Staged payload contains an unmanifested file: $relative" }
         # The manifest itself is not an entry of its own files list; its
         # integrity is already pinned by the parent-supplied manifest hash.
         if ($relative -eq 'RELEASE-MANIFEST.json') { continue }
-        $entry = @($manifest.files | Where-Object { (([string]$_.path).Replace('\', '/')) -eq $relative })[0]
+        $entry = $manifestPaths[$relative]
         $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($sha -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "Staged payload file was modified after handoff: $relative" }
     }

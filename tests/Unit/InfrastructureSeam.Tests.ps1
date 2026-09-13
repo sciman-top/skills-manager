@@ -4,6 +4,21 @@ BeforeAll {
 
 }
 Describe 'UTF-8 atomic file infrastructure seam' {
+    It 'does not overwrite current config with a stale backup after atomic save fails' {
+        . (Join-Path $repoRoot 'skills.ps1')
+        $CfgPath = Join-Path $TestDrive 'concurrent-config.json'
+        [IO.File]::WriteAllText($CfgPath, '{"value":"current"}')
+        Mock Write-CfgChangeSummary {}
+        Mock Set-ContentUtf8 {
+            param($path, $content)
+            if ($content -match 'candidate') { throw 'atomic write failed' }
+            [IO.File]::WriteAllText($path, $content)
+        }
+        { SaveCfgSafe ([pscustomobject]@{ value = 'candidate' }) '{"value":"stale"}' } | Should -Throw '*atomic write failed*'
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"value":"current"}'
+        Should -Invoke Set-ContentUtf8 -Times 1 -Exactly
+    }
+
     It 'writes identical UTF-8 without BOM through the helper and legacy wrapper' {
         . (Join-Path $repoRoot 'skills.ps1')
         $helperPath = Join-Path $TestDrive 'helper\unicode.txt'

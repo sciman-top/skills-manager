@@ -1346,28 +1346,15 @@ function SaveCfg($cfg) {
 }
 function SaveCfgSafe($cfg, [string]$rawBackup) {
     if ($DryRun) { return }
-    try {
-        $oldRaw = $rawBackup
-        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
-            $oldRaw = Get-ContentUtf8 $CfgPath
-        }
-        Write-CfgChangeSummary $oldRaw $cfg
-        $json = $cfg | ConvertTo-Json -Depth 50
-        Set-ContentUtf8 $CfgPath $json
+    $oldRaw = $rawBackup
+    if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
+        $oldRaw = Get-ContentUtf8 $CfgPath
     }
-    catch {
-        $saveError = $_
-        if ($rawBackup) {
-            # 回滚写失败不得覆盖原始保存异常：聚合两者，归因才不失真。
-            try {
-                Set-ContentUtf8 $CfgPath $rawBackup
-            }
-            catch {
-                throw ("配置保存失败且回滚写入也失败：保存错误={0}；回滚错误={1}" -f $saveError.Exception.Message, $_.Exception.Message)
-            }
-        }
-        throw $saveError
-    }
+    Write-CfgChangeSummary $oldRaw $cfg
+    $json = $cfg | ConvertTo-Json -Depth 50
+    # Atomic replacement preserves the target on failure; a second write of an
+    # older snapshot could overwrite another writer's current configuration.
+    Set-ContentUtf8 $CfgPath $json
 }
 
 function Get-LockPath {

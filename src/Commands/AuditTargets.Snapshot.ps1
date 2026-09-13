@@ -512,19 +512,6 @@ function Get-AuditLiveInstalledState($cfg = $null) {
     })
 }
 
-function New-AuditInstalledFactsFallbackCfg {
-    return [pscustomobject]([ordered]@{
-        vendors = @()
-        targets = @()
-        mappings = @()
-        imports = @()
-        mcp_servers = @()
-        mcp_targets = @()
-        update_force = $false
-        sync_mode = "sync"
-    })
-}
-
 function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "snapshot 路径不能为空"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)

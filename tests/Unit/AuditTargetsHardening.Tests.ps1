@@ -1,3 +1,13 @@
+Describe 'Audit snapshot configuration failures' {
+    BeforeAll { . $PSScriptRoot\..\..\skills.ps1 }
+    It 'preserves the configuration failure and never substitutes an empty inventory' {
+        Mock LoadCfg { throw 'config unreadable' }
+        Mock Get-AuditLiveInstalledState { throw 'inventory must not run' }
+        { New-AuditInstalledStateSnapshot 'test' } | Should -Throw '*config unreadable*'
+        Should -Invoke Get-AuditLiveInstalledState -Times 0 -Exactly
+    }
+}
+
 BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
     $script:Root = $Root

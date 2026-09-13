@@ -2040,11 +2040,14 @@ function Get-PackagePayloadFiles([string]$Root) {
     if (-not (Test-Path -LiteralPath $rootFull -PathType Container)) {
         throw "package_payload_missing:$rootFull"
     }
-    return @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -File -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
+    if (((Get-Item -LiteralPath $rootFull -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "package_payload_reparse_point:$rootFull"
+    }
+    return @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
         if ([bool]($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw ("package_payload_reparse_point:{0}" -f $_.FullName)
         }
-        $_
+        if (-not $_.PSIsContainer) { $_ }
     })
 }
 
@@ -2069,8 +2072,6 @@ function New-VerifiedPackageArchive([string]$SourceRoot, [string]$DestinationPat
     if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
         New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
     }
-    if (Test-Path -LiteralPath $destinationFull) { [IO.File]::Delete($destinationFull) }
-
     $files = @(Get-PackagePayloadFiles $sourceFull)
     $expected = @{}
     foreach ($file in $files) {
@@ -2081,67 +2082,76 @@ function New-VerifiedPackageArchive([string]$SourceRoot, [string]$DestinationPat
         }
     }
 
-    $stream = [IO.File]::Open($destinationFull, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $temporaryPath = '{0}.tmp-{1}' -f $destinationFull, [guid]::NewGuid().ToString('N')
     try {
-        $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+        $stream = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
         try {
-            foreach ($file in $files) {
-                $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
-                $entry = $archive.CreateEntry(("{0}/{1}" -f $archiveRoot, $relative), [IO.Compression.CompressionLevel]::Optimal)
-                $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
-                $input = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-                try {
-                    $output = $entry.Open()
-                    try { $input.CopyTo($output) }
-                    finally { $output.Dispose() }
+            $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+            try {
+                foreach ($file in $files) {
+                    $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
+                    $entry = $archive.CreateEntry(("{0}/{1}" -f $archiveRoot, $relative), [IO.Compression.CompressionLevel]::Optimal)
+                    $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+                    $input = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                    try {
+                        $output = $entry.Open()
+                        try { $input.CopyTo($output) }
+                        finally { $output.Dispose() }
+                    }
+                    finally { $input.Dispose() }
                 }
-                finally { $input.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
+        finally { $stream.Dispose() }
+
+        $observed = @{}
+        $readStream = [IO.File]::Open($temporaryPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            $readArchive = [IO.Compression.ZipArchive]::new($readStream, [IO.Compression.ZipArchiveMode]::Read, $false)
+            try {
+                foreach ($entry in @($readArchive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })) {
+                    $prefix = $archiveRoot + '/'
+                    if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) {
+                        throw ("package_archive_root_mismatch:{0}" -f $entry.FullName)
+                    }
+                    $relative = $entry.FullName.Substring($prefix.Length)
+                    if ($observed.ContainsKey($relative)) { throw ("package_archive_duplicate:{0}" -f $relative) }
+                    $entryStream = $entry.Open()
+                    try {
+                        $sha = [Security.Cryptography.SHA256]::Create()
+                        try { $hash = [Convert]::ToHexString($sha.ComputeHash($entryStream)).ToLowerInvariant() }
+                        finally { $sha.Dispose() }
+                    }
+                    finally { $entryStream.Dispose() }
+                    $observed[$relative] = [ordered]@{ size = $entry.Length; sha256 = $hash }
+                }
+            }
+            finally { $readArchive.Dispose() }
+        }
+        finally { $readStream.Dispose() }
+
+        if ($observed.Count -ne $expected.Count) {
+            throw ("package_archive_file_count_mismatch:expected={0}:actual={1}" -f $expected.Count, $observed.Count)
+        }
+        foreach ($relative in @($expected.Keys | Sort-Object)) {
+            if (-not $observed.ContainsKey($relative)) { throw ("package_archive_missing:{0}" -f $relative) }
+            if ([long]$observed[$relative].size -ne [long]$expected[$relative].size -or [string]$observed[$relative].sha256 -ne [string]$expected[$relative].sha256) {
+                throw ("package_archive_hash_mismatch:{0}" -f $relative)
             }
         }
-        finally { $archive.Dispose() }
-    }
-    finally { $stream.Dispose() }
-
-    $observed = @{}
-    $readStream = [IO.File]::Open($destinationFull, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-    try {
-        $readArchive = [IO.Compression.ZipArchive]::new($readStream, [IO.Compression.ZipArchiveMode]::Read, $false)
-        try {
-            foreach ($entry in @($readArchive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })) {
-                $prefix = $archiveRoot + '/'
-                if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) {
-                    throw ("package_archive_root_mismatch:{0}" -f $entry.FullName)
-                }
-                $relative = $entry.FullName.Substring($prefix.Length)
-                if ($observed.ContainsKey($relative)) { throw ("package_archive_duplicate:{0}" -f $relative) }
-                $entryStream = $entry.Open()
-                try {
-                    $sha = [Security.Cryptography.SHA256]::Create()
-                    try { $hash = [Convert]::ToHexString($sha.ComputeHash($entryStream)).ToLowerInvariant() }
-                    finally { $sha.Dispose() }
-                }
-                finally { $entryStream.Dispose() }
-                $observed[$relative] = [ordered]@{ size = $entry.Length; sha256 = $hash }
-            }
+        $result = [pscustomobject][ordered]@{
+            path = $destinationFull
+            file_count = $observed.Count
+            size = (Get-Item -LiteralPath $temporaryPath).Length
+            sha256 = (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        finally { $readArchive.Dispose() }
+        if ([IO.File]::Exists($destinationFull)) { [IO.File]::Replace($temporaryPath, $destinationFull, [System.Management.Automation.Language.NullString]::Value) }
+        else { [IO.File]::Move($temporaryPath, $destinationFull) }
+        return $result
     }
-    finally { $readStream.Dispose() }
-
-    if ($observed.Count -ne $expected.Count) {
-        throw ("package_archive_file_count_mismatch:expected={0}:actual={1}" -f $expected.Count, $observed.Count)
-    }
-    foreach ($relative in @($expected.Keys | Sort-Object)) {
-        if (-not $observed.ContainsKey($relative)) { throw ("package_archive_missing:{0}" -f $relative) }
-        if ([long]$observed[$relative].size -ne [long]$expected[$relative].size -or [string]$observed[$relative].sha256 -ne [string]$expected[$relative].sha256) {
-            throw ("package_archive_hash_mismatch:{0}" -f $relative)
-        }
-    }
-    return [pscustomobject][ordered]@{
-        path = $destinationFull
-        file_count = $observed.Count
-        size = (Get-Item -LiteralPath $destinationFull).Length
-        sha256 = (Get-FileHash -LiteralPath $destinationFull -Algorithm SHA256).Hash.ToLowerInvariant()
+    finally {
+        if ([IO.File]::Exists($temporaryPath)) { [IO.File]::Delete($temporaryPath) }
     }
 }
 
@@ -9902,28 +9912,15 @@ function SaveCfg($cfg) {
 }
 function SaveCfgSafe($cfg, [string]$rawBackup) {
     if ($DryRun) { return }
-    try {
-        $oldRaw = $rawBackup
-        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
-            $oldRaw = Get-ContentUtf8 $CfgPath
-        }
-        Write-CfgChangeSummary $oldRaw $cfg
-        $json = $cfg | ConvertTo-Json -Depth 50
-        Set-ContentUtf8 $CfgPath $json
+    $oldRaw = $rawBackup
+    if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
+        $oldRaw = Get-ContentUtf8 $CfgPath
     }
-    catch {
-        $saveError = $_
-        if ($rawBackup) {
-            # 回滚写失败不得覆盖原始保存异常：聚合两者，归因才不失真。
-            try {
-                Set-ContentUtf8 $CfgPath $rawBackup
-            }
-            catch {
-                throw ("配置保存失败且回滚写入也失败：保存错误={0}；回滚错误={1}" -f $saveError.Exception.Message, $_.Exception.Message)
-            }
-        }
-        throw $saveError
-    }
+    Write-CfgChangeSummary $oldRaw $cfg
+    $json = $cfg | ConvertTo-Json -Depth 50
+    # Atomic replacement preserves the target on failure; a second write of an
+    # older snapshot could overwrite another writer's current configuration.
+    Set-ContentUtf8 $CfgPath $json
 }
 
 function Get-LockPath {
@@ -17512,28 +17509,33 @@ function Copy-MigrationTree([string]$Source, [string]$Destination, [string[]]$Ex
     # is itself a junction would pull the target tree into the private snapshot.
     if (Is-ReparsePoint $sourceRoot) { throw ("迁移源目录不允许是链接/junction：{0}" -f $sourceRoot) }
     if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop)) {
-        # Migration contains package payload only: never follow links and never copy Git history.
-        if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
-        $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
-        if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
-        $pathKey = $relative.Replace('\', '/')
-        $excluded = $false
-        foreach ($prefix in $ExcludedRelativePaths) {
-            if ($pathKey -eq $prefix -or $pathKey.StartsWith(($prefix + '/'), [StringComparison]::OrdinalIgnoreCase)) {
-                $excluded = $true
-                break
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($sourceRoot)
+    while ($pending.Count -gt 0) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop)) {
+            # Migration contains package payload only: never follow links and never copy Git history.
+            if ($entry.Name -eq '.git' -or ($entry.FullName -match '[\\/]\.git(?:[\\/]|$)') -or (Is-ReparsePoint $entry.FullName)) { continue }
+            $relative = [IO.Path]::GetRelativePath($sourceRoot, $entry.FullName)
+            if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.') { continue }
+            $pathKey = $relative.Replace('\', '/')
+            $excluded = $false
+            foreach ($prefix in $ExcludedRelativePaths) {
+                if ($pathKey -eq $prefix -or $pathKey.StartsWith(($prefix + '/'), [StringComparison]::OrdinalIgnoreCase)) {
+                    $excluded = $true
+                    break
+                }
             }
+            if ($excluded) { continue }
+            $target = Join-Path $Destination $relative
+            if ($entry.PSIsContainer) {
+                if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
+                $pending.Push($entry.FullName)
+                continue
+            }
+            $parent = Split-Path -Parent $target
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            Copy-Item -LiteralPath $entry.FullName -Destination $target -Force
         }
-        if ($excluded) { continue }
-        $target = Join-Path $Destination $relative
-        if ($entry.PSIsContainer) {
-            if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
-            continue
-        }
-        $parent = Split-Path -Parent $target
-        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        Copy-Item -LiteralPath $entry.FullName -Destination $target -Force
     }
     return $true
 }
@@ -21712,19 +21714,6 @@ function Get-AuditLiveInstalledState($cfg = $null) {
     })
 }
 
-function New-AuditInstalledFactsFallbackCfg {
-    return [pscustomobject]([ordered]@{
-        vendors = @()
-        targets = @()
-        mappings = @()
-        imports = @()
-        mcp_servers = @()
-        mcp_targets = @()
-        update_force = $false
-        sync_mode = "sync"
-    })
-}
-
 function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "snapshot 路径不能为空"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
@@ -22913,11 +22902,7 @@ function Ensure-AuditNewManualImportsMapped($beforeCfg) {
 
 function New-AuditInstalledStateSnapshot([string]$context) {
     try {
-        try { $liveCfg = LoadCfg }
-        catch {
-            Log ("{0}读取 skills.json 失败，已回退为空安装快照：{1}" -f $context, $_.Exception.Message) "WARN"
-            $liveCfg = New-AuditInstalledFactsFallbackCfg
-        }
+        $liveCfg = LoadCfg
         $liveState = Get-AuditLiveInstalledState $liveCfg
         $configuredSupplySkills = if ($liveState.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { @($liveState.configured_supply_skills) } else { @(Get-InstalledSkillFacts $liveCfg) }
         $installedSkills = if ($liveState.PSObject.Properties.Match('profile_selected_skills').Count -gt 0) { @($liveState.profile_selected_skills) } else { @() }
