@@ -5,16 +5,9 @@ description: Complete implementation and maintenance tasks with repository-groun
 
 # AI coding workflow
 
-Follow the target repository's engineering contract and the user's intended
-outcome. User instructions take precedence over this skill's guidance, within
-host policy. Reuse authorization already given for the current scope, including
-external actions; ask only for missing required authorization or information
-that materially changes the outcome. If this skill causes a pause, identify the
-exact instruction and unresolved input instead of requesting routine approval.
-
-Prefer one primary executor through inspection, implementation and validation.
-Delegate only when authorized, slices can be independently verified, writes do
-not conflict, and coordination costs less than serial work.
+Complete the user's authorized outcome under the target repository's contract
+and host policy. Reuse existing authorization; ask only for required missing
+input. If this skill causes a pause, name the instruction and unresolved input.
 
 ## 1. Scope the current task
 
@@ -26,19 +19,18 @@ as "this file". Separate existing changes from this task's write set.
 Write or infer the following; a small task needs only a sentence, not a form:
 
 ```text
-Goal: observable outcome
-Context: current repository, caller and relevant evidence
-Constraints: write set, compatibility and side-effect boundaries
-Success: behavior and minimum sufficient verification
-Stop: where the current task ends
+Goal: the user's complete observable outcome
+Exact write set: source files and compatibility/side-effect boundaries
+Minimum proof: evidence sufficient for the requested behavior
+Stop: acceptance of the whole authorized goal, or a concrete blocker
 ```
 
 Choose depth by uncertainty and impact:
 
 - **tiny/direct**: a clear, local, low-risk change, including a reproducible
   small bug. Inspect, change and run focused proof without a separate plan.
-- **normal**: resolve meaningful design uncertainty, then implement a bounded
-  slice. Clarify behavior conflicts rather than routine implementation details.
+- **normal**: resolve meaningful design uncertainty, then implement verifiable
+  slices. Clarify behavior conflicts rather than routine implementation details.
 - **high-risk**: security, data, migration, public contracts or deployment
   consequences require the target repository's safeguards and rollback proof.
 
@@ -48,13 +40,18 @@ Use `systematic-debugging` when the cause needs investigation. After two failed
 attempts on the same issue, summarize facts, rejected hypotheses and attempts,
 then resolve missing input or disputed acceptance before trying another patch.
 
+A slice is a checkpoint, not a replacement for the overall goal. After its
+proof passes, continue remaining authorized work. Keep outstanding requirements
+visible across slices and resumes; do not silently reduce implementation to a
+plan, documentation, or one passing test. A blocked action does not block other
+independent authorized work. Report the unresolved remainder when it needs user
+input or an unavailable capability; do not claim the whole goal is complete.
+
 ## 2. Implement and verify
 
-Edit the target repository's source of truth and rebuild generated outputs
-when required. Directory names alone do not identify generated or third-party
-content. Add structure only when the current requested feature or demonstrated
-failure needs it; prefer existing interfaces. Preserve unrelated changes and
-secrets, and keep external actions within the authorized scope.
+Edit the repository's source of truth, rebuild generated outputs when required,
+and preserve unrelated changes. Add structure only for the requested feature or
+demonstrated failure; prefer existing interfaces.
 
 Use the lowest sufficient proof required by the repository, in dependency
 order: build, affected tests, contracts/invariants, then relevant hotspot checks.
@@ -65,8 +62,9 @@ show the same regression failing before and passing after when feasible.
 Inspect the final diff and run `git diff --check` when applicable. Use
 `verification-before-completion` for evidence-backed completion claims. For
 material risk, use authorized independent review of requirements, diff and
-tests; require concrete triggers, impact and evidence. Stop after the agreed
-proof and required closeout, reporting independent new issues separately.
+tests; require concrete triggers, impact and evidence. Reuse passing proof until
+its inputs change. Close out when the overall goal and required integration are
+complete, reporting unrelated new issues separately.
 
 ### Match observation to the changed behavior
 
@@ -83,8 +81,7 @@ require every check below or authorize live access.
 
 Reuse existing logs, tests and tools. If required observation is unavailable,
 report missing evidence and the proven lower boundary. A mock, health check or
-HTTP 200 cannot substitute for the actual user path. Add instrumentation only
-when current acceptance needs it and the change is within scope.
+HTTP 200 cannot substitute for the actual user path.
 
 Report changed behavior, verification and remaining limitations. Distinguish
 `repo_verified`, `filesystem_projected`, `host_loaded` and `live_accepted` when
@@ -93,11 +90,10 @@ or claim that a lower layer proves a higher one.
 
 ## 3. Resume and use capabilities selectively
 
-On continue/resume, re-read current status, changed code and latest proof.
-Reuse still-valid evidence; rerun only checks invalidated by changed inputs or
-environment. When history is misleading, hand off a short capsule containing
-Goal, current revision/evidence, decisions, write set, minimum proof and Stop.
-The receiver checks current repository facts before acting.
+On continue/resume, recover the overall goal, completed and outstanding work,
+then check current status and latest evidence. Treat new messages as steering
+unless they cancel or replace the goal. A handoff needs only that context,
+decisions, write set, minimum proof and Stop; the receiver checks current facts.
 
 Choose available tools by the task, not model names. Verify unstable API or
 host behavior against current source/help or authoritative documentation.
@@ -105,11 +101,10 @@ MCP is optional: use relevant connected tools for needed evidence or authorized
 integration, without configuring services or switching providers as a side
 effect. Model ability alone does not prove tool access or host support.
 
-Use specialist skills only for their current purpose: review-only requests use
-`code-review-and-quality`; Windows PowerShell automation uses
-`custom-powershell-windows-automation`. Use `capability-router` only when visible
-capabilities are insufficient and cold discovery or validation is needed, not
-as a per-task preflight. Do not chain all workflow skills for every task.
+Prefer one primary executor; delegate only when authorized and independently
+verifiable work makes coordination worthwhile. Load specialist skills for the
+current need, not as a fixed chain. Use `capability-router` only for a missing
+specialist capability, never as a routine preflight.
 
 In skills-manager, consult `docs/product/ai-coding-playbook.md` only for detailed
 usage and architecture background. Other repositories do not depend on it.
