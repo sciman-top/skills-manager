@@ -252,9 +252,7 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
         )
     }
     foreach ($candidate in $candidates) {
-        # Bound network stalls at the git transport layer so one unreachable
-        # source cannot hang the complete check-updates command.
-        $line = Invoke-GitCapture @("-c", "http.connectTimeout=15", "-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=20", "ls-remote", $repo, $candidate)
+        $line = Invoke-GitCapture @("ls-remote", $repo, $candidate) -RemoteQuery
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line -match "^[0-9a-fA-F]{40}") {
             return (($line -split "\s+")[0]).Trim()
@@ -270,9 +268,11 @@ function Resolve-RemoteCommitCached([string]$repo, [string]$ref, [hashtable]$cac
     $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
     $cacheKey = ("{0}|{1}" -f (Get-RepoIdentityKey $repo), $targetRef).ToLowerInvariant()
     if ($cache.ContainsKey($cacheKey)) {
+        if ($cache[$cacheKey] -is [Exception]) { throw $cache[$cacheKey] }
         return $cache[$cacheKey]
     }
-    $resolved = Resolve-RemoteCommit $repo $targetRef
+    try { $resolved = Resolve-RemoteCommit $repo $targetRef }
+    catch { $cache[$cacheKey] = $_.Exception; throw }
     $cache[$cacheKey] = $resolved
     return $resolved
 }
@@ -326,9 +326,13 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
         $path = VendorPath $v.name
         $current = Get-CurrentRepoCommit $path
-        $remote = Resolve-UpdatePlanTargetCommit $path ([string]$v.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs)
+        $remote = $null; $reason = ''
+        try { $remote = Resolve-UpdatePlanTargetCommit $path ([string]$v.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs) }
+        catch { $reason = if ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'query_failed' } }
+        if (-not $remote -and -not $reason) { $reason = 'ref_not_found' }
         $items += [pscustomobject]@{
             type = "vendor"
+            reason = $reason
             name = [string]$v.name
             source = [string]$v.repo
             ref = $ref
@@ -344,9 +348,13 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
         $path = Join-Path $ImportDir $name
         $current = Get-CurrentRepoCommit $path
-        $remote = Resolve-UpdatePlanTargetCommit $path ([string]$i.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs)
+        $remote = $null; $reason = ''
+        try { $remote = Resolve-UpdatePlanTargetCommit $path ([string]$i.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs) }
+        catch { $reason = if ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'query_failed' } }
+        if (-not $remote -and -not $reason) { $reason = 'ref_not_found' }
         $items += [pscustomobject]@{
             type = "import"
+            reason = $reason
             name = $name
             source = [string]$i.repo
             ref = $ref
@@ -414,7 +422,7 @@ function Show-UpdatePlan($cfg) {
     }
     $changed = @($items | Where-Object { $_.changed })
     foreach ($it in $items) {
-        $mark = if ($it.changed) { "UPGRADE" } else { "UNCHANGED" }
+        $mark = if ($it.target -eq 'unknown') { 'UNKNOWN' } elseif ($it.changed) { "UPGRADE" } else { "UNCHANGED" }
         Write-Host ("[{0}] {1}/{2} ref={3}" -f $mark, $it.type, $it.name, $it.ref)
         Write-Host ("  current: {0}" -f $it.current)
         Write-Host ("  target : {0}" -f $it.target)
@@ -441,6 +449,8 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
         schema_version = 1
         command = "check-updates"
         read_only = $true
+        complete = @($items | Where-Object { $_.target -eq 'unknown' }).Count -eq 0
+        failed = @($items | Where-Object { $_.target -eq 'unknown' }).Count
         total = $items.Count
         changed = @($items | Where-Object { [bool]$_.changed }).Count
         items = @($items | ForEach-Object {
@@ -452,6 +462,7 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
                 current = [string]$_.current
                 target = [string]$_.target
                 changed = [bool]$_.changed
+                reason = [string](Get-CfgObjectProperty $_ 'reason')
             }
         })
         }
@@ -462,7 +473,7 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
         $lines = [Collections.Generic.List[string]]::new()
         $lines.Add(("更新检查：total={0}, changed={1}" -f $report.total, $report.changed)) | Out-Null
         foreach ($item in @($report.items)) {
-            $lines.Add(("[{0}] {1}/{2} source={3}" -f $(if ($item.changed) { "UPDATE" } else { "CURRENT" }), $item.type, $item.name, $item.source)) | Out-Null
+            $lines.Add(("[{0}] {1}/{2} source={3} reason={4}" -f $(if ($item.target -eq 'unknown') { 'UNKNOWN' } elseif ($item.changed) { "UPDATE" } else { "CURRENT" }), $item.type, $item.name, $item.source, $item.reason)) | Out-Null
             $lines.Add(("  current={0}" -f $item.current)) | Out-Null
             $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
         }

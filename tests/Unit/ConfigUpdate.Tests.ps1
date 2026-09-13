@@ -925,6 +925,62 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Update Plan/Upgrade" {
+        It 'terminates a stalled HTTP query within its process deadline' {
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            $previous = $env:SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS
+            try {
+                $env:SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS = '1'
+                $port = $listener.LocalEndpoint.Port
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                { Resolve-RemoteCommit "http://127.0.0.1:$port/repo.git" main } | Should -Throw '*remote_query_timeout*'
+                $clock.Elapsed.TotalSeconds | Should -BeLessThan 8
+            }
+            finally { $listener.Stop(); $env:SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS = $previous }
+        }
+
+        It 'reports <Expected> without aborting the check' -ForEach @(
+            @{ Expected='query_failed'; Fail=$true },
+            @{ Expected='ref_not_found'; Fail=$false }
+        ) {
+            Mock Preflight {}
+            Mock LoadCfg { [pscustomobject]@{vendors=@([pscustomobject]@{name='demo';repo='https://example.test/demo.git';ref='main'});imports=@()} }
+            Mock Get-CurrentRepoCommit { 'old' }
+            Mock Resolve-RemoteCommit { if ($Fail) { throw 'remote_query_failed' }; return $null }
+            $report = (Invoke-CheckUpdatesCommand @('--json')).output | ConvertFrom-Json
+            $report.complete | Should -BeFalse
+            $report.items[0].reason | Should -Be $Expected
+            $report.changed | Should -Be 0
+        }
+
+        It 'isolates and caches failed sources while completing healthy sources' {
+            Mock Get-CurrentRepoCommit { 'old' }
+            Mock Resolve-RemoteCommit {
+                param($repo)
+                if ($repo -eq 'https://example.test/bad.git') { throw [TimeoutException]::new('remote_query_timeout') }
+                return 'new'
+            }
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{name='bad';repo='https://example.test/bad.git';ref='main'})
+                imports = @(
+                    [pscustomobject]@{name='bad-copy';repo='https://example.test/bad.git';ref='main';mode='manual'},
+                    [pscustomobject]@{name='good';repo='https://example.test/good.git';ref='main';mode='manual'}
+                )
+            }
+            Mock Preflight {}
+            Mock LoadCfg { $cfg }
+            $result = Invoke-CheckUpdatesCommand @('--json')
+            $report = $result.output | ConvertFrom-Json
+            $report.complete | Should -BeFalse
+            $report.failed | Should -Be 2
+            $report.changed | Should -Be 1
+            $report.items[0].reason | Should -Be 'timeout'
+            $report.items[1].target | Should -Be 'unknown'
+            $report.items[2].target | Should -Be 'new'
+            Should -Invoke Resolve-RemoteCommit -Times 1 -Exactly -ParameterFilter { $repo -eq 'https://example.test/bad.git' }
+            (Invoke-CheckUpdatesCommand @()).output | Should -Match '\[UNKNOWN\]'
+        }
+
         It "Builds dereferenced tag candidates without format errors" {
             Mock Invoke-GitCapture { $null }
 

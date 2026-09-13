@@ -83,6 +83,7 @@ try {
 
     $checkText = Invoke-WeeklyNative -FilePath 'pwsh' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entryPath, 'check-updates', '--json') -Capture
     $check = $checkText | ConvertFrom-Json
+    if (-not $check.complete) { throw 'Update check incomplete; refusing no_update or apply.' }
     $changed = [int]$check.changed
     if ($DryRun) { Write-WeeklyResult 'dry_run' $changed $false; return }
     if ($changed -eq 0) { Write-WeeklyResult 'no_update' 0 $false; return }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-09-11T13:18:07.0504210Z",
+  "generated_at": "2026-09-13T10:01:34.2364361Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -12,7 +12,7 @@
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "6ca0cd7db39b41b1c37e26d335c507ee92382c6d"
+      "commit": "be4e44a9fbc5e8df0beaefadbb28bd22ee61cc39"
     },
     {
       "name": "anthropics-skills",
@@ -65,7 +65,7 @@
       "ref": "main",
       "skill": "skills\\performance-optimization",
       "sparse": false,
-      "commit": "6ca0cd7db39b41b1c37e26d335c507ee92382c6d"
+      "commit": "be4e44a9fbc5e8df0beaefadbb28bd22ee61cc39"
     },
     {
       "name": "ant-design",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "1f1a239e0b18e80d4a673ff76852ccc8ce294a19"
+      "commit": "a6d8653261a4cf3353c145648fece23bad949278"
     },
     {
       "name": "domain-modeling",
@@ -155,7 +155,7 @@
       "ref": "main",
       "skill": "skills\\find-skills",
       "sparse": true,
-      "commit": "80feb48868972d518436f26711509bc78595b5cb"
+      "commit": "d667282815248da03a08a18272b5d2eef9caf77c"
     },
     {
       "name": "grill-me",
@@ -344,7 +344,7 @@
       "ref": "main",
       "skill": "skills\\ui-animation",
       "sparse": false,
-      "commit": "7898f84739066f620a2a292a031beb6c7f767745"
+      "commit": "69ba35c1eddf179fb44ed0c3caae1e433b8ff2c3"
     },
     {
       "name": "vite",
@@ -362,7 +362,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "c9148d0bb239ed01a95724a5928b98cdf9c30658"
+      "commit": "8321021c54d670126ce3b2969d5deb880b4b0c2a"
     }
   ]
 }

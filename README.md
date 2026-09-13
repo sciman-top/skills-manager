@@ -111,7 +111,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效 -SkillProfile full-compatible
 ```
 
-`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
+`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。报告增加 `complete/failed` 与逐源 `reason`：超时、查询失败、未命中 ref 分别为 `timeout/query_failed/ref_not_found`，目标为 `unknown`，不代表已是最新；部分失败仍输出 JSON，调用方必须检查 `complete`，每周 runner 遇到不完整检查会停止。每次远端 Git 查询默认限时 30 秒，可通过 `SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS` 设置为 1–300 秒；同一 repo/ref 的失败在本次检查内缓存，其他源继续检查。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
 
 `check-updates` 继续只检查上游技能；以下命令检查并更新 skills-manager 本体 Release。它只接受未被本地修改的 GitHub Release 安装目录，先核对 GitHub 发布的 SHA-256，再把目录替换交给独立进程，保留同级旧目录备份。源码开发版必须通过 Git 更新，不能使用此命令覆盖。

@@ -104,7 +104,7 @@ function Invoke-Git([string[]]$GitArgs) {
 # $Ok.Value=false 表示 git 以非零退出码失败；$ExitCode.Value 传出真实退出码
 # （DryRun 时为 $null），供调用方区分"正常未命中"（如 config 键不存在 exit 1）
 # 与真实取证失败；DryRun 视为成功且无输出。
-function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
+function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode, [switch]$RemoteQuery) {
     $Ok.Value = $false
     if ($null -ne $ExitCode) { $ExitCode.Value = $null }
     $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
@@ -114,6 +114,35 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
         return @()
     }
     Log ("git {0}" -f ($safeArgs -join " "))
+    if ($RemoteQuery) {
+        $seconds = 30
+        $configured = 0
+        if ([int]::TryParse($env:SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS, [ref]$configured)) {
+            $seconds = [Math]::Clamp($configured, 1, 300)
+        }
+        $process = [Diagnostics.Process]::new()
+        try {
+            $process.StartInfo.FileName = 'git'
+            $process.StartInfo.UseShellExecute = $false
+            $process.StartInfo.CreateNoWindow = $true
+            $process.StartInfo.RedirectStandardOutput = $true
+            $process.StartInfo.RedirectStandardError = $true
+            $process.StartInfo.Environment['GIT_TERMINAL_PROMPT'] = '0'
+            foreach ($argument in $GitArgs) { $process.StartInfo.ArgumentList.Add($argument) }
+            $null = $process.Start()
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit($seconds * 1000)) {
+                $process.Kill($true)
+                throw [TimeoutException]::new('remote_query_timeout')
+            }
+            if ($null -ne $ExitCode) { $ExitCode.Value = $process.ExitCode }
+            if ($process.ExitCode -ne 0) { throw 'remote_query_failed' }
+            $Ok.Value = $true
+            return ,@($stdout.GetAwaiter().GetResult() -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        }
+        finally { $process.Dispose() }
+    }
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
     $prevErrorActionPreference = $ErrorActionPreference
@@ -143,9 +172,9 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
     }
     return ,$lines.ToArray()
 }
-function Invoke-GitCapture([string[]]$GitArgs) {
+function Invoke-GitCapture([string[]]$GitArgs, [switch]$RemoteQuery) {
     $ok = $false
-    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok)
+    $lines = Invoke-GitCaptureCore $GitArgs ([ref]$ok) -RemoteQuery:$RemoteQuery
     if (-not $ok) { return $null }
     if (@($lines).Count -eq 0) { return "" }
     return ([string]$lines[0]).Trim()
