@@ -1,0 +1,9 @@
+$ai-coding-workflow
+Complete this coding task in the disposable workspace, not the checked-in fixture.
+Read AGENTS.md, the current Git state, Labels.ps1 and Test-Labels.ps1.
+Reproduce the failing behavior before editing, fix Labels.ps1, then run the
+smallest sufficient checks and inspect the final diff.
+Only Labels.ps1 may change. Do not commit, push, install dependencies, modify
+host configuration, spawn agents or read credentials and unrelated repositories.
+Use the current host's available skills and tools; report actual commands,
+results and the proven boundary. Do not claim another host was verified.

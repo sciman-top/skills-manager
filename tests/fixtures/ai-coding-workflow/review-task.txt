@@ -1,0 +1,13 @@
+$code-review-and-quality
+Independently review the uncommitted Labels.ps1 change in this disposable workspace.
+Goal: evaluate correctness and regression risk against AGENTS.md.
+Current status/evidence: read the current commit, status, source, diff and tests.
+Decisions already made: the behavioral contract is in AGENTS.md; do not rely on
+an implementation summary or another model's approval.
+Exact write set: empty. Read-only review; no commits, installs, host configuration
+changes, agents, credentials or unrelated repository access.
+Remaining work: seek concrete counterexamples; run existing checks or in-memory
+experiments only when they resolve an uncertainty.
+Minimum proof: findings identify location, trigger, impact and verification.
+Stop: finish this function's review; if no actionable defect is found, say so
+and report remaining evidence limits. Do not add style or unrelated improvements.

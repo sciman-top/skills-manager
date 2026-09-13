@@ -175,7 +175,7 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 
 目标是一个宿主中立、可验证、可回滚的本地能力管理器：工程事实和方法在唯一源维护，按需进入宿主，验证证据与真实使用结果分层。日常调用方是现有 `ai-coding-workflow`；详细说明留在本参考件，跨仓所需的最小观察选择已内置技能正文，不要求其他项目读取本仓文档。
 
-现有职责链继续使用：`src/ → build.ps1 → skills.ps1` 承载 CLI；`skills.json + overrides/ → 构建生效 → agent/与受控投影` 承载技能配置和资产。本文改进落在工作流技能与使用说明，现有接口足够承载，无需新增命令、模型调度服务或状态数据库。
+现有职责链继续使用：`src/ → build.ps1 → skills.ps1` 承载 CLI；`skills.json + overrides/ → 构建生效 → agent/与受控投影` 承载技能配置和资产；`tests/fixtures/ai-coding-workflow/ → 隔离副本 → 宿主实跑与独立复验` 承载显式工作流验收。现有接口足够承载，无需新增主 CLI 命令、模型调度服务或状态数据库。
 
 - 技术栈保持 PowerShell 7；本次没有跨平台运行约束、性能测量或部署失败证明需要换栈。
 - 根 `AGENTS.md` 保留仓库入口、不变量、最低门禁和回滚；方法进现有技能，详细场景进本文，确定性约束继续由现有脚本与测试承担。
@@ -183,3 +183,59 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - 只有当前调用方的真实失败无法被现有接口承载时，才重新评估架构；先证明失败、改动范围、最低验证和仅回滚本次切片的入口。
 
 补充来源（2026-09-12 已读取官方/项目原文）：[OpenAI 最佳实践](https://learn.chatgpt.com/guides/best-practices)、[ZCode 指令与工具能力](https://zcode.z.ai/cn/docs/agents)、[Aider 使用建议](https://aider.chat/docs/usage/tips.html)、[Anthropic 长程代理实践](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)。本文执行取舍为适用于本仓的工程判断，不是模型能力实测排名。
+
+## 10. 可复用的宿主编码验收
+
+调用方是显式验证编码工作流的用户或代理。受版本控制的[样例](../../tests/fixtures/ai-coding-workflow/)替代每次临时编写题目和检查脚本；只保存可重建的输入，不保存历史成功状态。它不进入技能投影，不新增产品命令、常驻服务或独立门禁。自动测试只检查样例能正确识别失败与合规实现，不调用模型。
+
+先在仓库根运行以下准备命令。每次、每个宿主使用新的目录；不要直接修复 tracked fixture，也不要覆盖或 reset 已有实跑目录。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$fixture = Join-Path (Get-Location) 'tests/fixtures/ai-coding-workflow'
+$runRoot = Join-Path (Get-Location) ('artifacts/work/ai-coding-acceptance/' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $runRoot | Out-Null
+foreach ($hostName in @('codex-cli', 'chatgpt-desktop', 'zcode')) {
+    $workspace = Join-Path $runRoot $hostName
+    Copy-Item -LiteralPath $fixture -Destination $workspace -Recurse
+    git -C $workspace init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Fixture Git init failed.' }
+    git -C $workspace add -- AGENTS.md Labels.ps1 Test-Labels.ps1 task.txt review-task.txt
+    if ($LASTEXITCODE -ne 0) { throw 'Fixture Git add failed.' }
+    git -C $workspace commit --quiet -m '建立隔离编码验收基线'
+    if ($LASTEXITCODE -ne 0) { throw 'Fixture baseline commit failed; check local Git identity.' }
+    $baseline = git -C $workspace rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Fixture baseline lookup failed.' }
+    $baseline | Set-Content -LiteralPath (Join-Path $runRoot "$hostName.baseline.txt") -Encoding utf8
+}
+$runRoot
+```
+
+按当前宿主支持的入口打开对应副本，使用其已有模型配置，在新任务中提交 `task.txt` 的内容。Codex CLI 可在副本目录按当前 `codex exec --help` 支持的选项使用 `Get-Content -LiteralPath task.txt -Raw | codex exec --sandbox workspace-write --json -`；将原始事件保存在副本之外的本次 run 目录。桌面入口不可用时保留该副本和缺口，不能通过其他宿主的结果补记成功。计划、权限及非交互命令以当前宿主为准，不修改 provider、认证或插件缓存来绕过阻塞。
+
+验收需要同一次任务的证据：实际宿主/表面、模型与推理档位、源版本、技能读取或加载事件、修复前失败、修复后结果及最终 diff。仅元数据可见不足以证明技能正文已读取；只有代理自述时记录加载不可观察。用新任务的 `review-task.txt` 验证只读交接审查，不将两个模型的同意当成测试。
+
+复验时从本仓调用未被被测代理修改的检查脚本。保留准备阶段输出的 `$runRoot`，将 `$hostName` 设为本次已完成的宿主目录名：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$hostName = 'zcode' # Or codex-cli / chatgpt-desktop for the completed run.
+$workspace = Join-Path $runRoot $hostName
+$baseline = (Get-Content -LiteralPath (Join-Path $runRoot "$hostName.baseline.txt") -Raw).Trim()
+$head = git -C $workspace rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $head -cne $baseline) { throw 'Fixture baseline changed.' }
+pwsh -NoProfile -File ./tests/fixtures/ai-coding-workflow/Test-Labels.ps1 -SourcePath (Join-Path $workspace 'Labels.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Independent behavior checks failed.' }
+git -C $workspace diff --exit-code $baseline -- AGENTS.md Test-Labels.ps1 task.txt review-task.txt
+if ($LASTEXITCODE -ne 0) { throw 'Protected fixture inputs changed.' }
+$status = @(git -C $workspace status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0 -or $status.Count -ne 1 -or $status[0] -cne ' M Labels.ps1') {
+    throw 'Fixture contains unexpected changes or staging.'
+}
+git -C $workspace diff --check
+if ($LASTEXITCODE -ne 0) { throw 'Fixture diff check failed.' }
+```
+
+原始样例的行为检查应失败；合规修复应为 `cases=11 failed=0`，覆盖空/单/多项、大小写、空白、首次顺序与拼写、文化无关比较、输入不变及幂等。复验还要求没有新增文件、暂存或提交，且只有 `Labels.ps1` 的修改；无输出的普通 diff 不能独自证明这些事实。被测副本之外的基线记录和原始事件应一并保留，只有可观察到的表面才记为该宿主验收。
+
+此样例证明一条受控修复与审查路径，不证明全部技能、自然项目验收或效率提升。性能与费用仍按第 7 节在真实任务中观察；本项目不负责调度这段观察，也不以完成等待时长作为日常编码门禁。
