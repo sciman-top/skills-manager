@@ -18,6 +18,17 @@ Describe 'E2E fixture' {
 
 }
 Describe 'Repository test runner output contract' {
+    It 'rejects a name filter that executes no tests' {
+        $fixture = New-RunnerFixture 'no-match' @'
+Describe 'Filter fixture' {
+    It 'available test' { $true | Should -BeTrue }
+}
+'@
+        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' *>&1)
+        $LASTEXITCODE | Should -Not -Be 0
+        ($output -join "`n") | Should -Match 'No tests executed'
+    }
+
     It 'prints one stable summary line for a passing run' {
         $fixture = New-RunnerFixture 'pass' @'
 Describe 'Noisy fixture' {

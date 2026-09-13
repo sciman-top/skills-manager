@@ -94,8 +94,12 @@ try {
         else {
             Invoke-QualityGate 'diff-check' { & git diff --check $DiffBase HEAD -- }
         }
-        Write-Host 'Local quality gates passed (docs).'
-        return
+        if ($TestPath.Count -eq 0 -and $TestName.Count -eq 0 -and $Verifier.Count -eq 0) {
+            Write-Host 'Local quality gates passed (docs).'
+            return
+        }
+        # Explicit proof supplements the classification, including an empty diff.
+        $Profile = if ($TestPath.Count -gt 0 -or $TestName.Count -gt 0) { 'focused' } else { 'quick' }
     }
 
     if ($Profile -eq 'focused' -and $TestPath.Count -eq 0 -and $TestName.Count -eq 0) {

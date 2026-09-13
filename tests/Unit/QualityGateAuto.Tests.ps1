@@ -157,4 +157,23 @@ $global:LASTEXITCODE = 0
         }
         finally { Pop-Location }
     }
+
+    It 'honors explicit regression tests after a docs-only auto classification' {
+        $repo = New-AutoGateFixture
+        New-Item -ItemType Directory -Path (Join-Path $repo 'tests') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'build.ps1') -Value '$global:LASTEXITCODE = 0'
+        Set-Content -LiteralPath (Join-Path $repo 'tests/run.ps1') -Value @'
+param([string[]]$TestPath, [string[]]$TestName)
+if ($TestPath -notcontains 'regression' -or $TestName -notcontains '*chosen') { throw 'Lost explicit filters' }
+Write-Host 'explicit-regression-executed'
+$global:LASTEXITCODE = 0
+'@
+        & git -C $repo add .
+        & git -C $repo commit -m 'runner fixture' *> $null
+        Add-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'docs change'
+        $out = Invoke-TempGate $repo @{ TestPath = @('regression'); TestName = @('*chosen') }
+        ($out | Out-String) | Should -Match 'explicit-regression-executed'
+        ($out | Out-String) | Should -Match '== diff-check =='
+        ($out | Out-String) | Should -Match 'Local quality gates passed \(focused\)'
+    }
 }
