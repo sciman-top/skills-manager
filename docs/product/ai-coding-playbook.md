@@ -4,12 +4,12 @@
 
 ## 1. 六杠杆 → 本仓机制映射
 
-| 杠杆（官方共识） | 本仓机制锚点 |
+| 实践取舍 | 本仓机制锚点 |
 | --- | --- |
-| 上下文是第一资源，会腐烂；一会话一工作单元 | 全局规则受控投影 + `global-rules-check`（9.79 条目瘦身 -22%）；长调查派子代理，主上下文只留结论 |
+| 上下文保持相关；一个任务围绕一个可验收目标 | `ai-coding-workflow` 第 3 节：重读当前事实、按需用短胶囊交接；独立调查仅在授权且并行净收益为正时委派 |
 | AGENTS.md/skills 短而准："删掉会致错吗"检验；重复犯错→retrospective→才入规则 | `src/Domain/SkillMetadata.ps1`（description≤1024、name≤64、frontmatter、块标量）；`RuleDiagnostics.ps1`（global 16384B/130 行、project 10240B/80 行 byte/line budget） |
 | Prompt 四要素 Goal/Context/Constraints/Done-when | 根 AGENTS.md 日常合同：Goal / Exact write set / Minimum proof / Stop |
-| 探索→计划→实现→提交；一句话能描述 diff 的小改动跳过计划 | 任务合同冻结 + plan 模式（宿主侧 `/plan`、Shift+Tab） |
+| 探索→计划→实现→提交；清晰的小改动直接推进 | `ai-coding-workflow` 的 tiny/direct、normal、high-risk；宿主计划入口以当前可用工具为准 |
 | 给 agent 一个它能自己跑的验证；只认证据不认声明 | `scripts/quality/run-local-quality-gates.ps1`（与 CI 共享分类器）、`tests/run.ps1`、verification-before-completion skill |
 | 重复工作三层沉淀：契约→AGENTS.md；方法→skill；已手工跑稳的流程→scheduled | 本仓即该杠杆的产品化；"手工未跑稳不定时化" |
 
@@ -17,18 +17,19 @@
 
 | 坑 | 防法 | 本仓锚点 |
 | --- | --- | --- |
-| 范围蔓延/过度设计 | 冻结 Goal/write set/Stop；审查 prompt 用 "Report gaps, not style preferences" | AGENTS.md B 节 not_admitted 准入门 |
+| 范围蔓延/过度设计 | 冻结 Goal/write set/Stop；审查 prompt 用 "Report gaps, not style preferences" | AGENTS.md B 节执行边界与现有 review skill |
 | 长会话退化（重复犯错、忘约束） | 同一问题失败两次后整理事实、假设和尝试，澄清缺口；历史误导时换新上下文 | 宿主侧行为；复用已有任务记录，不另建状态库 |
 | 幻觉 API/最优主张 | 强制一手来源+核实日期 | references/reference-shelf 只读缓存政策、一手资料核实纪律 |
-| 汇报与实态不符 | 只认命令输出；收口附 `git status` 快照 | verification-before-completion skill |
+| 汇报与实态不符 | 命令、界面或请求链证据必须直接支持对应结论；Git 状态只说明文件变更 | verification-before-completion skill；本文第 8 节 |
 | 测试迁就实现 | 不许改测试迁就实现；行为变化显式走契约迁移 | 审计快照 fixture 契约迁移先例（stale_snapshot fail-closed） |
 | 权限过大/并行互踩 | 默认最小权限、信任后再放开；并行用 git worktree | doctor config risks；scheduler 契约扫描（禁 RunLevel Highest）；git diff 分界并发改动 |
-| 规则膨胀反噬 | 每条规则过"删掉会致错吗"；重复失效下沉机制层 | mechanism-over-prose 裁决；9.79 瘦身 |
+| 规则膨胀反噬 | 每条规则过"删掉会致错吗"；重复失效下沉现有脚本或测试 | AGENTS.md 源文件与最低门禁约定；已有 quality scripts |
 | 逐步微管理、盯着 agent 看 | 单主执行者自主完成闭环；仅在已授权、写集互斥、能独立验证且净收益为正时并行 | ai-coding-workflow skill 的执行姿态与 task-fit 节 |
 | 做错目标或自证正确 | 用具体用户操作定义验收；重要改动独立复核需求、diff、反例 | 任务合同与已有 review skill |
 | 看不到真实行为 | 按受影响行为选观察证据；缺失时报告未验收边界 | 本文第 8 节；已有测试、日志和宿主工具 |
-| 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | Claude 官方 2026-09-12 警告；ai-coding-workflow skill §4（report gaps, not style preferences） |
-| 不告知 build/test 命令（多数质量问题=配置问题） | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md A 节 entrypoint、C 节最低门禁 |
+| 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | ai-coding-workflow 第 2 节；本文 5.3 审查模板 |
+| 缺少 build/test 命令 | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md 第 1 节 entrypoint、C 节最低门禁 |
+| 将输入或工具故障误判为模型推理不足 | 分别检查输入、工具执行、认证、额度、端点与协议；证据不足时不改模型配置 | 本文第 4 节；宿主当前工具输出与官方配置说明 |
 
 ## 3. 宿主元数据预算：观测口径
 
@@ -55,13 +56,24 @@
 
 **"预算触界"退役判据的使用法**：把实载宿主 surface（如 user_skill_root 的 managed_current 子集）的聚合与上表预算对照；触界后走退役政策四判据流程（触发失准/上游废弃/预算触界/用户报告无价值），本手册不自动触发任何删除或裁剪。
 
-## 4. GPT + GLM 双模型分工
+## 4. GPT + GLM 按任务选择
 
-- **契约写一次、两边吃**：AGENTS.md 是宿主中立开放规范（Codex/Claude Code/ZCode 同读）；稳定工程事实进 AGENTS.md，宿主差异进各自配置层。
-- **分工而非二选一**：GLM 承接大批量机械任务与长程端到端任务（GLM-5.3 定位 long-horizon agent、多阶段任务收益最大、Coding Plan 非高峰点数半价）；截图/视频→UI 的视觉编码另有 GLM-5.3-Flash 变体（VLM 分区，1M 上下文，2026-09-12 直抓）；GPT 高推理档承接架构决策、疑难 debug、安全审查（reasoning 分 low/medium/high/extra-high 四档，extra-high 为长程 agentic 推理重任务档；Codex 官方 2026-09-12 复核）。
-- **第三方景观（未接入，仅记录）**：DeepSeek-V4.1-Flash（API 名 `deepseek-flash`）——1M 上下文/384K 输出、thinking 默认开、OpenAI 与 Anthropic 双格式端点、off-peak 输出 $0.6/1M tok（peak $1.2、cache-hit $0.003）、并发 2500；旧名 deepseek-v4-flash/-vision-exp 已退役、请求由其按 Flash 价承接；v4-pro（V4-Pro-0813）宣布 2026-09-14 后继续供 API。模型发布不改本仓机制结论：三宿主技能/MCP 预算未动，task-fit 路由不含模型名分支、零改动。
-- **交叉审查必须 fresh context**：新会话/子代理独立审再合并发现，防继承被审者盲区；审查输出要求 "Report gaps, not style preferences"。
-- **资产积累节奏**：AI 同类错第 2 次→AGENTS.md 候选规则或 skill 候选（先过 retrospective + 准入门）；手动重复同一流程第 3 次→scheduled task 候选（先手工跑稳）。
+- **共享工程事实，分别核验加载**：本仓以 AGENTS.md 维护项目规则，Claude 通过 wrapper 引用；各宿主发现、继承和工具能力不同，不能用文件相同证明规则已加载。
+- **一个任务由一个主代理负责到底**：普通任务优先使用已有上下文且成本、延迟合适的一方。GPT 做架构或疑难诊断、GLM 做批量或长程实现，可以作为待验证的选择假设；不固定为“GPT 设计 → GLM 编码 → GPT 审查”。第 7 节说明实际效果的观察方式。
+- **按不确定性增加推理投入**：复杂取舍、跨模块故障、并发和安全问题可选更强推理档位；准确档位取决于当前模型、接口与宿主支持。缺少代码、复现或可运行环境时先补齐证据。
+- **模型能力与执行环境分别确认**：普通对话、可访问工作区的 Codex 执行环境与 ZCode 工具链按当前会话事实选择。界面任务需要实际渲染和交互证据，交付任务需要请求到效果的证据。
+- **有需要才独立审查**：重要改动使用新上下文或已授权代理，从需求、diff 和测试寻找反例；第二个模型同意不构成验证。低风险小改动不强制跨模型接力。
+
+遇到“模型答得不好”时，先按观察到的故障选取检查，不例行扫描全部配置：
+
+| 观察到的失败 | 先核查的事实 | 后续动作 |
+| --- | --- | --- |
+| 忽略图片或日志内容 | 当前请求是否实际包含输入、接口是否支持该输入 | 补齐有效输入；不要凭模型名称推断视觉能力 |
+| 工具未执行或返回错误 | 当前宿主工具是否可用、命令与原始错误 | 修复已授权的工具调用路径，再判断模型推理 |
+| 认证、限流或参数错误 | 脱敏错误、额度、端点用途、协议与支持参数 | 对照当前官方说明；配置变更仍按明确授权处理 |
+| 输入与工具正常但方案反复错误 | 复现、被排除的假设、需求和验收是否冲突 | 重新诊断，必要时提高推理投入或交接其他模型 |
+
+ZCode 的 Coding 套餐端点与通用 API 端点不能互换；参数和图片能力也不能仅凭模型名称推断。配置事实应查当前[官方说明](https://zcode.z.ai/cn/docs/configuration)，不在本手册复制密钥、账号或临时配置。
 
 ## 5. 可直接复制的任务模板
 
@@ -80,25 +92,27 @@ Minimum proof: <build、受影响测试、contract 或其他最低充分验证>
 Stop: <达到什么条件后停止，不做额外重构>
 
 先读取当前 git status、相关源码和测试；如果事实不足，先报告缺口。
-完成后报告改动、命令输出和 repo_verified / filesystem_projected /
-host_loaded / live_accepted，四层不要合并表述。
+完成后报告改动、验证结果和剩余限制；仅在涉及投影或实际运行时区分
+repo_verified / filesystem_projected / host_loaded / live_accepted，
+不要把低层证明当成高层验收，也不要无条件增加四层工作。
 ```
 
 用户不必预先知道精确文件或验证命令：可以只给目标、现场、约束和验收结果，
 由执行者调查后确定写集和最低验证。字段用于固定执行边界，不应成为例行审批表。
 
-### 5.2 GPT/Codex → GLM/ZCode 交接
+### 5.2 GPT/Codex 与 GLM/ZCode 双向交接
 
 ```text
 Task capsule:
 Goal: <目标>
-Current status/evidence: <当前分支、失败证据、已确认事实>
+Current status/evidence: <仓库路径、分支、commit、未提交修改与归属、关键证据>
 Decisions already made: <已确定的接口、行为和取舍>
 Exact write set: <精确写集>
+Remaining work: <尚未完成的实现、验证或阻塞>
 Minimum proof: <最低验证>
 Stop: <停止条件>
 
-请重新读取当前仓库状态和改动 seam，再在上述写集内实现。
+请重新读取当前仓库状态与相关改动，再在上述写集内推进剩余工作。
 不要根据模型名称猜测 API、provider、权限或宿主能力；不要扩大写集。
 如果发现契约冲突或真实失败与胶囊不符，先停下并报告证据。
 ```
@@ -107,14 +121,14 @@ Stop: <停止条件>
 
 ```text
 请只审查当前 diff/commit 的正确性、回归、安全、兼容和测试充分性。
-先读取当前仓库状态、实际源码、相关测试和项目规则。
+先读取需求、当前仓库状态、实际源码、相关测试和项目规则。
 Report gaps, not style preferences；不要为了提出建议而扩大范围。
-只报告可由证据支持的 actionable findings，并标明文件、原因和风险。
+只报告可由证据支持的 actionable findings，标明文件、触发条件、影响
+和验证办法；实现者的总结只作为线索。没有发现问题时明确说明。
 除非明确授权，不修改文件。
 ```
 
-模型分工仍是任务适配推断，不是固定优劣或自动故障切换：GPT/Codex
-可承担架构、根因和独立复核；GLM/ZCode 可承担有界的长程、多文件实现。
+同一模型可以完成以上各类任务；模板不要求跨模型交接或自动故障切换。
 
 ## 6. 实践来源（直抓/复核日期）
 
@@ -124,9 +138,10 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - OpenAI Prompt Engineering Guide — developers.openai.com/api/docs/guides/prompt-engineering（2026-09-10）
 - GLM-5.3 模型文档 / Coding Plan 端点 — docs.z.ai/guides/llm/glm-5.3、docs.z.ai/devpack/quick-start（2026-09-10 直抓、2026-09-12 复核）
 - GLM-5.3-Flash（VLM 分区）— docs.z.ai/guides/vlm/glm-5.3-flash（2026-09-12 直抓；旧 /guides/llm/ 路径 308 重定向至此）
-- DeepSeek Models & Pricing — api-docs.deepseek.com/quick_start/pricing（2026-09-12 直抓：deepseek-flash=V4.1-Flash、旧名退役承接脚注、v4-pro 续供公告）
 - GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对，30+ agent 可用）— github.com/github/spec-kit（raw README 2026-09-12）
 - Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
+
+2026-09-13 读取原文后采纳的实践：[OpenAI 提示指南](https://learn.chatgpt.com/docs/prompting)用于目标、上下文、边界和验证模板；[ZCode 介绍](https://zcode.z.ai/cn/docs/welcome)与[模型配置](https://zcode.z.ai/cn/docs/configuration)用于区分模型和执行环境；[Aider](https://aider.chat/docs/usage/tips.html)用于相关上下文和小步修改；[Spec Kit](https://github.com/github/spec-kit)与[Superpowers](https://github.com/obra/superpowers)用于需求澄清、系统诊断和验收思路。这里只采纳适用方法，不引入整套框架或安装依赖。
 
 ## 7. 日常执行与反馈
 
@@ -140,7 +155,7 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - 普通任务由 GPT 或 GLM 完整承担；模型分工是可调整的假设。以任务难度、工具可用性、总耗时和返工选择配置，避免每一步跨宿主交接。
 - 重要改动的独立审查从需求、diff 和相关测试寻找反例；报告触发条件、影响与证据。第二个模型的同意不能替代验证。
 - 失败用原始错误和当前状态反馈。同一问题连续失败两次，先整理已证实事实、失败尝试和未决问题，再决定澄清或换上下文；不盲目连续打补丁。
-- 效率观察可复用已有任务/PR记录，记录任务类型、宿主与模型、总耗时、人工纠错、验收后缺陷及可取得的费用。比较时保持任务类型和验收标准可比，不据少量非对照样本宣称模型优劣，不新建遥测或自动评分门禁。
+- 效率观察复用已有任务/PR记录，按需附一行：`任务类型 | 宿主/模型 | 一次验收通过与否 | 总耗时 | 人工纠错时间 | 验收后缺陷 | 可取得的费用或额度消耗`。优先看每个验收通过任务的综合成本；不可取得的数据标未知，失败任务的耗时与成本也计入。可在后续两周真实任务中积累可比样本，模型或宿主大版本变化后再抽样复测；这不是定时任务、门禁或本次交付的等待条件。不据少量非对照样本宣称模型优劣，不新建遥测或自动评分系统。
 
 ## 8. 按行为选择观察能力
 
