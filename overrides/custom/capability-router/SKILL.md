@@ -173,6 +173,16 @@ verify that helper hash and execute `Test-ExecutionAdmissionRevalidation` with
 the original admission, plan, validation and roots immediately before writing.
 The parent check does not replace this child check. Record its actual tool
 result bound to the admission id; never infer it from the child's final prose.
+Deliver full objects with `Export-ExecutionAdmissionHandoff` into a unique file
+in the authorized run directory (create that directory before admission).
+This parent-owned transport file is separate from the child's task write set.
+Pass the returned path, SHA-256 and admission id, plus helper path/hash and both
+roots, explicitly in the child message with `fork_turns="none"`. Do not rely on
+history inheritance, truncated terminal output, or reconstructing JSON by hand.
+The child verifies the helper hash, dot-sources it, and calls
+`Import-ExecutionAdmissionHandoff -Path $path -Sha256 $hash -AdmissionId $id -RepoRoot $root`.
+Import verifies exact bytes, identity and current snapshots. The child must
+still execute the explicit write-time revalidation immediately before mutation.
 Never dispatch when `$check.pass` is false. These are parent-side checks, not
 an OS sandbox; actual tools must still enforce the task's write boundary.
 

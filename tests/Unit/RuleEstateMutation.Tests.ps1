@@ -209,6 +209,58 @@ function New-EstateMutationFixture {
         [IO.File]::ReadAllText($target) | Should -Match 'concurrent owner change'
     }
 
+    It 'preserves a later target changed while an earlier action is being applied' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $script:estateFirstTarget = [string]$plan.actions[0].target_path
+        $script:estateLaterTarget = [string]$plan.actions[1].target_path
+        Mock Write-Utf8FileAtomic {
+            param($Path,$Content)
+            [IO.File]::WriteAllText($Path,$Content)
+            if ($Path -eq $script:estateFirstTarget) { [IO.File]::WriteAllText($script:estateLaterTarget,'concurrent owner edit') }
+        }
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath (Join-Path $f.workspace 'later-drift.json')
+        $result.pass | Should -BeFalse
+        $result.writes | Should -Be 1
+        [IO.File]::ReadAllText($script:estateLaterTarget) | Should -Be 'concurrent owner edit'
+        @($result.receipt.actions).Count | Should -Be 1
+    }
+
+    It 'keeps a recoverable <Operation> receipt when the write fails with landed=<Landed>' -TestCases @(
+        @{ Operation='update'; Landed=$true }, @{ Operation='update'; Landed=$false },
+        @{ Operation='create'; Landed=$true }, @{ Operation='create'; Landed=$false }
+    ) {
+        param($Operation,$Landed)
+        $f = New-EstateMutationFixture
+        if ($Operation -eq 'create') {
+            $review = Get-Content -LiteralPath $f.review -Raw | ConvertFrom-Json
+            $review.changes[0].target_file = 'CLAUDE.md'; $review.changes[0].allow_create = $true
+            $review | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.review
+        }
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $script:estateFaultTarget = [string]$plan.actions[0].target_path
+        $script:estateFaultLanded = $Landed
+        $before = if ($Operation -eq 'update') { [IO.File]::ReadAllText($script:estateFaultTarget) } else { '' }
+        $receiptPath = Join-Path $f.workspace 'landed-failure.json'
+        Mock Write-Utf8FileAtomic {
+            param($Path,$Content)
+            if ($Path -ne $script:estateFaultTarget -or $script:estateFaultLanded) { [IO.File]::WriteAllText($Path,$Content) }
+            if ($Path -eq $script:estateFaultTarget) { throw 'fixture failure after landing' }
+        }
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath $receiptPath
+        $result.pass | Should -BeFalse
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        @($receipt.actions).Count | Should -Be 1
+        $receipt.actions[0].status | Should -Be 'prepared'
+        { Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath $receiptPath -ResumeReceiptPath $receiptPath } | Should -Throw '*explicit rollback*'
+        $token = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 $receipt.operation_id).Substring(0,16).ToUpperInvariant()
+        $rollback = Invoke-RuleEstateRollback $receiptPath $receipt.actions[0].action_id $token $f.workspace $f.codex $f.claude
+        $rollback.pass | Should -BeTrue
+        $rollback.writes | Should -Be ([int]$Landed)
+        if ($Operation -eq 'update') { [IO.File]::ReadAllText($script:estateFaultTarget) | Should -Be $before }
+        else { Test-Path -LiteralPath $script:estateFaultTarget | Should -BeFalse }
+    }
+
     It 'rejects plan actions that no longer exactly project the authorized review' {
         $f = New-EstateMutationFixture
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
