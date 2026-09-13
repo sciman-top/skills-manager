@@ -49,6 +49,37 @@ BeforeAll {
 }
 
 Describe 'Execution admission' {
+    It 'delivers complete objects by immutable hash and rejects tampering or drift in a portable process' {
+        $root = Join-Path $TestDrive 'handoff'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $admission = New-ExecutionAdmission -OriginalRequest 'Review this proposal' -AdmittedGoal 'Ask one question' -Validation $fixture.validation -AllowedReadSet @($fixture.fixture_path) -AuthorityBasis current_user_request -IssuedAt '2026-09-12T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+        $path = Join-Path $root 'handoff.json'
+        $handoff = Export-ExecutionAdmissionHandoff -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path
+        $loaded = Import-ExecutionAdmissionHandoff -Path $path -Sha256 $handoff.sha256 -AdmissionId $admission.admission_id -RepoRoot $root
+        $loaded.plan.plan_id | Should -Be $plan.plan_id
+        @($loaded.validation.validated_closure).Count | Should -Be 2
+        { Export-ExecutionAdmissionHandoff -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path } | Should -Throw '*handoff_path_exists*'
+        { Import-ExecutionAdmissionHandoff -Path $path -Sha256 ('0' * 64) -AdmissionId $admission.admission_id -RepoRoot $root } | Should -Throw '*handoff_hash_mismatch*'
+        { Import-ExecutionAdmissionHandoff -Path $path -Sha256 $handoff.sha256 -AdmissionId 'wrong' -RepoRoot $root } | Should -Throw '*handoff_identity_mismatch*'
+        $helperPath = Join-Path $root 'runtime.ps1'
+        Get-ExecutionAdmissionRuntimeContent | Set-Content -LiteralPath $helperPath
+        $probePath = Join-Path $root 'probe.ps1'
+        @'
+param($Helper, $Path, $Hash, $Id, $Root)
+$ErrorActionPreference = 'Stop'
+. $Helper
+try { Import-ExecutionAdmissionHandoff -Path $Path -Sha256 $Hash -AdmissionId $Id -RepoRoot $Root | Out-Null; exit 0 }
+catch { Write-Output $_.Exception.Message; exit 1 }
+'@ | Set-Content -LiteralPath $probePath
+        & pwsh -NoProfile -File $probePath $helperPath $path $handoff.sha256 $admission.admission_id $root
+        $LASTEXITCODE | Should -Be 0
+        Add-Content -LiteralPath $fixture.fixture_path -Value 'concurrent drift'
+        $output = & pwsh -NoProfile -File $probePath $helperPath $path $handoff.sha256 $admission.admission_id $root
+        $LASTEXITCODE | Should -Be 1
+        ($output -join "`n") | Should -Match 'read_set_hash_drift'
+    }
+
     It 'admits exact controlled writes and rejects drift before execution' {
         $root = Join-Path $TestDrive 'controlled-write'
         $fixture = New-ExecutionAdmissionFixture $root

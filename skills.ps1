@@ -2396,7 +2396,7 @@ $script:ExecutionAdmissionProfiles = [ordered]@{
 function Get-ExecutionAdmissionRuntimeContent {
     # Export the already-loaded source functions so portable installations do
     # not need src/ or a consumer repository's skills.json at execution time.
-    $names = @('Get-OperationObjectProperty', 'Test-OperationObjectProperty', 'Test-OperationArray', 'Test-OperationRfc3339', 'Get-OperationSha256', 'Normalize-OperationPathKey', 'Test-OperationPathWithinRoot')
+    $names = @('New-OperationFinding', 'Get-OperationObjectProperty', 'Test-OperationObjectProperty', 'Test-OperationArray', 'Test-OperationRfc3339', 'Get-OperationSha256', 'Normalize-OperationPathKey', 'Test-OperationPathWithinRoot')
     $functions = @(Get-Command -CommandType Function -Name (@('*-ExecutionAdmission*', '*-ExecutionPlan*') + $names) | Where-Object Name -ne 'Get-ExecutionAdmissionRuntimeContent' | Sort-Object Name -Unique)
     $profiles = ($script:ExecutionAdmissionProfiles | ConvertTo-Json -Depth 10 -Compress).Replace("'", "''")
     $parts = @('#requires -Version 7.0', '# Generated from skills-manager source; do not edit.', ('$script:ExecutionAdmissionSchemaVersion = {0}' -f $script:ExecutionAdmissionSchemaVersion), ('$script:ExecutionAdmissionProfiles = ConvertFrom-Json -AsHashtable ''{0}''' -f $profiles))
@@ -2407,6 +2407,50 @@ function Get-ExecutionAdmissionRuntimeContent {
 function Get-ExecutionAdmissionProfile([string]$Mode) {
     if ([string]::IsNullOrWhiteSpace($Mode) -or -not $script:ExecutionAdmissionProfiles.Contains($Mode)) { return $null }
     return $script:ExecutionAdmissionProfiles[$Mode]
+}
+
+function Export-ExecutionAdmissionHandoff {
+    param(
+        [Parameter(Mandatory)]$Admission,
+        [Parameter(Mandatory)]$Plan,
+        [Parameter(Mandatory)]$Validation,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$SkillRoot,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $check = Test-ExecutionAdmissionRevalidation -Admission $Admission -Plan $Plan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
+    if (-not $check.pass) { throw 'handoff_admission_not_revalidated' }
+    $state = @(Get-ExecutionAdmissionWriteSnapshots -Paths @($Path) -RepoRoot $RepoRoot)[0]
+    if ($state.exists) { throw 'handoff_path_exists' }
+    $taskPaths = @($Admission.exact_write_set) + @($Admission.allowed_read_set | ForEach-Object path)
+    if ($taskPaths -contains $state.path) { throw 'handoff_overlaps_task_scope' }
+    $bundle = [ordered]@{ admission = $Admission; plan = $Plan; validation = $Validation; repo_root = [IO.Path]::GetFullPath($RepoRoot); skill_root = [IO.Path]::GetFullPath($SkillRoot) }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($bundle | ConvertTo-Json -Depth 60 -Compress))
+    # CreateNew preserves existing handoffs; the hash binds the exact serialized bytes.
+    $stream = [IO.File]::Open($state.path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+    return [pscustomobject]@{ path = $state.path; sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant(); admission_id = $Admission.admission_id }
+}
+
+function Import-ExecutionAdmissionHandoff {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Sha256,
+        [Parameter(Mandatory)][string]$AdmissionId,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+    if ($Sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'handoff_hash_invalid' }
+    $state = @(Get-ExecutionAdmissionWriteSnapshots -Paths @($Path) -RepoRoot $RepoRoot)[0]
+    if (-not $state.exists) { throw 'handoff_path_missing' }
+    $bytes = [IO.File]::ReadAllBytes($state.path)
+    $actual = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    if ($actual -cne $Sha256) { throw 'handoff_hash_mismatch' }
+    $bundle = [Text.UTF8Encoding]::new($false, $true).GetString($bytes) | ConvertFrom-Json -Depth 60
+    if ($bundle.admission.admission_id -cne $AdmissionId -or $bundle.repo_root -ne [IO.Path]::GetFullPath($RepoRoot)) { throw 'handoff_identity_mismatch' }
+    $check = Test-ExecutionAdmissionRevalidation -Admission $bundle.admission -Plan $bundle.plan -Validation $bundle.validation -RepoRoot $RepoRoot -SkillRoot $bundle.skill_root
+    if (-not $check.pass) { throw ('handoff_revalidation_failed: ' + (($check.findings | ForEach-Object code) -join ',')) }
+    return $bundle
 }
 
 function New-ExecutionAdmissionFinding([string]$Code, [string]$Path, [string]$Message) {
