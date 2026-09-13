@@ -40,7 +40,7 @@
 | Claude Code | 技能元数据约 1% 上下文预算 + 最少调用驱逐 + 长 description 1536 字符截断 | code.claude.com/docs/en/skills；2026-09-03 核实记录 |
 | Codex | 技能/工具预算约 2% prompt，超限压缩/省略+警告；project_doc_max_bytes 默认 32KiB | github.com/openai/codex issue #19679；2026-09-03 核实记录 |
 | ZCode | 固定元数据预算；description ≤1024 字符、正文 >100KB 截断 | 用户级 AGENTS.md 契约；2026-09-10 核对 |
-| GLM（经由 Coding Plan） | GLM-5.3：1M 上下文；coding 建议 `reasoning_effort: "max"`；temperature 1.0 仅见于官方 Quick Start 示例（页面无显式 coding 温度推荐）；thinking `disabled` 已彻底不支持（enabled 唯一值），迁移须先设 enabled+effort 再改模型 ID；GLM-5.3-Flash 为多模态视觉编码变体，已迁至 VLM 分区（旧 llm 路径 308 重定向；1M 上下文、文本参数同 5.3、attention/KV cache 较 5.3 降 3.01×/4.44×） | docs.z.ai/guides/llm/glm-5.3、docs.z.ai/guides/vlm/glm-5.3-flash；2026-09-10 直抓、2026-09-12 复核+直抓 VLM 页 |
+| GLM-5.3-Flash | 官方建议 `temperature: 1`、`top_p: 0.95`、`reasoning_effort: max`；`thinking.type` 仅支持 `enabled`，建议 `thinking.clear_thinking: false`。这些是模型 API 建议，不能据此假定 ZCode 或其他宿主暴露同名配置，也不能作为其他 GLM 型号的统一参数 | [官方模型页](https://docs.z.ai/guides/vlm/glm-5.3-flash)；2026-09-13 直抓 Markdown 原文复核 |
 
 **测量法**（本仓 2026-09-10 起内建，纯观测、无阈值、不影响 pass）：
 
