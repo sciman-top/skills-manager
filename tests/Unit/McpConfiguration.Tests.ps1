@@ -1196,6 +1196,38 @@ command = "cmd"
             Get-ContentUtf8 $path | Should -Be 'outside-change'
         }
 
+        It 'preserves a concurrent deletion during rollback and still restores other targets' {
+            $root = Join-Path $TestDrive 'mcp-rollback-deletion'
+            New-Item -ItemType Directory -Path $root | Out-Null
+            $missing = Join-Path $root 'missing.json'
+            $written = Join-Path $root 'written.json'
+            Set-ContentUtf8 $written 'desired'
+            $snapshots = @($missing,$written | ForEach-Object {
+                [pscustomobject]@{ path=$_; existed=$true; bytes=[Text.Encoding]::UTF8.GetBytes('before'); before_hash=(Get-OperationSha256 'before'); desired_hash=(Get-OperationSha256 'desired') }
+            })
+            { Restore-McpManagedTargetSnapshot $snapshots } | Should -Throw '*rollback_conflict*'
+            Test-Path -LiteralPath $missing | Should -BeFalse
+            Get-ContentUtf8 $written | Should -Be 'before'
+        }
+
+        It 'continues restoring independent targets when one rollback write fails' {
+            $root = Join-Path $TestDrive 'mcp-rollback-write-failure'
+            New-Item -ItemType Directory -Path $root | Out-Null
+            $first = Join-Path $root 'first.json'; $second = Join-Path $root 'second.json'
+            foreach ($path in @($first,$second)) { Set-ContentUtf8 $path 'desired' }
+            $snapshots = @($first,$second | ForEach-Object {
+                [pscustomobject]@{ path=$_; existed=$true; bytes=[Text.Encoding]::UTF8.GetBytes('before'); before_hash=(Get-OperationSha256 'before'); desired_hash=(Get-OperationSha256 'desired') }
+            })
+            Mock Write-BytesAtomic {
+                param($Path,$Bytes)
+                if ($Path -eq $first) { throw 'fixture restore failure' }
+                [IO.File]::WriteAllBytes($Path,$Bytes)
+            }
+            { Restore-McpManagedTargetSnapshot $snapshots } | Should -Throw '*rollback*'
+            Get-ContentUtf8 $first | Should -Be 'desired'
+            Get-ContentUtf8 $second | Should -Be 'before'
+        }
+
         It "redacts space-delimited secrets and URL userinfo in MCP diagnostics" {
             $masked = Mask-SensitiveMcpCommandText 'token secret-value https://user:pass@example.invalid Authorization: Bearer abc123'
             $masked | Should -Not -Match 'secret-value|user:pass|abc123'
