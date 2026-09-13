@@ -1,5 +1,36 @@
 Describe 'Audit snapshot configuration failures' {
     BeforeAll { . $PSScriptRoot\..\..\skills.ps1 }
+    It 'preserves an external configuration <Change> during compensation' -TestCases @(
+        @{ Change='edit' }, @{ Change='deletion' }
+    ) {
+        param($Change)
+        $CfgPath = Join-Path $TestDrive 'external-config.json'
+        [IO.File]::WriteAllText($CfgPath, '{"before":true}')
+        $AuditApplyConfigSnapshot = New-AuditApplyTransactionSnapshot
+        Set-ContentUtf8 $CfgPath '{"owned":true}'
+        if ($Change -eq 'edit') { [IO.File]::WriteAllText($CfgPath, '{"external":true}') }
+        else { [IO.File]::Delete($CfgPath) }
+        Mock 构建生效 {}
+        Mock 同步MCP {}
+        $result = Restore-AuditApplyTransaction $AuditApplyConfigSnapshot $true $true
+        $result.config_restored | Should -BeFalse
+        $result.status | Should -Be 'failed'
+        if ($Change -eq 'edit') { [IO.File]::ReadAllText($CfgPath) | Should -Be '{"external":true}' }
+        else { Test-Path -LiteralPath $CfgPath | Should -BeFalse }
+        Should -Invoke 构建生效 -Times 0 -Exactly
+        Should -Invoke 同步MCP -Times 0 -Exactly
+    }
+
+    It 'restores a configuration written by the active audit transaction' {
+        $CfgPath = Join-Path $TestDrive 'owned-config.json'
+        [IO.File]::WriteAllText($CfgPath, '{"before":true}')
+        $AuditApplyConfigSnapshot = New-AuditApplyTransactionSnapshot
+        Set-ContentUtf8 $CfgPath '{"owned":true}'
+        $result = Restore-AuditApplyTransaction $AuditApplyConfigSnapshot $false $false
+        $result.config_restored | Should -BeTrue
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"before":true}'
+    }
+
     It 'preserves the configuration failure and never substitutes an empty inventory' {
         Mock LoadCfg { throw 'config unreadable' }
         Mock Get-AuditLiveInstalledState { throw 'inventory must not run' }
