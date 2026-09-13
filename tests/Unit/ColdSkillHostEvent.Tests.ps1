@@ -71,6 +71,12 @@ Describe 'Cold skill raw host-event verifier' {
         $result.Output | Should -Match 'findings=0'
     }
 
+    It 'does not accept a parent-only write check as child revalidation' {
+        $output = & pwsh -NoProfile -File $verifierPath -EventsPath (Join-Path $fixturesRoot 'valid-s31.jsonl') -ScenarioId 'S31-live-derived' -RequireChildWriteRevalidation 2>&1
+        $LASTEXITCODE | Should -Be 1
+        ($output -join "`n") | Should -Match 'H011_CHILD_WRITE_REVALIDATION_MISSING'
+    }
+
     It 'rejects a child rollout whose parent binding does not match the raw host stream' {
         $result = Invoke-HostEventVerifier 'valid-s30-rollout-witness-host.jsonl' 'S30-live-derived' 'invalid-s30-wrong-parent-child-rollout.jsonl'
 

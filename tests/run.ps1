@@ -61,4 +61,9 @@ if ([int]$result.FailedCount -gt 0) {
     throw ("Pester failures: {0}" -f $result.FailedCount)
 }
 
+if ([int]$result.PassedCount -eq 0) {
+    $global:LASTEXITCODE = 1
+    throw 'No tests executed successfully; check filters and skipped tests.'
+}
+
 $global:LASTEXITCODE = 0

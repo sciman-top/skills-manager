@@ -254,6 +254,10 @@ Describe 'Native agent bridge' {
         $runner | Should -Match 'exact non-empty write set'
         $runner | Should -Match 'minimum proof'
         $runner | Should -Match 'requested_operation=controlled_write'
+        $runner | Should -Match 'YOU must execute Test-ExecutionAdmissionRevalidation'
+        $runner | Should -Match 'parent.s pass=true is not your write-time check'
+        $runner | Should -Match 'reason=write_revalidation_required'
+        $runner | Should -Match 'Do not rebuild the admission or refresh its snapshots'
         $runner | Should -Match 'external_read, unknown side effects'
         $runner | Should -Match 'Never spawn subagents'
 

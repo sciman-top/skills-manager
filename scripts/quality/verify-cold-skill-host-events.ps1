@@ -26,6 +26,7 @@ Stable finding codes:
   H008_ROLLOUT_CHILD_EVIDENCE_INVALID
   H009_REQUIRED_DISCOVERY_MISSING
   H010_SPECIALIST_HISTORY_NOT_ISOLATED
+  H011_CHILD_WRITE_REVALIDATION_MISSING
 #>
 [CmdletBinding()]
 param(
@@ -33,7 +34,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ScenarioId,
     [string]$ScenarioMatrixPath,
     [string]$ChildRolloutPath,
-    [string]$ParentRolloutPath
+    [string]$ParentRolloutPath,
+    [switch]$RequireChildWriteRevalidation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,11 +92,15 @@ function Get-ChildRolloutEvidence {
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'child rollout file is missing' }
         $sessionMetas = New-Object System.Collections.Generic.List[object]
+        $childCalls = New-Object System.Collections.Generic.List[string]
         foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             try {
                 $record = $line | ConvertFrom-Json
                 if ($null -ne $record -and [string]$record.type -eq 'session_meta') { $sessionMetas.Add($record) | Out-Null }
+                if ([string]$record.type -eq 'response_item' -and [string]$record.payload.type -in @('function_call', 'custom_tool_call')) {
+                    $childCalls.Add(([string]$record.payload.arguments + [string]$record.payload.input)) | Out-Null
+                }
             }
             catch {
                 # Non-JSON lines cannot establish rollout provenance.
@@ -121,7 +127,7 @@ function Get-ChildRolloutEvidence {
         if (-not [string]::IsNullOrWhiteSpace($ExpectedAgentRole) -and $agentRole -ne $ExpectedAgentRole) {
             throw ("child rollout agent_role '{0}' does not match expected '{1}'" -f $agentRole, $ExpectedAgentRole)
         }
-        return [pscustomobject]@{ ChildId = $childId; AgentRole = $agentRole; Path = $Path }
+        return [pscustomobject]@{ ChildId = $childId; AgentRole = $agentRole; Path = $Path; Calls = @($childCalls.ToArray()) }
     }
     catch {
         Add-Finding 'H008_ROLLOUT_CHILD_EVIDENCE_INVALID' ("{0}: {1}" -f $ScenarioId, $_.Exception.Message)
@@ -179,6 +185,14 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
             $expectedAgentRole = 'design-griller'
         }
         $rolloutChild = Get-ChildRolloutEvidence -Path $ChildRolloutPath -HostThreadId ($hostThreadIds | Select-Object -First 1) -ExpectedAgentRole $expectedAgentRole
+        if ($RequireChildWriteRevalidation) {
+            # This is a necessary evidence check, not proof of successful execution
+            # or write ordering: those require inspection of bound tool results.
+            $checkCalls = @($rolloutChild.Calls | Where-Object { $_ -match 'Test-ExecutionAdmissionRevalidation' })
+            if ($null -eq $rolloutChild -or $checkCalls.Count -eq 0) {
+                Add-Finding 'H011_CHILD_WRITE_REVALIDATION_MISSING' ("{0}: no child tool call contains write-time revalidation; parent results and final prose are insufficient" -f $ScenarioId)
+            }
+        }
         $collaborationEvents = @($completedItems | Where-Object { $_.type -eq 'collab_tool_call' })
         $spawnEvents = @($collaborationEvents | Where-Object { [string]$_.tool -eq 'spawn_agent' })
         $spawnWithChildId = @($spawnEvents | Where-Object { @($_.receiver_thread_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0 })
@@ -197,6 +211,10 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
             Add-Finding 'H006_BARE_WAIT_WITHOUT_CHILD' ("{0}: observed {1} wait event(s) without a child identifier" -f $ScenarioId, $bareWaits.Count)
         }
     }
+}
+
+if ($RequireChildWriteRevalidation -and $null -ne $scenario -and [string]$scenario.expected_native_agent -ne 'cold-capability-runner') {
+    Add-Finding 'H011_CHILD_WRITE_REVALIDATION_MISSING' 'write revalidation requires a runner scenario and bound child rollout'
 }
 
 if ($findings.Count -gt 0) {

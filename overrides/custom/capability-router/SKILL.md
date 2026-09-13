@@ -167,6 +167,12 @@ $check = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -
 For an authorized one-shot implementation, creation additionally takes
 `-RequestedOperation controlled_write -ExactWriteSet $files -MinimumProof $proof`.
 Revalidation checks existing-file hashes and absence of new files before spawn.
+For controlled writes, include this generated helper's exact physical path and
+SHA-256 in the child handoff as an additional read-only input. The child must
+verify that helper hash and execute `Test-ExecutionAdmissionRevalidation` with
+the original admission, plan, validation and roots immediately before writing.
+The parent check does not replace this child check. Record its actual tool
+result bound to the admission id; never infer it from the child's final prose.
 Never dispatch when `$check.pass` is false. These are parent-side checks, not
 an OS sandbox; actual tools must still enforce the task's write boundary.
 

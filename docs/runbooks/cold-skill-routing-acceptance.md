@@ -235,6 +235,13 @@ CSR-R5 使用六个互不复用的 fresh-host session：
 
 ## 7. 失败分类与停止条件
 
+受控写入验收必须传入 `-RequireChildWriteRevalidation` 和绑定的
+`-ChildRolloutPath`。子代理没有实际调用 `Test-ExecutionAdmissionRevalidation`
+时返回 `H011_CHILD_WRITE_REVALIDATION_MISSING`；父代理的成功结果与子代理最终
+自述不能替代。此检查仅是必要条件，仍须人工核对 helper 哈希、原始 admission id、
+工具成功结果、检查在首次写入之前，以及实际写集。它不是工具权限强制层，也不
+保证检查与写入之间不存在并发竞态。缺少这些证据时不得声称完整受控写入验收。
+
 必须冷发现的场景若没有实际 router 命令，host-event verifier 返回
 `H009_REQUIRED_DISCOVERY_MISSING`。父代理给出合理答案不能替代冷发现证据。
 Codex 专门角色的隔离验收同时传入 `-ParentRolloutPath`，其 session id 必须

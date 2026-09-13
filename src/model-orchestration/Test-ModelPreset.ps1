@@ -1,6 +1,20 @@
 #requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 $count = 0
+function global:claude {
+    $global:ModelSlotCapturedArgs = @($args)
+    $global:LASTEXITCODE = 0
+}
+try {
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset deepseek_flash_only -Slot quick_triage -Prompt 'argument boundary test'
+    if ($global:ModelSlotCapturedArgs[-2] -cne '--' -or $global:ModelSlotCapturedArgs[-1] -notlike '*argument boundary test') { throw 'Claude prompt must follow option terminator.' }
+    if ($global:ModelSlotCapturedArgs -notcontains 'Read,Glob,Grep' -or $global:ModelSlotCapturedArgs -notcontains 'Agent') { throw 'Claude tool restrictions missing.' }
+    $count += 2
+}
+finally {
+    Remove-Item Function:/claude
+    Remove-Variable ModelSlotCapturedArgs -Scope Global -ErrorAction SilentlyContinue
+}
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message }; $script:count++ }
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $expected = @{

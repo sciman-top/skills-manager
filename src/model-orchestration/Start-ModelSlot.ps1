@@ -29,7 +29,7 @@ else {
     $cliArgs = @('--print','--output-format','json','--model',$route.model,'--effort',$route.effort,'--disallowedTools','Agent')
     if ($Ephemeral) { $cliArgs += '--no-session-persistence' }
     if ($Slot -in @('quick_triage','standard_review')) { $cliArgs += @('--tools','Read,Glob,Grep') }
-    $executable = (Get-Command claude -CommandType Application).Source
+    $executable = 'claude'
 }
 if ($Plan) {
     @{preset=$Preset;slot=$Slot;model=$route.model;effort=$route.effort;host=$targetHost;delegation_enabled=$false;working_directory=$WorkingDirectory} | ConvertTo-Json
@@ -42,6 +42,8 @@ if ($Slot -in @('quick_triage','standard_review')) { $scopedPrompt += 'This is r
 $scopedPrompt += "`n`n"+$Prompt
 Push-Location -LiteralPath $WorkingDirectory
 try {
+    # End variadic Claude tool options before passing the positional prompt.
+    if ($targetHost -eq 'claude') { $cliArgs += '--' }
     & $executable @cliArgs $scopedPrompt
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Slot process failed (exit=$code); no replay or preset substitution performed." }
