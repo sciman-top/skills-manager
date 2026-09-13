@@ -315,6 +315,9 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
     }
 
     It 'selects existing behavior suites for frequent read and planning modules' -TestCases @(
+        @{ Source = 'src/Application/RuleAdvisor.ps1'; Expected = @('ReadOnlyCli', 'RuleAdvisor', 'RuleEstate') }
+        @{ Source = 'src/Application/RuleDiscovery.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleDiscovery', 'RuleEstate') }
+        @{ Source = 'src/Application/RuleAudit.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleEstate') }
         @{ Source = 'src/Application/CapabilityInventory.ps1'; Expected = @('CapabilityInventory', 'ReadOnlyCli') }
         @{ Source = 'src/Commands/AuditTargets.Bundle.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
         @{ Source = 'src/Commands/AuditTargets.Template.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
@@ -327,7 +330,31 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r = Invoke-Resolver $repo @{}
         $r.result.profile | Should -Be 'focused'
         @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
-        $r.result.requires_locked_sources | Should -BeFalse
+        $r.result.requires_locked_sources | Should -Be ($Expected -contains 'RuleEstate')
+    }
+
+    It 'uses exact behavior coverage for known gate scripts in local and CI modes' -TestCases @(
+        @{ Source = 'scripts/quality/resolve-gate-profile.ps1'; Expected = @('CiWorkflow', 'QualityGateAuto', 'ResolveGateProfile') }
+        @{ Source = 'tests/run.ps1'; Expected = @('TestRunner') }
+    ) {
+        param($Source, $Expected)
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Set-Content -LiteralPath (Join-Path $repo $Source) -Value '# behavior change'
+        $local = Invoke-Resolver $repo @{}
+        & git -C $repo add -- $Source
+        & git -C $repo commit -m 'behavior change' *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'fixture commit failed' }
+        $ci = Invoke-Resolver $repo @{ BaseSha = $base; Mode = 'ci' }
+        foreach ($r in @($local, $ci)) {
+            $r.result.profile | Should -Be 'focused'
+            @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
+            $r.result.requires_locked_sources | Should -BeFalse
+        }
+        Add-Content -LiteralPath (Join-Path $repo 'scripts/quality/x.ps1') -Value '# independent unmapped risk'
+        $mixed = Invoke-Resolver $repo @{ BaseSha = $base }
+        $mixed.result.profile | Should -Be 'full'
+        $mixed.result.reason | Should -Be 'risk_path'
     }
 
     It 'retains materialization for an unreviewed focused test suite' {

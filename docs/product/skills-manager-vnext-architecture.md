@@ -4,6 +4,8 @@
 
 架构只服务五条真实主链：技能配置与构建、MCP、目标仓审查、规则治理、原生技能投影。每条主链拥有一个清晰 interface；跨主链只共享配置、文件/Git 原语和 receipt，不建立中央 orchestrator。
 
+宿主负责判断用户是否要求访谈、审查或实施；不通过关键词 hook 强制选择工作流。确定性检查只处理已经明确的参数、路径、所有权或执行合同，不能把关键词命中当作用户授权或语义裁决。
+
 ## 2. 模块与 interface
 
 ### CLI shell
@@ -171,6 +173,8 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。
 
 CI 与本地共用 `scripts/quality/resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件与 tracked diff 合并分类；文档走 docs，规则走专项测试，已映射源码选择行为测试，未知路径、未映射源码、风险或分类失败走 full。源码映射是明确的覆盖选择，不用固定 smoke tests 代替功能验证；新增映射需有行为覆盖依据。`-TestPath` 可追加回归测试，显式 focused 用于已确认的切片。main push 与 PR 使用同一分类器，标签保留 full；focused CI 不额外叠加全套 verifier。文档检查覆盖本地暂存、未暂存及未跟踪内容。分类器是唯一权威副本，历史实施计划不覆盖当前脚本。
+
+精确行为映射也可覆盖已有专项测试的脚本，例如分类器自身与 `tests/run.ps1`；这不是对 quality/verify/override 目录整体降档。混合变更中的独立风险仍选择 full，门禁执行器、依赖安装及未映射脚本继续保留原风险分类。
 
 ## 6. 删除原则
 

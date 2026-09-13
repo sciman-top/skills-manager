@@ -18,8 +18,8 @@ $sourcePath = '^(src/|tests/Unit/)'
 $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
 $skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml)$'
 $skillsConfigPath = '^skills\.json$'
-# Explicit behavior coverage, not a smoke-test substitute. Unmapped source
-# falls back to full until its affected tests are known.
+# Exact source/script behavior coverage, not a smoke-test substitute.
+# Unmapped paths retain their risk classification or full fallback.
 $sourceTests = @{
     'src/Core.ps1' = @('Core', 'InfrastructureSeam', 'ReadOnlyCli')
     'src/Commands/Migration.ps1' = @('Migration')
@@ -32,6 +32,11 @@ $sourceTests = @{
     'src/Commands/AuditTargets.Template.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Plan.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Application/RuleDiagnostics.ps1' = @('RuleDiagnostics', 'RuleContent', 'ReadOnlyCli')
+    'src/Application/RuleAdvisor.ps1' = @('RuleAdvisor', 'RuleEstate', 'ReadOnlyCli')
+    'src/Application/RuleDiscovery.ps1' = @('RuleDiscovery', 'RuleAudit', 'RuleEstate', 'ReadOnlyCli')
+    'src/Application/RuleAudit.ps1' = @('RuleAudit', 'RuleEstate', 'ReadOnlyCli')
+    'scripts/quality/resolve-gate-profile.ps1' = @('ResolveGateProfile', 'QualityGateAuto', 'CiWorkflow')
+    'tests/run.ps1' = @('TestRunner')
 }
 $skillFocusedTests = @(
     'tests/Unit/SkillProjection.Tests.ps1'
@@ -181,7 +186,7 @@ if ($changedCount -eq 0) {
 # skills.json is content-sensitive: only projection/discovery inventory edits
 # can use the focused path; source, MCP, target, lock, and host-write changes
 # remain full. Unknown override shapes also fail closed to full.
-$riskChanged = @($changed | Where-Object { $riskRegex.IsMatch($_) })
+$riskChanged = @($changed | Where-Object { $riskRegex.IsMatch($_) -and -not $sourceTests.ContainsKey($_) })
 $unknownOverrideChanged = @($changed | Where-Object {
         $_ -like 'overrides/*' -and -not $riskRegex.IsMatch($_) -and -not $skillFocusedRegex.IsMatch($_) -and -not $docsRegex.IsMatch($_)
     })
@@ -201,12 +206,12 @@ if ($docsOnly) {
     exit 0
 }
 
- $sourceChanged = @($changed | Where-Object { $sourceRegex.IsMatch($_) })
+ $sourceChanged = @($changed | Where-Object { $sourceRegex.IsMatch($_) -or $sourceTests.ContainsKey($_) })
  $skillFocusedChanged = @($changed | Where-Object { $skillFocusedRegex.IsMatch($_) })
  $configFocusedChanged = @($changed | Where-Object { $skillsConfigRegex.IsMatch($_) })
  $ruleChanged = @($changed | Where-Object { $ruleRegex.IsMatch($_) })
  $unknownChanged = @($changed | Where-Object {
-    $_ -ne 'skills.ps1' -and -not ($sourceRegex.IsMatch($_) -or $skillFocusedRegex.IsMatch($_) -or $skillsConfigRegex.IsMatch($_) -or $ruleRegex.IsMatch($_) -or $docsRegex.IsMatch($_))
+    $_ -ne 'skills.ps1' -and -not ($sourceRegex.IsMatch($_) -or $sourceTests.ContainsKey($_) -or $skillFocusedRegex.IsMatch($_) -or $skillsConfigRegex.IsMatch($_) -or $ruleRegex.IsMatch($_) -or $docsRegex.IsMatch($_))
  })
 if ($unknownChanged.Count -gt 0) {
     $result = Get-GateProfileResult 'full' 'unknown_path' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount
@@ -216,7 +221,7 @@ if ($unknownChanged.Count -gt 0) {
 if ($sourceChanged.Count -gt 0 -or $skillFocusedChanged.Count -gt 0 -or $configFocusedChanged.Count -gt 0 -or $ruleChanged.Count -gt 0) {
     $focused = @()
     $reason = 'source_path'
-    foreach ($path in @($sourceChanged | Where-Object { $_ -like 'src/*' })) {
+    foreach ($path in @($sourceChanged | Where-Object { $_ -notlike 'tests/Unit/*' })) {
         if (-not $sourceTests.ContainsKey($path)) {
             $result = Get-GateProfileResult 'full' 'unmapped_source' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount
             if ($Json) { $result | ConvertTo-Json } else { $result }
