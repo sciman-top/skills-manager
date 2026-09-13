@@ -206,6 +206,7 @@ function Invoke-RuleEstateApply {
         if (-not [IO.File]::Exists($resumeFile)) { throw 'Resume receipt does not exist.' }
         $existing=[IO.File]::ReadAllText($resumeFile)|ConvertFrom-Json
         if ([string](Get-RuleEstateProperty $existing 'operation_id') -ne [string](Get-RuleEstateProperty $Plan 'operation_id')) { throw 'Resume receipt belongs to another plan.' }
+        if(@(Get-RuleEstateProperty $existing 'actions'|Where-Object status -eq 'prepared').Count -gt 0){throw 'Prepared actions require explicit rollback before a new apply; their write outcome is not verified.'}
     }
     $completedIds=@()
     if($null -ne $existing){$completedIds=@(Get-RuleEstateProperty $existing 'actions'|Where-Object{[string](Get-RuleEstateProperty $_ 'status') -eq 'applied'}|ForEach-Object{[string](Get-RuleEstateProperty $_ 'action_id')})}
@@ -228,6 +229,10 @@ function Invoke-RuleEstateApply {
             if($id -in $completedIds){continue}
             if(-not [string]::IsNullOrWhiteSpace($TestFailBeforeActionId) -and $id -eq $TestFailBeforeActionId){throw ('test_fail_before_action:{0}' -f $id)}
             $target=[string](Get-RuleEstateProperty $action 'target_path');$operation=[string](Get-RuleEstateProperty $action 'operation')
+            # Earlier actions may take time; the batch preflight is not a
+            # freshness guarantee for a later repository's current content.
+            if(Test-RuleEstateReparsePath $target ([string](Get-RuleEstateProperty $action 'authorized_root'))){throw ('target_reparse_before_write:{0}' -f $id)}
+            if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'before_hash')){throw ('target_hash_stale_before_write:{0}' -f $id)}
             $backupRoot=Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}' -f [string](Get-RuleEstateProperty $Plan 'operation_id'))
             New-Item -ItemType Directory -Path $backupRoot -Force|Out-Null
             $backup=Join-Path $backupRoot ('{0}.bak' -f $id)
@@ -235,10 +240,13 @@ function Invoke-RuleEstateApply {
             if([IO.File]::Exists($target)){$beforeBytes=[IO.File]::ReadAllBytes($target)}else{$beforeBytes=[byte[]]::new(0)}
             [IO.File]::WriteAllBytes($backup,$beforeBytes)
             $backupHash=Get-RuleEstateBytesHash $beforeBytes
+            $actionResult=[pscustomobject][ordered]@{action_id=$id;status='prepared';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;backup_sha256=$backupHash;backup_length=[long]$beforeBytes.LongLength;applied_at=$null}
+            $actionResults.Add($actionResult)|Out-Null
+            $receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
             Write-Utf8FileAtomic -Path $target -Content ([string](Get-RuleEstateProperty $action 'desired_text'))
             if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){throw ('desired_hash_not_applied:{0}' -f $id)}
             $writes++
-            $actionResults.Add([pscustomobject][ordered]@{action_id=$id;status='applied';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;backup_sha256=$backupHash;backup_length=[long]$beforeBytes.LongLength;applied_at=[datetimeoffset]::UtcNow.ToString('o')})|Out-Null
+            $actionResult.status='applied';$actionResult.applied_at=[datetimeoffset]::UtcNow.ToString('o')
             $receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
         }
         $receipt.status='applied';$receipt.completed_at=[datetimeoffset]::UtcNow.ToString('o');$receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
@@ -258,12 +266,14 @@ function Invoke-RuleEstateRollback {
     $workspace=[IO.Path]::GetFullPath($WorkspaceRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     if($workspace -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'workspace_root')) -or $codex -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'codex_user_root')) -or $claude -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'claude_user_root'))){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_root_mismatch' '$' 'Rollback roots must exactly match the receipt.'));writes=0}}
     $action=@(Get-RuleEstateProperty $receipt 'actions'|Where-Object{[string](Get-RuleEstateProperty $_ 'action_id') -eq $ActionId})|Select-Object -First 1
-    if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -ne 'applied'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied receipt target.'));writes=0}}
+    if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -notin @('applied','prepared')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied or prepared receipt target.'));writes=0}}
     $target=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path'));$root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root'));$scope=[string](Get-RuleEstateProperty $action 'target_scope')
     if($scope -ne 'repository'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate rollback only accepts repository actions; global user rules use global-rules-rollback.'));writes=0}}
     $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
     if(-not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
-    if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
+    $currentHash=Get-RuleEstateTextHashAtPath $target
+    $alreadyBefore=([string]$action.status -eq 'prepared' -and $currentHash -eq [string]$action.before_hash -and [IO.File]::Exists($target) -eq ([string]$action.operation -ne 'create'))
+    if(-not $alreadyBefore -and $currentHash -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     # 回滚令牌绑定具体 operation（与 apply 的 plan token 对称），静态常量不构成任何收据的准入。
     $expectedRollbackToken='ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 $operationId).Substring(0,16).ToUpperInvariant()
@@ -279,7 +289,7 @@ function Invoke-RuleEstateRollback {
     try{$backupText=$backupReader.ReadToEnd()}finally{$backupReader.Dispose()}
     $beforeHash=[string](Get-RuleEstateProperty $action 'before_hash')
     if([string]::IsNullOrWhiteSpace($beforeHash) -or (Get-OperationSha256 $backupText) -cne $beforeHash){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_baseline_mismatch' $backup 'Per-target backup content does not match the plan-certified before state.'));writes=0}}
-    if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}
+    if(-not $alreadyBefore){if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}}
     $action.status='rolled_back';$action | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force;Write-RuleEstateReceipt $receiptFile $receipt
-    return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=1;action_id=$ActionId}
+    return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=$(if($alreadyBefore){0}else{1});action_id=$ActionId}
 }

@@ -2540,17 +2540,31 @@ function Assert-McpDesiredStateFresh([object[]]$DesiredState,[string]$ExpectedCo
 
 function Restore-McpManagedTargetSnapshot([object[]]$Snapshot) {
     $conflicts=New-Object System.Collections.Generic.List[string]
+    $failures=New-Object System.Collections.Generic.List[string]
     foreach($entry in @($Snapshot)){
         $path=[string]$entry.path
+        try {
+        if(Test-AncestorChainHasReparse $path){$conflicts.Add($path)|Out-Null;continue}
+        $item=Get-ExistingFileSystemItem $path
+        if($null -eq $item){
+            # Managed writes never delete an existing target. Its disappearance
+            # therefore belongs to another writer, not to our rollback.
+            if([bool]$entry.existed){$conflicts.Add($path)|Out-Null}
+            continue
+        }
+        if($item.PSIsContainer){$conflicts.Add($path)|Out-Null;continue}
         if(Test-Path -LiteralPath $path -PathType Leaf){
             $currentHash=Get-OperationSha256 (Get-ContentUtf8 $path)
+            if([bool]$entry.existed -and $currentHash -eq [string]$entry.before_hash){continue}
             $allowed=@([string]$entry.before_hash,[string]$entry.desired_hash)|Where-Object{-not [string]::IsNullOrWhiteSpace($_)}
             if($currentHash -notin $allowed){$conflicts.Add($path)|Out-Null;continue}
         }
         if([bool]$entry.existed){Write-BytesAtomic -Path $path -Bytes ([byte[]]$entry.bytes)}
         elseif(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}
+        }
+        catch { $failures.Add(('{0}: {1}' -f $path,$_.Exception.Message))|Out-Null }
     }
-    Need ($conflicts.Count -eq 0) ("MCP rollback_conflict：managed targets changed outside this transaction: {0}" -f ($conflicts -join ', '))
+    Need ($conflicts.Count -eq 0 -and $failures.Count -eq 0) ("MCP rollback_conflict/recovery_failed: conflicts=[{0}]; errors=[{1}]" -f ($conflicts -join ', '),($failures -join '; '))
 }
 
 function Get-McpImplicitSidecarTargets([object[]]$DesiredState) {
