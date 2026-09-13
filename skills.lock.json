@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-09-13T10:01:34.2364361Z",
+  "generated_at": "2026-09-13T13:40:30.6826498Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -83,7 +83,7 @@
       "ref": "main",
       "skill": "plugins\\backend-development\\skills\\architecture-patterns",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "baoyu-skills",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "a6d8653261a4cf3353c145648fece23bad949278"
+      "commit": "9d2f91967414abcf3e15f08a53b7de347f81c5e4"
     },
     {
       "name": "domain-modeling",
@@ -146,7 +146,7 @@
       "ref": "main",
       "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "find-skills",
@@ -281,7 +281,7 @@
       "ref": "main",
       "skill": "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "python-performance-optimization",
@@ -290,7 +290,7 @@
       "ref": "main",
       "skill": "plugins\\python-development\\skills\\python-performance-optimization",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "python-testing-patterns",
@@ -299,7 +299,7 @@
       "ref": "main",
       "skill": "plugins\\python-development\\skills\\python-testing-patterns",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "research",
@@ -335,7 +335,7 @@
       "ref": "main",
       "skill": "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
       "sparse": false,
-      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6"
+      "commit": "062ca77305e2b60ceef74fdcabec12b6d8ccace8"
     },
     {
       "name": "ui-animation",
