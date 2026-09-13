@@ -1,10 +1,6 @@
 function New-AuditInstalledStateSnapshot([string]$context) {
     try {
-        try { $liveCfg = LoadCfg }
-        catch {
-            Log ("{0}读取 skills.json 失败，已回退为空安装快照：{1}" -f $context, $_.Exception.Message) "WARN"
-            $liveCfg = New-AuditInstalledFactsFallbackCfg
-        }
+        $liveCfg = LoadCfg
         $liveState = Get-AuditLiveInstalledState $liveCfg
         $configuredSupplySkills = if ($liveState.PSObject.Properties.Match('configured_supply_skills').Count -gt 0) { @($liveState.configured_supply_skills) } else { @(Get-InstalledSkillFacts $liveCfg) }
         $installedSkills = if ($liveState.PSObject.Properties.Match('profile_selected_skills').Count -gt 0) { @($liveState.profile_selected_skills) } else { @() }

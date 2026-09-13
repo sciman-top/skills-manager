@@ -50,6 +50,25 @@ Describe 'release-update-worker staged payload integrity' {
         { Assert-StagedPayloadIntegrity $pkg.root $pkg.manifest_sha } | Should -Not -Throw
     }
 
+    It 'rejects a duplicate manifest path instead of accepting the first hash' {
+        $pkg = New-StagedPackage
+        $manifest = Get-Content -LiteralPath $pkg.manifest_path -Raw | ConvertFrom-Json
+        $manifest.files = @($manifest.files) + @($manifest.files[0])
+        $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $pkg.manifest_path
+        $hash = Get-ReleaseManifestSha256 $pkg.root
+        { Assert-StagedPayloadIntegrity $pkg.root $hash } | Should -Throw '*duplicate*'
+    }
+
+    It 'rejects an unmanifested directory junction even when all payload hashes match' {
+        $pkg = New-StagedPackage
+        $outside = Join-Path $TestDrive 'outside-payload'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        $link = Join-Path $pkg.root 'extra-link'
+        New-Item -ItemType Junction -Path $link -Target $outside | Out-Null
+        try { { Assert-StagedPayloadIntegrity $pkg.root $pkg.manifest_sha } | Should -Throw '*reparse*' }
+        finally { [IO.Directory]::Delete($link) }
+    }
+
     It 'rejects a payload file modified after handoff' {
         $pkg = New-StagedPackage
         Set-Content -LiteralPath (Join-Path $pkg.root 'skills.ps1') -Value 'tampered' -Encoding UTF8

@@ -97,11 +97,14 @@ function Get-PackagePayloadFiles([string]$Root) {
     if (-not (Test-Path -LiteralPath $rootFull -PathType Container)) {
         throw "package_payload_missing:$rootFull"
     }
-    return @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -File -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
+    if (((Get-Item -LiteralPath $rootFull -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "package_payload_reparse_point:$rootFull"
+    }
+    return @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
         if ([bool]($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw ("package_payload_reparse_point:{0}" -f $_.FullName)
         }
-        $_
+        if (-not $_.PSIsContainer) { $_ }
     })
 }
 
@@ -126,8 +129,6 @@ function New-VerifiedPackageArchive([string]$SourceRoot, [string]$DestinationPat
     if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
         New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
     }
-    if (Test-Path -LiteralPath $destinationFull) { [IO.File]::Delete($destinationFull) }
-
     $files = @(Get-PackagePayloadFiles $sourceFull)
     $expected = @{}
     foreach ($file in $files) {
@@ -138,66 +139,75 @@ function New-VerifiedPackageArchive([string]$SourceRoot, [string]$DestinationPat
         }
     }
 
-    $stream = [IO.File]::Open($destinationFull, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $temporaryPath = '{0}.tmp-{1}' -f $destinationFull, [guid]::NewGuid().ToString('N')
     try {
-        $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+        $stream = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
         try {
-            foreach ($file in $files) {
-                $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
-                $entry = $archive.CreateEntry(("{0}/{1}" -f $archiveRoot, $relative), [IO.Compression.CompressionLevel]::Optimal)
-                $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
-                $input = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-                try {
-                    $output = $entry.Open()
-                    try { $input.CopyTo($output) }
-                    finally { $output.Dispose() }
+            $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+            try {
+                foreach ($file in $files) {
+                    $relative = [IO.Path]::GetRelativePath($sourceFull, $file.FullName).Replace('\', '/')
+                    $entry = $archive.CreateEntry(("{0}/{1}" -f $archiveRoot, $relative), [IO.Compression.CompressionLevel]::Optimal)
+                    $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+                    $input = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                    try {
+                        $output = $entry.Open()
+                        try { $input.CopyTo($output) }
+                        finally { $output.Dispose() }
+                    }
+                    finally { $input.Dispose() }
                 }
-                finally { $input.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
+        finally { $stream.Dispose() }
+
+        $observed = @{}
+        $readStream = [IO.File]::Open($temporaryPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            $readArchive = [IO.Compression.ZipArchive]::new($readStream, [IO.Compression.ZipArchiveMode]::Read, $false)
+            try {
+                foreach ($entry in @($readArchive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })) {
+                    $prefix = $archiveRoot + '/'
+                    if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) {
+                        throw ("package_archive_root_mismatch:{0}" -f $entry.FullName)
+                    }
+                    $relative = $entry.FullName.Substring($prefix.Length)
+                    if ($observed.ContainsKey($relative)) { throw ("package_archive_duplicate:{0}" -f $relative) }
+                    $entryStream = $entry.Open()
+                    try {
+                        $sha = [Security.Cryptography.SHA256]::Create()
+                        try { $hash = [Convert]::ToHexString($sha.ComputeHash($entryStream)).ToLowerInvariant() }
+                        finally { $sha.Dispose() }
+                    }
+                    finally { $entryStream.Dispose() }
+                    $observed[$relative] = [ordered]@{ size = $entry.Length; sha256 = $hash }
+                }
+            }
+            finally { $readArchive.Dispose() }
+        }
+        finally { $readStream.Dispose() }
+
+        if ($observed.Count -ne $expected.Count) {
+            throw ("package_archive_file_count_mismatch:expected={0}:actual={1}" -f $expected.Count, $observed.Count)
+        }
+        foreach ($relative in @($expected.Keys | Sort-Object)) {
+            if (-not $observed.ContainsKey($relative)) { throw ("package_archive_missing:{0}" -f $relative) }
+            if ([long]$observed[$relative].size -ne [long]$expected[$relative].size -or [string]$observed[$relative].sha256 -ne [string]$expected[$relative].sha256) {
+                throw ("package_archive_hash_mismatch:{0}" -f $relative)
             }
         }
-        finally { $archive.Dispose() }
-    }
-    finally { $stream.Dispose() }
-
-    $observed = @{}
-    $readStream = [IO.File]::Open($destinationFull, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-    try {
-        $readArchive = [IO.Compression.ZipArchive]::new($readStream, [IO.Compression.ZipArchiveMode]::Read, $false)
-        try {
-            foreach ($entry in @($readArchive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })) {
-                $prefix = $archiveRoot + '/'
-                if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal)) {
-                    throw ("package_archive_root_mismatch:{0}" -f $entry.FullName)
-                }
-                $relative = $entry.FullName.Substring($prefix.Length)
-                if ($observed.ContainsKey($relative)) { throw ("package_archive_duplicate:{0}" -f $relative) }
-                $entryStream = $entry.Open()
-                try {
-                    $sha = [Security.Cryptography.SHA256]::Create()
-                    try { $hash = [Convert]::ToHexString($sha.ComputeHash($entryStream)).ToLowerInvariant() }
-                    finally { $sha.Dispose() }
-                }
-                finally { $entryStream.Dispose() }
-                $observed[$relative] = [ordered]@{ size = $entry.Length; sha256 = $hash }
-            }
+        $result = [pscustomobject][ordered]@{
+            path = $destinationFull
+            file_count = $observed.Count
+            size = (Get-Item -LiteralPath $temporaryPath).Length
+            sha256 = (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        finally { $readArchive.Dispose() }
+        if ([IO.File]::Exists($destinationFull)) { [IO.File]::Replace($temporaryPath, $destinationFull, [System.Management.Automation.Language.NullString]::Value) }
+        else { [IO.File]::Move($temporaryPath, $destinationFull) }
+        return $result
     }
-    finally { $readStream.Dispose() }
-
-    if ($observed.Count -ne $expected.Count) {
-        throw ("package_archive_file_count_mismatch:expected={0}:actual={1}" -f $expected.Count, $observed.Count)
-    }
-    foreach ($relative in @($expected.Keys | Sort-Object)) {
-        if (-not $observed.ContainsKey($relative)) { throw ("package_archive_missing:{0}" -f $relative) }
-        if ([long]$observed[$relative].size -ne [long]$expected[$relative].size -or [string]$observed[$relative].sha256 -ne [string]$expected[$relative].sha256) {
-            throw ("package_archive_hash_mismatch:{0}" -f $relative)
-        }
-    }
-    return [pscustomobject][ordered]@{
-        path = $destinationFull
-        file_count = $observed.Count
-        size = (Get-Item -LiteralPath $destinationFull).Length
-        sha256 = (Get-FileHash -LiteralPath $destinationFull -Algorithm SHA256).Hash.ToLowerInvariant()
+    finally {
+        if ([IO.File]::Exists($temporaryPath)) { [IO.File]::Delete($temporaryPath) }
     }
 }

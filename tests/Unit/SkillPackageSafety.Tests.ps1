@@ -3,6 +3,43 @@ BeforeAll {
 }
 
 Describe 'Skill package safety' {
+    It 'publishes a verified replacement archive and removes the temporary file' {
+        $source = Join-Path $TestDrive 'replace-source'
+        New-Item -ItemType Directory -Path $source | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'payload.txt') -Value 'replacement'
+        $archive = Join-Path $TestDrive 'replace.zip'
+        [IO.File]::WriteAllText($archive, 'previous archive')
+        $result = New-VerifiedPackageArchive $source $archive
+        $result.path | Should -Be $archive
+        $result.file_count | Should -Be 1
+        $result.sha256 | Should -Be (Get-FileHash -LiteralPath $archive).Hash.ToLowerInvariant()
+        Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $TestDrive 'unpacked')
+        Get-Content -LiteralPath (Join-Path $TestDrive 'unpacked/replace-source/payload.txt') | Should -Be 'replacement'
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter '*.tmp-*').Count | Should -Be 0
+    }
+
+    It 'preserves an existing archive when replacement verification fails' {
+        $source = Join-Path $TestDrive 'archive-source'
+        New-Item -ItemType Directory -Path $source | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'payload.txt') -Value 'payload'
+        $archive = Join-Path $TestDrive 'delivery.zip'
+        [IO.File]::WriteAllText($archive, 'previous archive')
+        Mock Get-FileHash { [pscustomobject]@{ Hash = ('0' * 64) } } -ParameterFilter { $LiteralPath -like '*payload.txt' }
+        { New-VerifiedPackageArchive $source $archive } | Should -Throw '*package_archive_hash_mismatch*'
+        [IO.File]::ReadAllText($archive) | Should -Be 'previous archive'
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter '*.tmp-*').Count | Should -Be 0
+    }
+
+    It 'rejects junctions during payload enumeration instead of silently omitting them' {
+        $source = Join-Path $TestDrive 'payload-source'
+        $outside = Join-Path $TestDrive 'payload-outside'
+        New-Item -ItemType Directory -Path $source, $outside | Out-Null
+        $link = Join-Path $source 'linked'
+        New-Item -ItemType Junction -Path $link -Target $outside | Out-Null
+        try { { Get-PackagePayloadFiles $source } | Should -Throw '*package_payload_reparse_point*' }
+        finally { [IO.Directory]::Delete($link) }
+    }
+
     Context 'Staged directory replacement' {
         BeforeEach {
             $fixture = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
