@@ -252,7 +252,9 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
         )
     }
     foreach ($candidate in $candidates) {
-        $line = Invoke-GitCapture @("ls-remote", $repo, $candidate)
+        # Bound network stalls at the git transport layer so one unreachable
+        # source cannot hang the complete check-updates command.
+        $line = Invoke-GitCapture @("-c", "http.connectTimeout=15", "-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=20", "ls-remote", $repo, $candidate)
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line -match "^[0-9a-fA-F]{40}") {
             return (($line -split "\s+")[0]).Trim()

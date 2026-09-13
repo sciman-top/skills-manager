@@ -232,7 +232,12 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         skills = @($skills.ToArray() | Sort-Object name)
         capabilities = @()
     }
-    $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
+    # PowerShell serializes an empty property array as JSON null.  Cold
+    # consumers require dependencies to remain an array, including [] for a
+    # skill with no dependencies; normalize the serialized representation
+    # before fingerprinting and writing so projection and discovery agree.
+    $catalogJson = [regex]::Replace(($catalog | ConvertTo-Json -Depth 20 -Compress), '("dependencies"\s*:\s*)null', '${1}[]')
+    $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 $catalogJson
     return $catalog
 }
 
@@ -249,6 +254,7 @@ function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switc
     $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
     $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
+    $desired = [regex]::Replace($desired, '("dependencies"\s*:\s*)null', '${1}[]')
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $primaryChanged = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
