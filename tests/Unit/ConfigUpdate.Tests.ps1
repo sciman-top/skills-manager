@@ -2,6 +2,35 @@ BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
 
 }
+Describe 'Configuration mutation recovery' {
+    It 'restores only owned writes for <Initial> / <Change>' -ForEach @(
+        @{ Initial='existing'; Change='owned' }, @{ Initial='empty'; Change='owned' },
+        @{ Initial='missing'; Change='owned' }, @{ Initial='existing'; Change='edit' },
+        @{ Initial='existing'; Change='delete' }
+    ) {
+        $CfgPath = Join-Path $TestDrive "$Initial-$Change.json"
+        if ($Initial -eq 'existing') { [IO.File]::WriteAllText($CfgPath, '{"original":true}') }
+        elseif ($Initial -eq 'empty') { [IO.File]::WriteAllBytes($CfgPath, [byte[]]::new(0)) }
+        $snapshot = New-ConfigWriteSnapshot
+        Mock Write-CfgChangeSummary {}
+        SaveCfgSafe ([pscustomobject]@{ owned=1 }) '' $snapshot
+        SaveCfgSafe ([pscustomobject]@{ owned=2 }) '' $snapshot
+        if ($Change -eq 'edit') { [IO.File]::WriteAllText($CfgPath, '{"external":true}') }
+        elseif ($Change -eq 'delete') { [IO.File]::Delete($CfgPath) }
+        if ($Change -ne 'owned') {
+            { Restore-ConfigWriteSnapshot $snapshot } | Should -Throw '*config_restore_conflict*'
+            if ($Change -eq 'edit') { [IO.File]::ReadAllText($CfgPath) | Should -Be '{"external":true}' }
+            else { Test-Path -LiteralPath $CfgPath | Should -BeFalse }
+        }
+        else {
+            Restore-ConfigWriteSnapshot $snapshot
+            if ($Initial -eq 'missing') { Test-Path -LiteralPath $CfgPath | Should -BeFalse }
+            elseif ($Initial -eq 'empty') { (Get-Item -LiteralPath $CfgPath).Length | Should -Be 0 }
+            else { [IO.File]::ReadAllText($CfgPath) | Should -Be '{"original":true}' }
+        }
+    }
+}
+
 Describe 'Parallel prefetch lifecycle' {
     BeforeEach {
         $cfg = [pscustomobject]@{ vendors = @([pscustomobject]@{ name = 'one' }, [pscustomobject]@{ name = 'two' }); imports = @() }

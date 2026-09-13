@@ -157,15 +157,18 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
     $start.ArgumentList.Add($RepoRoot)
     foreach ($argument in @($Arguments)) { $start.ArgumentList.Add([string]$argument) }
     $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $start
-    if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
-    # 双管道异步读取，避免 stderr 充满管道缓冲时与顺序 ReadToEnd 互锁。
-    $outputTask = $process.StandardOutput.ReadToEndAsync()
-    $errorTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    $output = $outputTask.GetAwaiter().GetResult().Trim()
-    $errorText = $errorTask.GetAwaiter().GetResult().Trim()
-    return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
+    try {
+        $process.StartInfo = $start
+        if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
+        # Read both pipes concurrently to avoid blocking on a full stderr pipe.
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output = $outputTask.GetAwaiter().GetResult().Trim()
+        $errorText = $errorTask.GetAwaiter().GetResult().Trim()
+        return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
+    }
+    finally { $process.Dispose() }
 }
 
 function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsPath) {

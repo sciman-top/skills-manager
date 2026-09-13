@@ -1,1 +1,2 @@
 rules/global/*/*.md text eol=lf
+skills.ps1 text eol=crlf

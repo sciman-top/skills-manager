@@ -80,7 +80,7 @@ foreach ($f in $Files) {
 # Use bytes explicitly to avoid host/runtime encoding differences.
 $utf8NoBom = [System.Text.Encoding]::UTF8
 $bom = (New-Object System.Text.UTF8Encoding($true)).GetPreamble()
-$payloadText = ($Content -join "")
+$payloadText = ($Content -join "").Replace("`r`n", "`n").Replace("`n", "`r`n")
 $parseTokens = $null
 $parseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseInput($payloadText, [ref]$parseTokens, [ref]$parseErrors) | Out-Null

@@ -6392,15 +6392,18 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
     $start.ArgumentList.Add($RepoRoot)
     foreach ($argument in @($Arguments)) { $start.ArgumentList.Add([string]$argument) }
     $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $start
-    if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
-    # 双管道异步读取，避免 stderr 充满管道缓冲时与顺序 ReadToEnd 互锁。
-    $outputTask = $process.StandardOutput.ReadToEndAsync()
-    $errorTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    $output = $outputTask.GetAwaiter().GetResult().Trim()
-    $errorText = $errorTask.GetAwaiter().GetResult().Trim()
-    return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
+    try {
+        $process.StartInfo = $start
+        if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
+        # Read both pipes concurrently to avoid blocking on a full stderr pipe.
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output = $outputTask.GetAwaiter().GetResult().Trim()
+        $errorText = $errorTask.GetAwaiter().GetResult().Trim()
+        return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
+    }
+    finally { $process.Dispose() }
 }
 
 function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsPath) {
@@ -9974,7 +9977,36 @@ function SaveCfg($cfg) {
         Write-Utf8FileAtomic -Path $CfgPath -Content $json
     }
 }
-function SaveCfgSafe($cfg, [string]$rawBackup) {
+function New-ConfigWriteSnapshot {
+    $exists = [IO.File]::Exists($CfgPath)
+    [byte[]]$bytes = [byte[]]::new(0)
+    if ($exists) { $bytes = [IO.File]::ReadAllBytes($CfgPath) }
+    return [pscustomobject]@{
+        path = [IO.Path]::GetFullPath($CfgPath)
+        existed = $exists
+        bytes = $bytes
+        hashes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    }
+}
+
+function Restore-ConfigWriteSnapshot($Snapshot) {
+    if ($Snapshot.hashes.Count -eq 0) { return }
+    $path = [string]$Snapshot.path
+    Need (-not (Test-AncestorChainHasReparse $path)) 'config_restore_conflict:reparse_path'
+    if (-not (Test-PathEntry $path) -and -not $Snapshot.existed) { return }
+    $hash = Get-FileContentHash $path
+    if ([IO.File]::Exists($path) -and $Snapshot.existed) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $originalHash = [Convert]::ToHexString($sha.ComputeHash([byte[]]$Snapshot.bytes)).ToLowerInvariant() }
+        finally { $sha.Dispose() }
+        if ($hash -eq $originalHash) { return }
+    }
+    Need (-not [string]::IsNullOrWhiteSpace($hash) -and $Snapshot.hashes.Contains($hash)) 'config_restore_conflict:external_change'
+    if ($Snapshot.existed) { Write-BytesAtomic -Path $path -Bytes $Snapshot.bytes }
+    else { [IO.File]::Delete($path) }
+}
+
+function SaveCfgSafe($cfg, [string]$rawBackup, $Snapshot = $null) {
     if ($DryRun) { return }
     $oldRaw = $rawBackup
     if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
@@ -9982,6 +10014,12 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
     }
     Write-CfgChangeSummary $oldRaw $cfg
     $json = $cfg | ConvertTo-Json -Depth 50
+    if ($null -ne $Snapshot) {
+        Need ([IO.Path]::GetFullPath($CfgPath) -eq $Snapshot.path) 'config_snapshot_path_mismatch'
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$Snapshot.hashes.Add([Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
     # Atomic replacement preserves the target on failure; a second write of an
     # older snapshot could overwrite another writer's current configuration.
     Set-ContentUtf8 $CfgPath $json
@@ -11348,6 +11386,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
     $cfgRaw = ""
     $cfg = LoadCfg
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+    $configSnapshot = New-ConfigWriteSnapshot
 
     $resolvedTokens = Resolve-AddTokensFromAnyFormat $tokens
     if ($resolvedTokens) { $tokens = $resolvedTokens }
@@ -11429,7 +11468,6 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
                 $curSparse = $sparse
                 if ($gitSkillPath -eq "." -and $curSparse) { $curSparse = $false }
                 $sparsePath = if ($curSparse) { $gitSkillPath } else { $null }
-                $usedArchiveFallback = $false
 
                 try {
                     Ensure-Repo $cache $repo $ref $sparsePath $cfg.update_force $true
@@ -11447,13 +11485,9 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
                         Log ("git archive 回退失败，自动回退 GitHub 子目录快照导入：{0}" -f $archiveError) "WARN"
                         Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $cfg.update_force
                     }
-                    $usedArchiveFallback = $true
                 }
                 if ($script:SkillCandidatesCache) { $script:SkillCandidatesCache.Remove($cache) | Out-Null }
 
-                if ($curSparse -and -not $usedArchiveFallback) {
-                    Ensure-Repo $cache $repo $ref (To-GitPath $skillPath) $cfg.update_force $true
-                }
                 $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
 
@@ -11521,7 +11555,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
             }
         }
 
-        SaveCfgSafe $cfg $cfgRaw
+        SaveCfgSafe $cfg $cfgRaw $configSnapshot
         Clear-SkillsCache
 
         if (-not $NoBuild) {
@@ -11535,7 +11569,12 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
     }
     catch {
         $errMsg = $_.Exception.Message
-        $plan = Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg
+        try { Restore-ConfigWriteSnapshot $configSnapshot }
+        catch {
+            Write-Host ("Import failed: {0}; rollback incomplete: {1}" -f $errMsg, $_.Exception.Message) -ForegroundColor Red
+            return $false
+        }
+        $plan = if ($configSnapshot.hashes.Count -eq 0) { Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg } else { $null }
         if ($plan -and -not $NoCrossRepoFallback -and -not $script:CrossRepoAutoFallbackInProgress) {
             Log ("当前仓库未命中技能，自动回退到建议仓库重试：repo={0} --skill {1}" -f $plan.repo, $plan.skill) "WARN"
             $script:CrossRepoAutoFallbackInProgress = $true
@@ -11555,7 +11594,6 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
                 $script:CrossRepoAutoFallbackInProgress = $false
             }
         }
-        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
         Write-Host ("❌ 导入失败: {0}" -f $errMsg) -ForegroundColor Red
         Write-InstallErrorHint $errMsg $repo $parsed.skills
         return $false
@@ -11590,8 +11628,8 @@ function 初始化 {
 
         Invoke-Git @("clone", $v.repo, $path)
         Push-Location $path
-        Invoke-Git @("checkout", $v.ref)
-        Pop-Location
+        try { Invoke-Git @("checkout", $v.ref) }
+        finally { Pop-Location }
     }
 
     # 初始化后建议先安装/卸载
@@ -11656,12 +11694,12 @@ function 新增技能库 {
 
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
-    $tmp = Join-Path $VendorDir ("_tmp_" + $name)
+    $configSnapshot = New-ConfigWriteSnapshot
+    $tmp = Join-Path $VendorDir ("_tmp_{0}_{1}" -f $name, [guid]::NewGuid().ToString('N'))
     $dst = VendorPath $name
     $vendorPathCreated = $false
 
     try {
-        if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
         Invoke-Git @("clone", $repo, $tmp)
         Push-Location $tmp
         try {
@@ -11673,9 +11711,10 @@ function 新增技能库 {
 
         $cfg = LoadCfg
         if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+        $configSnapshot = New-ConfigWriteSnapshot
         Need (-not ($cfg.vendors | Where-Object { $_.name -eq $name })) "vendor 名称已存在：$name"
         $cfg.vendors += @{ name = $name; repo = $repo; ref = $ref }
-        SaveCfgSafe $cfg $cfgRaw
+        SaveCfgSafe $cfg $cfgRaw $configSnapshot
 
         Need (-not (Test-Path $dst)) "vendor 已存在：$name"
         Invoke-MoveItem $tmp $dst
@@ -11686,7 +11725,7 @@ function 新增技能库 {
         # Auto-migrate orphan manual skills
         $migrated = Migrate-ManualToVendor $cfg $name $repo
         if ($migrated -gt 0) {
-            SaveCfgSafe $cfg $cfgRaw # Save again with migrations
+            SaveCfgSafe $cfg $cfgRaw $configSnapshot # Save again with migrations
             Write-Host ("已自动迁移 {0} 个无需手动维护的技能到新 Vendor。" -f $migrated) -ForegroundColor Yellow
         }
 
@@ -11695,9 +11734,9 @@ function 新增技能库 {
     catch {
         $failure = $_
         try {
+            Restore-ConfigWriteSnapshot $configSnapshot
             if (Test-Path $tmp) { Invoke-RemoveItemWithRetry $tmp -Recurse -IgnoreFailure | Out-Null }
             if ($vendorPathCreated -and (Test-Path $dst)) { Invoke-RemoveItemWithRetry $dst -Recurse -IgnoreFailure | Out-Null }
-            if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
             Clear-SkillsCache
         }
         catch {
@@ -11732,6 +11771,7 @@ function 删除技能库 {
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
     $createdManualPaths = [System.Collections.Generic.List[string]]::new()
+    $configSnapshot = New-ConfigWriteSnapshot
     try {
         $removeNames = New-Object System.Collections.Generic.HashSet[string]
         foreach ($v in $toRemove) { $removeNames.Add($v.name) | Out-Null }
@@ -11754,16 +11794,20 @@ function 删除技能库 {
 
         # @() guards: an empty pipe result would assign $null and serialize
         # the field as JSON null, which older LoadCfg builds then reject.
+        $removedOutputs = @($cfg.mappings | Where-Object { $removeNames.Contains($_.vendor) } | ForEach-Object { [string]$_.to })
         $cfg.vendors = @($cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) })
         $cfg.mappings = @($cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) })
         $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) })
-        SaveCfgSafe $cfg $cfgRaw
+        $retiredOutputs = @(Get-UnmappedSkillOutputNames -Config $cfg -CandidateNames $removedOutputs)
+        Remove-RetiredSkillProjectionReferences -Config $cfg -SkillNames $retiredOutputs | Out-Null
+        SaveCfgSafe $cfg $cfgRaw $configSnapshot
         Clear-SkillsCache
         构建生效
     }
     catch {
         $failure = $_
-        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+        try { Restore-ConfigWriteSnapshot $configSnapshot }
+        catch { throw ("{0}; rollback incomplete: {1}" -f $failure.Exception.Message, $_.Exception.Message) }
         foreach ($createdPath in $createdManualPaths) {
             Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
         }

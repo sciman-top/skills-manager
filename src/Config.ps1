@@ -1344,7 +1344,36 @@ function SaveCfg($cfg) {
         Write-Utf8FileAtomic -Path $CfgPath -Content $json
     }
 }
-function SaveCfgSafe($cfg, [string]$rawBackup) {
+function New-ConfigWriteSnapshot {
+    $exists = [IO.File]::Exists($CfgPath)
+    [byte[]]$bytes = [byte[]]::new(0)
+    if ($exists) { $bytes = [IO.File]::ReadAllBytes($CfgPath) }
+    return [pscustomobject]@{
+        path = [IO.Path]::GetFullPath($CfgPath)
+        existed = $exists
+        bytes = $bytes
+        hashes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    }
+}
+
+function Restore-ConfigWriteSnapshot($Snapshot) {
+    if ($Snapshot.hashes.Count -eq 0) { return }
+    $path = [string]$Snapshot.path
+    Need (-not (Test-AncestorChainHasReparse $path)) 'config_restore_conflict:reparse_path'
+    if (-not (Test-PathEntry $path) -and -not $Snapshot.existed) { return }
+    $hash = Get-FileContentHash $path
+    if ([IO.File]::Exists($path) -and $Snapshot.existed) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $originalHash = [Convert]::ToHexString($sha.ComputeHash([byte[]]$Snapshot.bytes)).ToLowerInvariant() }
+        finally { $sha.Dispose() }
+        if ($hash -eq $originalHash) { return }
+    }
+    Need (-not [string]::IsNullOrWhiteSpace($hash) -and $Snapshot.hashes.Contains($hash)) 'config_restore_conflict:external_change'
+    if ($Snapshot.existed) { Write-BytesAtomic -Path $path -Bytes $Snapshot.bytes }
+    else { [IO.File]::Delete($path) }
+}
+
+function SaveCfgSafe($cfg, [string]$rawBackup, $Snapshot = $null) {
     if ($DryRun) { return }
     $oldRaw = $rawBackup
     if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
@@ -1352,6 +1381,12 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
     }
     Write-CfgChangeSummary $oldRaw $cfg
     $json = $cfg | ConvertTo-Json -Depth 50
+    if ($null -ne $Snapshot) {
+        Need ([IO.Path]::GetFullPath($CfgPath) -eq $Snapshot.path) 'config_snapshot_path_mismatch'
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$Snapshot.hashes.Add([Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
     # Atomic replacement preserves the target on failure; a second write of an
     # older snapshot could overwrite another writer's current configuration.
     Set-ContentUtf8 $CfgPath $json

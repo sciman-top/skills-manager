@@ -3,7 +3,9 @@ BeforeAll {
 
 }
 Describe "Build script" {
-    It "Concatenates source files without injecting separator spaces" {
+    It "Concatenates <Ending> source files into the canonical bundle" -ForEach @(
+        @{ Ending = 'LF'; Newline = "`n" }, @{ Ending = 'CRLF'; Newline = "`r`n" }
+    ) {
         $workspace = Join-Path $TestDrive "build-script"
         $srcRoot = Join-Path $workspace "src"
         $commandsRoot = Join-Path $srcRoot "Commands"
@@ -21,8 +23,8 @@ Describe "Build script" {
         $contents = @{}
         for ($i = 0; $i -lt $files.Count; $i++) {
             $relativePath = $files[$i]
-            $content = "chunk-$i"
-            $contents[$relativePath] = $content
+            $content = "# chunk-$i${Newline}chunk-$i"
+            $contents[$relativePath] = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")
 
             $filePath = Join-Path $srcRoot $relativePath
             $parent = Split-Path $filePath -Parent
@@ -39,5 +41,7 @@ Describe "Build script" {
 " }) -join "")
 
         $actual | Should -Be $expected
+        & pwsh -NoProfile -File (Join-Path $workspace "build.ps1") -Check | Out-Null
+        $LASTEXITCODE | Should -Be 0
     }
 }

@@ -3,6 +3,139 @@ BeforeAll {
 
 }
 Describe "Add Import Defaults" {
+    It 'removes only retired projection references when deleting a vendor' {
+        $CfgPath = Join-Path $TestDrive 'vendor-references.json'
+        $VendorDir = Join-Path $TestDrive 'vendor-references'
+        $vendor = [pscustomobject]@{ name='demo'; repo='https://example.com/demo.git' }
+        $cfg = [pscustomobject]@{
+            vendors=@($vendor); imports=@()
+            mappings=@(
+                [pscustomobject]@{ vendor='demo'; from='one'; to='retired' },
+                [pscustomobject]@{ vendor='demo'; from='two'; to='shared' },
+                [pscustomobject]@{ vendor='other'; from='two'; to='shared' }
+            )
+            skill_projection=[pscustomobject]@{
+                discovery_catalog=[pscustomobject]@{ domain_memberships=[pscustomobject]@{ content=@('retired','shared') } }
+                projection_profiles=[pscustomobject]@{ profiles=[pscustomobject]@{ core=[pscustomobject]@{ include=@('retired','shared') } } }
+            }
+        }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Select-Items { ,@($vendor) }
+        Mock Confirm-WithSummary { $true }
+        Mock Confirm-Action { $false }
+        Mock SaveCfgSafe {}
+        Mock 构建生效 {}
+        删除技能库
+        $cfg.skill_projection.discovery_catalog.domain_memberships.content | Should -Be @('shared')
+        $cfg.skill_projection.projection_profiles.profiles.core.include | Should -Be @('shared')
+    }
+
+    It 'preserves externally modified configuration when adding a vendor fails before saving' {
+        $CfgPath = Join-Path $TestDrive 'vendor-failure.json'
+        $VendorDir = Join-Path $TestDrive 'new-vendors'
+        New-Item -ItemType Directory -Path $VendorDir -Force | Out-Null
+        [IO.File]::WriteAllText($CfgPath, '{"original":true}')
+        $cfg = [pscustomobject]@{ vendors=@(); mappings=@(); imports=@() }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Read-Host { 'https://github.com/example/demo.git' } -ParameterFilter { $Prompt -like '*地址*' }
+        Mock Read-Host { 'main' } -ParameterFilter { $Prompt -like '*分支*' }
+        Mock Read-Host { 'demo' } -ParameterFilter { $Prompt -like '*名称*' }
+        Mock Invoke-Git {
+            [IO.File]::WriteAllText($CfgPath, '{"external":true}')
+            throw 'clone failed'
+        }
+        { 新增技能库 } | Should -Throw '*clone failed*'
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"external":true}'
+    }
+
+    It 'restores the working directory when initialization checkout fails' {
+        $VendorDir = Join-Path $TestDrive 'init-vendor'
+        $cfg = [pscustomobject]@{ vendors=@([pscustomobject]@{ name='demo'; repo='https://example.com/demo.git'; ref='main' }) }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Test-InstalledVendorPath { $false }
+        Mock Invoke-Git {
+            param($GitArgs)
+            if ($GitArgs[0] -eq 'clone') { New-Item -ItemType Directory -Path $GitArgs[2] -Force | Out-Null }
+            else { throw 'checkout failed' }
+        }
+        $before = (Get-Location).Path
+        { 初始化 } | Should -Throw '*checkout failed*'
+        (Get-Location).Path | Should -Be $before
+    }
+
+    It 'restores a failed import before considering any cross-repository fallback' {
+        $CfgPath = Join-Path $TestDrive 'build-recovery.json'
+        $VendorDir = Join-Path $TestDrive 'vendor'
+        [IO.File]::WriteAllText($CfgPath, '{"original":true}')
+        $cfg = [pscustomobject]@{ vendors=@(); mappings=@(); imports=@(); update_force=$false }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Assert-RepoReachable {}
+        Mock Ensure-Repo {}
+        Mock Migrate-ManualToVendor { 0 }
+        Mock Write-CfgChangeSummary {}
+        Mock 构建生效 { throw 'build failed' }
+        Mock Get-CrossRepoInstallFallbackPlan { throw 'must not retry another repository after writing config' }
+        Mock Write-InstallErrorHint {}
+        Add-ImportFromArgs @('example/demo', '--ref', 'main') | Should -BeFalse
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"original":true}'
+        Should -Invoke Get-CrossRepoInstallFallbackPlan -Times 0 -Exactly
+    }
+
+    It 'retains converted sources when vendor deletion compensation sees external config' {
+        $CfgPath = Join-Path $TestDrive 'delete-config.json'
+        $created = Join-Path $TestDrive 'converted'
+        New-Item -ItemType Directory -Path $created | Out-Null
+        [IO.File]::WriteAllText($CfgPath, '{"original":true}')
+        $vendor = [pscustomobject]@{ name='demo'; repo='https://example.com/demo.git' }
+        $cfg = [pscustomobject]@{ vendors=@($vendor); mappings=@(); imports=@() }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Select-Items { ,@($vendor) }
+        Mock Confirm-WithSummary { $true }
+        Mock Confirm-Action { $true }
+        Mock Write-CfgChangeSummary {}
+        Mock Convert-InstalledVendorSkillsToManual { [pscustomobject]@{ converted=1; skipped=0; created_paths=@($created) } }
+        Mock 构建生效 {
+            [IO.File]::WriteAllText($CfgPath, '{"external":true}')
+            throw 'build failed'
+        }
+        { 删除技能库 } | Should -Throw '*config_restore_conflict*'
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"external":true}'
+        Test-Path -LiteralPath $created | Should -BeTrue
+    }
+
+    It 'preserves external configuration after import failure at <Stage>' -ForEach @(
+        @{ Stage = 'probe' }, @{ Stage = 'build' }
+    ) {
+        $CfgPath = Join-Path $TestDrive "$Stage-config.json"
+        $VendorDir = Join-Path $TestDrive "$Stage-vendor"
+        [IO.File]::WriteAllText($CfgPath, '{"original":true}')
+        $cfg = [pscustomobject]@{ vendors=@(); mappings=@(); imports=@(); update_force=$false }
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock Assert-RepoReachable {
+            if ($Stage -eq 'probe') {
+                [IO.File]::WriteAllText($CfgPath, '{"external":true}')
+                throw 'probe failed'
+            }
+        }
+        Mock Ensure-Repo {}
+        Mock Migrate-ManualToVendor { 0 }
+        Mock 构建生效 {
+            [IO.File]::WriteAllText($CfgPath, '{"external":true}')
+            throw 'build failed'
+        }
+        Mock Get-CrossRepoInstallFallbackPlan { $null }
+        Mock Write-InstallErrorHint {}
+        Mock Write-CfgChangeSummary {}
+        Add-ImportFromArgs @('example/demo', '--ref', 'main') | Should -BeFalse
+        [IO.File]::ReadAllText($CfgPath) | Should -Be '{"external":true}'
+    }
+
     It "Treats repo-only add as vendor-intent with no explicit skill" {
         $parsed = Parse-AddArgs @("addyosmani/web-quality-skills")
 
@@ -242,7 +375,9 @@ Describe "Add Import Defaults" {
         }
     }
 
-    It "Uses declared SKILL name for manual import when it differs from path leaf" {
+    It "Uses declared SKILL name with one repository preparation (sparse=<Sparse>)" -ForEach @(
+        @{ Sparse=$false }, @{ Sparse=$true }
+    ) {
         $oldCfgPath = $CfgPath
         $oldImportDir = $ImportDir
         $oldVendorDir = $VendorDir
@@ -290,7 +425,10 @@ Describe "Add Import Defaults" {
                 $script:importWrites += $import
             }
 
-            Add-ImportFromArgs @("https://github.com/remotion-dev/skills", "--skill", "remotion-best-practices")
+            $tokens = @("https://github.com/remotion-dev/skills", "--skill", "remotion-best-practices")
+            if ($Sparse) { $tokens += '--sparse' }
+            Add-ImportFromArgs $tokens | Should -BeTrue
+            Should -Invoke Ensure-Repo -Times 1 -Exactly
 
             @($script:importWrites).Count | Should -Be 1
             $script:importWrites[0].name | Should -Be "remotion-best-practices"
