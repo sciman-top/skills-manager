@@ -38,6 +38,24 @@ A passing slice is a checkpoint. Continue remaining authorized work, including
 independent work when another action is blocked. Keep outstanding requirements
 visible; a plan or one passing test does not complete an implementation goal.
 
+### Select the executor by task fit
+
+Treat GPT/Codex and GLM/ZCode as task-fit executors, not stages in a fixed
+pipeline:
+
+- Keep one primary executor through inspect, implement and verify for small or
+  ordinary work. Prefer the host/model that has the required workspace and tool
+  access with the lowest sufficient reasoning, latency and cost.
+- As a starting hypothesis, use GPT/Codex for ambiguous root causes,
+  architecture, security or release risk; use GLM/ZCode for bounded mechanical
+  or multi-file implementation when its current host path is available. Judge
+  the choice by same-task acceptance, correction effort, elapsed time and cost,
+  not by model name or generation speed alone.
+- Handoff only when the expected gain exceeds the context-transfer cost. Pass a
+  task capsule, and require the receiving host to reread current state and the
+  changed seam. Check current help, schema, documentation and actual inputs
+  before assuming a model, provider, permission, vision or tool capability.
+
 ## 2. Implement and verify
 
 Use existing build and affected verification commands. Add a test when it

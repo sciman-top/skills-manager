@@ -22,6 +22,15 @@ Describe 'Checked-in skill content' {
         }
     }
 
+    It 'keeps GPT and GLM selection task-fit instead of imposing a fixed pipeline' {
+        $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
+
+        $skill | Should -Match '(?i)GPT/Codex and GLM/ZCode'
+        $skill | Should -Match '(?i)not stages in a fixed\s+pipeline'
+        $skill | Should -Match '(?i)same-task acceptance'
+        $skill | Should -Match '(?i)current help, schema, documentation and actual inputs'
+    }
+
     It 'retains the explicit-use constraint for strict TDD' {
         $metadata = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/agents/openai.yaml') -Raw
         $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/SKILL.md') -Raw
