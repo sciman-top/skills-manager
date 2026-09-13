@@ -9,13 +9,13 @@ function Invoke-CodexCliJson {
     if ($null -eq $command) { throw 'codex_cli_unavailable' }
     $output = @(& $command.Source @Arguments 2>&1)
     $exitCode = $LASTEXITCODE
-    try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50) }
+    try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50 -NoEnumerate) }
     catch {
         if ($exitCode -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
         throw ('codex_cli_json_invalid: {0}' -f $_.Exception.Message)
     }
     if ($exitCode -ne 0 -and -not $AllowNonZeroExitWithJson) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
-    return $payload
+    return ,$payload
 }
 
 function Get-CodexPluginSkillInventory {
@@ -123,7 +123,7 @@ function Get-CodexHostObservation {
     [CmdletBinding()]
     param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @(), [switch]$SkipProbe)
 
-    if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory }
+    if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory -SkipProbe:$SkipProbe }
     if ($SkipProbe) {
         $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
         return [pscustomobject][ordered]@{

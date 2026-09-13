@@ -35,6 +35,30 @@ Describe 'Codex CLI plugin inventory' {
 }
 
 Describe 'Codex CLI host observation' {
+    It 'does not invoke any CLI when host probes are skipped without a supplied inventory' {
+        Mock Invoke-CodexCliJson { throw 'probe must not run' }
+        $result = Get-CodexHostObservation -SkipProbe
+        $result.requested | Should -BeFalse
+        $result.plugins.coverage | Should -Be 'not_observed'
+        Should -Invoke Invoke-CodexCliJson -Times 0 -Exactly
+    }
+
+    It 'preserves JSON array cardinality through the CLI boundary' -ForEach @(
+        @{ Json = '[]'; Count = 0 },
+        @{ Json = '[{"name":"one","enabled":true}]'; Count = 1 },
+        @{ Json = '[{"name":"one","enabled":true},{"name":"two","enabled":false}]'; Count = 2 }
+    ) {
+        $fixtureCodex = Join-Path $TestDrive 'codex-array.ps1'
+        [IO.File]::WriteAllText($fixtureCodex, "Write-Output '$Json'`n`$global:LASTEXITCODE = 0`n")
+        Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
+        $payload = Invoke-CodexCliJson -Arguments @('mcp', 'list', '--json')
+        ($payload -is [array]) | Should -BeTrue
+        $payload.Count | Should -Be $Count
+        $result = Get-CodexMcpObservation
+        $result.coverage | Should -Be 'complete'
+        $result.servers.Count | Should -Be $Count
+    }
+
     It 'returns redacted MCP and doctor facts without claiming host load' {
         Mock Invoke-CodexCliJson {
             param([string[]]$Arguments, [switch]$AllowNonZeroExitWithJson)

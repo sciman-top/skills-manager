@@ -142,13 +142,13 @@ function Invoke-CodexCliJson {
     if ($null -eq $command) { throw 'codex_cli_unavailable' }
     $output = @(& $command.Source @Arguments 2>&1)
     $exitCode = $LASTEXITCODE
-    try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50) }
+    try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50 -NoEnumerate) }
     catch {
         if ($exitCode -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
         throw ('codex_cli_json_invalid: {0}' -f $_.Exception.Message)
     }
     if ($exitCode -ne 0 -and -not $AllowNonZeroExitWithJson) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
-    return $payload
+    return ,$payload
 }
 
 function Get-CodexPluginSkillInventory {
@@ -256,7 +256,7 @@ function Get-CodexHostObservation {
     [CmdletBinding()]
     param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @(), [switch]$SkipProbe)
 
-    if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory }
+    if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory -SkipProbe:$SkipProbe }
     if ($SkipProbe) {
         $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
         return [pscustomobject][ordered]@{
@@ -7374,7 +7374,6 @@ function Invoke-RulePatchApply {
         $appliedHash = Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
-        Remove-RulePatchTransactionFile $backupPath
         $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'git_revert_required' }))
         return [pscustomobject][ordered]@{ pass = $true; status = 'applied'; findings = @(); receipt = $receipt; writes = 1; rollback = 'not_required' }
     }
@@ -7384,6 +7383,11 @@ function Invoke-RulePatchApply {
             if ($TestFaultPoint -eq 'after_replace_rollback_failure') { $rollbackState = 'rollback_failed' }
             else {
                 try {
+                    if ((Test-RulePatchReparsePath $targetPath $BoundaryRoot) -or
+                        -not [System.IO.File]::Exists($targetPath) -or
+                        (Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) {
+                        throw 'rollback_target_stale'
+                    }
                     if ($operation -eq 'create') { [System.IO.File]::Delete($targetPath) }
                     else { Write-BytesAtomic -Path $targetPath -Bytes $beforeBytes }
                     $rollbackState = 'restored'
@@ -7538,13 +7542,13 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
         }
     }
     $Ok.Value = $true
-    $lines = @()
+    $lines = [Collections.Generic.List[string]]::new()
     foreach ($line in @($out)) {
         $text = Convert-GitOutputLineToText $line
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
-        $lines += $text
+        $lines.Add($text)
     }
-    return ,$lines
+    return ,$lines.ToArray()
 }
 function Invoke-GitCapture([string[]]$GitArgs) {
     $ok = $false
@@ -13813,67 +13817,56 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
     $running = @()
     $errors = New-Object System.Collections.Generic.List[string]
     $timeoutSeconds = Get-UpdatePrefetchTimeoutSeconds
-    foreach ($p in $paths) {
-        while (@($running).Count -ge $Parallelism) {
+    $nextPath = 0
+    try {
+        while ($nextPath -lt $paths.Count -or $running.Count -gt 0) {
+            while ($nextPath -lt $paths.Count -and $running.Count -lt $Parallelism) {
+                $job = Start-Job -ScriptBlock {
+                    param($repoPath)
+                    try {
+                        $ErrorActionPreference = 'Continue'
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        & git -C $repoPath fetch --all --tags 2>$null | Out-Null
+                        if ($LASTEXITCODE -ne 0) {
+                            return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
+                        }
+                        return [pscustomobject]@{ ok = $true; msg = '' }
+                    }
+                    catch {
+                        return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
+                    }
+                } -ArgumentList $paths[$nextPath]
+                $running += $job
+                $nextPath++
+            }
             $runningIds = @($running | ForEach-Object { [int]$_.Id })
             $done = Wait-Job -Id $runningIds -Any -Timeout $timeoutSeconds
             if ($null -eq $done) {
-                foreach ($stuck in @($running)) {
-                    Stop-Job -Id ([int]$stuck.Id) -ErrorAction SilentlyContinue
-                    Remove-Job -Id ([int]$stuck.Id) -Force -ErrorAction SilentlyContinue
-                }
                 $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
-                return $false
+                break
             }
             if ([string]$done.State -ne 'Completed') {
                 $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
-                Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
-                $running = @($running | Where-Object { $_.Id -ne $done.Id })
-                continue
             }
-            $output = Receive-Job -Id ([int]$done.Id) -ErrorAction SilentlyContinue
+            else {
+                $output = @(Receive-Job -Id ([int]$done.Id) -ErrorAction Stop)
+                if ($output.Count -ne 1 -or $output[0].ok -isnot [bool] -or -not $output[0].ok) {
+                    $errors.Add(("prefetch result unsuccessful or invalid: id={0}" -f [int]$done.Id)) | Out-Null
+                }
+            }
             Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             $running = @($running | Where-Object { $_.Id -ne $done.Id })
-            if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
         }
-        $job = Start-Job -ScriptBlock {
-            param($repoPath)
-            try {
-                $prevErrorActionPreference = $ErrorActionPreference
-                try {
-                    $ErrorActionPreference = "Continue"
-                    & git -C $repoPath fetch --all --tags 2>$null | Out-Null
-                }
-                finally {
-                    $ErrorActionPreference = $prevErrorActionPreference
-                }
-                if ($LASTEXITCODE -ne 0) {
-                    return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
-                }
-                return [pscustomobject]@{ ok = $true; msg = "" }
-            }
-            catch {
-                return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
-            }
-        } -ArgumentList $p
-        $running += $job
     }
-    foreach ($j in @($running)) {
-        $done = Wait-Job -Id ([int]$j.Id) -Timeout $timeoutSeconds
-        if ($null -eq $done) {
-            Stop-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
-            Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
-            $errors.Add(("prefetch timeout after {0}s: {1}" -f $timeoutSeconds, [string]$j.Name)) | Out-Null
-            continue
+    catch {
+        $errors.Add(("prefetch exception: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+    finally {
+        # Only jobs owned by this invocation are stopped, including startup/receive failures.
+        foreach ($job in @($running)) {
+            Stop-Job -Id ([int]$job.Id) -ErrorAction SilentlyContinue
+            Remove-Job -Id ([int]$job.Id) -Force -ErrorAction SilentlyContinue
         }
-        if ([string]$done.State -ne 'Completed') {
-            $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
-            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
-            continue
-        }
-        $output = Receive-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
-        Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
-        if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
     }
     if ($errors.Count -gt 0) {
         Log ("并行预取完成（部分失败 {0} 项，后续将按原流程继续）。" -f $errors.Count) "WARN"

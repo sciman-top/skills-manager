@@ -135,13 +135,13 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode) {
         }
     }
     $Ok.Value = $true
-    $lines = @()
+    $lines = [Collections.Generic.List[string]]::new()
     foreach ($line in @($out)) {
         $text = Convert-GitOutputLineToText $line
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
-        $lines += $text
+        $lines.Add($text)
     }
-    return ,$lines
+    return ,$lines.ToArray()
 }
 function Invoke-GitCapture([string[]]$GitArgs) {
     $ok = $false

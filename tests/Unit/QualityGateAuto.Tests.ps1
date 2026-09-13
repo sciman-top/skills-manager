@@ -105,6 +105,16 @@ Describe 'Local quality gate -Profile auto routing' {
         finally { Pop-Location }
     }
 
+    It 'auto preserves the explicit base when docs whitespace is already committed' {
+        $repo = New-AutoGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'committed whitespace   '
+        & git -C $repo add README.md
+        & git -C $repo commit -m 'docs change' *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'fixture commit failed' }
+        { Invoke-TempGate $repo @{ Profile = 'auto'; DiffBase = $base } *> $null } | Should -Throw
+    }
+
     It 'docs auto passes for a clean docs-only change end to end' {
         $repo = New-AutoGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

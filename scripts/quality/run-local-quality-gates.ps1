@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$autoProfile = $Profile -eq 'auto'
 
 function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
     Write-Host ("== {0} ==" -f $Name)
@@ -74,15 +75,13 @@ try {
         if ($ResolveOnly) { return }
         $Profile = [string]$resolved.profile
         if ($Profile -eq 'focused') { $TestPath = @(@($resolved.focused_test_paths) + $TestPath | Sort-Object -Unique) }
-        # The docs gate must check the current worktree; a resolver-derived base
-        # would narrow `git diff --check` to the committed range only.
-        if ($Profile -eq 'docs') { $DiffBase = '' }
     }
 
     if ($Profile -eq 'docs') {
-        if ([string]::IsNullOrWhiteSpace($DiffBase)) {
+        if ($autoProfile -or [string]::IsNullOrWhiteSpace($DiffBase)) {
             Invoke-QualityGate 'diff-check' {
-                & git diff --check HEAD --
+                $checkBase = if ([string]::IsNullOrWhiteSpace($DiffBase)) { 'HEAD' } else { $DiffBase }
+                & git diff --check $checkBase --
                 if ($LASTEXITCODE -ne 0) { throw 'Tracked whitespace check failed.' }
                 $untrackedDocs = @(& git ls-files --others --exclude-standard)
                 if ($LASTEXITCODE -ne 0) { throw 'Untracked file enumeration failed.' }

@@ -115,67 +115,56 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
     $running = @()
     $errors = New-Object System.Collections.Generic.List[string]
     $timeoutSeconds = Get-UpdatePrefetchTimeoutSeconds
-    foreach ($p in $paths) {
-        while (@($running).Count -ge $Parallelism) {
+    $nextPath = 0
+    try {
+        while ($nextPath -lt $paths.Count -or $running.Count -gt 0) {
+            while ($nextPath -lt $paths.Count -and $running.Count -lt $Parallelism) {
+                $job = Start-Job -ScriptBlock {
+                    param($repoPath)
+                    try {
+                        $ErrorActionPreference = 'Continue'
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        & git -C $repoPath fetch --all --tags 2>$null | Out-Null
+                        if ($LASTEXITCODE -ne 0) {
+                            return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
+                        }
+                        return [pscustomobject]@{ ok = $true; msg = '' }
+                    }
+                    catch {
+                        return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
+                    }
+                } -ArgumentList $paths[$nextPath]
+                $running += $job
+                $nextPath++
+            }
             $runningIds = @($running | ForEach-Object { [int]$_.Id })
             $done = Wait-Job -Id $runningIds -Any -Timeout $timeoutSeconds
             if ($null -eq $done) {
-                foreach ($stuck in @($running)) {
-                    Stop-Job -Id ([int]$stuck.Id) -ErrorAction SilentlyContinue
-                    Remove-Job -Id ([int]$stuck.Id) -Force -ErrorAction SilentlyContinue
-                }
                 $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
-                return $false
+                break
             }
             if ([string]$done.State -ne 'Completed') {
                 $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
-                Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
-                $running = @($running | Where-Object { $_.Id -ne $done.Id })
-                continue
             }
-            $output = Receive-Job -Id ([int]$done.Id) -ErrorAction SilentlyContinue
+            else {
+                $output = @(Receive-Job -Id ([int]$done.Id) -ErrorAction Stop)
+                if ($output.Count -ne 1 -or $output[0].ok -isnot [bool] -or -not $output[0].ok) {
+                    $errors.Add(("prefetch result unsuccessful or invalid: id={0}" -f [int]$done.Id)) | Out-Null
+                }
+            }
             Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             $running = @($running | Where-Object { $_.Id -ne $done.Id })
-            if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
         }
-        $job = Start-Job -ScriptBlock {
-            param($repoPath)
-            try {
-                $prevErrorActionPreference = $ErrorActionPreference
-                try {
-                    $ErrorActionPreference = "Continue"
-                    & git -C $repoPath fetch --all --tags 2>$null | Out-Null
-                }
-                finally {
-                    $ErrorActionPreference = $prevErrorActionPreference
-                }
-                if ($LASTEXITCODE -ne 0) {
-                    return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
-                }
-                return [pscustomobject]@{ ok = $true; msg = "" }
-            }
-            catch {
-                return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
-            }
-        } -ArgumentList $p
-        $running += $job
     }
-    foreach ($j in @($running)) {
-        $done = Wait-Job -Id ([int]$j.Id) -Timeout $timeoutSeconds
-        if ($null -eq $done) {
-            Stop-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
-            Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
-            $errors.Add(("prefetch timeout after {0}s: {1}" -f $timeoutSeconds, [string]$j.Name)) | Out-Null
-            continue
+    catch {
+        $errors.Add(("prefetch exception: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+    finally {
+        # Only jobs owned by this invocation are stopped, including startup/receive failures.
+        foreach ($job in @($running)) {
+            Stop-Job -Id ([int]$job.Id) -ErrorAction SilentlyContinue
+            Remove-Job -Id ([int]$job.Id) -Force -ErrorAction SilentlyContinue
         }
-        if ([string]$done.State -ne 'Completed') {
-            $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
-            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
-            continue
-        }
-        $output = Receive-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
-        Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
-        if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
     }
     if ($errors.Count -gt 0) {
         Log ("并行预取完成（部分失败 {0} 项，后续将按原流程继续）。" -f $errors.Count) "WARN"

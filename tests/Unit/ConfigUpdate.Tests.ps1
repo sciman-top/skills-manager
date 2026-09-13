@@ -2,6 +2,42 @@ BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
 
 }
+Describe 'Parallel prefetch lifecycle' {
+    BeforeEach {
+        $cfg = [pscustomobject]@{ vendors = @([pscustomobject]@{ name = 'one' }, [pscustomobject]@{ name = 'two' }); imports = @() }
+        Mock VendorPath { $TestDrive }
+        Mock Test-IsGitRepoRoot { $true }
+        Mock Log {}
+        Mock Stop-Job {}
+        Mock Remove-Job {}
+        Mock Start-Job { [pscustomobject]@{ Id = 41; Name = 'fixture' } }
+        Mock Wait-Job { [pscustomobject]@{ Id = 41; State = 'Completed' } }
+    }
+
+    It 'does not treat an empty or malformed completed job result as successful prefetch' -ForEach @(
+        @{ Result = $null }, @{ Result = [pscustomobject]@{ msg = 'missing status' } },
+        @{ Result = [pscustomobject]@{ ok = 'false'; msg = 'wrong type' } }
+    ) {
+        Mock Receive-Job { $Result }
+        Invoke-ParallelGitPrefetch $cfg 2 | Should -BeFalse
+        Should -Invoke Remove-Job -Times 1 -Exactly
+    }
+
+    It 'cleans already started jobs if a later job fails to start' {
+        $one = Join-Path $TestDrive 'one'; $two = Join-Path $TestDrive 'two'
+        New-Item -ItemType Directory -Path $one, $two -Force | Out-Null
+        Mock VendorPath { param($vendorName) Join-Path $TestDrive $vendorName }
+        Mock Start-Job {
+            param($ArgumentList)
+            if ($ArgumentList[0] -eq $two) { throw 'job startup failed' }
+            [pscustomobject]@{ Id = 41; Name = 'fixture' }
+        }
+        try { Invoke-ParallelGitPrefetch $cfg 2 | Out-Null } catch {}
+        Should -Invoke Stop-Job -Times 1 -Exactly -ParameterFilter { $Id -eq 41 }
+        Should -Invoke Remove-Job -Times 1 -Exactly -ParameterFilter { $Id -eq 41 }
+    }
+}
+
 Describe "Config And Update Enhancements" {
     Context "UTF-8 config reads" {
         It "Loads skills.json through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
