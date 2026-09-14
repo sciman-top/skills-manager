@@ -4,38 +4,7 @@ BeforeAll {
 }
 Describe "Menu structure" {
     BeforeAll {
-function Get-FunctionBody {
-        param(
-            [string]$Text,
-            [string]$FunctionName
-        )
-
-        $start = $Text.IndexOf("function $FunctionName {")
-        if ($start -lt 0) {
-            throw "Failed to locate function $FunctionName"
-        }
-
-        $cursor = $Text.IndexOf("{", $start)
-        if ($cursor -lt 0) {
-            throw "Failed to locate opening brace for $FunctionName"
-        }
-
-        $depth = 0
-        for ($i = $cursor; $i -lt $Text.Length; $i++) {
-            $ch = $Text[$i]
-            if ($ch -eq "{") {
-                $depth++
-            }
-            elseif ($ch -eq "}") {
-                $depth--
-                if ($depth -eq 0) {
-                    return $Text.Substring($start, $i - $start + 1)
-                }
-            }
-        }
-
-        throw "Failed to extract function body for $FunctionName"
-    }
+. (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
 function Assert-MenuRouting {
         param(
             [string]$MenuBody,

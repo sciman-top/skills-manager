@@ -1,4 +1,5 @@
 BeforeAll {
+. (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
     . $PSScriptRoot\..\..\skills.ps1
 
     $script:originalWorkspaceState = @{}
@@ -6,29 +7,7 @@ BeforeAll {
         $script:originalWorkspaceState[$name] = Get-Variable -Name $name -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     }
 
-    function Set-AuditTestWorkspace([string]$root) {
-        $values = @{
-            Root = $root
-            CfgPath = Join-Path $root "skills.json"
-            LogPath = Join-Path $root "build.log"
-            VendorDir = Join-Path $root "vendor"
-            AgentDir = Join-Path $root "agent"
-            OverridesDir = Join-Path $root "overrides"
-            ManualDir = Join-Path $root "manual"
-            ImportDir = Join-Path $root "imports"
-            DryRun = $false
-        }
-        foreach ($entry in $values.GetEnumerator()) {
-            Set-Variable -Name $entry.Key -Scope 1 -Value $entry.Value
-            Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
-            Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
-        }
-        EnsureDir $VendorDir
-        EnsureDir $AgentDir
-        EnsureDir $OverridesDir
-        EnsureDir $ManualDir
-        EnsureDir $ImportDir
-    }
+    
 
     function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath, [string]$RunId = 'r-test') {
         $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
@@ -89,7 +68,7 @@ Describe "Skill Audit E2E" {
         It "Emits exactly snapshot recommendations and receipt files" {
             $root = Join-Path $TestDrive "ws-skill-audit-bundle"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
-            Set-AuditTestWorkspace $root
+            Set-TestWorkspace $root
 
             $cfg = [pscustomobject]@{
                 vendors = @([pscustomobject]@{ name = "placeholder"; repo = "https://example.com/placeholder.git"; ref = "main" })
@@ -138,7 +117,7 @@ Describe "Skill Audit E2E" {
         It "Applies a selected add recommendation and keeps add indexes stable" {
             $root = Join-Path $TestDrive "ws-skill-audit-apply"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
-            Set-AuditTestWorkspace $root
+            Set-TestWorkspace $root
 
             $cfg = [pscustomobject]@{
                 vendors = @([pscustomobject]@{ name = "placeholder"; repo = "https://example.com/placeholder.git"; ref = "main" })
@@ -239,7 +218,7 @@ Describe "Skill Audit E2E" {
         It "Applies a selected MCP add recommendation" {
             $root = Join-Path $TestDrive "ws-skill-audit-apply-mcp"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
-            Set-AuditTestWorkspace $root
+            Set-TestWorkspace $root
 
             $cfg = [pscustomobject]@{
                 vendors = @([pscustomobject]@{ name = "placeholder"; repo = "https://example.com/placeholder.git"; ref = "main" })

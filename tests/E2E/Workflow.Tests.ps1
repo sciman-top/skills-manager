@@ -1,4 +1,5 @@
 BeforeAll {
+. (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
 
@@ -7,31 +8,7 @@ BeforeAll {
         $script:originalWorkspaceState[$name] = Get-Variable -Name $name -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     }
 
-    function Set-TestWorkspace([string]$root) {
-        $values = @{
-            Root = $root
-            CfgPath = Join-Path $root "skills.json"
-            LogPath = Join-Path $root "build.log"
-            VendorDir = Join-Path $root "vendor"
-            AgentDir = Join-Path $root "agent"
-            OverridesDir = Join-Path $root "overrides"
-            ManualDir = Join-Path $root "manual"
-            ImportDir = Join-Path $root "imports"
-            DryRun = $false
-        }
-        foreach ($entry in $values.GetEnumerator()) {
-            Set-Variable -Name $entry.Key -Scope 1 -Value $entry.Value
-            Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
-            Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
-        }
-        EnsureDir $VendorDir
-        EnsureDir $AgentDir
-        EnsureDir $OverridesDir
-        EnsureDir $ManualDir
-        EnsureDir $ImportDir
     }
-
-}
 AfterAll {
     foreach ($entry in $script:originalWorkspaceState.GetEnumerator()) {
         Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value

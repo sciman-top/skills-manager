@@ -1,21 +1,6 @@
 Describe 'Portable capability-router cold discovery' {
     BeforeAll {
-function Get-TestSha256([string]$Value) {
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try {
-            return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '')
-        }
-        finally { $sha.Dispose() }
-    }
-function Get-TestPackageSha256([string]$SkillDirectory) {
-    $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
-    $parts = foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | Sort-Object FullName)) {
-        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
-        if ($relative -eq 'catalog.json') { continue }
-        '{0}|{1}' -f $relative, ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
-    }
-    return Get-TestSha256 ($parts -join "`n")
-}
+. (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
 
     }
 

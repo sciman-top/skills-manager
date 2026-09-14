@@ -1,4 +1,5 @@
 BeforeAll {
+. (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
     # Dot-source the main script to load functions
     . $PSScriptRoot\..\..\skills.ps1
     $script:Root = $Root
@@ -10,65 +11,6 @@ BeforeAll {
     $script:ManualDir = $ManualDir
     $script:ImportDir = $ImportDir
     $script:DryRun = $DryRun
-
-    function Get-FunctionBody {
-        param(
-            [string]$Text,
-            [string]$FunctionName
-        )
-
-        $start = $Text.IndexOf("function $FunctionName {")
-        if ($start -lt 0) {
-            throw "Failed to locate function $FunctionName"
-        }
-
-        $cursor = $Text.IndexOf("{", $start)
-        if ($cursor -lt 0) {
-            throw "Failed to locate opening brace for $FunctionName"
-        }
-
-        $depth = 0
-        for ($i = $cursor; $i -lt $Text.Length; $i++) {
-            $ch = $Text[$i]
-            if ($ch -eq "{") {
-                $depth++
-            }
-            elseif ($ch -eq "}") {
-                $depth--
-                if ($depth -eq 0) {
-                    return $Text.Substring($start, $i - $start + 1)
-                }
-            }
-        }
-
-        throw "Failed to extract function body for $FunctionName"
-    }
-
-    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath, [string]$RunId = 'r-test') {
-        $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
-        $state = Get-AuditWorkflowInputState $resolved
-        $snapshotPath = Join-Path (Split-Path -Parent $resolved) 'snapshot.json'
-        Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("fixture 依赖 snapshot.json 先于 receipt 存在：{0}" -f $snapshotPath)
-        $receipt = [pscustomobject][ordered]@{
-            schema_version = 1
-            workflow = 'recommendations_validate_dry_run'
-            generated_at = [datetimeoffset]::UtcNow.ToString('o')
-            success = $true
-            persisted = $false
-            run_id = $RunId
-            recommendations_path = $resolved
-            recommendations_sha256 = Get-FileContentHash $resolved
-            stages = [pscustomobject]@{
-                recommendations_validation = [pscustomobject]@{ status = 'passed' }
-                preflight = [pscustomobject]@{ status = 'passed' }
-                dry_run = [pscustomobject]@{ status = 'passed' }
-                input_stability = [pscustomobject]@{ status = 'passed' }
-            }
-            scan = [pscustomobject]@{ snapshot_sha256 = Get-FileContentHash $snapshotPath }
-            input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
-        }
-        Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
-    }
 
     function New-TestAuditSnapshot {
         param(
