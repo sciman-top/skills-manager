@@ -3797,11 +3797,6 @@ function Get-CapabilitySurfaceFileHash([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-function Get-CapabilitySurfaceTextHash([string]$Text) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
-}
 function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
     $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
@@ -3826,7 +3821,7 @@ function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, 
     $text = [string]$metadata.text
     $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
     $description = [string]$metadata.description
-    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-OperationSha256 $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
 }
 
 # Additive metadata-budget observation for the retirement policy's budget
@@ -3851,7 +3846,7 @@ function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
 function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
     $ordered = @($Items | Sort-Object name, path)
     $canonical = @($ordered | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.name, $_.entrypoint_hash, $_.description_hash, $_.owner, $_.projection_state }) -join "`n"
-    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-CapabilitySurfaceTextHash $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
+    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-OperationSha256 $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
 }
 
 function Get-CapabilityNativeReplacementCandidates {
@@ -4291,8 +4286,17 @@ function Evaluate-SkillEligibility {
 
 $skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
-if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Get-NativeSkillProjectionProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Core.ps1') }
+
+function Get-NativeSkillProjectionProperty {
+    param($Object, [string[]]$Names)
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) { return (Get-OperationObjectProperty $Object $name) }
+    }
+    return $null
+}
 
 function Get-SkillManagerProjectionMutexName([string]$RootPath) {
     if ([string]::IsNullOrWhiteSpace($RootPath)) { throw 'Projection lock root is required.' }
@@ -4353,15 +4357,6 @@ function Invoke-WithSkillManagerProjectionLock {
     $lease = Enter-SkillManagerProjectionLock $RootPath
     try { & $ScriptBlock }
     finally { Exit-SkillManagerProjectionLock $lease }
-}
-
-function Get-NativeSkillProjectionProperty {
-    param($Object, [string[]]$Names)
-
-    foreach ($name in @($Names)) {
-        if (Test-OperationObjectProperty $Object $name) { return (Get-OperationObjectProperty $Object $name) }
-    }
-    return $null
 }
 
 function Resolve-NativeSkillProjectionPath {
@@ -25525,10 +25520,10 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         skills = @($skills.ToArray() | Sort-Object name)
         capabilities = @()
     }
-    # PS7 ConvertTo-Json 对空数组属性输出 []（PS5.1 才有 null 序列化问题）；
-    # 构造点始终写入 @()，冷消费者拿到的 dependencies 恒为数组，指纹与落盘
-    # 文本天然一致。
-    $catalogJson = $catalog | ConvertTo-Json -Depth 20 -Compress
+    # ConvertTo-Json may collapse an empty property array to null. Cold
+    # consumers require dependencies to remain an array, including [] for a
+    # skill with no dependencies; normalize before fingerprinting and writing.
+    $catalogJson = [regex]::Replace(($catalog | ConvertTo-Json -Depth 20 -Compress), '("dependencies"\s*:\s*)null', '${1}[]')
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 $catalogJson
     return $catalog
 }
@@ -25546,6 +25541,7 @@ function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switc
     $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
     $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
+    $desired = [regex]::Replace($desired, '("dependencies"\s*:\s*)null', '${1}[]')
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $primaryChanged = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }

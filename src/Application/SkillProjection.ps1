@@ -1,7 +1,16 @@
 $skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
-if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Get-NativeSkillProjectionProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Core.ps1') }
+
+function Get-NativeSkillProjectionProperty {
+    param($Object, [string[]]$Names)
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) { return (Get-OperationObjectProperty $Object $name) }
+    }
+    return $null
+}
 
 function Get-SkillManagerProjectionMutexName([string]$RootPath) {
     if ([string]::IsNullOrWhiteSpace($RootPath)) { throw 'Projection lock root is required.' }
@@ -62,15 +71,6 @@ function Invoke-WithSkillManagerProjectionLock {
     $lease = Enter-SkillManagerProjectionLock $RootPath
     try { & $ScriptBlock }
     finally { Exit-SkillManagerProjectionLock $lease }
-}
-
-function Get-NativeSkillProjectionProperty {
-    param($Object, [string[]]$Names)
-
-    foreach ($name in @($Names)) {
-        if (Test-OperationObjectProperty $Object $name) { return (Get-OperationObjectProperty $Object $name) }
-    }
-    return $null
 }
 
 function Resolve-NativeSkillProjectionPath {

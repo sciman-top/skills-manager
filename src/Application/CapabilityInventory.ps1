@@ -8,11 +8,6 @@ function Get-CapabilitySurfaceFileHash([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-function Get-CapabilitySurfaceTextHash([string]$Text) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
-    finally { $sha.Dispose() }
-}
 function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
     $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
@@ -37,7 +32,7 @@ function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, 
     $text = [string]$metadata.text
     $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
     $description = [string]$metadata.description
-    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-OperationSha256 $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
 }
 
 # Additive metadata-budget observation for the retirement policy's budget
@@ -62,7 +57,7 @@ function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
 function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
     $ordered = @($Items | Sort-Object name, path)
     $canonical = @($ordered | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.name, $_.entrypoint_hash, $_.description_hash, $_.owner, $_.projection_state }) -join "`n"
-    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-CapabilitySurfaceTextHash $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
+    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-OperationSha256 $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
 }
 
 function Get-CapabilityNativeReplacementCandidates {
