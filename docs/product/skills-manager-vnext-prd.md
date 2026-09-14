@@ -64,7 +64,7 @@
 - `FR-SKL-004`：本地 override 只进入 `overrides/{custom,patches,resources}`，patch 记录 provenance。
 - `FR-SKL-005`：卸载只撤配置与受管输出，不删除未授权源码或宿主-owned assets。
 - `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库可提供可重复调用且 fail-closed 的 skills-only maintenance runner，但计划任务的创建、更新、删除、运行账户、触发频率与宿主验收由 host/operator 持有；runner 不同步 MCP、不 push。调度注册是交互式 operator 的显式动作；调度 runner 仅检查/更新 skills-manager 自身，绝不修改宿主 MCP 配置。
-- `FR-SKL-007`（当前实现）：`skills.json` schema v3 顶层为 allowlist，仅允许 `schema_version`、`sync_mode`、`update_force`、`skill_projection`、`vendors`、`mappings`、`imports`、`targets`、`mcp_servers`、`mcp_profiles`、`mcp_targets`；v3 下未知顶层字段 fail closed。v2 保持只读迁移兼容并仅输出 observation；v2 到 v3 的迁移已按一次性、可回滚与迁移/回滚/兼容三件套验证完成。后续 schema 变更仍须遵守 [加固实施计划](skills-manager-hardening-implementation-plan.md) HSM-CFG-300/310 的兼容窗口与回滚合同。
+- `FR-SKL-007`（当前实现）：`skills.json` schema v3 顶层为 allowlist，仅允许 `schema_version`、`sync_mode`、`update_force`、`skill_projection`、`vendors`、`mappings`、`imports`、`targets`、`mcp_servers`、`mcp_profiles`、`mcp_targets`；v3 下未知顶层字段 fail closed。v2 保持只读迁移兼容并仅输出 observation；v2 到 v3 的迁移已按一次性、可回滚与迁移/回滚/兼容三件套验证完成。后续 schema 变更仍须遵守 [加固实施计划](../archive/skills-manager-hardening-implementation-plan.md) HSM-CFG-300/310 的兼容窗口与回滚合同。
 
 ### 5.2 MCP
 
@@ -112,7 +112,7 @@
 
 ### 5.7 外部 AI consumer 与受控技能演进（未来、POC 门禁）
 
-本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/product/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
+本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/archive/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
 
 - `FR-HER-001`：外部 AI consumer 的最小 contract 只描述 `consumer_id`、受管 source identity/hash、target root、ownership mode、read/write policy、projection receipt 与 rollback entry。它不得描述模型、会话、任务、提示词、工具调用或调度语义。
 - `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。

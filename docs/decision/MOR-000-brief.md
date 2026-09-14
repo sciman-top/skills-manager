@@ -1,7 +1,7 @@
 # MOR-000：runtime 归属与控制面边界决议
 
 **状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `skills-manager/src/model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
-**依据**：[PRD](../product/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
+**依据**：[PRD](../archive/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 

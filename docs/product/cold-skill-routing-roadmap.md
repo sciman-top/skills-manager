@@ -4,7 +4,7 @@
 **状态语义**: 稳定设计合同；不记录运行时状态  
 **当前状态**: **engineering-frozen（core-lean 常态主发现路径，不再扩展演进；2026-08-25 决议后收窄默认投影，见 §0）**
 **适用范围**: 本仓受控 cold catalog、native-agent bridge 与 Codex host-specific 验收  
-**相关文档**: [PRD](skills-manager-vnext-prd.md)、[Architecture](skills-manager-vnext-architecture.md)、[实施计划](cold-skill-routing-implementation-plan.md)、[验收 Runbook](../runbooks/cold-skill-routing-acceptance.md)
+**相关文档**: [PRD](skills-manager-vnext-prd.md)、[Architecture](skills-manager-vnext-architecture.md)、[实施计划](../archive/cold-skill-routing-implementation-plan.md)、[验收 Runbook](../runbooks/cold-skill-routing-acceptance.md)
 
 ## 0. 冻结决议（2026-08-25）
 
@@ -188,4 +188,4 @@ ZCode、模拟 parent、catalog reader 或测试 harness 无 native subagent 机
 | `host_specific_live_accepted` | 当前宿主的 child id/lifecycle/行为证据 | 其他宿主或其他技能的独立验收 |
 | `observed` | 有界实验的原始样本及结果分类 | 统计推广或产品承诺（需另行决策） |
 
-实施顺序、精确 write set、test cases、rollback 及每项 stop condition 以 [冷技能路由实施计划](cold-skill-routing-implementation-plan.md) 为唯一细化来源。
+实施顺序、精确 write set、test cases、rollback 及每项 stop condition 以 [冷技能路由实施计划](../archive/cold-skill-routing-implementation-plan.md) 为唯一细化来源。

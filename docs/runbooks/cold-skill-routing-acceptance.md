@@ -5,7 +5,7 @@
 **版本**: receipt v2
 
 **性质**: 显式 host-specific 验收工作流；不属于普通编码完成条件
-**关联**: [路线图](../product/cold-skill-routing-roadmap.md)、[实施计划](../product/cold-skill-routing-implementation-plan.md)
+**关联**: [路线图](../product/cold-skill-routing-roadmap.md)、[实施计划](../archive/cold-skill-routing-implementation-plan.md)
 
 ## 1. 目的与适用边界
 

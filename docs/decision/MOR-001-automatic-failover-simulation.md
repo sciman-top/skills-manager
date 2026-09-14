@@ -2,7 +2,7 @@
 
 **状态**：proposed / design-only（2026-08-29）；不改变 [MOR-000](MOR-000-brief.md) 的 `decided_deferred`，不授权创建 runtime、网络探测、模型调用、宿主写入或后台进程。
 **归属**：未来独立 `<runtime-root>` 中的可选模块；不得进入 `skills-manager` runtime、`skills.json`、`skills.ps1` 或当前 MOR 的离线 `Resolve` 实现。
-**关联**：[PRD](../product/cross-host-model-orchestration-prd.md) §4.2、§6.1、§9 · [架构](../product/cross-host-model-orchestration-architecture.md) §1、§3、§6 · [MOR-000](MOR-000-brief.md)
+**关联**：[PRD](../archive/cross-host-model-orchestration-prd.md) §4.2、§6.1、§9 · [架构](../archive/cross-host-model-orchestration-architecture.md) §1、§3、§6 · [MOR-000](MOR-000-brief.md)
 **Truth boundary**：本文件和未来 synthetic test 最多证明 `repo_verified` / `simulated_runtime_verified`；绝不证明 `filesystem_projected`、`host_loaded`、模型可用、账户授权、结果质量或 `live_accepted`。
 
 ## 1. 决议与不变量
