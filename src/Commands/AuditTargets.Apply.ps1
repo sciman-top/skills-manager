@@ -9,10 +9,6 @@ function Get-AuditPersistedChangeTotal($counts) {
     return $total
 }
 
-function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
-    return (Get-AuditReceiptPath $recommendationsPath)
-}
-
 function ConvertTo-AuditJsonArray($value) {
     $items = New-Object System.Collections.Generic.List[object]
     if ($null -ne $value) {
@@ -788,7 +784,7 @@ function Complete-AuditRecommendationsDryRun {
         }
         $Report["dry_run_acknowledged"] = $true
     }
-    $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+    $dryRunSummaryPath = Get-AuditReceiptPath $RecommendationsPath
     $dryRunSummary = New-AuditDryRunSummary $Plan $RecommendationsPath
     $Report["summary"] = $dryRunSummary
     $Report["dry_run_summary_path"] = $dryRunSummaryPath
@@ -825,7 +821,7 @@ function Resolve-AuditApplySelections {
 
 function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
     $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
-    $workflowPath = Get-AuditWorkflowReportPath $resolved
+    $workflowPath = Get-AuditReceiptPath $resolved
     if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
     }

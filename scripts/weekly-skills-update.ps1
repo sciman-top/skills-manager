@@ -60,8 +60,11 @@ try {
     try {
         $lockHandle = [IO.File]::Open($lockFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     }
-    catch {
-        throw 'Another weekly skills update is already running.'
+    catch [System.IO.IOException] {
+        # 仅共享/锁定冲突（Win32 32/33）代表真实并发实例；ACL、只读目录等
+        # 其他 IO 失败按原样抛出，避免把排障方向误导成“已有实例在跑”。
+        if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) { throw 'Another weekly skills update is already running.' }
+        throw
     }
 
     New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null

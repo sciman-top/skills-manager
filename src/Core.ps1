@@ -678,9 +678,11 @@ function Test-AncestorChainHasReparse([string]$path) {
         }
         catch {
             # A path that exists but cannot be inspected is not a safe write
-            # boundary.  Missing lexical segments remain harmless and are
-            # skipped while walking toward the filesystem root.
-            if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) { return $true }
+            # boundary.  Get-ExistingFileSystemItem 已把真正“不存在”的段折叠为
+            # $null 返回（循环内跳过），走到 catch 的一律是无法检查的状态，
+            # 必须按不安全处理；.NET Exists 对 access-denied 同样返回 false，
+            # 不能用它在这里做二次判别。
+            return $true
         }
         $parent = [IO.Directory]::GetParent($cursor)
         $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
@@ -836,8 +838,11 @@ function Get-ReparsePointTargetFullPath([string]$path) {
 function Find-LatestBackup([string]$path) {
     $parent = Split-Path $path -Parent
     $leaf = Split-Path $path -Leaf
-    $pattern = "{0}.bak.*" -f $leaf
-    Get-ChildItem $parent -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+    # -Filter/-Path 会把叶名中的 [ ] 当通配符集，特殊目录名会静默丢备份发现：
+    # 枚举用 -LiteralPath，匹配用客户端前缀比较。
+    $bakPrefix = "{0}.bak." -f $leaf
+    Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name.StartsWith($bakPrefix, [StringComparison]::Ordinal) } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 }
@@ -853,7 +858,7 @@ function Remove-JunctionAndRestore([string]$linkPath) {
         $bak = Find-LatestBackup $linkPath
         if ($bak) {
             if (Confirm-Action ("检测到备份：{0}，是否恢复？" -f $bak.Name) "Y" -DefaultNo) {
-                if (Test-Path $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
+                if (Test-Path -LiteralPath $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
                 Invoke-MoveItem $bak.FullName $linkPath
             }
             else {

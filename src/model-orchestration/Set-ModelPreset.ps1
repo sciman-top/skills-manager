@@ -4,8 +4,8 @@ param(
     [ValidateSet('Resolve','Plan','Apply','Rollback')][string]$Action = 'Plan',
     [string]$Preset = 'gpt6_astra_only',
     [string[]]$AvailablePreset = @(),
-    [string]$CodexRoot = (Join-Path $env:USERPROFILE '.codex'),
-    [string]$ClaudeRoot = (Join-Path $env:USERPROFILE '.claude'),
+    [string]$CodexRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }),
+    [string]$ClaudeRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
     [string]$ReceiptPath = ''
 )
 $ErrorActionPreference = 'Stop'

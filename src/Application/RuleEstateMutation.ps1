@@ -272,7 +272,9 @@ function Invoke-RuleEstateRollback {
     $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
     if(-not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     $currentHash=Get-RuleEstateTextHashAtPath $target
-    $alreadyBefore=([string]$action.status -eq 'prepared' -and $currentHash -eq [string]$action.before_hash -and [IO.File]::Exists($target) -eq ([string]$action.operation -ne 'create'))
+    # status='applied' 且目标已物理回到 before 状态（如上次回滚还原成功但收据
+    # 写失败）时按已完成补记 rolled_back；否则该 action 永远卡在 rollback_target_stale。
+    $alreadyBefore=($currentHash -eq [string]$action.before_hash -and [IO.File]::Exists($target) -eq ([string]$action.operation -ne 'create') -and ([string]$action.status -eq 'prepared' -or [string]$action.status -eq 'applied'))
     if(-not $alreadyBefore -and $currentHash -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     # 回滚令牌绑定具体 operation（与 apply 的 plan token 对称），静态常量不构成任何收据的准入。

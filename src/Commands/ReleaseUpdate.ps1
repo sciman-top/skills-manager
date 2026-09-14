@@ -113,14 +113,32 @@ function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest)
     $root = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\', '/')
     $entries = @($Manifest.files)
     Need ($entries.Count -gt 0) 'RELEASE-MANIFEST.json 缺少文件清单，无法安全覆盖本地安装'
+    $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $entries) {
         $relative = [string]$entry.path
         Need (-not [string]::IsNullOrWhiteSpace($relative) -and -not [IO.Path]::IsPathRooted($relative) -and $relative -notmatch '(^|[\\/])\.\.([\\/]|$)') 'RELEASE-MANIFEST.json 包含不安全路径'
+        $relative = $relative.Replace('\', '/')
+        Need ($expectedPaths.Add($relative)) ("RELEASE-MANIFEST.json 包含重复文件：{0}" -f $relative)
         $path = [IO.Path]::GetFullPath((Join-Path $root $relative))
         Need (Is-PathInsideOrEqual $path $root) 'RELEASE-MANIFEST.json 文件路径越界'
         Need (Test-Path -LiteralPath $path -PathType Leaf) ("发行文件缺失：{0}" -f $relative)
         $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         Need ($actual -eq ([string]$entry.sha256).ToLowerInvariant()) ("本地发行文件已修改：{0}；请使用 Git 源码开发版或先迁移定制内容" -f $relative)
+    }
+    # The worker swaps the whole installation directory. Keep its owned
+    # receipt across repeated updates, but block every other unmanifested file
+    # before the swap so local data cannot be silently discarded.
+    [void]$expectedPaths.Add('RELEASE-MANIFEST.json')
+    $ownedRuntimeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$ownedRuntimeFiles.Add('reports/release-update/last.json')
+    $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
+            [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+        })
+    foreach ($actualPath in $actualPaths) {
+        Need ($expectedPaths.Contains($actualPath) -or $ownedRuntimeFiles.Contains($actualPath)) ("本地安装包含未受管理文件，拒绝整目录替换以避免丢失：{0}" -f $actualPath)
+    }
+    foreach ($expectedPath in $expectedPaths) {
+        Need ($actualPaths -contains $expectedPath) ("发行文件缺失：{0}" -f $expectedPath)
     }
     return $true
 }

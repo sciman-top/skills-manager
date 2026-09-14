@@ -133,8 +133,15 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode, [sw
             $stdout = $process.StandardOutput.ReadToEndAsync()
             $stderr = $process.StandardError.ReadToEndAsync()
             if (-not $process.WaitForExit($seconds * 1000)) {
-                $process.Kill($true)
+                # 超时边界进程可能恰好自行退出：先 HasExited 守卫再 Kill。
+                if (-not $process.HasExited) { $process.Kill($true) }
+                $null = $process.WaitForExit(5000)
                 throw [TimeoutException]::new('remote_query_timeout')
+            }
+            # 进程退出后输出读取仍设同额有界上限：继承 stdout 句柄的子孙进程会让
+            # ReadToEndAsync 永不 EOF，无界 GetResult 会绕过上面的查询超时。
+            if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
+                throw [TimeoutException]::new('remote_query_output_timeout')
             }
             if ($null -ne $ExitCode) { $ExitCode.Value = $process.ExitCode }
             if ($process.ExitCode -ne 0) { throw 'remote_query_failed' }

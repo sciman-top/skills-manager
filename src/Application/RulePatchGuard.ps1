@@ -43,13 +43,13 @@ function Test-RulePatchApplyGuard {
     if ([string]::IsNullOrWhiteSpace($requiredToken) -or $Token -cne $requiredToken) { $findings.Add((New-RulePatchGuardFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit apply token does not match.')) | Out-Null }
     $operation = [string](Get-OperationObjectProperty $target 'operation')
     if ($operation -eq 'create' -and [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'create_target_exists' '$.target.path' 'Create target already exists.')) | Out-Null }
-    elseif ($operation -eq 'create' -and (Get-RulePatchTextHash '') -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'create_before_hash_invalid' '$.target.before_hash' 'Create plans must use the empty-text before hash.')) | Out-Null }
+    elseif ($operation -eq 'create' -and (Get-OperationSha256 '') -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'create_before_hash_invalid' '$.target.before_hash' 'Create plans must use the empty-text before hash.')) | Out-Null }
     elseif ($operation -eq 'update' -and -not [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'target_missing' '$.target.path' 'Update target must already exist.')) | Out-Null }
     elseif ($operation -eq 'update') {
-        $current = [System.IO.File]::ReadAllText($path); $currentHash = Get-RulePatchTextHash $current
+        $current = [System.IO.File]::ReadAllText($path); $currentHash = Get-OperationSha256 $current
         if ($currentHash -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'target_hash_stale' '$.target.before_hash' 'Target content changed after planning.')) | Out-Null }
     }
     $desiredText = [string](Get-OperationObjectProperty $Plan 'desired_text')
-    if ((Get-RulePatchTextHash $desiredText) -ne [string](Get-OperationObjectProperty $target 'desired_hash')) { $findings.Add((New-RulePatchGuardFinding 'desired_hash_mismatch' '$.target.desired_hash' 'Desired text does not match its declared hash.')) | Out-Null }
+    if ((Get-OperationSha256 $desiredText) -ne [string](Get-OperationObjectProperty $target 'desired_hash')) { $findings.Add((New-RulePatchGuardFinding 'desired_hash_mismatch' '$.target.desired_hash' 'Desired text does not match its declared hash.')) | Out-Null }
     return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); findings = @($findings.ToArray()); target_path = $path; boundary_root = $boundary; writes = 0 }
 }

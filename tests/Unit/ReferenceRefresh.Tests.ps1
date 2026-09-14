@@ -165,9 +165,28 @@ Describe 'Optional reference shelf boundary' {
         Set-Content -LiteralPath (Join-Path $fixture.Consumer 'dirty.txt') -Value 'keep this checkout offline' -Encoding UTF8
         Write-ReferenceRefreshManifest -Path $manifestPath -ReferencesRoot $fixture.ReferencesRoot -UpstreamUrl 'https://github.com/openai/codex.git'
 
-        $result = & $refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'github-equivalent-reports') -FetchOnly -SkipDirtyRepos
+        # 身份等价判定先于脏区阻断执行：若 HTTPS/SCP 等价判定失败，状态会是
+        # origin-identity-mismatch；到达 skipped-dirty 即证明身份判定通过。
+        $result = & $refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'github-equivalent-reports') -FetchOnly
 
         $result.results[0].status | Should -Be 'skipped-dirty'
-        $result.results[0].note | Should -Match 'dirty worktree; skipped by policy'
+    }
+
+    It 'blocks dirty worktrees by default and allows them only via -SkipDirtyRepos' {
+        $fixture = New-ReferenceRefreshFixture -Root (Join-Path $TestDrive 'github-equivalent')
+        $manifestPath = Join-Path $TestDrive 'github-equivalent-manifest.json'
+        & git -C $fixture.Consumer remote set-url origin 'git@github.com:OpenAI/Codex.git'
+        Set-Content -LiteralPath (Join-Path $fixture.Consumer 'dirty.txt') -Value 'keep this checkout offline' -Encoding UTF8
+        Write-ReferenceRefreshManifest -Path $manifestPath -ReferencesRoot $fixture.ReferencesRoot -UpstreamUrl 'https://github.com/openai/codex.git'
+
+        # 默认脏工作区阻断：不 fetch/pull，按策略跳过（计入失败退出码）。
+        $blocked = & $refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'github-equivalent-reports') -FetchOnly
+        $blocked.results[0].status | Should -Be 'skipped-dirty'
+        $blocked.results[0].note | Should -Match 'dirty worktree; skipped by policy'
+        (& git -C $fixture.Consumer rev-parse origin/main).Trim() | Should -Be $fixture.ConsumerOriginBefore
+
+        # -SkipDirtyRepos 是显式豁免：允许继续处理脏仓。
+        $allowed = & $refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'github-equivalent-reports') -FetchOnly -SkipDirtyRepos
+        $allowed.results[0].status | Should -Not -Be 'skipped-dirty'
     }
 }

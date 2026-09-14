@@ -73,10 +73,25 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *skills-manager
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $file = Join-Path $root 'skills.ps1'
         Set-Content -LiteralPath $file -Value 'known-good' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $root 'RELEASE-MANIFEST.json') -Value '{}' -Encoding utf8
         $manifest = [pscustomobject]@{ files = @([pscustomobject]@{ path = 'skills.ps1'; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }) }
         (Test-ReleaseUpdatePristineInstallation $root $manifest) | Should -BeTrue
         Set-Content -LiteralPath $file -Value 'locally-modified' -Encoding utf8
         { Test-ReleaseUpdatePristineInstallation $root $manifest } | Should -Throw '*本地发行文件已修改*'
+    }
+
+    It 'blocks unowned installation files but allows the updater runtime receipt' {
+        $root = Join-Path $TestDrive 'release-install-extras'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $file = Join-Path $root 'skills.ps1'
+        Set-Content -LiteralPath $file -Value 'known-good' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $root 'RELEASE-MANIFEST.json') -Value '{}' -Encoding utf8
+        $manifest = [pscustomobject]@{ files = @([pscustomobject]@{ path = 'skills.ps1'; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }) }
+        New-Item -ItemType Directory -Path (Join-Path $root 'reports/release-update') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'reports/release-update/last.json') -Value '{}' -Encoding utf8
+        (Test-ReleaseUpdatePristineInstallation $root $manifest) | Should -BeTrue
+        Set-Content -LiteralPath (Join-Path $root 'local-not-managed.txt') -Value 'must not be dropped' -Encoding utf8
+        { Test-ReleaseUpdatePristineInstallation $root $manifest } | Should -Throw '*未受管理文件*'
     }
 
     It 'requires an explicit schedule action and rejects auto-apply on disable' {

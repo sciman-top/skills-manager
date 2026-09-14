@@ -365,6 +365,12 @@ else {
     }
 }
 
+# agent/ 存在但零有效技能时循环零次执行不能等价于通过：空产物会被一路投影并
+# 摘除宿主既有技能，必须在门禁层 fail closed。
+if ((Test-Path -LiteralPath $AgentRoot -PathType Container) -and @($skills).Count -eq 0) {
+    Add-IntegrityFinding $errors "empty_agent_root" "" ("agent root exists but contains no verifiable skills: {0}" -f $AgentRoot) $AgentRoot
+}
+
 $errorItems = @($errors.GetEnumerator())
 $warningItems = @($warnings.GetEnumerator())
 $report = [pscustomobject][ordered]@{

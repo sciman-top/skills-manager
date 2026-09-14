@@ -561,7 +561,9 @@ foreach ($repoName in $RepoNames) {
     $statusText = Invoke-GitText -RepositoryPath $repoPath -Arguments @("status", "--short")
     $isDirty = -not [string]::IsNullOrWhiteSpace($statusText)
 
-    if ($isDirty -and $SkipDirtyRepos) {
+    # 治理口径“参考仓脏/冲突即阻断”：默认不推进脏工作区，-SkipDirtyRepos 是
+    # 显式豁免而不是默认绕过。
+    if ($isDirty -and -not $SkipDirtyRepos) {
         $results.Add([pscustomobject]@{
                 repo = $repoName
                 tier = $repoTier
@@ -577,7 +579,7 @@ foreach ($repoName in $RepoNames) {
                 changed = $false
                 cloned = $cloned
                 ahead_behind = $null
-                note = if ($cloned) { "cloned this run; worktree is dirty after clone or local changes" } else { "dirty worktree; skipped by policy" }
+                note = if ($cloned) { "cloned this run; worktree is dirty after clone or local changes" } else { "dirty worktree; skipped by policy (pass -SkipDirtyRepos to allow)" }
                 compare_log = @()
             })
         continue
@@ -803,6 +805,11 @@ while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$lines[$line
     (($lines -join "`n") + "`n"),
     [System.Text.UTF8Encoding]::new($false)
 )
+# 逐仓失败（含脏仓阻断、来源不一致）必须反映到进程退出码；只写 receipt 会让
+# 以退出码判断的调用方把整场失败当成功。
+$failedStatuses = @('unknown-repo', 'missing', 'clone-blocked', 'clone-failed', 'origin-mismatch', 'origin-identity-mismatch', 'fetch-failed', 'pull-failed', 'pull-skipped-no-branch', 'skipped-dirty', 'cloned-dirty')
+$failedCount = @($results | Where-Object { $failedStatuses -contains [string]$_.status }).Count
+
 [pscustomobject]@{
     manifest_path = $ManifestPath
     references_root = $ReferencesRoot
@@ -813,5 +820,9 @@ while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$lines[$line
     clone_missing = [bool]$CloneMissing
     fetch_only = [bool]$FetchOnly
     skip_dirty_repos = [bool]$SkipDirtyRepos
+    failed_count = $failedCount
     results = $results
 }
+
+if ($failedCount -gt 0) { exit 1 }
+exit 0

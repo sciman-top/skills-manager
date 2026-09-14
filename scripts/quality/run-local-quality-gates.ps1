@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $autoProfile = $Profile -eq 'auto'
+$docsSupplemented = $false
 
 function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
     Write-Host ("== {0} ==" -f $Name)
@@ -87,8 +88,13 @@ try {
                 if ($LASTEXITCODE -ne 0) { throw 'Untracked file enumeration failed.' }
                 foreach ($path in $untrackedDocs) {
                     & git diff --no-index --check -- /dev/null $path
-                    if ($LASTEXITCODE -ne 0) { throw "Untracked whitespace check failed: $path" }
+                    # --no-index 用 1 表示“与 /dev/null 存在差异”（任何新文件皆是），
+                    # 3 才是空白问题、128 是 git 错误：只有 >1 属于检查失败。
+                    if ($LASTEXITCODE -gt 1) { throw "Untracked whitespace check failed: $path" }
                 }
+                # 干净新文件遗留的退出码 1 属于正常信号，不能泄漏给
+                # Invoke-QualityGate 的整段 $LASTEXITCODE 检查。
+                $global:LASTEXITCODE = 0
             }
         }
         else {
@@ -100,6 +106,9 @@ try {
         }
         # Explicit proof supplements the classification, including an empty diff.
         $Profile = if ($TestPath.Count -gt 0 -or $TestName.Count -gt 0) { 'focused' } else { 'quick' }
+        # docs 分支带显式补充验证时意图是“验证”：build 关必须只读核对提交的
+        # 生成物，不允许静默重写漂移的 skills.ps1 掩盖本地漂移。
+        $docsSupplemented = $true
     }
 
     if ($Profile -eq 'focused' -and $TestPath.Count -eq 0 -and $TestName.Count -eq 0) {
@@ -107,7 +116,7 @@ try {
     }
     # Local builds regenerate the bundle; CI checks the submitted bytes before tests.
     # AllowDirtyWorktree remains accepted for existing callers.
-    Invoke-QualityGate 'build' { & .\build.ps1 -Check:$CheckGenerated }
+    Invoke-QualityGate 'build' { & .\build.ps1 -Check:($CheckGenerated -or $docsSupplemented) }
     if ($Profile -eq 'focused') {
         if ($TestPath.Count -gt 0 -and $TestName.Count -gt 0) {
             Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestPath $TestPath -TestName $TestName }

@@ -301,7 +301,17 @@ function Get-CodexNpxWrapperBinRel([string]$packageName) {
     }
 }
 
-function Convert-CodexNpxServerToCachedNodeWrapper($server) {
+function Get-CodexMcpScriptsRoot([string]$CodexRoot = '') {
+    $root = if ([string]::IsNullOrWhiteSpace($CodexRoot)) {
+        Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex"
+    }
+    else {
+        [IO.Path]::GetFullPath($CodexRoot)
+    }
+    return (Join-Path $root 'scripts')
+}
+
+function Convert-CodexNpxServerToCachedNodeWrapper($server, [string]$CodexRoot = '') {
     if ($null -eq $server) { return $null }
     if (-not [string]::Equals([string]$server.command, "npx", [System.StringComparison]::OrdinalIgnoreCase)) {
         return $null
@@ -330,7 +340,7 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     if ($packageIndex + 1 -lt $args.Count) {
         $extraArgs = @($args[($packageIndex + 1)..($args.Count - 1)])
     }
-    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-node-cache-wrapper.mjs"
+    $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-node-cache-wrapper.mjs"
     $entry = [ordered]@{
         transport = "stdio"
         command = "node"
@@ -340,11 +350,11 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     return [pscustomobject]$entry
 }
 
-function Convert-CodexPostgresServerToCachedNodeWrapper($server) {
+function Convert-CodexPostgresServerToCachedNodeWrapper($server, [string]$CodexRoot = '') {
     if ($null -eq $server) { return $null }
     if (-not (Test-McpServerUsesPostgresConnectionString $server)) { return $null }
 
-    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-postgres-env-wrapper.mjs"
+    $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-postgres-env-wrapper.mjs"
     $entry = [ordered]@{
         transport = "stdio"
         command = "node"
@@ -391,7 +401,7 @@ function Should-SkipCodexMcpKnownTaskkillStdoutLeak($server) {
     return $true
 }
 
-function Convert-McpServersToCodexConfigMap($servers) {
+function Convert-McpServersToCodexConfigMap($servers, [string]$CodexRoot = '') {
     $map = [ordered]@{}
     if ($null -eq $servers) { return [pscustomobject]$map }
 
@@ -404,9 +414,9 @@ function Convert-McpServersToCodexConfigMap($servers) {
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
         $entry.transport = $transport
         if ($transport -eq "stdio") {
-            $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s
+            $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s $CodexRoot
             if ($null -eq $wrapped) {
-                $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $s
+                $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $s $CodexRoot
             }
             if ($null -ne $wrapped) {
                 foreach ($prop in $wrapped.PSObject.Properties) { $entry[[string]$prop.Name] = $prop.Value }
@@ -1647,7 +1657,7 @@ function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldNa
     }
 }
 
-function Build-CodexConfigToml([string]$existingToml, $servers) {
+function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRoot = '') {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
@@ -1696,7 +1706,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
         $codexServers += $server
     }
 
-    $managedMap = Convert-McpServersToCodexConfigMap $codexServers
+    $managedMap = Convert-McpServersToCodexConfigMap $codexServers $CodexRoot
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
     $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
@@ -2288,7 +2298,7 @@ function New-McpSyncDesiredState {
                 $content = $payload | ConvertTo-Json -Depth 100
             }
             'codex_toml' {
-                $content = Build-CodexConfigToml $existing $Servers
+                $content = Build-CodexConfigToml $existing $Servers ([string]$spec.root)
             }
             'zcode_json' {
                 $payload = Build-ZCodeMcpPayload $existing $ActiveServers
@@ -2573,9 +2583,9 @@ function Get-McpImplicitSidecarTargets([object[]]$DesiredState) {
     foreach($target in @($DesiredState|Where-Object{[string]$_.kind -eq 'codex_toml'})){
         $root=[IO.Path]::GetFullPath([string]$target.root)
         $nodePath=Join-Path $root 'scripts/mcp-node-cache-wrapper.mjs'
-        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent)})|Out-Null}
+        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent);changed=$false})|Out-Null}
         $postgresPath=Join-Path $root 'scripts/mcp-postgres-env-wrapper.mjs'
-        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent)})|Out-Null}
+        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent);changed=$false})|Out-Null}
     }
     return @($targets.ToArray())
 }
@@ -2625,13 +2635,22 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             $exists=Test-Path -LiteralPath $path -PathType Leaf
             $beforeHash=$(if($exists){Get-OperationSha256 (Get-ContentUtf8 $path)}else{$null})
             $sidecar|Add-Member -NotePropertyName before_hash -NotePropertyValue $beforeHash -Force
+            $sidecar|Add-Member -NotePropertyName desired_hash -NotePropertyValue (Get-OperationSha256 ([string]$sidecar.desired_content)) -Force
+            $sidecar|Add-Member -NotePropertyName changed -NotePropertyValue ($beforeHash -ne [string]$sidecar.desired_hash) -Force
             $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$beforeHash;desired_hash=(Get-OperationSha256 ([string]$sidecar.desired_content))})|Out-Null
         }
-        foreach($target in @($DesiredState|Where-Object changed)){
+        $targetsToWrite = @($DesiredState | Where-Object {
+            if ([bool]$_.changed) { return $true }
+            if ([string]$_.kind -ne 'codex_toml') { return $false }
+            $targetRoot = [IO.Path]::GetFullPath([string]$_.root)
+            return @($sidecars | Where-Object { [IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot -and [bool]$_.changed }).Count -gt 0
+        })
+        foreach($target in $targetsToWrite){
             Assert-McpDesiredStateFresh @($target) $ExpectedConfigRevision
             if([string]$target.kind -eq 'codex_toml'){
                 $targetRoot=[IO.Path]::GetFullPath([string]$target.root)
                 foreach($sidecar in @($sidecars|Where-Object{[IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot})){
+                    if (-not [bool]$target.changed -and -not [bool]$sidecar.changed) { continue }
                     $exists=Test-Path -LiteralPath $sidecar.path -PathType Leaf
                     if($null -eq $sidecar.before_hash){Need (-not $exists) ("MCP sidecar_created_since_lock：{0}" -f $sidecar.path)}
                     else{Need $exists ("MCP sidecar_missing_since_lock：{0}" -f $sidecar.path);Need ((Get-OperationSha256 (Get-ContentUtf8 $sidecar.path)) -eq [string]$sidecar.before_hash) ("MCP sidecar_hash_stale：{0}" -f $sidecar.path)}
@@ -2640,9 +2659,11 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             Write-McpDesiredTarget $target
         }
         $transactionSucceeded=$true
-        return [pscustomobject]@{pass=$true;writes=@($DesiredState|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
+        return [pscustomobject]@{pass=$true;writes=$targetsToWrite.Count;sidecar_writes=@($sidecars|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
     }catch{
-        if($snapshot.Count -gt 0){Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}
+        # 还原自身失败时不得替换原始同步异常：聚合两者保留完整故障定位入口。
+        $syncError=$_.Exception.Message
+        if($snapshot.Count -gt 0){try{Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}catch{throw ('MCP managed target rollback failed: {0}; sync failure: {1}' -f $_.Exception.Message,$syncError)}}
         throw
     }finally{
         foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}

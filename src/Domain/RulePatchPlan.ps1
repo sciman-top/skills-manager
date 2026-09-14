@@ -1,7 +1,3 @@
-function Get-RulePatchTextHash([string]$Text) {
-    return Get-OperationSha256 ([string]$Text)
-}
-
 function New-RulePatchUnifiedDiff {
     param([string]$CurrentText, [string]$DesiredText, [string]$DisplayPath, [int]$MaxDiffChars = 131072)
     if ($CurrentText -ceq $DesiredText) { return [pscustomobject][ordered]@{ format = 'unified'; content = ''; has_changes = $false } }
@@ -30,7 +26,7 @@ function New-RulePatchPlan {
     )
     $path = [System.IO.Path]::GetFullPath($TargetPath); $root = [System.IO.Path]::GetFullPath($AuthorizedRoot)
     if ([string]::IsNullOrWhiteSpace($RequiredToken)) { $RequiredToken = if ($AuthorizationScope -eq 'fixture') { 'APPLY_RULE_PATCH' } else { 'APPLY_RULE_REPO_PATCH' } }
-    $beforeHash = Get-RulePatchTextHash $CurrentText; $desiredHash = Get-RulePatchTextHash $DesiredText
+    $beforeHash = Get-OperationSha256 $CurrentText; $desiredHash = Get-OperationSha256 $DesiredText
     $diff = New-RulePatchUnifiedDiff $CurrentText $DesiredText ([System.IO.Path]::GetFileName($path)) $MaxDiffChars
     $identity = '{0}|{1}|{2}|{3}' -f $path.ToLowerInvariant(), $beforeHash, $desiredHash, $DesiredSource
     $patchId = 'patch-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)

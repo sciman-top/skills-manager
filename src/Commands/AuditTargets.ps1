@@ -949,10 +949,6 @@ function Select-AuditBalancedSourceFiles([string]$resolvedPath, [object[]]$Files
     return @($selected.ToArray() | Sort-Object FullName)
 }
 
-function New-AuditArtifactCapabilityAccumulator {
-    return @{}
-}
-
 function Add-AuditBoundedEvidence($Evidence, $Item) {
     if ($Evidence.Count -lt 48) {
         $Evidence.Add($Item) | Out-Null
@@ -1053,10 +1049,6 @@ function ConvertTo-AuditArtifactCapabilityArray($Accumulator) {
                 })) | Out-Null
     }
     return @($result.ToArray())
-}
-
-function New-AuditRequirementSignalAccumulator {
-    return @{}
 }
 
 function Add-AuditRequirementEvidence {
@@ -1646,8 +1638,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     $buildCommands = New-Object System.Collections.Generic.List[string]
     $testCommands = New-Object System.Collections.Generic.List[string]
     $capabilities = New-Object System.Collections.Generic.List[string]
-    $artifactCapabilities = New-AuditArtifactCapabilityAccumulator
-    $requirementSignals = New-AuditRequirementSignalAccumulator
+    $artifactCapabilities = @{}
+    $requirementSignals = @{}
     $agentRuleFiles = New-Object System.Collections.Generic.List[string]
     $notableFiles = New-Object System.Collections.Generic.List[string]
     $scanCoverage = [pscustomobject]([ordered]@{
@@ -1831,7 +1823,7 @@ function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
 }
 
 function Merge-AuditArtifactCapabilities($scans) {
-    $accumulator = New-AuditArtifactCapabilityAccumulator
+    $accumulator = @{}
     foreach ($scan in @($scans)) {
         $target = Get-CfgObjectProperty $scan "target"
         $targetName = [string](Get-CfgObjectProperty $target "name")
@@ -1854,7 +1846,7 @@ function Merge-AuditArtifactCapabilities($scans) {
 }
 
 function Merge-AuditRequirementSignals($scans) {
-    $accumulator = New-AuditRequirementSignalAccumulator
+    $accumulator = @{}
     foreach ($scan in @($scans)) {
         $target = Get-CfgObjectProperty $scan "target"
         $targetName = [string](Get-CfgObjectProperty $target "name")

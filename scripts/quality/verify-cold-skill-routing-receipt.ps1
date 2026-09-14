@@ -114,6 +114,23 @@ if ($receipt -and $null -ne ($receipt.PSObject.Properties['records'])) {
         [string]::IsNullOrWhiteSpace([string]$migration.legacy_receipt_sha256)) {
         Add-Finding 'E001_SCHEMA_INVALID' 'migration wrapper must bind legacy_receipt_path and legacy_receipt_sha256'
     }
+    else {
+        # wrapper 豁免矩阵绑定与 verbatim 校验的前提是 legacy 收据真实可验：
+        # 必须存在且 sha256 重算与声明一致，否则 v2 记录可借 wrapper 形态洗白。
+        $legacyPath = [string]$migration.legacy_receipt_path
+        if (-not [IO.Path]::IsPathRooted($legacyPath)) {
+            $legacyPath = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($ReceiptPath))) $legacyPath
+        }
+        if (-not [IO.File]::Exists($legacyPath)) {
+            Add-Finding 'E001_SCHEMA_INVALID' ("migration wrapper legacy receipt does not exist: {0}" -f $legacyPath)
+        }
+        else {
+            $legacyHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($legacyPath))).ToLowerInvariant()
+            if ($legacyHash -ne ([string]$migration.legacy_receipt_sha256).ToLowerInvariant()) {
+                Add-Finding 'E001_SCHEMA_INVALID' ("migration wrapper legacy receipt sha256 mismatch: {0}" -f $legacyPath)
+            }
+        }
+    }
 }
 elseif ($receipt -and [int]$receipt.schema_version -ne 2 -and $null -ne ($receipt.PSObject.Properties['scenarios'])) {
     if (-not $AllowLegacyMigration) {

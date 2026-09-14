@@ -1110,6 +1110,70 @@ Describe "Core Functions" {
                 $ImportDir = $oldImportDir
             }
         }
+
+        It "treats a legacy import with an omitted mode as manual" {
+            $oldVendorDir = $VendorDir
+            $oldManualDir = $ManualDir
+            $oldImportDir = $ImportDir
+            try {
+                $VendorDir = Join-Path $TestDrive "vendor-missing-mode"
+                $ManualDir = Join-Path $TestDrive "manual-missing-mode"
+                $ImportDir = Join-Path $TestDrive "imports-missing-mode"
+                $vendorSkillDir = Join-Path $VendorDir "myvendor\skills\demo"
+                $manualLegacyDir = Join-Path $ManualDir "demo-legacy"
+                New-Item -ItemType Directory -Path $vendorSkillDir, $manualLegacyDir -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $vendorSkillDir 'SKILL.md') 'vendor skill'
+                Set-ContentUtf8 (Join-Path $manualLegacyDir 'SKILL.md') 'legacy skill'
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = 'myvendor'; repo = 'https://example.com/repo.git' })
+                    imports = @([pscustomobject]@{ name = 'demo-legacy'; repo = 'https://example.com/repo.git'; ref = 'main'; skill = 'skills\demo' })
+                    mappings = @()
+                }
+
+                Migrate-ManualToVendor $cfg 'myvendor' 'https://example.com/repo.git' | Should -Be 1
+                Test-Path -LiteralPath $manualLegacyDir | Should -BeFalse
+                @($cfg.imports | Where-Object { $_.mode -eq 'vendor' -and $_.name -eq 'myvendor' }).Count | Should -Be 1
+            }
+            finally {
+                $VendorDir = $oldVendorDir
+                $ManualDir = $oldManualDir
+                $ImportDir = $oldImportDir
+            }
+        }
+
+        It "stages manual source for a transaction instead of deleting it" {
+            $oldVendorDir = $VendorDir
+            $oldManualDir = $ManualDir
+            $oldImportDir = $ImportDir
+            try {
+                $root = Join-Path $TestDrive 'manual-migration-transaction'
+                $VendorDir = Join-Path $root 'vendor'
+                $ManualDir = Join-Path $root 'manual'
+                $ImportDir = Join-Path $root 'imports'
+                $backupRoot = Join-Path $root 'txn'
+                $vendorSkillDir = Join-Path $VendorDir 'myvendor\skills\demo'
+                $manualLegacyDir = Join-Path $ManualDir 'demo-legacy'
+                New-Item -ItemType Directory -Path $vendorSkillDir, $manualLegacyDir -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $vendorSkillDir 'SKILL.md') 'vendor skill'
+                Set-ContentUtf8 (Join-Path $manualLegacyDir 'SKILL.md') 'legacy skill'
+                $records = [System.Collections.Generic.List[object]]::new()
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = 'myvendor'; repo = 'https://example.com/repo.git' })
+                    imports = @([pscustomobject]@{ name = 'demo-legacy'; mode = 'manual'; repo = 'https://example.com/repo.git'; ref = 'main'; skill = 'skills\demo' })
+                    mappings = @()
+                }
+
+                Migrate-ManualToVendor $cfg 'myvendor' 'https://example.com/repo.git' $backupRoot $records | Should -Be 1
+                Test-Path -LiteralPath $manualLegacyDir | Should -BeFalse
+                @($records).Count | Should -Be 1
+                Test-Path -LiteralPath ([string]$records[0].backup) -PathType Container | Should -BeTrue
+            }
+            finally {
+                $VendorDir = $oldVendorDir
+                $ManualDir = $oldManualDir
+                $ImportDir = $oldImportDir
+            }
+        }
     }
 
     Context "Convert-InstalledVendorSkillsToManual" {

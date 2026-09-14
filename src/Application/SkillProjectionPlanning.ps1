@@ -28,7 +28,19 @@ function Resolve-SkillProjectionPath([string]$Path, [string]$RepoRoot = '') {
         $RepoRoot = if ($null -ne $repoRootVariable -and -not [string]::IsNullOrWhiteSpace([string]$repoRootVariable.Value)) { [string]$repoRootVariable.Value } else { $skillProjectionPlanningRepoRoot }
     }
     $resolved = $Path.Trim()
-    if ($resolved.StartsWith('~')) { $resolved = $resolved -replace '^~', [Environment]::GetFolderPath('UserProfile') }
+    if ($resolved.StartsWith('~')) {
+        $homeRoot = [Environment]::GetFolderPath('UserProfile')
+        $normalizedHomePath = $resolved.Replace('/', '\')
+        if ($normalizedHomePath -match '^~\\\.codex(?:\\|$)' -and -not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+            $resolved = Join-Path ([IO.Path]::GetFullPath($env:CODEX_HOME)) $normalizedHomePath.Substring(8).TrimStart('\')
+        }
+        elseif ($normalizedHomePath -match '^~\\\.claude(?:\\|$)' -and -not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) {
+            $resolved = Join-Path ([IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR)) $normalizedHomePath.Substring(9).TrimStart('\')
+        }
+        else {
+            $resolved = $normalizedHomePath -replace '^~', $homeRoot
+        }
+    }
     $resolved = $resolved.Replace('/', '\')
     if (-not [IO.Path]::IsPathRooted($resolved)) { $resolved = Join-Path $RepoRoot $resolved }
     return [IO.Path]::GetFullPath($resolved)
@@ -86,11 +98,7 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
         # 计划侧 package_hash 会与 apply 阶段的漂移校验比对，必须用纯内容哈希。
         $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
     }
-    return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")
-}
-
-function Get-SkillProjectionTextHash([string]$Text) {
-    return (Get-OperationSha256 $Text)
+    return Get-OperationSha256 ($parts.ToArray() -join "`n")
 }
 
 function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {
@@ -212,7 +220,7 @@ function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null
             }
         }
     }
-    return Get-SkillProjectionTextHash ($identity | ConvertTo-Json -Depth 12 -Compress)
+    return Get-OperationSha256 ($identity | ConvertTo-Json -Depth 12 -Compress)
 }
 
 function Add-SkillProjectionManifestFinding($Findings, [string]$Code, [string]$Path, [string]$Message) {

@@ -1,7 +1,3 @@
-function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
-    return (Get-AuditReceiptPath $recommendationsPath)
-}
-
 function Get-AuditWorkflowInputState([string]$recommendationsPath) {
     $dir = Split-Path $recommendationsPath -Parent
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
@@ -119,7 +115,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         [string]$DryRunAck
     )
     $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
-    $workflowPath = Get-AuditWorkflowReportPath $resolvedRecommendations
+    $workflowPath = Get-AuditReceiptPath $resolvedRecommendations
     $recommendationDir = Split-Path -Parent $resolvedRecommendations
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
     $stages = [pscustomobject]([ordered]@{

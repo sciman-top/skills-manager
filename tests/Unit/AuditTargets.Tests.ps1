@@ -1056,8 +1056,8 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
         }
 
         It "Preserves later source and target evidence when documentation fills the sample" {
-            $requirements = New-AuditRequirementSignalAccumulator
-            $artifacts = New-AuditArtifactCapabilityAccumulator
+            $requirements = @{}
+            $artifacts = @{}
             foreach ($number in 1..60) {
                 Add-AuditRequirementEvidence $requirements workflow ocr recognize documentation README.md "line$number" docs
                 Add-AuditArtifactEvidence $artifacts pdf process documentation README.md "line$number" docs
@@ -1139,6 +1139,9 @@ $scan.detected.artifact_capabilities | Out-Null
             $implementedPdf.Count | Should -Be 1
             $implementedPdf[0].confidence | Should -Be "high"
             $implementedPdf[0].evidence_status | Should -Be "implemented"
+            # evidence 为空时管道不向 Should 传任何输入，断言会静默通过：
+            # 先钉住非空再逐项断言。
+            @($implementedPdf[0].evidence).Count | Should -BeGreaterThan 0
             ($implementedPdf[0].evidence | ForEach-Object { [string]$_.signal }) | Should -Match "@L1$"
 
             $testOnlyRepo = Join-Path $TestDrive "target-repo-test-only-artifact-evidence"
@@ -1150,6 +1153,7 @@ $scan.detected.artifact_capabilities | Out-Null
             $testOnlyPdf.Count | Should -Be 1
             $testOnlyPdf[0].confidence | Should -Be "medium"
             $testOnlyPdf[0].evidence_status | Should -Be "test_covered"
+            @($testOnlyPdf[0].evidence).Count | Should -BeGreaterThan 0
             ($testOnlyPdf[0].evidence | ForEach-Object { [string]$_.kind } | Select-Object -Unique) | Should -Be @("test")
         }
 
@@ -1950,8 +1954,8 @@ $scan.detected.artifact_capabilities | Out-Null
                 $report.changed_counts.add_planned | Should -Be 1
                 $report.changed_counts.add_installed | Should -Be 0
                 $report.dry_run_acknowledged | Should -Be $true
-                Test-Path -LiteralPath (Get-AuditDryRunSummaryPath $path) | Should -Be $true
-                $summaryRaw = Get-ContentUtf8 (Get-AuditDryRunSummaryPath $path)
+                Test-Path -LiteralPath (Get-AuditReceiptPath $path) | Should -Be $true
+                $summaryRaw = Get-ContentUtf8 (Get-AuditReceiptPath $path)
                 $summaryRaw | Should -Match '"source_observations":\s*\[\]'
                 @(Get-ChildItem -LiteralPath $script:Root -File).Name | Should -Not -Match '^runtime-evidence-'
             }
@@ -2291,7 +2295,7 @@ $scan.detected.artifact_capabilities | Out-Null
             }
 
             $result = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘"
-            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
+            $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $recPath) | ConvertFrom-Json).workflow
 
             $result.success | Should -Be $true
             $result.persisted | Should -Be $false
@@ -2331,7 +2335,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $_.Exception.Message | Should -Match "prompt_contract_mismatch"
             }
 
-            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
+            $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.success | Should -Be $false
             $saved.persisted | Should -Be $false
@@ -2355,7 +2359,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $_.Exception.Message | Should -Match "recommendations_missing"
             }
 
-            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
+            $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.error_code | Should -Be "recommendations_missing"
             $saved.failed_stage | Should -Be "recommendations_validation"
@@ -2397,7 +2401,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $_.Exception.Message | Should -Match "workflow_input_changed"
             }
 
-            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
+            $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.error_code | Should -Be "workflow_input_changed"
             $saved.failed_stage | Should -Be "input_stability"

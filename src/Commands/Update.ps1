@@ -467,7 +467,9 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
         })
         }
         if ($json) {
-            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report }
+            # exit_code 供分派层透传：查询失败（failed>0）时调用方不能把
+            # 零退出码误读成“无更新”。
+            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
         }
 
         $lines = [Collections.Generic.List[string]]::new()
@@ -477,7 +479,7 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
             $lines.Add(("  current={0}" -f $item.current)) | Out-Null
             $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
         }
-        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report }
+        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
     }
     finally {
         $script:SuppressAllLogging = $previousSuppressAllLogging

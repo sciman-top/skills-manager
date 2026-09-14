@@ -1170,9 +1170,11 @@ function Test-AncestorChainHasReparse([string]$path) {
         }
         catch {
             # A path that exists but cannot be inspected is not a safe write
-            # boundary.  Missing lexical segments remain harmless and are
-            # skipped while walking toward the filesystem root.
-            if ([IO.Directory]::Exists($cursor) -or [IO.File]::Exists($cursor)) { return $true }
+            # boundary.  Get-ExistingFileSystemItem 已把真正“不存在”的段折叠为
+            # $null 返回（循环内跳过），走到 catch 的一律是无法检查的状态，
+            # 必须按不安全处理；.NET Exists 对 access-denied 同样返回 false，
+            # 不能用它在这里做二次判别。
+            return $true
         }
         $parent = [IO.Directory]::GetParent($cursor)
         $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
@@ -1328,8 +1330,11 @@ function Get-ReparsePointTargetFullPath([string]$path) {
 function Find-LatestBackup([string]$path) {
     $parent = Split-Path $path -Parent
     $leaf = Split-Path $path -Leaf
-    $pattern = "{0}.bak.*" -f $leaf
-    Get-ChildItem $parent -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+    # -Filter/-Path 会把叶名中的 [ ] 当通配符集，特殊目录名会静默丢备份发现：
+    # 枚举用 -LiteralPath，匹配用客户端前缀比较。
+    $bakPrefix = "{0}.bak." -f $leaf
+    Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name.StartsWith($bakPrefix, [StringComparison]::Ordinal) } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 }
@@ -1345,7 +1350,7 @@ function Remove-JunctionAndRestore([string]$linkPath) {
         $bak = Find-LatestBackup $linkPath
         if ($bak) {
             if (Confirm-Action ("检测到备份：{0}，是否恢复？" -f $bak.Name) "Y" -DefaultNo) {
-                if (Test-Path $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
+                if (Test-Path -LiteralPath $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
                 Invoke-MoveItem $bak.FullName $linkPath
             }
             else {
@@ -3369,10 +3374,6 @@ function New-RuleResponsibility {
     }
 }
 
-function Get-RulePatchTextHash([string]$Text) {
-    return Get-OperationSha256 ([string]$Text)
-}
-
 function New-RulePatchUnifiedDiff {
     param([string]$CurrentText, [string]$DesiredText, [string]$DisplayPath, [int]$MaxDiffChars = 131072)
     if ($CurrentText -ceq $DesiredText) { return [pscustomobject][ordered]@{ format = 'unified'; content = ''; has_changes = $false } }
@@ -3401,7 +3402,7 @@ function New-RulePatchPlan {
     )
     $path = [System.IO.Path]::GetFullPath($TargetPath); $root = [System.IO.Path]::GetFullPath($AuthorizedRoot)
     if ([string]::IsNullOrWhiteSpace($RequiredToken)) { $RequiredToken = if ($AuthorizationScope -eq 'fixture') { 'APPLY_RULE_PATCH' } else { 'APPLY_RULE_REPO_PATCH' } }
-    $beforeHash = Get-RulePatchTextHash $CurrentText; $desiredHash = Get-RulePatchTextHash $DesiredText
+    $beforeHash = Get-OperationSha256 $CurrentText; $desiredHash = Get-OperationSha256 $DesiredText
     $diff = New-RulePatchUnifiedDiff $CurrentText $DesiredText ([System.IO.Path]::GetFileName($path)) $MaxDiffChars
     $identity = '{0}|{1}|{2}|{3}' -f $path.ToLowerInvariant(), $beforeHash, $desiredHash, $DesiredSource
     $patchId = 'patch-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
@@ -3468,7 +3469,19 @@ function Resolve-SkillProjectionPath([string]$Path, [string]$RepoRoot = '') {
         $RepoRoot = if ($null -ne $repoRootVariable -and -not [string]::IsNullOrWhiteSpace([string]$repoRootVariable.Value)) { [string]$repoRootVariable.Value } else { $skillProjectionPlanningRepoRoot }
     }
     $resolved = $Path.Trim()
-    if ($resolved.StartsWith('~')) { $resolved = $resolved -replace '^~', [Environment]::GetFolderPath('UserProfile') }
+    if ($resolved.StartsWith('~')) {
+        $homeRoot = [Environment]::GetFolderPath('UserProfile')
+        $normalizedHomePath = $resolved.Replace('/', '\')
+        if ($normalizedHomePath -match '^~\\\.codex(?:\\|$)' -and -not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+            $resolved = Join-Path ([IO.Path]::GetFullPath($env:CODEX_HOME)) $normalizedHomePath.Substring(8).TrimStart('\')
+        }
+        elseif ($normalizedHomePath -match '^~\\\.claude(?:\\|$)' -and -not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) {
+            $resolved = Join-Path ([IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR)) $normalizedHomePath.Substring(9).TrimStart('\')
+        }
+        else {
+            $resolved = $normalizedHomePath -replace '^~', $homeRoot
+        }
+    }
     $resolved = $resolved.Replace('/', '\')
     if (-not [IO.Path]::IsPathRooted($resolved)) { $resolved = Join-Path $RepoRoot $resolved }
     return [IO.Path]::GetFullPath($resolved)
@@ -3526,11 +3539,7 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
         # 计划侧 package_hash 会与 apply 阶段的漂移校验比对，必须用纯内容哈希。
         $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
     }
-    return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")
-}
-
-function Get-SkillProjectionTextHash([string]$Text) {
-    return (Get-OperationSha256 $Text)
+    return Get-OperationSha256 ($parts.ToArray() -join "`n")
 }
 
 function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {
@@ -3652,7 +3661,7 @@ function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null
             }
         }
     }
-    return Get-SkillProjectionTextHash ($identity | ConvertTo-Json -Depth 12 -Compress)
+    return Get-OperationSha256 ($identity | ConvertTo-Json -Depth 12 -Compress)
 }
 
 function Add-SkillProjectionManifestFinding($Findings, [string]$Code, [string]$Path, [string]$Message) {
@@ -3799,14 +3808,6 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     if ($value.StartsWith('~/') -or $value.StartsWith('~\')) { $value = Join-Path $HOME $value.Substring(2) }
     if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $RepoRoot $value }
     return [IO.Path]::GetFullPath($value)
-}
-
-function Test-CapabilitySurfacePathWithinRoot([string]$Path, [string]$Root) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
-    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
-    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
-    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or
-        $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Resolve-CapabilitySurfaceLinkTarget($Directory) {
@@ -3962,7 +3963,7 @@ function New-SkillSurfaceView {
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {
@@ -3999,7 +4000,7 @@ function New-SkillSurfaceView {
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {
@@ -6460,7 +6461,7 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
         if ([System.IO.File]::Exists($path)) {
             $text = [System.IO.File]::ReadAllText($path)
             if ([string]::IsNullOrWhiteSpace($text)) { continue }
-            return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-RulePatchTextHash $text }
+            return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-OperationSha256 $text }
         }
     }
     return $null
@@ -6498,9 +6499,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         $sections.Add([pscustomobject][ordered]@{
             section = $name
             aligned = $aligned
-            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-RulePatchTextHash $codexText }
-            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
-            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-RulePatchTextHash $zcodeText }
+            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-OperationSha256 $codexText }
+            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-OperationSha256 $claudeText }
+            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-OperationSha256 $zcodeText }
         }) | Out-Null
         if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex, Claude, or configured ZCode global common section {0} is absent or different.' -f $name) }) | Out-Null }
         if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
@@ -6658,7 +6659,7 @@ function New-RuleEstateTargetAudit {
         $desired = "@AGENTS.md`n"
         $patchCandidates = @([pscustomobject][ordered]@{
             finding_code = 'project_claude_wrapper_missing'; operation = 'create'; target_path = $Target.claude_path
-            desired_text = $desired; desired_hash = Get-RulePatchTextHash $desired; risk = 'low'; review_required = $true
+            desired_text = $desired; desired_hash = Get-OperationSha256 $desired; risk = 'low'; review_required = $true
             verification = @('UTF-8 without BOM', 'first physical line equals @AGENTS.md', 'Claude native load remains separate')
         })
     }
@@ -6990,7 +6991,9 @@ function Invoke-RuleEstateRollback {
     $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
     if(-not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     $currentHash=Get-RuleEstateTextHashAtPath $target
-    $alreadyBefore=([string]$action.status -eq 'prepared' -and $currentHash -eq [string]$action.before_hash -and [IO.File]::Exists($target) -eq ([string]$action.operation -ne 'create'))
+    # status='applied' 且目标已物理回到 before 状态（如上次回滚还原成功但收据
+    # 写失败）时按已完成补记 rolled_back；否则该 action 永远卡在 rollback_target_stale。
+    $alreadyBefore=($currentHash -eq [string]$action.before_hash -and [IO.File]::Exists($target) -eq ([string]$action.operation -ne 'create') -and ([string]$action.status -eq 'prepared' -or [string]$action.status -eq 'applied'))
     if(-not $alreadyBefore -and $currentHash -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     # 回滚令牌绑定具体 operation（与 apply 的 plan token 对称），静态常量不构成任何收据的准入。
@@ -7297,6 +7300,10 @@ function Invoke-GlobalRuleProjectionApply {
                 $action.status='prepared';Write-GlobalRuleReceipt $receiptFile $receipt
             }
             Write-BytesAtomic -Path ([string]$action.target_path) -Bytes ([IO.File]::ReadAllBytes([string]$action.source_path))
+            # 写入后复核 hash 绑定：plan 认证与逐 action 写入之间源被并发修改时，
+            # 未审查字节不得以 applied 状态落收据。
+            $writtenFacts=Get-GlobalRuleFileFacts $action.target_path
+            if(-not$writtenFacts.exists-or$writtenFacts.hash-ne[string]$action.source_hash){throw('Post-apply target hash mismatch: {0}'-f$action.target_path)}
             $action.status='applied';$receipt.writes=[int]$receipt.writes+1;Write-GlobalRuleReceipt $receiptFile $receipt
         }
         $receipt.status='applied';$receipt.completed_at=[datetimeoffset]::UtcNow.ToString('o');$receipt.last_error=$null;$receipt.truth_boundary='filesystem_applied_not_host_loaded';Write-GlobalRuleReceipt $receiptFile $receipt
@@ -7400,14 +7407,14 @@ function Test-RulePatchApplyGuard {
     if ([string]::IsNullOrWhiteSpace($requiredToken) -or $Token -cne $requiredToken) { $findings.Add((New-RulePatchGuardFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit apply token does not match.')) | Out-Null }
     $operation = [string](Get-OperationObjectProperty $target 'operation')
     if ($operation -eq 'create' -and [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'create_target_exists' '$.target.path' 'Create target already exists.')) | Out-Null }
-    elseif ($operation -eq 'create' -and (Get-RulePatchTextHash '') -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'create_before_hash_invalid' '$.target.before_hash' 'Create plans must use the empty-text before hash.')) | Out-Null }
+    elseif ($operation -eq 'create' -and (Get-OperationSha256 '') -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'create_before_hash_invalid' '$.target.before_hash' 'Create plans must use the empty-text before hash.')) | Out-Null }
     elseif ($operation -eq 'update' -and -not [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'target_missing' '$.target.path' 'Update target must already exist.')) | Out-Null }
     elseif ($operation -eq 'update') {
-        $current = [System.IO.File]::ReadAllText($path); $currentHash = Get-RulePatchTextHash $current
+        $current = [System.IO.File]::ReadAllText($path); $currentHash = Get-OperationSha256 $current
         if ($currentHash -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'target_hash_stale' '$.target.before_hash' 'Target content changed after planning.')) | Out-Null }
     }
     $desiredText = [string](Get-OperationObjectProperty $Plan 'desired_text')
-    if ((Get-RulePatchTextHash $desiredText) -ne [string](Get-OperationObjectProperty $target 'desired_hash')) { $findings.Add((New-RulePatchGuardFinding 'desired_hash_mismatch' '$.target.desired_hash' 'Desired text does not match its declared hash.')) | Out-Null }
+    if ((Get-OperationSha256 $desiredText) -ne [string](Get-OperationObjectProperty $target 'desired_hash')) { $findings.Add((New-RulePatchGuardFinding 'desired_hash_mismatch' '$.target.desired_hash' 'Desired text does not match its declared hash.')) | Out-Null }
     return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); findings = @($findings.ToArray()); target_path = $path; boundary_root = $boundary; writes = 0 }
 }
 
@@ -7440,7 +7447,7 @@ function Invoke-RulePatchApply {
         if ($TestFaultPoint -eq 'after_stage') { throw 'test_fault:after_stage' }
         if ($operation -eq 'update') {
             $freshText = [System.IO.File]::ReadAllText($targetPath)
-            if ((Get-RulePatchTextHash $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
+            if ((Get-OperationSha256 $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
         }
         elseif ([System.IO.File]::Exists($targetPath)) { throw 'create_target_appeared_before_replace' }
         if ($TestFaultPoint -eq 'before_replace') { throw 'test_fault:before_replace' }
@@ -7448,7 +7455,7 @@ function Invoke-RulePatchApply {
         else { [System.IO.File]::Move($stagePath, $targetPath) }
         $replaced = $true
         if ($TestFaultPoint -in @('after_replace', 'after_replace_rollback_failure')) { throw ('test_fault:{0}' -f $TestFaultPoint) }
-        $appliedHash = Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))
+        $appliedHash = Get-OperationSha256 ([System.IO.File]::ReadAllText($targetPath))
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
         $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'git_revert_required' }))
@@ -7462,7 +7469,7 @@ function Invoke-RulePatchApply {
                 try {
                     if ((Test-RulePatchReparsePath $targetPath $BoundaryRoot) -or
                         -not [System.IO.File]::Exists($targetPath) -or
-                        (Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) {
+                        (Get-OperationSha256 ([System.IO.File]::ReadAllText($targetPath))) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) {
                         throw 'rollback_target_stale'
                     }
                     if ($operation -eq 'create') { [System.IO.File]::Delete($targetPath) }
@@ -7617,8 +7624,15 @@ function Invoke-GitCaptureCore([string[]]$GitArgs, [ref]$Ok, [ref]$ExitCode, [sw
             $stdout = $process.StandardOutput.ReadToEndAsync()
             $stderr = $process.StandardError.ReadToEndAsync()
             if (-not $process.WaitForExit($seconds * 1000)) {
-                $process.Kill($true)
+                # 超时边界进程可能恰好自行退出：先 HasExited 守卫再 Kill。
+                if (-not $process.HasExited) { $process.Kill($true) }
+                $null = $process.WaitForExit(5000)
                 throw [TimeoutException]::new('remote_query_timeout')
+            }
+            # 进程退出后输出读取仍设同额有界上限：继承 stdout 句柄的子孙进程会让
+            # ReadToEndAsync 永不 EOF，无界 GetResult 会绕过上面的查询超时。
+            if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
+                throw [TimeoutException]::new('remote_query_output_timeout')
             }
             if ($null -ne $ExitCode) { $ExitCode.Value = $process.ExitCode }
             if ($process.ExitCode -ne 0) { throw 'remote_query_failed' }
@@ -9735,7 +9749,7 @@ function Repair-VendorImports($cfg, [ref]$changed) {
     }
 }
 
-function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
+function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo, [string]$MigrationBackupRoot = '', [object]$MigrationRecords = $null) {
     $normRepo = Normalize-RepoUrl $repo
     $migratedCount = 0
     
@@ -9745,7 +9759,8 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
     
     $manualImports = @()
     foreach ($i in $cfg.imports) {
-        if ($i.mode -eq "manual" -and (Normalize-RepoUrl $i.repo) -eq $normRepo) {
+        $mode = if ($i.PSObject.Properties.Match('mode').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$i.mode)) { [string]$i.mode } else { 'manual' }
+        if ($mode -eq "manual" -and (Normalize-RepoUrl $i.repo) -eq $normRepo) {
             $manualImports += $i
         }
     }
@@ -9790,10 +9805,24 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
             $migratedCount++
             Log ("已迁移手动技能：manual/{0} -> vendor/{1}/{2}" -f $oldName, $vendorName, $skillPath)
              
-            # Remove Manual Directory
+            # During 构建生效, stage the old manual tree inside the build
+            # transaction. It is only discarded when the complete build is
+            # committed; a failed build can therefore restore both config and
+            # source data. Direct install/update callers retain the historical
+            # immediate cleanup behavior.
             $manualDirPath = Join-Path $ManualDir $oldName
             if (Test-Path $manualDirPath) {
-                Invoke-RemoveItem $manualDirPath -Recurse
+                if (-not [string]::IsNullOrWhiteSpace($MigrationBackupRoot)) {
+                    EnsureDir $MigrationBackupRoot
+                    $backupPath = Join-Path $MigrationBackupRoot ("{0}-{1}" -f $oldName, [Guid]::NewGuid().ToString('N'))
+                    Invoke-MoveItem $manualDirPath $backupPath
+                    if ($null -ne $MigrationRecords -and $MigrationRecords -is [System.Collections.IList]) {
+                        $MigrationRecords.Add([pscustomobject]@{ source = $manualDirPath; backup = $backupPath }) | Out-Null
+                    }
+                }
+                else {
+                    Invoke-RemoveItem $manualDirPath -Recurse
+                }
             }
         }
     }
@@ -9804,12 +9833,12 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
     return $migratedCount
 }
 
-function Optimize-Imports($cfg) {
+function Optimize-Imports($cfg, [string]$MigrationBackupRoot = '', [object]$MigrationRecords = $null) {
     if ($null -eq $cfg) { return }
     $total = 0
     foreach ($v in $cfg.vendors) {
         if (-not [string]::IsNullOrWhiteSpace($v.repo)) {
-            $total += Migrate-ManualToVendor $cfg $v.name $v.repo
+            $total += Migrate-ManualToVendor $cfg $v.name $v.repo $MigrationBackupRoot $MigrationRecords
         }
     }
     if ($total -gt 0) {
@@ -11603,6 +11632,15 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
             Write-Host ("Import failed: {0}; rollback incomplete: {1}" -f $errMsg, $_.Exception.Message) -ForegroundColor Red
             return $false
         }
+        # 配置已回滚但构建生效可能已写入 agent/ 与宿主投影：补偿重建到回滚后
+        # 状态；补偿失败只报告，不阻断后续跨仓回退判断。
+        try {
+            构建生效 -AllowUnverifiedProjection
+            Log "配置已回滚，宿主投影已按回滚后配置补偿重建。" "WARN"
+        }
+        catch {
+            Log ("补偿投影失败，宿主目标可能残留本次导入的部分产物，需重新执行【构建生效】：{0}" -f $_.Exception.Message) "ERROR"
+        }
         $plan = if ($configSnapshot.hashes.Count -eq 0) { Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg } else { $null }
         if ($plan -and -not $NoCrossRepoFallback -and -not $script:CrossRepoAutoFallbackInProgress) {
             Log ("当前仓库未命中技能，自动回退到建议仓库重试：repo={0} --skill {1}" -f $plan.repo, $plan.skill) "WARN"
@@ -11837,6 +11875,15 @@ function 删除技能库 {
         $failure = $_
         try { Restore-ConfigWriteSnapshot $configSnapshot }
         catch { throw ("{0}; rollback incomplete: {1}" -f $failure.Exception.Message, $_.Exception.Message) }
+        # 配置已回滚但构建生效可能已写入 agent/ 与宿主投影：补偿重建到回滚后
+        # 状态；补偿自身失败只报告，不掩盖原始删除失败。
+        try {
+            构建生效 -AllowUnverifiedProjection
+            Log "配置已回滚，宿主投影已按回滚后配置补偿重建。" "WARN"
+        }
+        catch {
+            Log ("补偿投影失败，宿主目标可能残留删除前的投影产物，需重新执行【构建生效】：{0}" -f $_.Exception.Message) "ERROR"
+        }
         foreach ($createdPath in $createdManualPaths) {
             Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
         }
@@ -12856,9 +12903,9 @@ function 卸载([string[]]$tokens = @()) {
         throw $failure
     }
     # Legacy sources are no longer referenced only after the build succeeds.
+    # 卸载在构建成功后已不可逆，目录占用导致的删除失败只告警不推翻卸载结果。
     foreach ($legacyPath in $legacyPaths) {
-        Invoke-RemoveItem $legacyPath -Recurse
-        $deletedLegacyManualDirs++
+        if (Invoke-RemoveItemWithRetry $legacyPath -Recurse -IgnoreFailure) { $deletedLegacyManualDirs++ }
     }
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
@@ -13087,6 +13134,17 @@ function Start-BuildTransaction {
         # 三态区分：absent=构建前无 agent/；backed_up=已挪入事务备份；
         # present_no_backup=备份挪动失败但构建前 agent/ 仍在（回滚必须 fail closed）。
         agent_before_state = "absent"
+        config_path = if (-not [string]::IsNullOrWhiteSpace([string]$CfgPath)) { [IO.Path]::GetFullPath($CfgPath) } else { '' }
+        config_before_exists = $false
+        config_before_bytes = [byte[]]::new(0)
+        config_before_hash = ''
+        config_after_hash = ''
+        manual_migrations = [System.Collections.Generic.List[object]]::new()
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$state.config_path) -and (Test-Path -LiteralPath $state.config_path -PathType Leaf)) {
+        $state.config_before_exists = $true
+        $state.config_before_bytes = [IO.File]::ReadAllBytes($state.config_path)
+        $state.config_before_hash = (Get-FileHash -LiteralPath $state.config_path -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     if ($DryRun) { return [pscustomobject]$state }
     $agentParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($AgentDir))
@@ -13131,6 +13189,44 @@ function Start-BuildTransaction {
     return [pscustomobject]$state
 }
 
+function Restore-BuildConfigAndManualMigration($txn) {
+    if ($null -eq $txn) { return }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $records = if ($txn.PSObject.Properties.Match('manual_migrations').Count -gt 0) { @($txn.manual_migrations) } else { @() }
+    foreach ($record in @($records | Sort-Object backup -Descending)) {
+        $source = [string]$record.source
+        $backup = [string]$record.backup
+        try {
+            if (Test-Path -LiteralPath $source) {
+                if (Test-Path -LiteralPath $backup) { throw ("manual migration rollback conflict: source and backup both exist: {0}" -f $source) }
+                continue
+            }
+            if (-not (Test-Path -LiteralPath $backup -PathType Container)) { throw ("manual migration backup missing: {0}" -f $backup) }
+            $parent = Split-Path -Parent $source
+            if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+            Invoke-MoveItem $backup $source
+        }
+        catch { $errors.Add($_.Exception.Message) | Out-Null }
+    }
+
+    $configPath = if ($txn.PSObject.Properties.Match('config_path').Count -gt 0) { [string]$txn.config_path } else { '' }
+    $beforeHash = if ($txn.PSObject.Properties.Match('config_before_hash').Count -gt 0) { [string]$txn.config_before_hash } else { '' }
+    $afterHash = if ($txn.PSObject.Properties.Match('config_after_hash').Count -gt 0) { [string]$txn.config_after_hash } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($configPath) -and $txn.PSObject.Properties.Match('config_before_exists').Count -gt 0 -and [bool]$txn.config_before_exists) {
+        try {
+            $currentExists = Test-Path -LiteralPath $configPath -PathType Leaf
+            $currentHash = if ($currentExists) { (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+            if ($currentHash -eq $beforeHash) { }
+            elseif (-not [string]::IsNullOrWhiteSpace($afterHash) -and $currentHash -eq $afterHash) {
+                Write-BytesAtomic -Path $configPath -Bytes ([byte[]]$txn.config_before_bytes)
+            }
+            else { throw ("构建事务配置已发生并发漂移，拒绝覆盖：{0}" -f $configPath) }
+        }
+        catch { $errors.Add($_.Exception.Message) | Out-Null }
+    }
+    if ($errors.Count -gt 0) { throw (($errors | Select-Object -First 10) -join '; ') }
+}
+
 function Rollback-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return $true }
     $restored = $false
@@ -13140,6 +13236,9 @@ function Rollback-BuildTransaction($txn) {
     # 构建完成时刻，带着 catalog 写入比对会被误判为并发漂移。
     $catalogTransaction = if ($txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
     $catalogRestoreError = $null
+    $configMigrationRestoreError = $null
+    try { Restore-BuildConfigAndManualMigration $txn }
+    catch { $configMigrationRestoreError = $_.Exception.Message }
     if ($null -ne $catalogTransaction) {
         foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
             try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
@@ -13267,6 +13366,10 @@ function Rollback-BuildTransaction($txn) {
     finally {
         if (-not [string]::IsNullOrWhiteSpace([string]$catalogRestoreError)) {
             $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogRestoreError } else { '{0}; {1}' -f $restoreError, $catalogRestoreError }
+            $restored = $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$configMigrationRestoreError)) {
+            $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $configMigrationRestoreError } else { '{0}; {1}' -f $restoreError, $configMigrationRestoreError }
             $restored = $false
         }
         # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
@@ -13473,6 +13576,13 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
         }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
+        # mappings 非空却产出零技能说明整条供给链失效；只 WARN 会让空 agent/ 一路
+        # 投影到宿主并摘除既有技能。零 mappings 配置（custom-only）不在此列。
+        $effectiveMappings = @(@($cfg.mappings) | Where-Object { $null -ne $_ })
+        if ($count -eq 0 -and $effectiveMappings.Count -gt 0) {
+            Write-Host "❌ 构建产物为空：skills.json 存在 mappings，但 agent/ 未产出任何技能，已升级为失败。" -ForegroundColor Red
+            $failures.Add("build-agent-empty => mappings 非空但 agent/ 零技能；请检查上方失效 mappings 与构建 WARN 日志") | Out-Null
+        }
         return $failures.ToArray()
     })
 }
@@ -13679,30 +13789,40 @@ function 构建生效(
         $promotionBlocked = $false
         $hostProjectionAttempted = $false
 
-        # Optimization/Migration check
+        # Start the build transaction before import optimization. Migration may
+        # move manual source trees and write skills.json; both must be covered
+        # by the same rollback boundary as agent/.
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
-        Optimize-Imports $cfg
-        $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
-        if (@($optChanges).Count -gt 0) {
-            SaveCfg $cfg
-            Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
-        }
-
-        Write-BuildSummary $cfg
-        Log "=== 启动构建生效流程 ==="
-        $catalogTransaction = $null
-        if ($SkipHostProjection -and -not $DryRun) {
-            # The catalog is the only repository-side projection performed by
-            # this branch; snapshot it before moving agent/ into the build
-            # transaction so a later failure can restore both surfaces.
-            $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
-        }
         $txn = Start-BuildTransaction
-        if ($null -ne $txn -and $null -ne $catalogTransaction) {
-            $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+        $txnPath = if ($null -ne $txn -and $txn.PSObject.Properties.Match('path').Count -gt 0) { [string]$txn.path } else { '' }
+        $migrationRoot = if (-not [string]::IsNullOrWhiteSpace($txnPath) -and -not $DryRun) { Join-Path $txnPath 'manual-migrations' } else { '' }
+        $migrationRecords = if ($null -ne $txn) { [System.Collections.Generic.List[object]]::new() } else { $null }
+        if ($null -ne $txn -and $null -ne $migrationRecords) {
+            $txn | Add-Member -NotePropertyName manual_migrations -NotePropertyValue $migrationRecords -Force
         }
+        $catalogTransaction = $null
         Start-DryRunMirrorCollect
         try {
+            Optimize-Imports $cfg $migrationRoot $migrationRecords
+            $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
+            if (@($optChanges).Count -gt 0) {
+                SaveCfg $cfg
+                if ($null -ne $txn -and -not $DryRun -and (Test-Path -LiteralPath $CfgPath -PathType Leaf)) {
+                    $txn.config_after_hash = (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+                Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
+            }
+
+            Write-BuildSummary $cfg
+            Log "=== 启动构建生效流程 ==="
+            if ($SkipHostProjection -and -not $DryRun) {
+                # Snapshot the catalog after optimization so rollback restores
+                # the exact pre-build projection inputs and outputs.
+                $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
+                if ($null -ne $txn) {
+                    $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+                }
+            }
             $failures = @()
             $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
@@ -13759,6 +13879,13 @@ function 构建生效(
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"
+        }
+        catch {
+            # 内层失败收集之外的逃逸异常（override 重名、原子写失败等）也必须走事务
+            # 回滚：否则 agent/ 停留在半构建态，.txn 备份位置不出现在任何错误信息里。
+            $failures += ("build-agent-exception => {0}" -f $_.Exception.Message)
+            Log ("构建生效因异常中止，转入事务回滚：{0}" -f $_.Exception.Message) "ERROR"
+            $needRollback = $true
         }
         finally {
             Stop-DryRunMirrorCollect
@@ -14348,7 +14475,9 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
         })
         }
         if ($json) {
-            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report }
+            # exit_code 供分派层透传：查询失败（failed>0）时调用方不能把
+            # 零退出码误读成“无更新”。
+            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
         }
 
         $lines = [Collections.Generic.List[string]]::new()
@@ -14358,7 +14487,7 @@ function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
             $lines.Add(("  current={0}" -f $item.current)) | Out-Null
             $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
         }
-        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report }
+        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
     }
     finally {
         $script:SuppressAllLogging = $previousSuppressAllLogging
@@ -15214,7 +15343,17 @@ function Get-CodexNpxWrapperBinRel([string]$packageName) {
     }
 }
 
-function Convert-CodexNpxServerToCachedNodeWrapper($server) {
+function Get-CodexMcpScriptsRoot([string]$CodexRoot = '') {
+    $root = if ([string]::IsNullOrWhiteSpace($CodexRoot)) {
+        Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex"
+    }
+    else {
+        [IO.Path]::GetFullPath($CodexRoot)
+    }
+    return (Join-Path $root 'scripts')
+}
+
+function Convert-CodexNpxServerToCachedNodeWrapper($server, [string]$CodexRoot = '') {
     if ($null -eq $server) { return $null }
     if (-not [string]::Equals([string]$server.command, "npx", [System.StringComparison]::OrdinalIgnoreCase)) {
         return $null
@@ -15243,7 +15382,7 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     if ($packageIndex + 1 -lt $args.Count) {
         $extraArgs = @($args[($packageIndex + 1)..($args.Count - 1)])
     }
-    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-node-cache-wrapper.mjs"
+    $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-node-cache-wrapper.mjs"
     $entry = [ordered]@{
         transport = "stdio"
         command = "node"
@@ -15253,11 +15392,11 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     return [pscustomobject]$entry
 }
 
-function Convert-CodexPostgresServerToCachedNodeWrapper($server) {
+function Convert-CodexPostgresServerToCachedNodeWrapper($server, [string]$CodexRoot = '') {
     if ($null -eq $server) { return $null }
     if (-not (Test-McpServerUsesPostgresConnectionString $server)) { return $null }
 
-    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-postgres-env-wrapper.mjs"
+    $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-postgres-env-wrapper.mjs"
     $entry = [ordered]@{
         transport = "stdio"
         command = "node"
@@ -15304,7 +15443,7 @@ function Should-SkipCodexMcpKnownTaskkillStdoutLeak($server) {
     return $true
 }
 
-function Convert-McpServersToCodexConfigMap($servers) {
+function Convert-McpServersToCodexConfigMap($servers, [string]$CodexRoot = '') {
     $map = [ordered]@{}
     if ($null -eq $servers) { return [pscustomobject]$map }
 
@@ -15317,9 +15456,9 @@ function Convert-McpServersToCodexConfigMap($servers) {
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
         $entry.transport = $transport
         if ($transport -eq "stdio") {
-            $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s
+            $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s $CodexRoot
             if ($null -eq $wrapped) {
-                $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $s
+                $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $s $CodexRoot
             }
             if ($null -ne $wrapped) {
                 foreach ($prop in $wrapped.PSObject.Properties) { $entry[[string]$prop.Name] = $prop.Value }
@@ -16560,7 +16699,7 @@ function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldNa
     }
 }
 
-function Build-CodexConfigToml([string]$existingToml, $servers) {
+function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRoot = '') {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
@@ -16609,7 +16748,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
         $codexServers += $server
     }
 
-    $managedMap = Convert-McpServersToCodexConfigMap $codexServers
+    $managedMap = Convert-McpServersToCodexConfigMap $codexServers $CodexRoot
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
     $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
@@ -17201,7 +17340,7 @@ function New-McpSyncDesiredState {
                 $content = $payload | ConvertTo-Json -Depth 100
             }
             'codex_toml' {
-                $content = Build-CodexConfigToml $existing $Servers
+                $content = Build-CodexConfigToml $existing $Servers ([string]$spec.root)
             }
             'zcode_json' {
                 $payload = Build-ZCodeMcpPayload $existing $ActiveServers
@@ -17486,9 +17625,9 @@ function Get-McpImplicitSidecarTargets([object[]]$DesiredState) {
     foreach($target in @($DesiredState|Where-Object{[string]$_.kind -eq 'codex_toml'})){
         $root=[IO.Path]::GetFullPath([string]$target.root)
         $nodePath=Join-Path $root 'scripts/mcp-node-cache-wrapper.mjs'
-        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent)})|Out-Null}
+        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent);changed=$false})|Out-Null}
         $postgresPath=Join-Path $root 'scripts/mcp-postgres-env-wrapper.mjs'
-        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent)})|Out-Null}
+        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent);changed=$false})|Out-Null}
     }
     return @($targets.ToArray())
 }
@@ -17538,13 +17677,22 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             $exists=Test-Path -LiteralPath $path -PathType Leaf
             $beforeHash=$(if($exists){Get-OperationSha256 (Get-ContentUtf8 $path)}else{$null})
             $sidecar|Add-Member -NotePropertyName before_hash -NotePropertyValue $beforeHash -Force
+            $sidecar|Add-Member -NotePropertyName desired_hash -NotePropertyValue (Get-OperationSha256 ([string]$sidecar.desired_content)) -Force
+            $sidecar|Add-Member -NotePropertyName changed -NotePropertyValue ($beforeHash -ne [string]$sidecar.desired_hash) -Force
             $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$beforeHash;desired_hash=(Get-OperationSha256 ([string]$sidecar.desired_content))})|Out-Null
         }
-        foreach($target in @($DesiredState|Where-Object changed)){
+        $targetsToWrite = @($DesiredState | Where-Object {
+            if ([bool]$_.changed) { return $true }
+            if ([string]$_.kind -ne 'codex_toml') { return $false }
+            $targetRoot = [IO.Path]::GetFullPath([string]$_.root)
+            return @($sidecars | Where-Object { [IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot -and [bool]$_.changed }).Count -gt 0
+        })
+        foreach($target in $targetsToWrite){
             Assert-McpDesiredStateFresh @($target) $ExpectedConfigRevision
             if([string]$target.kind -eq 'codex_toml'){
                 $targetRoot=[IO.Path]::GetFullPath([string]$target.root)
                 foreach($sidecar in @($sidecars|Where-Object{[IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot})){
+                    if (-not [bool]$target.changed -and -not [bool]$sidecar.changed) { continue }
                     $exists=Test-Path -LiteralPath $sidecar.path -PathType Leaf
                     if($null -eq $sidecar.before_hash){Need (-not $exists) ("MCP sidecar_created_since_lock：{0}" -f $sidecar.path)}
                     else{Need $exists ("MCP sidecar_missing_since_lock：{0}" -f $sidecar.path);Need ((Get-OperationSha256 (Get-ContentUtf8 $sidecar.path)) -eq [string]$sidecar.before_hash) ("MCP sidecar_hash_stale：{0}" -f $sidecar.path)}
@@ -17553,9 +17701,11 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
             Write-McpDesiredTarget $target
         }
         $transactionSucceeded=$true
-        return [pscustomobject]@{pass=$true;writes=@($DesiredState|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
+        return [pscustomobject]@{pass=$true;writes=$targetsToWrite.Count;sidecar_writes=@($sidecars|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
     }catch{
-        if($snapshot.Count -gt 0){Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}
+        # 还原自身失败时不得替换原始同步异常：聚合两者保留完整故障定位入口。
+        $syncError=$_.Exception.Message
+        if($snapshot.Count -gt 0){try{Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}catch{throw ('MCP managed target rollback failed: {0}; sync failure: {1}' -f $_.Exception.Message,$syncError)}}
         throw
     }finally{
         foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}
@@ -18184,14 +18334,32 @@ function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest)
     $root = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\', '/')
     $entries = @($Manifest.files)
     Need ($entries.Count -gt 0) 'RELEASE-MANIFEST.json 缺少文件清单，无法安全覆盖本地安装'
+    $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $entries) {
         $relative = [string]$entry.path
         Need (-not [string]::IsNullOrWhiteSpace($relative) -and -not [IO.Path]::IsPathRooted($relative) -and $relative -notmatch '(^|[\\/])\.\.([\\/]|$)') 'RELEASE-MANIFEST.json 包含不安全路径'
+        $relative = $relative.Replace('\', '/')
+        Need ($expectedPaths.Add($relative)) ("RELEASE-MANIFEST.json 包含重复文件：{0}" -f $relative)
         $path = [IO.Path]::GetFullPath((Join-Path $root $relative))
         Need (Is-PathInsideOrEqual $path $root) 'RELEASE-MANIFEST.json 文件路径越界'
         Need (Test-Path -LiteralPath $path -PathType Leaf) ("发行文件缺失：{0}" -f $relative)
         $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         Need ($actual -eq ([string]$entry.sha256).ToLowerInvariant()) ("本地发行文件已修改：{0}；请使用 Git 源码开发版或先迁移定制内容" -f $relative)
+    }
+    # The worker swaps the whole installation directory. Keep its owned
+    # receipt across repeated updates, but block every other unmanifested file
+    # before the swap so local data cannot be silently discarded.
+    [void]$expectedPaths.Add('RELEASE-MANIFEST.json')
+    $ownedRuntimeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$ownedRuntimeFiles.Add('reports/release-update/last.json')
+    $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
+            [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+        })
+    foreach ($actualPath in $actualPaths) {
+        Need ($expectedPaths.Contains($actualPath) -or $ownedRuntimeFiles.Contains($actualPath)) ("本地安装包含未受管理文件，拒绝整目录替换以避免丢失：{0}" -f $actualPath)
+    }
+    foreach ($expectedPath in $expectedPaths) {
+        Need ($actualPaths -contains $expectedPath) ("发行文件缺失：{0}" -f $expectedPath)
     }
     return $true
 }
@@ -19701,10 +19869,6 @@ function Select-AuditBalancedSourceFiles([string]$resolvedPath, [object[]]$Files
     return @($selected.ToArray() | Sort-Object FullName)
 }
 
-function New-AuditArtifactCapabilityAccumulator {
-    return @{}
-}
-
 function Add-AuditBoundedEvidence($Evidence, $Item) {
     if ($Evidence.Count -lt 48) {
         $Evidence.Add($Item) | Out-Null
@@ -19805,10 +19969,6 @@ function ConvertTo-AuditArtifactCapabilityArray($Accumulator) {
                 })) | Out-Null
     }
     return @($result.ToArray())
-}
-
-function New-AuditRequirementSignalAccumulator {
-    return @{}
 }
 
 function Add-AuditRequirementEvidence {
@@ -20398,8 +20558,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     $buildCommands = New-Object System.Collections.Generic.List[string]
     $testCommands = New-Object System.Collections.Generic.List[string]
     $capabilities = New-Object System.Collections.Generic.List[string]
-    $artifactCapabilities = New-AuditArtifactCapabilityAccumulator
-    $requirementSignals = New-AuditRequirementSignalAccumulator
+    $artifactCapabilities = @{}
+    $requirementSignals = @{}
     $agentRuleFiles = New-Object System.Collections.Generic.List[string]
     $notableFiles = New-Object System.Collections.Generic.List[string]
     $scanCoverage = [pscustomobject]([ordered]@{
@@ -20583,7 +20743,7 @@ function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
 }
 
 function Merge-AuditArtifactCapabilities($scans) {
-    $accumulator = New-AuditArtifactCapabilityAccumulator
+    $accumulator = @{}
     foreach ($scan in @($scans)) {
         $target = Get-CfgObjectProperty $scan "target"
         $targetName = [string](Get-CfgObjectProperty $target "name")
@@ -20606,7 +20766,7 @@ function Merge-AuditArtifactCapabilities($scans) {
 }
 
 function Merge-AuditRequirementSignals($scans) {
-    $accumulator = New-AuditRequirementSignalAccumulator
+    $accumulator = @{}
     foreach ($scan in @($scans)) {
         $target = Get-CfgObjectProperty $scan "target"
         $targetName = [string](Get-CfgObjectProperty $target "name")
@@ -23311,10 +23471,6 @@ function Get-AuditPersistedChangeTotal($counts) {
     return $total
 }
 
-function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
-    return (Get-AuditReceiptPath $recommendationsPath)
-}
-
 function ConvertTo-AuditJsonArray($value) {
     $items = New-Object System.Collections.Generic.List[object]
     if ($null -ne $value) {
@@ -24090,7 +24246,7 @@ function Complete-AuditRecommendationsDryRun {
         }
         $Report["dry_run_acknowledged"] = $true
     }
-    $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+    $dryRunSummaryPath = Get-AuditReceiptPath $RecommendationsPath
     $dryRunSummary = New-AuditDryRunSummary $Plan $RecommendationsPath
     $Report["summary"] = $dryRunSummary
     $Report["dry_run_summary_path"] = $dryRunSummaryPath
@@ -24127,7 +24283,7 @@ function Resolve-AuditApplySelections {
 
 function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
     $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
-    $workflowPath = Get-AuditWorkflowReportPath $resolved
+    $workflowPath = Get-AuditReceiptPath $resolved
     if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
     }
@@ -24651,10 +24807,6 @@ function Show-AuditLatestStatus {
     }
 }
 
-function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
-    return (Get-AuditReceiptPath $recommendationsPath)
-}
-
 function Get-AuditWorkflowInputState([string]$recommendationsPath) {
     $dir = Split-Path $recommendationsPath -Parent
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
@@ -24772,7 +24924,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         [string]$DryRunAck
     )
     $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
-    $workflowPath = Get-AuditWorkflowReportPath $resolvedRecommendations
+    $workflowPath = Get-AuditReceiptPath $resolvedRecommendations
     $recommendationDir = Split-Path -Parent $resolvedRecommendations
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
     $stages = [pscustomobject]([ordered]@{
@@ -25373,11 +25525,10 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         skills = @($skills.ToArray() | Sort-Object name)
         capabilities = @()
     }
-    # PowerShell serializes an empty property array as JSON null.  Cold
-    # consumers require dependencies to remain an array, including [] for a
-    # skill with no dependencies; normalize the serialized representation
-    # before fingerprinting and writing so projection and discovery agree.
-    $catalogJson = [regex]::Replace(($catalog | ConvertTo-Json -Depth 20 -Compress), '("dependencies"\s*:\s*)null', '${1}[]')
+    # PS7 ConvertTo-Json 对空数组属性输出 []（PS5.1 才有 null 序列化问题）；
+    # 构造点始终写入 @()，冷消费者拿到的 dependencies 恒为数组，指纹与落盘
+    # 文本天然一致。
+    $catalogJson = $catalog | ConvertTo-Json -Depth 20 -Compress
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 $catalogJson
     return $catalog
 }
@@ -25395,7 +25546,6 @@ function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switc
     $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
     $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
-    $desired = [regex]::Replace($desired, '("dependencies"\s*:\s*)null', '${1}[]')
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $primaryChanged = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
@@ -26648,7 +26798,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "选择" { 选择 }
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
-            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
+            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
             { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
             "锁定" { 锁定 }

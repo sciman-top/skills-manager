@@ -542,6 +542,15 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
             Write-Host ("Import failed: {0}; rollback incomplete: {1}" -f $errMsg, $_.Exception.Message) -ForegroundColor Red
             return $false
         }
+        # 配置已回滚但构建生效可能已写入 agent/ 与宿主投影：补偿重建到回滚后
+        # 状态；补偿失败只报告，不阻断后续跨仓回退判断。
+        try {
+            构建生效 -AllowUnverifiedProjection
+            Log "配置已回滚，宿主投影已按回滚后配置补偿重建。" "WARN"
+        }
+        catch {
+            Log ("补偿投影失败，宿主目标可能残留本次导入的部分产物，需重新执行【构建生效】：{0}" -f $_.Exception.Message) "ERROR"
+        }
         $plan = if ($configSnapshot.hashes.Count -eq 0) { Get-CrossRepoInstallFallbackPlan $repo $parsed.skills $errMsg } else { $null }
         if ($plan -and -not $NoCrossRepoFallback -and -not $script:CrossRepoAutoFallbackInProgress) {
             Log ("当前仓库未命中技能，自动回退到建议仓库重试：repo={0} --skill {1}" -f $plan.repo, $plan.skill) "WARN"
@@ -776,6 +785,15 @@ function 删除技能库 {
         $failure = $_
         try { Restore-ConfigWriteSnapshot $configSnapshot }
         catch { throw ("{0}; rollback incomplete: {1}" -f $failure.Exception.Message, $_.Exception.Message) }
+        # 配置已回滚但构建生效可能已写入 agent/ 与宿主投影：补偿重建到回滚后
+        # 状态；补偿自身失败只报告，不掩盖原始删除失败。
+        try {
+            构建生效 -AllowUnverifiedProjection
+            Log "配置已回滚，宿主投影已按回滚后配置补偿重建。" "WARN"
+        }
+        catch {
+            Log ("补偿投影失败，宿主目标可能残留删除前的投影产物，需重新执行【构建生效】：{0}" -f $_.Exception.Message) "ERROR"
+        }
         foreach ($createdPath in $createdManualPaths) {
             Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
         }
@@ -1795,9 +1813,9 @@ function 卸载([string[]]$tokens = @()) {
         throw $failure
     }
     # Legacy sources are no longer referenced only after the build succeeds.
+    # 卸载在构建成功后已不可逆，目录占用导致的删除失败只告警不推翻卸载结果。
     foreach ($legacyPath in $legacyPaths) {
-        Invoke-RemoveItem $legacyPath -Recurse
-        $deletedLegacyManualDirs++
+        if (Invoke-RemoveItemWithRetry $legacyPath -Recurse -IgnoreFailure) { $deletedLegacyManualDirs++ }
     }
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
@@ -2026,6 +2044,17 @@ function Start-BuildTransaction {
         # 三态区分：absent=构建前无 agent/；backed_up=已挪入事务备份；
         # present_no_backup=备份挪动失败但构建前 agent/ 仍在（回滚必须 fail closed）。
         agent_before_state = "absent"
+        config_path = if (-not [string]::IsNullOrWhiteSpace([string]$CfgPath)) { [IO.Path]::GetFullPath($CfgPath) } else { '' }
+        config_before_exists = $false
+        config_before_bytes = [byte[]]::new(0)
+        config_before_hash = ''
+        config_after_hash = ''
+        manual_migrations = [System.Collections.Generic.List[object]]::new()
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$state.config_path) -and (Test-Path -LiteralPath $state.config_path -PathType Leaf)) {
+        $state.config_before_exists = $true
+        $state.config_before_bytes = [IO.File]::ReadAllBytes($state.config_path)
+        $state.config_before_hash = (Get-FileHash -LiteralPath $state.config_path -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     if ($DryRun) { return [pscustomobject]$state }
     $agentParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($AgentDir))
@@ -2070,6 +2099,44 @@ function Start-BuildTransaction {
     return [pscustomobject]$state
 }
 
+function Restore-BuildConfigAndManualMigration($txn) {
+    if ($null -eq $txn) { return }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $records = if ($txn.PSObject.Properties.Match('manual_migrations').Count -gt 0) { @($txn.manual_migrations) } else { @() }
+    foreach ($record in @($records | Sort-Object backup -Descending)) {
+        $source = [string]$record.source
+        $backup = [string]$record.backup
+        try {
+            if (Test-Path -LiteralPath $source) {
+                if (Test-Path -LiteralPath $backup) { throw ("manual migration rollback conflict: source and backup both exist: {0}" -f $source) }
+                continue
+            }
+            if (-not (Test-Path -LiteralPath $backup -PathType Container)) { throw ("manual migration backup missing: {0}" -f $backup) }
+            $parent = Split-Path -Parent $source
+            if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+            Invoke-MoveItem $backup $source
+        }
+        catch { $errors.Add($_.Exception.Message) | Out-Null }
+    }
+
+    $configPath = if ($txn.PSObject.Properties.Match('config_path').Count -gt 0) { [string]$txn.config_path } else { '' }
+    $beforeHash = if ($txn.PSObject.Properties.Match('config_before_hash').Count -gt 0) { [string]$txn.config_before_hash } else { '' }
+    $afterHash = if ($txn.PSObject.Properties.Match('config_after_hash').Count -gt 0) { [string]$txn.config_after_hash } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($configPath) -and $txn.PSObject.Properties.Match('config_before_exists').Count -gt 0 -and [bool]$txn.config_before_exists) {
+        try {
+            $currentExists = Test-Path -LiteralPath $configPath -PathType Leaf
+            $currentHash = if ($currentExists) { (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+            if ($currentHash -eq $beforeHash) { }
+            elseif (-not [string]::IsNullOrWhiteSpace($afterHash) -and $currentHash -eq $afterHash) {
+                Write-BytesAtomic -Path $configPath -Bytes ([byte[]]$txn.config_before_bytes)
+            }
+            else { throw ("构建事务配置已发生并发漂移，拒绝覆盖：{0}" -f $configPath) }
+        }
+        catch { $errors.Add($_.Exception.Message) | Out-Null }
+    }
+    if ($errors.Count -gt 0) { throw (($errors | Select-Object -First 10) -join '; ') }
+}
+
 function Rollback-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return $true }
     $restored = $false
@@ -2079,6 +2146,9 @@ function Rollback-BuildTransaction($txn) {
     # 构建完成时刻，带着 catalog 写入比对会被误判为并发漂移。
     $catalogTransaction = if ($txn.PSObject.Properties.Match('catalog_transaction').Count -gt 0) { $txn.catalog_transaction } else { $null }
     $catalogRestoreError = $null
+    $configMigrationRestoreError = $null
+    try { Restore-BuildConfigAndManualMigration $txn }
+    catch { $configMigrationRestoreError = $_.Exception.Message }
     if ($null -ne $catalogTransaction) {
         foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
             try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
@@ -2206,6 +2276,10 @@ function Rollback-BuildTransaction($txn) {
     finally {
         if (-not [string]::IsNullOrWhiteSpace([string]$catalogRestoreError)) {
             $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $catalogRestoreError } else { '{0}; {1}' -f $restoreError, $catalogRestoreError }
+            $restored = $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$configMigrationRestoreError)) {
+            $restoreError = if ([string]::IsNullOrWhiteSpace([string]$restoreError)) { $configMigrationRestoreError } else { '{0}; {1}' -f $restoreError, $configMigrationRestoreError }
             $restored = $false
         }
         # 仅在恢复成功后清理事务目录；恢复失败时保留目录（含 agent/ 备份）供人工恢复。
@@ -2412,6 +2486,13 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
         }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
+        # mappings 非空却产出零技能说明整条供给链失效；只 WARN 会让空 agent/ 一路
+        # 投影到宿主并摘除既有技能。零 mappings 配置（custom-only）不在此列。
+        $effectiveMappings = @(@($cfg.mappings) | Where-Object { $null -ne $_ })
+        if ($count -eq 0 -and $effectiveMappings.Count -gt 0) {
+            Write-Host "❌ 构建产物为空：skills.json 存在 mappings，但 agent/ 未产出任何技能，已升级为失败。" -ForegroundColor Red
+            $failures.Add("build-agent-empty => mappings 非空但 agent/ 零技能；请检查上方失效 mappings 与构建 WARN 日志") | Out-Null
+        }
         return $failures.ToArray()
     })
 }
@@ -2618,30 +2699,40 @@ function 构建生效(
         $promotionBlocked = $false
         $hostProjectionAttempted = $false
 
-        # Optimization/Migration check
+        # Start the build transaction before import optimization. Migration may
+        # move manual source trees and write skills.json; both must be covered
+        # by the same rollback boundary as agent/.
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
-        Optimize-Imports $cfg
-        $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
-        if (@($optChanges).Count -gt 0) {
-            SaveCfg $cfg
-            Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
-        }
-
-        Write-BuildSummary $cfg
-        Log "=== 启动构建生效流程 ==="
-        $catalogTransaction = $null
-        if ($SkipHostProjection -and -not $DryRun) {
-            # The catalog is the only repository-side projection performed by
-            # this branch; snapshot it before moving agent/ into the build
-            # transaction so a later failure can restore both surfaces.
-            $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
-        }
         $txn = Start-BuildTransaction
-        if ($null -ne $txn -and $null -ne $catalogTransaction) {
-            $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+        $txnPath = if ($null -ne $txn -and $txn.PSObject.Properties.Match('path').Count -gt 0) { [string]$txn.path } else { '' }
+        $migrationRoot = if (-not [string]::IsNullOrWhiteSpace($txnPath) -and -not $DryRun) { Join-Path $txnPath 'manual-migrations' } else { '' }
+        $migrationRecords = if ($null -ne $txn) { [System.Collections.Generic.List[object]]::new() } else { $null }
+        if ($null -ne $txn -and $null -ne $migrationRecords) {
+            $txn | Add-Member -NotePropertyName manual_migrations -NotePropertyValue $migrationRecords -Force
         }
+        $catalogTransaction = $null
         Start-DryRunMirrorCollect
         try {
+            Optimize-Imports $cfg $migrationRoot $migrationRecords
+            $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
+            if (@($optChanges).Count -gt 0) {
+                SaveCfg $cfg
+                if ($null -ne $txn -and -not $DryRun -and (Test-Path -LiteralPath $CfgPath -PathType Leaf)) {
+                    $txn.config_after_hash = (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+                Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
+            }
+
+            Write-BuildSummary $cfg
+            Log "=== 启动构建生效流程 ==="
+            if ($SkipHostProjection -and -not $DryRun) {
+                # Snapshot the catalog after optimization so rollback restores
+                # the exact pre-build projection inputs and outputs.
+                $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
+                if ($null -ne $txn) {
+                    $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
+                }
+            }
             $failures = @()
             $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
@@ -2698,6 +2789,13 @@ function 构建生效(
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"
+        }
+        catch {
+            # 内层失败收集之外的逃逸异常（override 重名、原子写失败等）也必须走事务
+            # 回滚：否则 agent/ 停留在半构建态，.txn 备份位置不出现在任何错误信息里。
+            $failures += ("build-agent-exception => {0}" -f $_.Exception.Message)
+            Log ("构建生效因异常中止，转入事务回滚：{0}" -f $_.Exception.Message) "ERROR"
+            $needRollback = $true
         }
         finally {
             Stop-DryRunMirrorCollect

@@ -281,6 +281,17 @@ dependencies:
         @($result.Report.errors).Count | Should -Be 0
     }
 
+    It "fails closed when the agent root exists but contains no skills" {
+        $fixture = New-IntegrityFixture "empty-agent" ""
+        Remove-Item -LiteralPath (Join-Path $fixture.AgentRoot "demo") -Recurse -Force
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 1
+        $result.Report.ok | Should -Be $false
+        $result.Report.skill_count | Should -Be 0
+        @($result.Report.errors | Where-Object { $_.code -eq 'empty_agent_root' }).Count | Should -Be 1
+    }
+
     It "runs with explicit fixture paths under PowerShell 7" {
         $pwsh = Get-Command pwsh -ErrorAction Stop | Select-Object -First 1
         $fixture = New-IntegrityFixture "powershell-7" ""

@@ -283,6 +283,10 @@ function Invoke-GlobalRuleProjectionApply {
                 $action.status='prepared';Write-GlobalRuleReceipt $receiptFile $receipt
             }
             Write-BytesAtomic -Path ([string]$action.target_path) -Bytes ([IO.File]::ReadAllBytes([string]$action.source_path))
+            # 写入后复核 hash 绑定：plan 认证与逐 action 写入之间源被并发修改时，
+            # 未审查字节不得以 applied 状态落收据。
+            $writtenFacts=Get-GlobalRuleFileFacts $action.target_path
+            if(-not$writtenFacts.exists-or$writtenFacts.hash-ne[string]$action.source_hash){throw('Post-apply target hash mismatch: {0}'-f$action.target_path)}
             $action.status='applied';$receipt.writes=[int]$receipt.writes+1;Write-GlobalRuleReceipt $receiptFile $receipt
         }
         $receipt.status='applied';$receipt.completed_at=[datetimeoffset]::UtcNow.ToString('o');$receipt.last_error=$null;$receipt.truth_boundary='filesystem_applied_not_host_loaded';Write-GlobalRuleReceipt $receiptFile $receipt

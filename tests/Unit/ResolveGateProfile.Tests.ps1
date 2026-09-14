@@ -318,11 +318,16 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         @{ Source = 'src/Application/RuleAdvisor.ps1'; Expected = @('ReadOnlyCli', 'RuleAdvisor', 'RuleEstate') }
         @{ Source = 'src/Application/RuleDiscovery.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleDiscovery', 'RuleEstate') }
         @{ Source = 'src/Application/RuleAudit.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleEstate') }
-        @{ Source = 'src/Application/CapabilityInventory.ps1'; Expected = @('CapabilityInventory', 'ReadOnlyCli') }
-        @{ Source = 'src/Commands/AuditTargets.Bundle.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
-        @{ Source = 'src/Commands/AuditTargets.Template.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
-    ) {
-        param($Source, $Expected)
+         @{ Source = 'src/Application/CapabilityInventory.ps1'; Expected = @('CapabilityInventory', 'ReadOnlyCli') }
+         @{ Source = 'src/Commands/AuditTargets.Bundle.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
+         @{ Source = 'src/Commands/AuditTargets.Template.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
+         @{ Source = 'src/Application/SkillCatalogCompiler.ps1'; Expected = @('SkillCatalogCompiler'); ExpectedLocked = $true }
+         @{ Source = 'src/Application/SkillEligibilityPolicy.ps1'; Expected = @('SkillEligibilityPolicy'); ExpectedLocked = $true }
+         @{ Source = 'src/Commands/Doctor.ps1'; Expected = @('DoctorCli', 'DoctorEnhancements'); ExpectedLocked = $true }
+         @{ Source = 'src/Domain/ExecutionAdmission.ps1'; Expected = @('ExecutionAdmission'); ExpectedLocked = $true }
+         @{ Source = 'src/Main.ps1'; Expected = @('MainDispatch', 'MenuStructure'); ExpectedLocked = $true }
+     ) {
+        param($Source, $Expected, $ExpectedLocked)
         $repo = New-ResolveGateFixture
         $path = Join-Path $repo $Source
         New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
@@ -330,7 +335,26 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r = Invoke-Resolver $repo @{}
         $r.result.profile | Should -Be 'focused'
         @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
-        $r.result.requires_locked_sources | Should -Be ($Expected -contains 'RuleEstate')
+        $expectedMaterialization = if ($null -eq $ExpectedLocked) { $Expected -contains 'RuleEstate' } else { [bool]$ExpectedLocked }
+        $r.result.requires_locked_sources | Should -Be $expectedMaterialization
+    }
+
+    It 'keeps external-write and cross-surface modules on the full path' -TestCases @(
+        @{ Source = 'src/Application/GlobalRuleProjection.ps1' }
+        @{ Source = 'src/Application/NativeSkillProjection.ps1' }
+        @{ Source = 'src/Commands/Install.ps1' }
+        @{ Source = 'src/Commands/Mcp.ps1' }
+        @{ Source = 'src/Commands/SkillProjection.ps1' }
+    ) {
+        param($Source)
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        $path = Join-Path $repo $Source
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value '# external write change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'unmapped_source'
     }
 
     It 'uses exact behavior coverage for known gate scripts in local and CI modes' -TestCases @(

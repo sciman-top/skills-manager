@@ -21,14 +21,6 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     return [IO.Path]::GetFullPath($value)
 }
 
-function Test-CapabilitySurfacePathWithinRoot([string]$Path, [string]$Root) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
-    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
-    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
-    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or
-        $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
-}
-
 function Resolve-CapabilitySurfaceLinkTarget($Directory) {
     if ($null -eq $Directory -or -not [bool]($Directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
     $targetProperty = $Directory.PSObject.Properties['Target']
@@ -182,7 +174,7 @@ function New-SkillSurfaceView {
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {
@@ -219,7 +211,7 @@ function New-SkillSurfaceView {
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {

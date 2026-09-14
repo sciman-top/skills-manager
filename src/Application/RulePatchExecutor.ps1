@@ -27,7 +27,7 @@ function Invoke-RulePatchApply {
         if ($TestFaultPoint -eq 'after_stage') { throw 'test_fault:after_stage' }
         if ($operation -eq 'update') {
             $freshText = [System.IO.File]::ReadAllText($targetPath)
-            if ((Get-RulePatchTextHash $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
+            if ((Get-OperationSha256 $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
         }
         elseif ([System.IO.File]::Exists($targetPath)) { throw 'create_target_appeared_before_replace' }
         if ($TestFaultPoint -eq 'before_replace') { throw 'test_fault:before_replace' }
@@ -35,7 +35,7 @@ function Invoke-RulePatchApply {
         else { [System.IO.File]::Move($stagePath, $targetPath) }
         $replaced = $true
         if ($TestFaultPoint -in @('after_replace', 'after_replace_rollback_failure')) { throw ('test_fault:{0}' -f $TestFaultPoint) }
-        $appliedHash = Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))
+        $appliedHash = Get-OperationSha256 ([System.IO.File]::ReadAllText($targetPath))
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
         $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'git_revert_required' }))
@@ -49,7 +49,7 @@ function Invoke-RulePatchApply {
                 try {
                     if ((Test-RulePatchReparsePath $targetPath $BoundaryRoot) -or
                         -not [System.IO.File]::Exists($targetPath) -or
-                        (Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) {
+                        (Get-OperationSha256 ([System.IO.File]::ReadAllText($targetPath))) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) {
                         throw 'rollback_target_stale'
                     }
                     if ($operation -eq 'create') { [System.IO.File]::Delete($targetPath) }

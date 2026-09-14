@@ -10,6 +10,21 @@ BeforeAll {
 
 }
 Describe 'Skill projection' {
+    It 'resolves host home aliases from active Codex and Claude roots' {
+        $oldCodex = $env:CODEX_HOME
+        $oldClaude = $env:CLAUDE_CONFIG_DIR
+        try {
+            $env:CODEX_HOME = Join-Path $TestDrive 'codex-home'
+            $env:CLAUDE_CONFIG_DIR = Join-Path $TestDrive 'claude-home'
+            Resolve-SkillProjectionPath '~/.codex/config.toml' $TestDrive | Should -Be ([IO.Path]::GetFullPath((Join-Path $env:CODEX_HOME 'config.toml')))
+            Resolve-SkillProjectionPath '~/.claude/settings.json' $TestDrive | Should -Be ([IO.Path]::GetFullPath((Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json')))
+        }
+        finally {
+            $env:CODEX_HOME = $oldCodex
+            $env:CLAUDE_CONFIG_DIR = $oldClaude
+        }
+    }
+
     It 'selects one canonical path and records a real content conflict' {
         $high = Join-Path $TestDrive 'high'
         $low = Join-Path $TestDrive 'low'

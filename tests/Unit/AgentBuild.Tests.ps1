@@ -42,6 +42,64 @@ Describe "Agent build" {
         }
     }
 
+    It "restores config and staged manual source when the build transaction rolls back" {
+        $oldRoot = $Root
+        $oldAgentDir = $AgentDir
+        $oldCfgPath = $CfgPath
+        $oldManualDir = $ManualDir
+        $oldVendorDir = $VendorDir
+        $oldImportDir = $ImportDir
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $Root = Join-Path $TestDrive 'migration-build-rollback'
+            $AgentDir = Join-Path $Root 'agent'
+            $CfgPath = Join-Path $Root 'skills.json'
+            $ManualDir = Join-Path $Root 'manual'
+            $VendorDir = Join-Path $Root 'vendor'
+            $ImportDir = Join-Path $Root 'imports'
+            New-Item -ItemType Directory -Path $AgentDir, $ManualDir, $VendorDir, $ImportDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'old agent'
+            $originalConfig = '{"vendors":[],"imports":[],"mappings":[]}'
+            Set-ContentUtf8 $CfgPath $originalConfig
+
+            $vendorSkill = Join-Path $VendorDir 'myvendor\skills\demo'
+            $manualSkill = Join-Path $ManualDir 'demo-legacy'
+            New-Item -ItemType Directory -Path $vendorSkill, $manualSkill -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $vendorSkill 'SKILL.md') 'vendor'
+            Set-ContentUtf8 (Join-Path $manualSkill 'SKILL.md') 'manual'
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = 'myvendor'; repo = 'https://example.com/repo.git' })
+                imports = @([pscustomobject]@{ name = 'demo-legacy'; mode = 'manual'; repo = 'https://example.com/repo.git'; ref = 'main'; skill = 'skills\demo'; sparse = $false })
+                mappings = @()
+            }
+
+            $txn = Start-BuildTransaction
+            Migrate-ManualToVendor $cfg 'myvendor' 'https://example.com/repo.git' (Join-Path $txn.path 'manual-migrations') $txn.manual_migrations | Should -Be 1
+            Set-ContentUtf8 $CfgPath '{"vendors":[{"name":"myvendor"}],"imports":[],"mappings":[]}'
+            $txn.config_after_hash = (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'new.txt') 'new agent'
+            $txn.agent_after_fingerprint = Get-DirectoryFingerprint $AgentDir
+            $txn.agent_after_fingerprint_error = ''
+
+            Rollback-BuildTransaction $txn | Should -BeTrue
+            Get-ContentUtf8 $CfgPath | Should -Be $originalConfig
+            Test-Path -LiteralPath (Join-Path $ManualDir 'demo-legacy') -PathType Container | Should -BeTrue
+            Get-ContentUtf8 (Join-Path $AgentDir 'old.txt') | Should -Be 'old agent'
+            Test-Path -LiteralPath (Join-Path $AgentDir 'new.txt') | Should -BeFalse
+        }
+        finally {
+            $Root = $oldRoot
+            $AgentDir = $oldAgentDir
+            $CfgPath = $oldCfgPath
+            $ManualDir = $oldManualDir
+            $VendorDir = $oldVendorDir
+            $ImportDir = $oldImportDir
+            $DryRun = $oldDryRun
+        }
+    }
+
     It "preserves the moved agent backup when its fingerprint cannot be read" {
         $oldRoot = $Root
         $oldAgent = $AgentDir

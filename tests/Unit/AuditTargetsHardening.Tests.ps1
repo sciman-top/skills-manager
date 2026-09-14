@@ -529,7 +529,7 @@ Describe "Audit target hardening" {
             $_.Exception.Message | Should -Match "target_repo_drift"
         }
 
-        $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
+        $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $recPath) | ConvertFrom-Json).workflow
         $thrown | Should -Be $true
         $saved.failed_stage | Should -Be "input_stability"
         $saved.error_code | Should -Be "target_repo_drift"

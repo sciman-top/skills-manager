@@ -105,6 +105,21 @@ Describe 'Local quality gate -Profile auto routing' {
         finally { Pop-Location }
     }
 
+    It 'the docs gate passes for a whitespace-clean untracked docs file' {
+        $repo = New-AutoGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        # --no-index 对“与 /dev/null 有差异”的干净新文件返回 1；只有 >1 才是
+        # 空白/git 失败。新增干净文档不应触发 Untracked whitespace 失败。
+        New-Item -ItemType Directory -Path (Join-Path $repo 'docs') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'docs/clean.md') -Value 'clean notes'
+        Push-Location $repo
+        try {
+            Invoke-TempGate $repo @{ Profile = 'auto'; DiffBase = $base } *> $null
+            $LASTEXITCODE | Should -Be 0
+        }
+        finally { Pop-Location }
+    }
+
     It 'auto preserves the explicit base when docs whitespace is already committed' {
         $repo = New-AutoGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

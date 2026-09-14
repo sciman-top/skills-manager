@@ -1073,7 +1073,7 @@ function Repair-VendorImports($cfg, [ref]$changed) {
     }
 }
 
-function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
+function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo, [string]$MigrationBackupRoot = '', [object]$MigrationRecords = $null) {
     $normRepo = Normalize-RepoUrl $repo
     $migratedCount = 0
     
@@ -1083,7 +1083,8 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
     
     $manualImports = @()
     foreach ($i in $cfg.imports) {
-        if ($i.mode -eq "manual" -and (Normalize-RepoUrl $i.repo) -eq $normRepo) {
+        $mode = if ($i.PSObject.Properties.Match('mode').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$i.mode)) { [string]$i.mode } else { 'manual' }
+        if ($mode -eq "manual" -and (Normalize-RepoUrl $i.repo) -eq $normRepo) {
             $manualImports += $i
         }
     }
@@ -1128,10 +1129,24 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
             $migratedCount++
             Log ("已迁移手动技能：manual/{0} -> vendor/{1}/{2}" -f $oldName, $vendorName, $skillPath)
              
-            # Remove Manual Directory
+            # During 构建生效, stage the old manual tree inside the build
+            # transaction. It is only discarded when the complete build is
+            # committed; a failed build can therefore restore both config and
+            # source data. Direct install/update callers retain the historical
+            # immediate cleanup behavior.
             $manualDirPath = Join-Path $ManualDir $oldName
             if (Test-Path $manualDirPath) {
-                Invoke-RemoveItem $manualDirPath -Recurse
+                if (-not [string]::IsNullOrWhiteSpace($MigrationBackupRoot)) {
+                    EnsureDir $MigrationBackupRoot
+                    $backupPath = Join-Path $MigrationBackupRoot ("{0}-{1}" -f $oldName, [Guid]::NewGuid().ToString('N'))
+                    Invoke-MoveItem $manualDirPath $backupPath
+                    if ($null -ne $MigrationRecords -and $MigrationRecords -is [System.Collections.IList]) {
+                        $MigrationRecords.Add([pscustomobject]@{ source = $manualDirPath; backup = $backupPath }) | Out-Null
+                    }
+                }
+                else {
+                    Invoke-RemoveItem $manualDirPath -Recurse
+                }
             }
         }
     }
@@ -1142,12 +1157,12 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
     return $migratedCount
 }
 
-function Optimize-Imports($cfg) {
+function Optimize-Imports($cfg, [string]$MigrationBackupRoot = '', [object]$MigrationRecords = $null) {
     if ($null -eq $cfg) { return }
     $total = 0
     foreach ($v in $cfg.vendors) {
         if (-not [string]::IsNullOrWhiteSpace($v.repo)) {
-            $total += Migrate-ManualToVendor $cfg $v.name $v.repo
+            $total += Migrate-ManualToVendor $cfg $v.name $v.repo $MigrationBackupRoot $MigrationRecords
         }
     }
     if ($total -gt 0) {

@@ -225,7 +225,7 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
         if ([System.IO.File]::Exists($path)) {
             $text = [System.IO.File]::ReadAllText($path)
             if ([string]::IsNullOrWhiteSpace($text)) { continue }
-            return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-RulePatchTextHash $text }
+            return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-OperationSha256 $text }
         }
     }
     return $null
@@ -263,9 +263,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         $sections.Add([pscustomobject][ordered]@{
             section = $name
             aligned = $aligned
-            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-RulePatchTextHash $codexText }
-            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
-            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-RulePatchTextHash $zcodeText }
+            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-OperationSha256 $codexText }
+            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-OperationSha256 $claudeText }
+            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-OperationSha256 $zcodeText }
         }) | Out-Null
         if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex, Claude, or configured ZCode global common section {0} is absent or different.' -f $name) }) | Out-Null }
         if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
@@ -423,7 +423,7 @@ function New-RuleEstateTargetAudit {
         $desired = "@AGENTS.md`n"
         $patchCandidates = @([pscustomobject][ordered]@{
             finding_code = 'project_claude_wrapper_missing'; operation = 'create'; target_path = $Target.claude_path
-            desired_text = $desired; desired_hash = Get-RulePatchTextHash $desired; risk = 'low'; review_required = $true
+            desired_text = $desired; desired_hash = Get-OperationSha256 $desired; risk = 'low'; review_required = $true
             verification = @('UTF-8 without BOM', 'first physical line equals @AGENTS.md', 'Claude native load remains separate')
         })
     }

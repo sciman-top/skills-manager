@@ -386,6 +386,14 @@ Describe 'MCP configuration and host transactions' {
     }
 
     Context "Build-CodexConfigToml" {
+        It "uses the configured Codex root for generated wrapper arguments" {
+            $root = Join-Path $TestDrive 'custom-codex-root'
+            $server = [pscustomobject]@{ name = 'context7'; transport = 'stdio'; command = 'npx'; args = @('-y', '@upstash/context7-mcp') }
+            $toml = Build-CodexConfigToml '' @($server) $root
+            $toml | Should -Match 'custom-codex-root.*mcp-node-cache-wrapper\.mjs'
+            $toml | Should -Not -Match ([regex]::Escape((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex\scripts\mcp-node-cache-wrapper.mjs')))
+        }
+
         It "Quotes TOML inline keys that are not bare keys" {
             $server = [pscustomobject]@{ name = "api-gw"; transport = "http"; url = "https://example.com/mcp"; headers = [pscustomobject]@{ "X.Custom" = "abc" } }
             $toml = Build-CodexConfigToml "" @($server)
@@ -1257,6 +1265,23 @@ command = "cmd"
             Get-ContentUtf8 $targetPath | Should -Be 'before-target'
             Get-ContentUtf8 $nodeWrapper | Should -Be 'before-node'
             Get-ContentUtf8 $postgresWrapper | Should -Be 'before-postgres'
+        }
+
+        It "repairs missing Codex wrapper sidecars when the TOML target is unchanged" {
+            $root = Join-Path $TestDrive 'mcp-sidecar-repair'
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $targetPath = Join-Path $root 'config.toml'
+            Set-ContentUtf8 $targetPath 'unchanged-target'
+            $hash = Get-OperationSha256 'unchanged-target'
+            $target = [pscustomobject]@{path=$targetPath;root=$root;kind='codex_toml';before_hash=$hash;desired_content='unchanged-target';changed=$false}
+
+            $result = Invoke-McpManagedTargetTransaction @($target)
+
+            $result.pass | Should -BeTrue
+            $result.writes | Should -Be 1
+            Test-Path -LiteralPath (Join-Path $root 'scripts\mcp-node-cache-wrapper.mjs') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $root 'scripts\mcp-postgres-env-wrapper.mjs') | Should -BeTrue
+            Get-ContentUtf8 $targetPath | Should -Be 'unchanged-target'
         }
 
         It "does not enter a managed transaction while the target root lock is held" {
