@@ -232,10 +232,10 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         skills = @($skills.ToArray() | Sort-Object name)
         capabilities = @()
     }
-    # PS7 ConvertTo-Json 对空数组属性输出 []（PS5.1 才有 null 序列化问题）；
-    # 构造点始终写入 @()，冷消费者拿到的 dependencies 恒为数组，指纹与落盘
-    # 文本天然一致。
-    $catalogJson = $catalog | ConvertTo-Json -Depth 20 -Compress
+    # ConvertTo-Json may collapse an empty property array to null. Cold
+    # consumers require dependencies to remain an array, including [] for a
+    # skill with no dependencies; normalize before fingerprinting and writing.
+    $catalogJson = [regex]::Replace(($catalog | ConvertTo-Json -Depth 20 -Compress), '("dependencies"\s*:\s*)null', '${1}[]')
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 $catalogJson
     return $catalog
 }
@@ -253,6 +253,7 @@ function Sync-SkillDiscoveryCatalog($projectionCfg, $Transaction = $null, [switc
     $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
     $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
+    $desired = [regex]::Replace($desired, '("dependencies"\s*:\s*)null', '${1}[]')
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $primaryChanged = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
     $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
