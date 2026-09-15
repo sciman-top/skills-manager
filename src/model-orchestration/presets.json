@@ -1,20 +1,42 @@
 {
-  "schema_version": 1,
-  "default_preset": "gpt6_astra_only",
-  "codex_order": ["gpt6_astra_only", "gpt56_sol_only", "gpt56_terra_only", "gpt56_luna_only"],
-  "slots": {
-    "quick_triage": "light",
-    "routine_maintenance": "standard",
-    "standard_review": "standard",
-    "bounded_implementation": "standard",
-    "deep_investigation_or_implementation": "deep"
-  },
+  "schema_version": 2,
+  "default_preset": "gpt56_sol_terra",
+  "codex_order": ["gpt56_sol_terra", "gpt56_luna_only"],
+  "slots": ["quick_triage", "routine_maintenance", "standard_review", "bounded_implementation", "deep_investigation_or_implementation"],
   "presets": {
-    "gpt6_astra_only": {"host": "codex", "model": "gpt-6-astra", "efforts": {"light": "low", "standard": "medium", "deep": "high"}},
-    "gpt56_sol_only": {"host": "codex", "model": "gpt-5.6-sol", "efforts": {"light": "low", "standard": "medium", "deep": "high"}},
-    "gpt56_terra_only": {"host": "codex", "model": "gpt-5.6-terra", "efforts": {"light": "high", "standard": "xhigh", "deep": "max"}},
-    "gpt56_luna_only": {"host": "codex", "model": "gpt-5.6-luna", "efforts": {"light": "high", "standard": "xhigh", "deep": "max"}},
-    "glm53_flash_only": {"host": "zcode", "model": "glm-5.3-flash", "efforts": {"light": "low", "standard": "high", "deep": "max"}},
-    "deepseek_flash_only": {"host": "claude", "model": "deepseek-flash", "efforts": {"light": "high", "standard": "high", "deep": "max"}}
+    "gpt56_sol_terra": {
+      "host": "codex",
+      "menu": [
+        {"model": "gpt-5.6-sol", "effort": "medium"},
+        {"model": "gpt-5.6-terra", "effort": "high"},
+        {"model": "gpt-5.6-terra", "effort": "xhigh"}
+      ],
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
+    },
+    "gpt56_luna_only": {
+      "host": "codex",
+      "menu": [
+        {"model": "gpt-5.6-luna", "effort": "medium"},
+        {"model": "gpt-5.6-luna", "effort": "high"},
+        {"model": "gpt-5.6-luna", "effort": "xhigh"}
+      ],
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
+    },
+    "glm53_flash_only": {
+      "host": "zcode",
+      "menu": [
+        {"model": "glm-5.3-flash", "effort": "low"},
+        {"model": "glm-5.3-flash", "effort": "max"}
+      ],
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 1}
+    },
+    "deepseek_flash_only": {
+      "host": "claude",
+      "menu": [
+        {"model": "deepseek-flash", "effort": "high"},
+        {"model": "deepseek-flash", "effort": "max"}
+      ],
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 1}
+    }
   }
 }

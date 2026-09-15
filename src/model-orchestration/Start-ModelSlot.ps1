@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$Preset = 'gpt6_astra_only',
+    [string]$Preset = 'gpt56_sol_terra',
     [string[]]$AvailablePreset = @(),
     [Parameter(Mandatory)][ValidateSet('quick_triage','routine_maintenance','standard_review','bounded_implementation','deep_investigation_or_implementation')][string]$Slot,
     [string]$WorkingDirectory = (Get-Location).Path,

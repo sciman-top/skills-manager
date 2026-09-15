@@ -1,10 +1,10 @@
 # Model Presets
 
-This independent, local PowerShell 7 tool projects the six model-family presets defined in `presets.json`. It does not select gateways, inspect credentials, retry tasks, or run background monitors.
+This independent, local PowerShell 7 tool projects the four orchestration presets defined in `presets.json` (schema v2). It does not select gateways, inspect credentials, retry tasks, or run background monitors.
 
-The default is `gpt6_astra_only`. Five semantic execution slots map to `light / standard / standard / standard / deep`. Astra/Sol use low/medium/high, Terra/Luna use high/xhigh/max, GLM uses low/high/max, and DeepSeek Flash uses high/high/max.
+One preset is active at a time. Each preset pins an ordered menu of `(model, effort)` levels and may mix model families: the default `gpt56_sol_terra` runs light work on Sol and heavy work on Terra. The five semantic execution slots map onto menu indexes with duplicates allowed — `quick_triage` takes the lightest level, `routine_maintenance` / `standard_review` / `bounded_implementation` share the standard level, and `deep_investigation_or_implementation` takes the deepest level. Current menus: Sol-Terra = Sol/medium, Terra/high, Terra/xhigh; Luna-only = medium, high, xhigh; GLM-5.3-Flash (ZCode) = low, max; DeepSeek Flash (Claude Code) = high, max.
 
-Use the controlled slot entrypoint for single-family execution. It freezes the selected preset and exact slot route, disables native subagent delegation, accepts no extra model/config flags, and never retries under another preset:
+Use the controlled slot entrypoint for single-preset execution. It freezes the selected preset and exact slot route, disables native subagent delegation, accepts no extra model/config flags, and never retries under another preset:
 
 ```powershell
 pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -WorkingDirectory D:/CODE/skills-manager -Prompt 'Your bounded task'
@@ -16,14 +16,14 @@ The restriction applies to this controlled entrypoint. It is not an operating-sy
 ```powershell
 pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Plan
 pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Apply
-pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_only
+pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_terra
 pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Apply -Preset deepseek_flash_only
 pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt.json>
 ```
 
-`AvailablePreset` is an explicitly declared available set, not an automatic model or gateway probe. The example selects Sol despite input ordering. Running tasks do not switch presets; only future sessions use a newly projected default.
+`AvailablePreset` is an explicitly declared available set, not an automatic model or gateway probe. The example selects Sol-Terra despite input ordering. Running tasks do not switch presets; only future sessions use a newly projected default.
 
-Codex projections create four complete native profiles (`gpt6-astra-only`, `gpt56-sol-only`, `gpt56-terra-only`, `gpt56-luna-only`), five role definitions per profile, and matching parent/review/subagent defaults. Existing provider, auth, permissions, concurrency limits, hooks, and unrelated roles remain intact.
+Codex projections create two complete native profiles (`gpt56-sol-terra`, `gpt56-luna-only`), five role definitions per profile, and matching parent/review/subagent defaults. A profile's parent/review/subagent defaults are pinned to the preset's standard route (the `routine_maintenance` slot entry): Sol-Terra therefore defaults to Terra/high while its quick-triage role stays on Sol/medium. Existing provider, auth, permissions, concurrency limits, hooks, and unrelated roles remain intact.
 
 Codex 0.153.4's specialized delegation path bypassed a trusted hook in two controlled live tests. That ineffective hook was retired. The chosen entrypoint disables native delegation instead; no global `code_mode_host` change is required.
 
@@ -35,7 +35,7 @@ Backups may contain pre-existing sensitive host configuration. `.state/` and `.g
 
 ```powershell
 pwsh -NoProfile -File ./Test-ModelPreset.ps1
-codex --profile gpt6-astra-only --strict-config --version
+codex --profile gpt56-sol-terra --strict-config --version
 claude plugin validate "$env:USERPROFILE/.claude/agents"
 ```
 

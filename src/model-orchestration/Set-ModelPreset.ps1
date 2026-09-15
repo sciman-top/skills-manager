@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Resolve','Plan','Apply','Rollback')][string]$Action = 'Plan',
-    [string]$Preset = 'gpt6_astra_only',
+    [string]$Preset = 'gpt56_sol_terra',
     [string[]]$AvailablePreset = @(),
     [string]$CodexRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }),
     [string]$ClaudeRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
@@ -10,6 +10,20 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+# Fail closed on any malformed preset, not only the selected one: slot_map keys,
+# index range, and menu population are the whole contract between menu and slots.
+$slotNames = @($policy.slots)
+foreach ($id in $policy.presets.Keys) {
+    $p = $policy.presets[$id]
+    $menu = @($p.menu)
+    if ($menu.Count -eq 0) { throw "Preset $id has an empty menu." }
+    if (-not $p.slot_map -or @($p.slot_map.Keys).Count -ne $slotNames.Count) { throw "Preset $id slot_map must cover exactly all slots." }
+    foreach ($slot in $slotNames) {
+        if (-not $p.slot_map.Contains($slot)) { throw "Preset $id is missing slot mapping: $slot" }
+        $idx = $p.slot_map[$slot]
+        if ($idx -lt 0 -or $idx -ge $menu.Count) { throw "Preset $id slot index out of range: $slot -> $idx" }
+    }
+}
 $AvailablePreset = @($AvailablePreset | ForEach-Object { $_.Split(',', [StringSplitOptions]::TrimEntries) })
 if ($AvailablePreset.Count -gt 0) {
     foreach ($id in $AvailablePreset) { if ($policy.codex_order -cnotcontains $id) { throw "Unknown Codex preset: $id" } }
@@ -20,7 +34,10 @@ if ($AvailablePreset.Count -gt 0) {
 if (-not $policy.presets.Contains($Preset)) { throw 'Unknown preset.' }
 $modelPreset = $policy.presets[$Preset]
 $routes = [ordered]@{}
-foreach ($slot in $policy.slots.Keys) { $routes[$slot] = @{ model = $modelPreset.model; effort = $modelPreset.efforts[$policy.slots[$slot]] } }
+foreach ($slot in $slotNames) {
+    $entry = $modelPreset.menu[$modelPreset.slot_map[$slot]]
+    $routes[$slot] = @{ model = $entry.model; effort = $entry.effort }
+}
 if ($Action -eq 'Resolve') { @{ preset = $Preset; routes = $routes; availability = 'operator_declared' } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 $stateRoot = Join-Path $PSScriptRoot '.state'
@@ -81,49 +98,52 @@ foreach ($id in $policy.codex_order) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
     $roleBlocks = [Collections.Generic.List[string]]::new()
-    foreach ($slot in $policy.slots.Keys) {
-        $tier = $policy.slots[$slot]; $effort = $p.efforts[$tier]
+    $standard = $p.menu[$p.slot_map['routine_maintenance']]
+    foreach ($slot in $slotNames) {
+        $entry = $p.menu[$p.slot_map[$slot]]
         $rolePath = Join-Path $PSScriptRoot ".generated/codex/$id/$slot.toml"
         $readOnly = $slot -in @('quick_triage','standard_review')
-        $description = "Execution slot $slot, $($p.model)/$effort. " + $(if ($readOnly) { 'Read-only evidence work.' } else { 'Bounded implementation with proportionate verification.' })
+        $description = "Execution slot $slot, $($entry.model)/$($entry.effort). " + $(if ($readOnly) { 'Read-only evidence work.' } else { 'Bounded implementation with proportionate verification.' })
         $instructions = "Execute only the assigned $slot task within the supplied scope. Preserve unrelated changes. Do not delegate or change models. Return concrete evidence and stop at the assigned boundary."
         if ($readOnly) { $instructions += ' Do not modify files or external state.' }
-        $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($p.model)`"", "model_reasoning_effort = `"$effort`"", "developer_instructions = `"$instructions`"", '', '[agents]', 'enabled = false', '') -join "`n"
+        $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '', '[agents]', 'enabled = false', '') -join "`n"
         AddFile $rolePath $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
-    $header = @("model = `"$($p.model)`"", "review_model = `"$($p.model)`"", "model_reasoning_effort = `"$($p.efforts.standard)`"", "developer_instructions = `"Use only the five named execution slots from this preset. Never mix model families. Spawn with bounded history (fork_turns=none or an explicit positive count), not all. No gateway selection or task replay. Slot effort is mandatory.`"", '', '[agents]', "default_subagent_model = `"$($p.model)`"", "default_subagent_reasoning_effort = `"$($p.efforts.standard)`"") -join "`n"
+    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"Use only the five named execution slots from this preset, each on its pinned model/effort route. Only one preset is active at a time; never substitute presets, models, or efforts outside the pinned routes. Spawn with bounded history (fork_turns=none or an explicit positive count), not all. No gateway selection or task replay. Slot effort is mandatory.`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
     $profileText = $header + "`n`n" + ($roleBlocks -join "`n")
     AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
     if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
 }
 $configPath = Join-Path $CodexRoot 'config.toml'
+$standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
 $config = [IO.File]::ReadAllText($configPath)
 $config = [regex]::Replace($config, '(?ms)^# model-orchestration begin\r?\n.*?^# model-orchestration end\r?\n?', '')
-$config = SetScalar $config '' 'model' ('"'+$modelPreset.model+'"')
-$config = SetScalar $config '' 'review_model' ('"'+$modelPreset.model+'"')
-$config = SetScalar $config '' 'model_reasoning_effort' ('"'+$modelPreset.efforts.standard+'"')
-$config = SetScalar $config 'agents' 'default_subagent_model' ('"'+$modelPreset.model+'"')
-$config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$modelPreset.efforts.standard+'"')
+$config = SetScalar $config '' 'model' ('"'+$standard.model+'"')
+$config = SetScalar $config '' 'review_model' ('"'+$standard.model+'"')
+$config = SetScalar $config '' 'model_reasoning_effort' ('"'+$standard.effort+'"')
+$config = SetScalar $config 'agents' 'default_subagent_model' ('"'+$standard.model+'"')
+$config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$standard.effort+'"')
 $config = $config.TrimEnd() + "`n# model-orchestration begin`n$activeBlocks`n# model-orchestration end`n"
 AddFile $configPath $config
 }
 elseif ($modelPreset.host -eq 'claude') {
     $ClaudeRoot = [IO.Path]::GetFullPath($ClaudeRoot)
+    $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
     $settingsPath = Join-Path $ClaudeRoot 'settings.json'
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
     if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
-    $settings.model = $modelPreset.model
-    $settings.availableModels = @($modelPreset.model)
-    $settings.effortLevel = $modelPreset.efforts.standard
-    foreach ($key in @('ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_MODEL','ANTHROPIC_DEFAULT_FABLE_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL')) { $settings.env[$key] = $modelPreset.model }
+    $settings.model = $standard.model
+    $settings.availableModels = @($standard.model)
+    $settings.effortLevel = $standard.effort
+    foreach ($key in @('ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_MODEL','ANTHROPIC_DEFAULT_FABLE_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL')) { $settings.env[$key] = $standard.model }
     $settings.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE = '1'
-    $settings.env.CLAUDE_CODE_EFFORT_LEVEL = $modelPreset.efforts.standard
+    $settings.env.CLAUDE_CODE_EFFORT_LEVEL = $standard.effort
     AddFile $settingsPath ($settings | ConvertTo-Json -Depth 80)
-    foreach ($slot in $policy.slots.Keys) {
+    foreach ($slot in $slotNames) {
         $name = $slot.Replace('_','-')
-        $effort = $modelPreset.efforts[$policy.slots[$slot]]
-        $body = @('---',"name: $name", "description: $slot execution slot using DeepSeek V4.1 Flash at $effort effort.", "model: $($modelPreset.model)", "effort: $effort", 'disallowedTools: Agent', '---', '', 'Perform only the assigned bounded task. Preserve unrelated work. Return concrete verification evidence. Do not change models or delegate.')
+        $entry = $modelPreset.menu[$modelPreset.slot_map[$slot]]
+        $body = @('---',"name: $name", "description: $slot execution slot using $($entry.model) at $($entry.effort) effort.", "model: $($entry.model)", "effort: $($entry.effort)", 'disallowedTools: Agent', '---', '', 'Perform only the assigned bounded task. Preserve unrelated work. Return concrete verification evidence. Do not change models or delegate.')
         if ($slot -in @('quick_triage','standard_review')) { $body += 'Read-only: do not modify files or external state.' }
         AddFile (Join-Path $ClaudeRoot "agents/$name.md") (($body -join "`n")+"`n")
     }

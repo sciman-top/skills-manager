@@ -17,32 +17,30 @@ finally {
 }
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message }; $script:count++ }
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+$slots = @($policy.slots)
 $expected = @{
-    gpt6_astra_only=@('gpt-6-astra','low','medium','high')
-    gpt56_sol_only=@('gpt-5.6-sol','low','medium','high')
-    gpt56_terra_only=@('gpt-5.6-terra','high','xhigh','max')
-    gpt56_luna_only=@('gpt-5.6-luna','high','xhigh','max')
-    glm53_flash_only=@('glm-5.3-flash','low','high','max')
-    deepseek_flash_only=@('deepseek-flash','high','high','max')
+    gpt56_sol_terra     = @{ menu = @(@('gpt-5.6-sol','medium'),@('gpt-5.6-terra','high'),@('gpt-5.6-terra','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
+    gpt56_luna_only     = @{ menu = @(@('gpt-5.6-luna','medium'),@('gpt-5.6-luna','high'),@('gpt-5.6-luna','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
+    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','low'),@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
+    deepseek_flash_only = @{ menu = @(@('deepseek-flash','high'),@('deepseek-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
 }
-Assert ($policy.presets.Count -eq 6 -and $policy.slots.Count -eq 5) 'Preset/slot count'
+Assert ($policy.presets.Count -eq 4 -and $slots.Count -eq 5) 'Preset/slot count'
 foreach ($id in $expected.Keys) {
     $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $id | ConvertFrom-Json -AsHashtable
-    foreach ($slot in $policy.slots.Keys) {
-        $index = @('light','standard','deep').IndexOf($policy.slots[$slot]) + 1
-        Assert ($resolved.routes[$slot].model -ceq $expected[$id][0] -and $resolved.routes[$slot].effort -ceq $expected[$id][$index]) "Wrong route: $id/$slot"
+    foreach ($slot in $slots) {
+        $pair = $expected[$id].menu[$expected[$id].map[$slot]]
+        Assert ($resolved.routes[$slot].model -ceq $pair[0] -and $resolved.routes[$slot].effort -ceq $pair[1]) "Wrong route: $id/$slot"
     }
 }
-$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_only | ConvertFrom-Json
-Assert ($selected.preset -eq 'gpt56_sol_only') 'Ordered selection'
-$cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt56_luna_only,gpt56_sol_only' -Plan | ConvertFrom-Json
-Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt56_sol_only' -and $cliSelection.effort -eq 'medium' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
+$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_terra | ConvertFrom-Json
+Assert ($selected.preset -eq 'gpt56_sol_terra') 'Ordered selection'
+$cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt56_luna_only,gpt56_sol_terra' -Plan | ConvertFrom-Json
+Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt56_sol_terra' -and $cliSelection.effort -eq 'high' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
 foreach ($id in @($policy.codex_order) + @('deepseek_flash_only')) {
-    foreach ($slot in $policy.slots.Keys) {
+    foreach ($slot in $slots) {
         $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
-        $p = $policy.presets[$id]
-        $effort = $p.efforts[$policy.slots[$slot]]
-        Assert ($plan.model -eq $p.model -and $plan.effort -eq $effort -and $plan.delegation_enabled -eq $false) 'Frozen route and delegation disabled'
+        $pair = $expected[$id].menu[$expected[$id].map[$slot]]
+        Assert ($plan.model -eq $pair[0] -and $plan.effort -eq $pair[1] -and $plan.delegation_enabled -eq $false) 'Frozen route and delegation disabled'
     }
 }
 $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Raw
@@ -67,7 +65,7 @@ try {
     [IO.File]::WriteAllText($cfg, $emptyRoot)
     $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
     $emptyRootResult = Get-Content -LiteralPath $cfg -Raw
-    Assert ($emptyRootResult.StartsWith('model = "gpt-6-astra"')) 'Empty root must receive its own model key'
+    Assert ($emptyRootResult.StartsWith('model = "gpt-5.6-terra"')) 'Empty root must receive its own model key'
     Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $emptyRootReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $emptyRoot) 'Empty-root rollback must restore original content'
@@ -83,6 +81,11 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -Preset deepseek_flash_only -ClaudeRoot $claudeTarget | ConvertFrom-Json).files.Count -eq 0) 'Claude not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $claudeReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $settings).Hash -ceq $settingsBefore) 'Claude rollback bytes'
+    $badText = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw) -replace '"deep_investigation_or_implementation": \d+', '"deep_investigation_or_implementation": 9'
+    [IO.File]::WriteAllText((Join-Path $fixture 'presets.json'), $badText)
+    $threw = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
+    Assert $threw 'Out-of-range slot index must fail closed'
 }
 finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
