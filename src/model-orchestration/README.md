@@ -2,7 +2,7 @@
 
 This independent, local PowerShell 7 tool projects the four orchestration presets defined in `presets.json` (schema v2). It does not select gateways, inspect credentials, retry tasks, or run background monitors.
 
-One preset is active at a time. Each preset pins an ordered menu of `(model, effort)` levels and may mix model families: the default `gpt56_sol_terra` runs light work on Sol and heavy work on Terra. The five semantic execution slots map onto menu indexes with duplicates allowed — `quick_triage` takes the lightest level, `routine_maintenance` / `standard_review` / `bounded_implementation` share the standard level, and `deep_investigation_or_implementation` takes the deepest level. Current menus: Sol-Terra = Sol/medium, Terra/high, Terra/xhigh; Luna-only = medium, high, xhigh; GLM-5.3-Flash (ZCode) = low, max; DeepSeek Flash (Claude Code) = high, max.
+One preset is active at a time. Each preset pins an ordered menu of `(model, effort)` levels, lightest first, and may mix model families: in the default `gpt56_sol_terra`, routine work runs on Terra while the deepest slot gets Sol/medium — the strongest level of the preset (operator-declared 2026-09-15: Sol/medium > Terra/xhigh > Terra/high). The five semantic execution slots map onto menu indexes with duplicates allowed — `quick_triage` takes the lightest level, `routine_maintenance` / `standard_review` / `bounded_implementation` share the standard level, and `deep_investigation_or_implementation` takes the deepest level. Current menus: Sol-Terra = Terra/high, Terra/xhigh, Sol/medium; Luna-only = medium, high, xhigh; GLM-5.3-Flash (ZCode) = low, max; DeepSeek Flash (Claude Code) = high, max.
 
 Use the controlled slot entrypoint for single-preset execution. It freezes the selected preset and exact slot route, disables native subagent delegation, accepts no extra model/config flags, and never retries under another preset:
 
@@ -23,7 +23,7 @@ pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <recei
 
 `AvailablePreset` is an explicitly declared available set, not an automatic model or gateway probe. The example selects Sol-Terra despite input ordering. Running tasks do not switch presets; only future sessions use a newly projected default.
 
-Codex projections create two complete native profiles (`gpt56-sol-terra`, `gpt56-luna-only`), five role definitions per profile, and matching parent/review/subagent defaults. A profile's parent/review/subagent defaults are pinned to the preset's standard route (the `routine_maintenance` slot entry): Sol-Terra therefore defaults to Terra/high while its quick-triage role stays on Sol/medium. Existing provider, auth, permissions, concurrency limits, hooks, and unrelated roles remain intact.
+Codex projections create two complete native profiles (`gpt56-sol-terra`, `gpt56-luna-only`), five role definitions per profile, and matching parent/review/subagent defaults. A profile's parent/review/subagent defaults are pinned to the preset's standard route (the `routine_maintenance` slot entry): Sol-Terra therefore defaults to Terra/xhigh while its deep role stays on Sol/medium. Existing provider, auth, permissions, concurrency limits, hooks, and unrelated roles remain intact.
 
 Codex 0.153.4's specialized delegation path bypassed a trusted hook in two controlled live tests. That ineffective hook was retired. The chosen entrypoint disables native delegation instead; no global `code_mode_host` change is required.
 

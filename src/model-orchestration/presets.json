@@ -7,9 +7,9 @@
     "gpt56_sol_terra": {
       "host": "codex",
       "menu": [
-        {"model": "gpt-5.6-sol", "effort": "medium"},
         {"model": "gpt-5.6-terra", "effort": "high"},
-        {"model": "gpt-5.6-terra", "effort": "xhigh"}
+        {"model": "gpt-5.6-terra", "effort": "xhigh"},
+        {"model": "gpt-5.6-sol", "effort": "medium"}
       ],
       "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
     },

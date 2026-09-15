@@ -19,7 +19,7 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
 $expected = @{
-    gpt56_sol_terra     = @{ menu = @(@('gpt-5.6-sol','medium'),@('gpt-5.6-terra','high'),@('gpt-5.6-terra','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
+    gpt56_sol_terra     = @{ menu = @(@('gpt-5.6-terra','high'),@('gpt-5.6-terra','xhigh'),@('gpt-5.6-sol','medium')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
     gpt56_luna_only     = @{ menu = @(@('gpt-5.6-luna','medium'),@('gpt-5.6-luna','high'),@('gpt-5.6-luna','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
     glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','low'),@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
     deepseek_flash_only = @{ menu = @(@('deepseek-flash','high'),@('deepseek-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
@@ -35,7 +35,7 @@ foreach ($id in $expected.Keys) {
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_terra | ConvertFrom-Json
 Assert ($selected.preset -eq 'gpt56_sol_terra') 'Ordered selection'
 $cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt56_luna_only,gpt56_sol_terra' -Plan | ConvertFrom-Json
-Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt56_sol_terra' -and $cliSelection.effort -eq 'high' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
+Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt56_sol_terra' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
 foreach ($id in @($policy.codex_order) + @('deepseek_flash_only')) {
     foreach ($slot in $slots) {
         $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
