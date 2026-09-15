@@ -53,6 +53,25 @@ Describe 'Skill projection profiles' {
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
     }
 
+    It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
+        $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
+        $skillPath = Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md'
+        $text = Get-ContentUtf8 $skillPath
+
+        $config.PSObject.Properties['managed_link_includes'] | Should -BeNullOrEmpty
+        $config.PSObject.Properties['managed_link_excludes'] | Should -BeNullOrEmpty
+        (Get-Item -LiteralPath $skillPath).Length | Should -BeLessOrEqual 4500
+        $text | Should -Match 'Never let a skill invent a new gate'
+        $text | Should -Match 'Strict TDD, coverage'
+        $text | Should -Match 'capability-router'
+    }
+
+    It 'accepts the profile-only projection shape at the CLI config contract' {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+
+        { Assert-Cfg $config } | Should -Not -Throw
+    }
+
     It 'retains the former nine-skill core set as an explicit compatibility profile' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'

@@ -7,18 +7,6 @@
     "manifest_path": "reports/skill-projection/current.json",
     "managed_source_path": "agent",
     "user_skill_root": "~/.agents/skills",
-    "managed_link_includes": [
-      "ai-coding-workflow",
-      "capability-router",
-      "code-review-and-quality",
-      "custom-powershell-windows-automation",
-      "research",
-      "systematic-debugging",
-      "verification-before-completion"
-    ],
-    "managed_link_excludes": [
-      "skill-creator"
-    ],
     "projection_profiles": {
       "schema_version": 1,
       "default_profile": "core-lean",
@@ -982,7 +970,6 @@
   "mcp_servers": [
     {
       "name": "context7",
-      "enabled": false,
       "enabled_tools": [
         "resolve-library-id",
         "query-docs"
@@ -997,7 +984,6 @@
     },
     {
       "name": "microsoft-learn",
-      "enabled": true,
       "enabled_tools": [
         "microsoft_docs_search",
         "microsoft_docs_fetch",
@@ -1009,7 +995,6 @@
     },
     {
       "name": "openaiDeveloperDocs",
-      "enabled": true,
       "enabled_tools": [
         "search_openai_docs",
         "fetch_openai_doc",
@@ -1021,7 +1006,6 @@
     },
     {
       "name": "playwright",
-      "enabled": false,
       "enabled_tools": [
         "browser_navigate",
         "browser_snapshot",

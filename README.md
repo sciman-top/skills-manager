@@ -54,7 +54,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `vendors` / `imports`：技能来源
 - `mappings`：安装白名单与输出名
 - `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
-- `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
+- `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 定义、按场景启用 profile 与同步目标；存在 `mcp_profiles` 时，`mcp_profiles.active` 是当前启用集合的唯一真源，server 定义只描述服务能力，旧配置的 `mcp_servers[].enabled` 仅作无 profile 配置的兼容回退
 
 ### 同一版本下的四类交付物
 
@@ -141,7 +141,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 | Claude | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
 | ZCode | 7 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
 
-默认 7 项中的 `ai-coding-workflow` 是日常实现、调试、审查与收口的薄闭环入口：它只携带高频稳定方法，详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
+默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试、审查与收口的薄闭环入口：它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
 
 ### AI 编码快速用法
 

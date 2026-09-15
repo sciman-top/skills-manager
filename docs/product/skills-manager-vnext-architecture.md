@@ -32,7 +32,7 @@
 
 - Interface：`安装MCP`、`卸载MCP`、`MCP配置`、`同步MCP`
 - Implementation：`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）和 `src/Commands/Mcp.ps1`（adapter、规划、事务与同步）
-- State：`skills.json.mcp_servers/mcp_profiles/mcp_targets`
+- State：`skills.json.mcp_servers/mcp_profiles/mcp_targets`；配置 `mcp_profiles` 时由 `mcp_profiles.active` 唯一决定当前启用集合，`mcp_servers[].enabled` 仅保留给无 profile 的历史兼容输入
 
 MCP config mutation、host projection、live readiness 是三个不同状态。仓库保存环境变量名，不保存 credential value。
 

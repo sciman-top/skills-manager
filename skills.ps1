@@ -9871,7 +9871,10 @@ function Assert-Cfg($cfg) {
             if ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
                 Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
                 Need ([string](Get-CfgObjectProperty $t 'receipt_path') -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
-                Need ($null -ne $cfg.skill_projection -and (Assert-IsArray (Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')) -and @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')).Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+                $usesProjectionProfiles = $null -ne (Get-CfgObjectProperty $cfg.skill_projection 'projection_profiles')
+                if (-not $usesProjectionProfiles) {
+                    Need ($null -ne $cfg.skill_projection -and (Assert-IsArray (Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')) -and @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')).Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+                }
             }
         }
     }
@@ -10670,7 +10673,10 @@ function Get-DoctorSkillProjectionConsistency {
                 $result.warnings += ("{0}: projection_selection_invalid: {1}" -f $hostName, $_.Exception.Message)
                 continue
             }
-            if ([bool]$selection.uses_profiles) {
+            # projection_profiles is the source of truth.  Compare the legacy
+            # mirror only when a user still carries it; a profile-only config
+            # is canonical and must not be reported as drift.
+            if ([bool]$selection.uses_profiles -and (Test-OperationObjectProperty $projection 'managed_link_includes')) {
                 $legacyIncludes = @()
                 if (Test-OperationObjectProperty $projection 'managed_link_includes') {
                     $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })

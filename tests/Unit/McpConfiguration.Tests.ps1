@@ -1807,6 +1807,10 @@ command = "npx"
         $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
         $profiles = $config.mcp_profiles.profiles
 
+        foreach ($server in @($config.mcp_servers)) {
+            $server.PSObject.Properties['enabled'] | Should -BeNullOrEmpty
+        }
+
         @($profiles.default.enabled) | Should -Be @()
         @($profiles.coding.enabled) | Should -Be @('openaiDeveloperDocs')
         @($profiles.dotnet.enabled) | Should -Be @('microsoft-learn')

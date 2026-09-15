@@ -241,7 +241,10 @@ function Get-DoctorSkillProjectionConsistency {
                 $result.warnings += ("{0}: projection_selection_invalid: {1}" -f $hostName, $_.Exception.Message)
                 continue
             }
-            if ([bool]$selection.uses_profiles) {
+            # projection_profiles is the source of truth.  Compare the legacy
+            # mirror only when a user still carries it; a profile-only config
+            # is canonical and must not be reported as drift.
+            if ([bool]$selection.uses_profiles -and (Test-OperationObjectProperty $projection 'managed_link_includes')) {
                 $legacyIncludes = @()
                 if (Test-OperationObjectProperty $projection 'managed_link_includes') {
                     $legacyIncludes = @((Get-OperationObjectProperty $projection 'managed_link_includes') | ForEach-Object { [string]$_ })
