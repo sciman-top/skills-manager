@@ -20,8 +20,8 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $slots = @($policy.slots)
 $expected = @{
     gpt56_sol_terra     = @{ menu = @(@('gpt-5.6-terra','high'),@('gpt-5.6-terra','xhigh'),@('gpt-5.6-sol','medium')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
-    gpt56_luna_only     = @{ menu = @(@('gpt-5.6-luna','medium'),@('gpt-5.6-luna','high'),@('gpt-5.6-luna','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
-    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','low'),@('glm-5.3-flash','high'),@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2} }
+    gpt56_luna_only     = @{ menu = @(@('gpt-5.6-luna','high'),@('gpt-5.6-luna','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
+    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','high'),@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
     deepseek_flash_only = @{ menu = @(@('deepseek-flash','high'),@('deepseek-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
 }
 Assert ($policy.presets.Count -eq 4 -and $slots.Count -eq 5) 'Preset/slot count'

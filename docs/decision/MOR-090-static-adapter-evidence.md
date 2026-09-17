@@ -23,7 +23,7 @@
 
 **Fixture 优先级（2026-08-31 修订；2026-09-15 再修订）**：MOR-100 逐项 fixture 优先验证默认 preset `gpt56_sol_terra` 实际使用的三个 Codex config tuple：**Terra/high、Terra/xhigh、Sol/medium**。其中 `deep` 槽与 high-risk 提升路径固定使用 Sol/medium（操作者直证整套最强档）；Sol/high 随 Sol-only preset 退役退出日常使用集，仍保留在 surface Adapter 候选集合中，不阻断该 preset 的准入。三项 fixture 未全部通过前，Sol-Terra 仍只能是 intended policy default，不能外推为实际 host default。
 
-**后续 preset fixture（2026-09-15 修订；2026-09-18 更新）**：现行集合为 `gpt56_sol_terra`（Sol/medium、Terra/high、Terra/xhigh）、`gpt56_luna_only`（medium/high/xhigh）、`glm53_flash_only`（low/high/max，标准槽=high）、`deepseek_flash_only`（high/max）；hosts 见 MOR-000-brief（glm/deepseek 含 codex 面）。C7 已证明当前机器可 strict-load 旧集合（Terra/max、Luna/max 等）profile，因此该机器曾达到 `filesystem_projected` / config-load acceptance；tuple 仍保持 `partial`，直到 MOR-100 记录独立 current-host fixture。C7 结论只覆盖旧集合的 profile 文件，新集合 profile 投影后须重新 strict-load。其他 host 不得复用该结论，也不得将 API/security surface 的 max 证据外推。
+**后续 preset fixture（2026-09-15 修订；2026-09-18 二次更新）**：现行集合为 `gpt56_sol_terra`（Sol/medium、Terra/high、Terra/xhigh）、`gpt56_luna_only`（high/xhigh）、`glm53_flash_only`（high/max）、`deepseek_flash_only`（high/max）；hosts 见 MOR-000-brief（glm/deepseek 含 codex 面）。C7 已证明当前机器可 strict-load 旧集合（Terra/max、Luna/max 等）profile，因此该机器曾达到 `filesystem_projected` / config-load acceptance；tuple 仍保持 `partial`，直到 MOR-100 记录独立 current-host fixture。C7 结论只覆盖旧集合的 profile 文件，新集合 profile 投影后须重新 strict-load。其他 host 不得复用该结论，也不得将 API/security surface 的 max 证据外推。
 
 ## 2. zcode（GLM / bigmodel）
 

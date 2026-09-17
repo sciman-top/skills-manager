@@ -16,20 +16,18 @@
     "gpt56_luna_only": {
       "hosts": ["codex"],
       "menu": [
-        {"model": "gpt-5.6-luna", "effort": "medium"},
         {"model": "gpt-5.6-luna", "effort": "high"},
         {"model": "gpt-5.6-luna", "effort": "xhigh"}
       ],
-      "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 1}
     },
     "glm53_flash_only": {
       "hosts": ["zcode", "codex"],
       "menu": [
-        {"model": "glm-5.3-flash", "effort": "low"},
         {"model": "glm-5.3-flash", "effort": "high"},
         {"model": "glm-5.3-flash", "effort": "max"}
       ],
-      "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
+      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 1}
     },
     "deepseek_flash_only": {
       "hosts": ["claude", "codex"],
