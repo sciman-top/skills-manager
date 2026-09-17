@@ -14,9 +14,14 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $Preset -AvailablePreset $AvailablePreset | ConvertFrom-Json -AsHashtable
 $Preset = $resolved.preset
 $route = $resolved.routes[$Slot]
-$targetHost = $policy.presets[$Preset].host
+$presetHosts = @($policy.presets[$Preset].hosts)
+# Launch on the first declared facet with a verified native interface, so the
+# primary host wins (deepseek=claude) and zcode is always skipped as
+# resolve-only; a zcode-only preset has no launchable facet at all.
+$targetHost = $null
+foreach ($h in $presetHosts) { if ($h -ceq 'codex' -or $h -ceq 'claude') { $targetHost = $h; break } }
+if (-not $targetHost) { throw 'ZCode native launch interface is not verified.' }
 $WorkingDirectory = (Resolve-Path -LiteralPath $WorkingDirectory).Path
-if ($targetHost -eq 'zcode') { throw 'ZCode native launch interface is not verified.' }
 if ($targetHost -eq 'codex') {
     $cliArgs = @('exec','--profile',$Preset.Replace('_','-'),'--strict-config','--json','--skip-git-repo-check','-C',$WorkingDirectory,
         '-c',('model="'+$route.model+'"'),'-c',('review_model="'+$route.model+'"'),

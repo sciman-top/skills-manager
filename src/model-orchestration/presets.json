@@ -1,11 +1,11 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "default_preset": "gpt56_sol_terra",
   "codex_order": ["gpt56_sol_terra", "gpt56_luna_only"],
   "slots": ["quick_triage", "routine_maintenance", "standard_review", "bounded_implementation", "deep_investigation_or_implementation"],
   "presets": {
     "gpt56_sol_terra": {
-      "host": "codex",
+      "hosts": ["codex"],
       "menu": [
         {"model": "gpt-5.6-terra", "effort": "high"},
         {"model": "gpt-5.6-terra", "effort": "xhigh"},
@@ -14,7 +14,7 @@
       "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
     },
     "gpt56_luna_only": {
-      "host": "codex",
+      "hosts": ["codex"],
       "menu": [
         {"model": "gpt-5.6-luna", "effort": "high"},
         {"model": "gpt-5.6-luna", "effort": "xhigh"},
@@ -23,7 +23,7 @@
       "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
     },
     "glm53_flash_only": {
-      "host": "zcode",
+      "hosts": ["zcode", "codex"],
       "menu": [
         {"model": "glm-5.3-flash", "effort": "low"},
         {"model": "glm-5.3-flash", "effort": "high"},
@@ -32,7 +32,7 @@
       "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2}
     },
     "deepseek_flash_only": {
-      "host": "claude",
+      "hosts": ["claude", "codex"],
       "menu": [
         {"model": "deepseek-flash", "effort": "high"},
         {"model": "deepseek-flash", "effort": "max"}

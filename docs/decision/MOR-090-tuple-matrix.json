@@ -5,7 +5,7 @@
     "contract_layers": ["host_adapter", "provider_dialect"],
     "allowlist_rule": "status==verified; final route candidate additionally requires host_adapter AND provider_dialect sides verified (intersection). No cross-surface extrapolation (e.g. openai_* max -> codex_config_surface).",
     "collected": "2026-08-28",
-    "updated": "2026-09-12",
+    "updated": "2026-09-17",
     "pending_surfaces": [
       {
         "surface": "claude_host",
@@ -98,6 +98,11 @@
     {"surface": "deepseek_responses", "layer": "provider_dialect", "model": "deepseek-v4-flash", "effort": "max", "field_path": "reasoning.effort", "status": "unknown", "facts": [], "notes": "无直接一手页面"},
     {"surface": "deepseek_responses", "layer": "provider_dialect", "model": "deepseek-v4-pro", "effort": "low", "field_path": "reasoning.effort", "status": "unknown", "facts": [], "notes": "无直接一手页面"},
     {"surface": "deepseek_responses", "layer": "provider_dialect", "model": "deepseek-v4-pro", "effort": "high", "field_path": "reasoning.effort", "status": "unknown", "facts": [], "notes": "无直接一手页面"},
-    {"surface": "deepseek_responses", "layer": "provider_dialect", "model": "deepseek-v4-pro", "effort": "max", "field_path": "reasoning.effort", "status": "unknown", "facts": [], "notes": "无直接一手页面"}
+    {"surface": "deepseek_responses", "layer": "provider_dialect", "model": "deepseek-v4-pro", "effort": "max", "field_path": "reasoning.effort", "status": "unknown", "facts": [], "notes": "无直接一手页面"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "glm-5.3-flash", "effort": "low", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "2026-09-17 本机 cockpit provider（localhost:4163）最小请求逐项实测 exit 0"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "glm-5.3-flash", "effort": "high", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "glm-5.3-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-flash", "effort": "high", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"}
   ]
 }

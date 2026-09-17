@@ -17,6 +17,8 @@ foreach ($id in $policy.presets.Keys) {
     $p = $policy.presets[$id]
     $menu = @($p.menu)
     if ($menu.Count -eq 0) { throw "Preset $id has an empty menu." }
+    $hosts = @($p.hosts)
+    if ($hosts.Count -eq 0 -or ($hosts | Where-Object { $_ -cnotin @('codex','claude','zcode') })) { throw "Preset $id has invalid hosts." }
     if (-not $p.slot_map -or @($p.slot_map.Keys).Count -ne $slotNames.Count) { throw "Preset $id slot_map must cover exactly all slots." }
     foreach ($slot in $slotNames) {
         if (-not $p.slot_map.Contains($slot)) { throw "Preset $id is missing slot mapping: $slot" }
@@ -38,7 +40,7 @@ foreach ($slot in $slotNames) {
     $entry = $modelPreset.menu[$modelPreset.slot_map[$slot]]
     $routes[$slot] = @{ model = $entry.model; effort = $entry.effort }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; routes = $routes; availability = 'operator_declared' } | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Resolve') { @{ preset = $Preset; hosts = @($modelPreset.hosts); routes = $routes; availability = 'operator_declared' } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 $stateRoot = Join-Path $PSScriptRoot '.state'
 function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }; return $null }
@@ -68,7 +70,9 @@ if ($Action -eq 'Rollback') {
     foreach ($f in @($receipt.files)[($receipt.files.Count-1)..0]) { RestoreFile $f }
     'Rollback complete.'; return
 }
-if ($modelPreset.host -eq 'zcode') { throw 'ZCode native model/effort write interface is not verified; resolve is available, native projection is blocked.' }
+# Only the codex/claude facets have a verified write interface; a preset whose
+# hosts are zcode-only stays resolve-only (fail closed, never guessed writes).
+if ('codex' -notin $modelPreset.hosts -and 'claude' -notin $modelPreset.hosts) { throw 'ZCode native model/effort write interface is not verified; resolve is available, native projection is blocked.' }
 function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
     # Only edit known flat scalar keys; unfamiliar TOML shapes are rejected.
     $lines = [Collections.Generic.List[string]]::new()
@@ -93,8 +97,12 @@ function AddFile([string]$Path,[string]$Text) {
     $files.Add(@{path=[IO.Path]::GetFullPath($Path); text=$Text; before_hash=(Hash $Path)})
 }
 $profileNames = @{}
-if ($modelPreset.host -eq 'codex') {
-foreach ($id in $policy.codex_order) {
+if ('codex' -in $modelPreset.hosts) {
+# Every preset with a codex facet gets a complete native profile, so the strict
+# slot launcher can freeze any of them; codex_order presets come first.
+$codexIds = @($policy.codex_order | Where-Object { 'codex' -in $policy.presets[$_].hosts })
+foreach ($id in $policy.presets.Keys) { if ($id -cnotin $codexIds -and 'codex' -in $policy.presets[$id].hosts) { $codexIds += $id } }
+foreach ($id in $codexIds) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
     $roleBlocks = [Collections.Generic.List[string]]::new()
@@ -127,7 +135,9 @@ $config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$s
 $config = $config.TrimEnd() + "`n# model-orchestration begin`n$activeBlocks`n# model-orchestration end`n"
 AddFile $configPath $config
 }
-elseif ($modelPreset.host -eq 'claude') {
+# Not elseif: a preset may carry both facets (deepseek projects Claude Code and
+# the shared codex surface in one Apply).
+if ('claude' -in $modelPreset.hosts) {
     $ClaudeRoot = [IO.Path]::GetFullPath($ClaudeRoot)
     $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
     $settingsPath = Join-Path $ClaudeRoot 'settings.json'

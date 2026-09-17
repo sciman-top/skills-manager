@@ -25,6 +25,7 @@ $expected = @{
     deepseek_flash_only = @{ menu = @(@('deepseek-flash','high'),@('deepseek-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1} }
 }
 Assert ($policy.presets.Count -eq 4 -and $slots.Count -eq 5) 'Preset/slot count'
+Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('claude' -in $policy.presets['deepseek_flash_only'].hosts) -and ('codex' -in $policy.presets['deepseek_flash_only'].hosts)) 'Dual-host facets'
 foreach ($id in $expected.Keys) {
     $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $id | ConvertFrom-Json -AsHashtable
     foreach ($slot in $slots) {
@@ -36,7 +37,7 @@ $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -A
 Assert ($selected.preset -eq 'gpt56_sol_terra') 'Ordered selection'
 $cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt56_luna_only,gpt56_sol_terra' -Plan | ConvertFrom-Json
 Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt56_sol_terra' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
-foreach ($id in @($policy.codex_order) + @('deepseek_flash_only')) {
+foreach ($id in @($policy.codex_order) + @('glm53_flash_only') + @('deepseek_flash_only')) {
     foreach ($slot in $slots) {
         $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
         $pair = $expected[$id].menu[$expected[$id].map[$slot]]
@@ -74,11 +75,11 @@ try {
     $settings = Join-Path $claudeTarget 'settings.json'
     [IO.File]::WriteAllText($settings, '{"model":"old","env":{"ANTHROPIC_BASE_URL":"preserve-endpoint","ANTHROPIC_AUTH_TOKEN":"test-sentinel"},"permissions":{"deny":["test-deny"]}}')
     $settingsBefore = (Get-FileHash -LiteralPath $settings).Hash
-    $claudeReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -Preset deepseek_flash_only -ClaudeRoot $claudeTarget | ConvertFrom-Json
+    $claudeReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -Preset deepseek_flash_only -ClaudeRoot $claudeTarget -CodexRoot $target | ConvertFrom-Json
     $projected = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json
     Assert ($projected.env.ANTHROPIC_BASE_URL -eq 'preserve-endpoint' -and $projected.env.ANTHROPIC_AUTH_TOKEN -eq 'test-sentinel' -and $projected.permissions.deny[0] -eq 'test-deny') 'Claude unrelated config changed'
     Assert ($projected.model -eq 'deepseek-flash' -and $projected.effortLevel -eq 'high' -and $projected.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE -eq '1' -and $projected.availableModels.Count -eq 1 -and $projected.availableModels[0] -eq 'deepseek-flash') 'Claude family projection'
-    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -Preset deepseek_flash_only -ClaudeRoot $claudeTarget | ConvertFrom-Json).files.Count -eq 0) 'Claude not idempotent'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -Preset deepseek_flash_only -ClaudeRoot $claudeTarget -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Claude not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $claudeReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $settings).Hash -ceq $settingsBefore) 'Claude rollback bytes'
     $badText = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw) -replace '"deep_investigation_or_implementation": \d+', '"deep_investigation_or_implementation": 9'
