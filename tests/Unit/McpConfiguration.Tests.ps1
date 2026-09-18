@@ -423,6 +423,45 @@ shell_tool = true
             $toml | Should -Match '(?m)^shell_tool = true\r?$'
         }
 
+        It "preserves a non-MCP table whose header has an inline comment" {
+            $existing = @'
+model = "gpt-5.6-luna"
+
+[mcp_servers.old]
+command = "old-server"
+
+[features] # host-owned settings
+multi_agent = false
+
+[agents]
+enabled = false
+'@
+
+            $toml = Build-CodexConfigToml $existing @()
+
+            $toml | Should -Not -Match '(?m)^\[mcp_servers\.old\]'
+            $toml | Should -Match '(?m)^\[features\] # host-owned settings\r?$'
+            $toml | Should -Match '(?m)^multi_agent = false\r?$'
+            $toml | Should -Match '(?m)^\[agents\]\r?$'
+        }
+
+        It "recognizes a managed MCP table whose header has an inline comment" {
+            $existing = @'
+model = "gpt-5.6-luna"
+
+[mcp_servers.old] # locally annotated
+command = "old-server"
+
+[agents]
+enabled = false
+'@
+
+            $toml = Build-CodexConfigToml $existing @()
+
+            $toml | Should -Not -Match 'old-server'
+            $toml | Should -Match '(?m)^\[agents\]\r?$'
+        }
+
         It "Converts Postgres key-value connection strings to URL form" {
             $url = Convert-PostgresKeyValueConnectionStringToUrl "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=p@ ss;"
             $url | Should -Be "postgresql://mcp_user:p%40%20ss@127.0.0.1:55432/postgres"

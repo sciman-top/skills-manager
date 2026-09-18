@@ -51,7 +51,10 @@ function WriteAtomic([string]$Path, [string]$Text) {
     finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp } }
 }
 function RestoreFile($File) {
-    if ((Hash $File.path) -cne $File.after_hash) { throw "Rollback drift: $($File.path)" }
+    $currentHash = Hash $File.path
+    $alreadyRestored = if ($File.before_hash) { $currentHash -ceq $File.before_hash } else { $null -eq $currentHash }
+    if ($alreadyRestored) { return }
+    if ($currentHash -cne $File.after_hash) { throw "Rollback drift: $($File.path)" }
     if ($File.before_hash) {
         if ((Hash $File.backup) -cne $File.before_hash) { throw 'Backup hash mismatch.' }
         $temp = "$($File.path).$([guid]::NewGuid().ToString('N')).tmp"
@@ -64,10 +67,21 @@ if ($Action -eq 'Rollback') {
     if (-not $ReceiptPath) { throw 'ReceiptPath is required.' }
     $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json -AsHashtable
     foreach ($f in $receipt.files) {
-        if ((Hash $f.path) -cne $f.after_hash) { throw "Rollback drift: $($f.path)" }
+        $currentHash = Hash $f.path
+        $isBefore = if ($f.before_hash) { $currentHash -ceq $f.before_hash } else { $null -eq $currentHash }
+        if (-not $isBefore -and $currentHash -cne $f.after_hash) { throw "Rollback drift: $($f.path)" }
         if ($f.before_hash -and (Hash $f.backup) -cne $f.before_hash) { throw 'Backup hash mismatch.' }
     }
-    foreach ($f in @($receipt.files)[($receipt.files.Count-1)..0]) { RestoreFile $f }
+    $receipt.status = 'rollback_in_progress'; WriteAtomic $ReceiptPath ($receipt | ConvertTo-Json -Depth 12)
+    try {
+        foreach ($f in @($receipt.files)[($receipt.files.Count-1)..0]) { RestoreFile $f }
+        $receipt.status = 'rolled_back'; WriteAtomic $ReceiptPath ($receipt | ConvertTo-Json -Depth 12)
+    }
+    catch {
+        $receipt.status = 'rollback_blocked'; $receipt.last_error = $_.Exception.Message
+        WriteAtomic $ReceiptPath ($receipt | ConvertTo-Json -Depth 12)
+        throw
+    }
     'Rollback complete.'; return
 }
 # Only the codex/claude facets have a verified write interface; a preset whose
@@ -79,13 +93,14 @@ function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
     foreach ($line in ($Text -split '\r?\n')) { $lines.Add($line) }
     $start = 0; $end = $lines.Count
     if ($Section) {
-        $headers = @(0..($lines.Count-1) | Where-Object { $lines[$_] -cmatch ('^\[' + [regex]::Escape($Section) + '\]\s*$') })
+        $headers = @(0..($lines.Count-1) | Where-Object { $lines[$_] -cmatch ('^\[' + [regex]::Escape($Section) + '\]\s*(?:#.*)?$') })
         if ($headers.Count -ne 1) { throw "Expected one [$Section] section." }
         $start = $headers[0] + 1
     }
     for ($i=$start; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end=$i; break } }
     $hits = @(for ($i=$start; $i -lt $end; $i++) {
-        if ($lines[$i] -match ('^\s*' + [regex]::Escape($Key) + '\s*=')) { $i }
+        $keyPattern = '(?:' + [regex]::Escape($Key) + '|"' + [regex]::Escape($Key) + '"|''' + [regex]::Escape($Key) + ''')'
+        if ($lines[$i] -match ('^\s*' + $keyPattern + '\s*=')) { $i }
     })
     if ($hits.Count -gt 1) { throw "Duplicate scalar: $Key" }
     $newLine = "$Key = $Value"

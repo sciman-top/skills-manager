@@ -4,6 +4,7 @@ Describe 'MOR tuple matrix validator fail-closed behavior' {
         $script:validatorPath = Join-Path $repoRoot 'scripts\quality\validate-mor-tuple-matrix.ps1'
         $script:canonicalPath = Join-Path $repoRoot 'docs\decision\MOR-090-tuple-matrix.json'
         $script:tempFiles = [System.Collections.Generic.List[string]]::new()
+        $script:gatePath = Join-Path $repoRoot 'scripts\quality\run-local-quality-gates.ps1'
 
         function Invoke-ValidatorAgainst([string]$MatrixJson) {
             $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mor-matrix-' + [guid]::NewGuid().ToString('N') + '.json')
@@ -25,6 +26,12 @@ Describe 'MOR tuple matrix validator fail-closed behavior' {
         $output = & pwsh -NoProfile -File $script:validatorPath -Path $fixture 2>&1
         $LASTEXITCODE | Should -Be 0
         ($output -join "`n") | Should -Match 'MOR tuple matrix validation passed'
+    }
+
+    It 'runs the implementation contract in the full gate and explicit mor verifier' {
+        $gate = Get-Content -LiteralPath $script:gatePath -Raw
+        $gate | Should -Match "(?s)Profile -eq 'full'.*'mor'"
+        $gate | Should -Match 'src\\model-orchestration\\Test-ModelPreset\.ps1'
     }
 
     It 'rejects an empty object' {

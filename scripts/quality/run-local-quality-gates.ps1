@@ -137,9 +137,10 @@ try {
     elseif ($Profile -eq 'focused') {
         @()
     }
+    elseif ($Profile -eq 'full') {
+        @('lock', 'integrity', 'config', 'scheduler', 'mor')
+    }
     else {
-        # 'mor' stays explicit-only via -Verifier: design-only MOR (MOR-000)
-        # carries no automatic gate until implementation is admitted.
         @('lock', 'integrity', 'config', 'scheduler')
     }
     foreach ($verifier in $selectedVerifiers) {
@@ -148,7 +149,12 @@ try {
             'integrity' { Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 } }
             'config' { Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce } }
             'scheduler' { Invoke-QualityGate 'host-scheduler-ownership' { Assert-HostSchedulerOwnershipContract } }
-            'mor' { Invoke-QualityGate 'model-orchestration-contract' { & .\scripts\quality\validate-mor-tuple-matrix.ps1 } }
+            'mor' {
+                Invoke-QualityGate 'model-orchestration-contract' {
+                    & .\scripts\quality\validate-mor-tuple-matrix.ps1
+                    & .\src\model-orchestration\Test-ModelPreset.ps1
+                }
+            }
         }
     }
     Write-Host ("Local quality gates passed ({0})." -f $Profile)

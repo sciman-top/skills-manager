@@ -16764,7 +16764,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
         $hostOwnedMcpNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $hostOwnedMcpNames.Add("node_repl") | Out-Null
         foreach ($line in $lines) {
-            if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*$') {
+            if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*(?:#.*)?$') {
                 $serverName = [string]$Matches[1]
                 $skipMcpSection = -not $hostOwnedMcpNames.Contains($serverName)
                 if (-not $skipMcpSection) {
@@ -16773,7 +16773,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
                 continue
             }
 
-            if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
+            if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*(?:#.*)?$') {
                 $skipMcpSection = $false
                 $kept.Add($line) | Out-Null
                 continue

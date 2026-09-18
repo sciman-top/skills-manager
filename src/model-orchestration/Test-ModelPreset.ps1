@@ -62,6 +62,14 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
+    $quotedRoot = '"model" = "old"' + "`n[agents] # inline comment`nenabled = true`n"
+    [IO.File]::WriteAllText($cfg, $quotedRoot)
+    $quotedReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $quotedResult = Get-Content -LiteralPath $cfg -Raw
+    Assert (@([regex]::Matches($quotedResult, '(?m)^\s*(?:model|"model"|''model'')\s*=')).Count -eq 1) 'Quoted root model key must be replaced instead of duplicated'
+    Assert ($quotedResult.Contains('[agents] # inline comment')) 'Commented agents table must be recognized'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $quotedReceipt.receipt | Out-Null
+    Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $quotedRoot) 'Quoted-root rollback must restore original content'
     $emptyRoot = "[agents]`n[unrelated]`nmodel = `"preserve-other-section`""
     [IO.File]::WriteAllText($cfg, $emptyRoot)
     $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
@@ -82,6 +90,19 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -Preset deepseek_flash_only -ClaudeRoot $claudeTarget -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Claude not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $claudeReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $settings).Hash -ceq $settingsBefore) 'Claude rollback bytes'
+    [IO.File]::WriteAllText($cfg, $original)
+    $retryReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $retryState = Get-Content -LiteralPath $retryReceipt.receipt -Raw | ConvertFrom-Json
+    $lockedPath = [string]$retryState.files[0].path
+    $lockedStream = [IO.File]::Open($lockedPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $rollbackBlocked = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $retryReceipt.receipt | Out-Null }
+    catch { $rollbackBlocked = $true }
+    finally { $lockedStream.Dispose() }
+    Assert $rollbackBlocked 'Rollback interruption fixture must fail once'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $retryReceipt.receipt | Out-Null
+    Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $original) 'Interrupted rollback must be retryable'
+    Assert (-not (Test-Path -LiteralPath $lockedPath)) 'Retry must remove a created file that blocked the first rollback'
     $badText = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw) -replace '"deep_investigation_or_implementation": \d+', '"deep_investigation_or_implementation": 9'
     [IO.File]::WriteAllText((Join-Path $fixture 'presets.json'), $badText)
     $threw = $false
