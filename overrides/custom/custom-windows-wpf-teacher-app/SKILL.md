@@ -35,7 +35,9 @@ Use this skill for practical classroom software on Windows machines.
 
 - First identify the real running entrypoint, process name, window title, config/state path, and whether the app is single-instance.
 - Prefer non-invasive evidence first: screenshot, window bounds, logs, current config, and command output.
-- For WPF/.NET apps, prefer Microsoft UI Automation based probes, then FlaUI for .NET test code, or pywinauto for ad-hoc Python inspection when a repo already supports Python.
+- For WPF/.NET apps, prefer Microsoft UI Automation based probes. Use FlaUI for
+  .NET test code or pywinauto for ad-hoc Python inspection only when the project
+  already carries that route or the current task authorizes adding it.
 - WinAppDriver/Appium-style routes are acceptable only when the project already carries that dependency or the user explicitly wants a broader desktop E2E harness.
 - Do not treat Playwright browser success as proof that a native Windows desktop surface works. Browser automation only verifies web/Electron/webview surfaces.
 - Before interrupting a long-running desktop app, check current-task authorization.

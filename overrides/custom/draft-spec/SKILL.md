@@ -1,6 +1,6 @@
 ---
 name: draft-spec
-description: Draft a review-ready Markdown product or implementation specification from the current conversation and repository context without publishing it. Use when the user asks to draft a spec, PRD, requirements summary, or design document for review; do not use for issue-tracker publication.
+description: Draft a review-ready Markdown spec, PRD, requirements summary, or design document from the current conversation and repository evidence. Return it in chat or write it to an explicitly requested local path; do not publish it to an external tracker.
 ---
 
 # Draft Spec
@@ -13,8 +13,10 @@ payload is absent, ask for it rather than filling the gap with a guessed
 
 ## Output
 
-Return the draft in the response. Follow a supplied template; otherwise use
-the sections below, combining or omitting sections that add no useful decision:
+Return the draft in the response unless the user requests a local or repository
+path, in which case write that artifact within the authorized task scope. Follow
+a supplied template; otherwise use the sections below, combining or omitting
+sections that add no useful decision:
 
 1. Problem statement
 2. Goals and non-goals
@@ -37,7 +39,7 @@ missing, keep the choice open rather than inventing APIs, files, or estimates.
 
 ## Side-effect boundary
 
-This is a draft-only skill. Do not call an issue tracker, create labels or
-links, or create or modify repository files. If the user later asks to
-publish the draft, treat publication as a separate, explicitly authorized
-task with its own workflow; this skill implies no publishing command.
+This is a draft-only skill. A user-requested local Markdown file is an allowed
+deliverable, not publication. Do not call an issue tracker, create remote
+records, labels, or links. If the user later asks to publish the draft, treat
+publication as a separate task with its own exact target and authorization.

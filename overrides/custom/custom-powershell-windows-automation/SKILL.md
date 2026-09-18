@@ -20,6 +20,10 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 ## Patterns
 
 - Use structured JSON/TOML/CSV parsing instead of text replacement when practical.
+- Pass native command arguments as an array through the call operator; do not
+  build executable command strings or use `Invoke-Expression`. When
+  `Start-Process -ArgumentList` cannot preserve exact token boundaries, use
+  `System.Diagnostics.ProcessStartInfo.ArgumentList` and verify the child input.
 - For environment variables, distinguish Process/User/Machine scopes in logs.
 - For CLIs, capture `cmd`, `exit_code`, redacted key output, and timestamp; never place secrets or tokens in commands, output, or receipts.
 - For agent/MCP config, separate source of truth from generated projection files.
@@ -42,5 +46,8 @@ Use this skill for durable Windows automation rather than one-off shell snippets
   verify the resulting state or receipt instead of replaying the operation.
 - Check encoding, path, native-process exit, and locked-file behavior under the supported PowerShell 7 runtime.
 - Verify non-zero exit codes and durable receipts separately from stderr; preserve diagnostic output without retrying an ambiguous write.
+- Before stopping, restarting, or replacing an existing process, service, or
+  scheduled task, resolve its identity and confirm that action is within the
+  current task. A source or config edit alone does not authorize interruption.
 - When an explicitly scoped external legacy consumer requires Windows PowerShell 5.1, isolate that compatibility path and verify it separately; do not weaken the primary PS7 contract.
 - Report changed paths, backup/rollback location, commands run, and the lowest truth layer actually verified. A successful source edit or scheduled-task definition is not proof that a new process or future trigger loaded it.

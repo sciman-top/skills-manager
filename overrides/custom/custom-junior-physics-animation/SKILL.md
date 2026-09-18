@@ -18,6 +18,9 @@ Use this skill when the goal is teaching a concept through motion or interaction
 - D3: best for data, graphs, coordinate systems, and variable relationships.
 - Manim: best for formula derivation, geometry, vector decomposition, and exported short videos.
 - PPT animation: best when the teacher needs simple step-by-step reveal without running a browser.
+- Use a proven domain library when the requested interaction depends on a real
+  physics engine, charting system, or animation renderer. Keep simple textbook
+  relationships explicit in code so their assumptions and units remain auditable.
 
 ## Design Rules
 
@@ -58,6 +61,8 @@ Use this skill when the goal is teaching a concept through motion or interaction
 - For time-based models, derive state from simulation time rather than frame
   count. Check pause/resume, stepping, and reset: pause must freeze the model and
   reset must restore parameters, time, and traces consistently.
+- Keep model state separate from rendering state. When randomness represents
+  measurement noise or particles, expose or fix the seed for reproducible checks.
 - Run in desktop and classroom projector aspect ratios.
 - For web/SVG output, verify the real entrypoint loads, the animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit. Exercise touch or pen input when the interaction contract requires it.
 - If offline delivery is required, open the delivered artifact without network

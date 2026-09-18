@@ -1,6 +1,6 @@
 ---
 name: draft-tickets
-description: Draft a dependency-aware tracer-bullet ticket breakdown from a plan, spec, or conversation without creating issues or publishing it. Use when the user asks to split work into tickets, vertical slices, or an implementation sequence for review; do not use for tracker publication.
+description: Draft dependency-aware tracer-bullet tickets or vertical implementation slices from a plan, spec, or conversation. Return them in chat or write an explicitly requested local draft; do not create issues in an external tracker.
 ---
 
 # Draft Tickets
@@ -11,7 +11,8 @@ nor repository context identifies a target, ask for it before drafting tickets.
 
 ## Output
 
-Return a numbered Markdown list. For every ticket include:
+Return a numbered Markdown list, or write the same draft to a user-requested
+local or repository path. For every ticket include:
 
 - a short title;
 - the end-to-end behavior it delivers;
@@ -35,8 +36,7 @@ List only true blocking dependencies; an arbitrary sequence is not a blocker.
 
 ## Side-effect boundary
 
-This is a draft-only skill. Do not call an issue tracker, create labels,
-blocking links, ticket files, or other repository files. If the user approves
-the breakdown and wants it published, treat publication as a separate,
-explicitly authorized task with its own workflow; this skill implies no
-publishing command.
+This is a draft-only skill. A user-requested local Markdown file is an allowed
+deliverable. Do not call an issue tracker or create remote issues, labels, or
+blocking links. If the user wants the breakdown published, treat publication
+as a separate task with its own exact tracker, project, and authorization.

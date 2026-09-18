@@ -24,7 +24,7 @@ Use this skill for Chinese article workflows where structure, credibility, image
 ## Conditional Capabilities
 
 - Do not load every adjacent skill. Use an available writing, editing, or content-strategy skill only when that narrower task needs specialist guidance.
-- Use an available image-generation or cover/infographic capability (for example `baoyu-cover-image` or `baoyu-infographic`) only when the user requests actual visual assets; otherwise provide a concrete image brief and placeholder.
+- Use a visible native image-generation, cover, or infographic capability only when the user requests actual visual assets; otherwise provide a concrete image brief with aspect ratio, text-safe area, subject, style, and usage constraints.
 - Use conversion or platform-specific tooling only after the canonical Markdown is stable.
 
 ## Deliverable
