@@ -649,8 +649,8 @@ $routingReceipt = [ordered]@{
     catalog_fingerprint = [string]$routingReceiptInput.catalog_fingerprint
     selection_required = $requestedNames.Count -eq 0
     requested_candidates = $requestedNames
-    validated_candidates = if ($loadPass) { @($selectedRows | ForEach-Object { [string]$_.name }) } else { @() }
-    validated_closure = if ($loadPass) { @($validatedClosureRows | ForEach-Object { [string]$_.name }) } else { @() }
+    validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
+    validated_closure = @(if ($loadPass) { $validatedClosureRows | ForEach-Object { [string]$_.name } })
     execution_contract = $effectiveExecutionContract
     status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
     truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
@@ -667,7 +667,7 @@ $routingReceipt = [ordered]@{
     catalog_path = $catalogFile
     catalog_resolution = [ordered]@{ mode = [string]$resolution.mode; auto_discover_requested = [bool]$AutoDiscover }
     catalog = [ordered]@{ status = $catalogStatus; skill_count = $catalogSkillCount; findings = @($catalogFindings.ToArray()) }
-    discovery_domains = if ($null -ne $catalog -and $catalogFindings.Count -eq 0) { @($catalog.domains | Select-Object name, purpose) } else { @() }
+    discovery_domains = @(if ($null -ne $catalog -and $catalogFindings.Count -eq 0) { $catalog.domains | Select-Object name, purpose })
     retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; candidate_count = $allRows.Count; max_candidates = $MaxCandidates; truncated = $truncated; scope_required = $discoveryScopeRequired }
     selected = $selectedRows
     validated_closure = $validatedClosureRows

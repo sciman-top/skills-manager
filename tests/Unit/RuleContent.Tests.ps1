@@ -16,9 +16,9 @@ Describe 'Checked-in rule content' {
     }
 
     It 'retains the cold-routing execution and observation boundaries' {
-        foreach ($path in @('rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md')) {
+        foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md')) {
             $text = [IO.File]::ReadAllText((Join-Path $repoRoot $path))
-            foreach ($contract in @('capability-router', 'one_shot', 'multi_turn_user_decision', 'parent-mediated', 'not_observable')) {
+            foreach ($contract in @('capability-router', 'one_shot', 'multi_turn_user_decision', 'parent-mediated', 'host_admission_required', '禁止通过搜索 vendor/import/agent')) {
                 $text | Should -Match ([regex]::Escape($contract))
             }
         }

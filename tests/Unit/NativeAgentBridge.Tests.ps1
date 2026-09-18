@@ -8,28 +8,14 @@ BeforeAll {
         return (Get-ContentUtf8 (Join-Path $repoRoot $RelativePath)) -replace "`r", ''
     }
 
-    # CSR-110 static model pin oracle: both managed templates must carry exactly
-    # one gpt-5.6-terra/high pair between description and sandbox_mode, and no
-    # provider/auth/routing field may smuggle itself into the template.
-    function Get-BridgeModelPinViolations([string]$TemplateText) {
+    # Bridge roles own workflow behavior. Model/effort belongs to the active
+    # preset and must remain selectable at spawn time or inheritable from it.
+    function Get-BridgeRoutingOverrideViolations([string]$TemplateText) {
         $violations = New-Object System.Collections.Generic.List[string]
         $modelFields = [regex]::Matches($TemplateText, '(?m)^model\s*=\s*"([^"]*)"$')
         $effortFields = [regex]::Matches($TemplateText, '(?m)^model_reasoning_effort\s*=\s*"([^"]*)"$')
-
-        if ($modelFields.Count -ne 1) { $violations.Add('model field count is not exactly one') }
-        elseif ($modelFields[0].Groups[1].Value -ne 'gpt-5.6-terra') { $violations.Add('model is not gpt-5.6-terra') }
-        if ($effortFields.Count -ne 1) { $violations.Add('model_reasoning_effort field count is not exactly one') }
-        elseif ($effortFields[0].Groups[1].Value -ne 'high') { $violations.Add('model_reasoning_effort is not high') }
-
-        if ($modelFields.Count -eq 1 -and $effortFields.Count -eq 1) {
-            $description = [regex]::Match($TemplateText, '(?m)^description\s*=')
-            $sandbox = [regex]::Match($TemplateText, '(?m)^sandbox_mode\s*=')
-            if (-not $description.Success -or -not $sandbox.Success -or
-                $modelFields[0].Index -lt $description.Index -or $modelFields[0].Index -gt $sandbox.Index -or
-                $effortFields[0].Index -lt $description.Index -or $effortFields[0].Index -gt $sandbox.Index) {
-                $violations.Add('model pin is not placed between description and sandbox_mode')
-            }
-        }
+        if ($modelFields.Count -gt 0) { $violations.Add('bridge template overrides active preset model') }
+        if ($effortFields.Count -gt 0) { $violations.Add('bridge template overrides active preset effort') }
 
         foreach ($forbidden in @('provider', 'model_provider', 'base_url', 'api_key', 'auth', 'secret', 'fallback', 'profile', 'session')) {
             if ($TemplateText -match ('(?m)^{0}\s*=' -f $forbidden)) { $violations.Add(("forbidden template field present: {0}" -f $forbidden)) }
@@ -54,30 +40,27 @@ Describe 'Native agent bridge' {
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml') | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
     }
 
-    It 'pins both managed bridge templates to exactly one static gpt-5.6-terra/high model pair' {
+    It 'lets both managed bridge templates use the active preset route' {
         foreach ($name in @('design-griller', 'cold-capability-runner')) {
             $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\{0}.toml" -f $name)
-            @(Get-BridgeModelPinViolations $template) | Should -Be @()
+            @(Get-BridgeRoutingOverrideViolations $template) | Should -Be @()
         }
     }
 
-    It 'template repository invariant: every managed bridge template carries exactly one static gpt-5.6-terra/high pair (oracle-checked)' {
+    It 'rejects model, effort, provider and session overrides in bridge templates' {
         $template = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
-        @(Get-BridgeModelPinViolations $template) | Should -Be @()
+        @(Get-BridgeRoutingOverrideViolations $template) | Should -Be @()
 
         $mutations = [ordered]@{
-            missing_model = $template -replace '(?m)^model = "gpt-5\.6-terra"$', ''
-            missing_effort = $template -replace '(?m)^model_reasoning_effort = "high"$', ''
-            duplicate_model = $template -replace '(?m)^(model = "gpt-5\.6-terra")$', ('$1' + "`n" + '$1')
-            wrong_model = $template -replace 'gpt-5\.6-terra', 'gpt-5.6-sol'
-            wrong_effort = $template -replace '(?m)^(model_reasoning_effort = )"high"$', '$1"medium"'
-            forbidden_provider_field = $template -replace '(?m)^(model_reasoning_effort = "high")$', ('$1' + "`n" + 'provider = "smuggled"')
-            pin_after_sandbox = ($template -replace '(?m)^model = "gpt-5\.6-terra"$', '') -replace '(?m)^(sandbox_mode = "read-only")$', ('$1' + "`n" + 'model = "gpt-5.6-terra"')
+            model = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('model = "gpt-5.6-terra"' + "`n" + '$1')
+            effort = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('model_reasoning_effort = "high"' + "`n" + '$1')
+            provider = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('provider = "smuggled"' + "`n" + '$1')
+            session = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('session = "smuggled"' + "`n" + '$1')
         }
 
         foreach ($mutation in $mutations.GetEnumerator()) {
-            $violations = @(Get-BridgeModelPinViolations ([string]$mutation.Value))
-            @($violations).Count | Should -BeGreaterThan 0 -Because ("mutation '{0}' must be rejected by the pin oracle" -f $mutation.Key)
+            $violations = @(Get-BridgeRoutingOverrideViolations ([string]$mutation.Value))
+            @($violations).Count | Should -BeGreaterThan 0 -Because ("mutation '{0}' must be rejected by the routing oracle" -f $mutation.Key)
         }
     }
 

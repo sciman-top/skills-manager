@@ -109,6 +109,10 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.query_sha256 | Should -Match '^[a-f0-9]{64}$'
         $result.routing_receipt.catalog_fingerprint | Should -Match '^[a-f0-9]{64}$'
         $result.routing_receipt.writes_performed | Should -Be $false
+        ($result.routing_receipt.validated_candidates -is [array]) | Should -BeTrue
+        ($result.routing_receipt.validated_closure -is [array]) | Should -BeTrue
+        $result.routing_receipt.validated_candidates.Count | Should -Be 0
+        ($result.discovery_domains -is [array]) | Should -BeTrue
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'activation_plan'
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'session_plan'
     }
@@ -147,6 +151,8 @@ Describe 'Capability router fallback' {
         $result.execution_authorization.status|Should -Be 'not_granted'
         $result.routing_receipt.status | Should -Be 'validated'
         $result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
+        ($result.routing_receipt.validated_candidates -is [array]) | Should -BeTrue
+        ($result.routing_receipt.validated_closure -is [array]) | Should -BeTrue
         @($result.routing_receipt.validated_candidates) | Should -Be @('codebase-design')
         @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design')
         $result.execution_contract.mode | Should -Be 'host_admission_required'
@@ -259,6 +265,7 @@ Describe 'Capability router fallback' {
         @($result.validated_closure.name) | Should -Be @('codebase-design','grilling','domain-modeling')
         @($result.validated_closure | Where-Object name -eq 'domain-modeling')[0].side_effect | Should -Be 'controlled_write'
         @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design','grilling','domain-modeling')
+        ($result.routing_receipt.validated_closure -is [array]) | Should -BeTrue
         $result.execution_authorization.requires_review | Should -Be $true
     }
 

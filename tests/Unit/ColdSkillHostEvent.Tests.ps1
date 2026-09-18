@@ -14,6 +14,29 @@ BeforeAll {
 }
 
 Describe 'Cold skill raw host-event verifier' {
+    It 'rejects failed router calls, incomplete turns and waits bound to another child' {
+        $original = Get-Content (Join-Path $fixturesRoot 'valid-s31.jsonl') -Raw
+        $cases = @(
+            @{ Text = $original.Replace('"exit_code":0', '"exit_code":1'); Code = 'H012_ROUTER_COMMAND_FAILED' }
+            @{ Text = $original.Replace('"turn.completed"', '"turn.failed"'); Code = 'H013_HOST_TURN_INCOMPLETE' }
+            @{ Text = ($original -replace '("tool":"wait","receiver_thread_ids":\[)"[^"]+"', '$1"unrelated-child"'); Code = 'H014_CHILD_WAIT_UNBOUND' }
+        )
+        foreach ($case in $cases) {
+            $path = Join-Path $TestDrive 'failed-event.jsonl'
+            Set-Content -LiteralPath $path -Value $case.Text
+            $output = & pwsh -NoProfile -File $verifierPath -EventsPath $path -ScenarioId S31-live-derived 2>&1
+            $LASTEXITCODE | Should -Be 1
+            ($output -join "`n") | Should -Match $case.Code
+        }
+    }
+
+    It 'detects a router invocation without the optional AutoDiscover flag' {
+        $path = Join-Path $TestDrive 'explicit-candidate.jsonl'
+        (Get-Content (Join-Path $fixturesRoot 'valid-s31.jsonl') -Raw).Replace(' -AutoDiscover', '') | Set-Content $path
+        $output = & pwsh -NoProfile -File $verifierPath -EventsPath $path -ScenarioId S03-explicit 2>&1
+        $LASTEXITCODE | Should -Be 1
+        ($output -join "`n") | Should -Match 'H003_FORBIDDEN_DISCOVERY_OBSERVED'
+    }
     It 'accepts a multi-turn host stream only with spawn, child id, and child-bound wait' {
         $result = Invoke-HostEventVerifier 'valid-s30.jsonl' 'S30-live-derived'
 

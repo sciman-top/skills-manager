@@ -60,7 +60,7 @@ Describe 'Global rule source contract' {
     }
 
     It 'rejects a ZCode global-rule version that differs from the shared release' {
-        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.81','**版本**: 9.82');[IO.File]::WriteAllText($path,$text)
+        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.82','**版本**: 99.0');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_version_mismatch'
     }
 

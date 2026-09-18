@@ -27,6 +27,9 @@ Stable finding codes:
   H009_REQUIRED_DISCOVERY_MISSING
   H010_SPECIALIST_HISTORY_NOT_ISOLATED
   H011_CHILD_WRITE_REVALIDATION_MISSING
+  H012_ROUTER_COMMAND_FAILED
+  H013_HOST_TURN_INCOMPLETE
+  H014_CHILD_WAIT_UNBOUND
 #>
 [CmdletBinding()]
 param(
@@ -136,6 +139,11 @@ function Get-ChildRolloutEvidence {
 }
 
 if ($null -ne $scenario -and $events.Count -gt 0) {
+    # A plausible answer or a command in a failed/incomplete turn is not acceptance.
+    if (@($events | Where-Object type -eq 'turn.completed').Count -eq 0 -or
+        @($events | Where-Object { $_.type -in @('turn.failed', 'error') }).Count -gt 0) {
+        Add-Finding 'H013_HOST_TURN_INCOMPLETE' 'host stream lacks a successful completed turn or contains a host failure'
+    }
     if (-not [string]::IsNullOrWhiteSpace($ParentRolloutPath)) {
         try {
             $parentRecords = @(Get-Content -LiteralPath $ParentRolloutPath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -159,9 +167,15 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
         $_.type -eq 'command_execution' -and [string]$_.status -in @('completed', 'failed')
     })
     $routerCommands = @($terminalCommands | Where-Object {
-        [string]$_.command -match '(?i)route-capability\.ps1' -and [string]$_.command -match '(?i)-AutoDiscover'
+        [string]$_.command -match '(?i)route-capability\.ps1' -and
+        [string]$_.command -match '(?i)-(?:AutoDiscover|Candidate|SelectedCapability|Query)\b'
     })
     $discoveryCommands = @($routerCommands | Where-Object { [string]$_.command -notmatch '(?i)-Candidate' })
+    foreach ($command in $routerCommands) {
+        if ([string]$command.status -ne 'completed' -or $null -eq $command.exit_code -or [int]$command.exit_code -ne 0) {
+            Add-Finding 'H012_ROUTER_COMMAND_FAILED' 'router invocation did not complete successfully'
+        }
+    }
 
     if ([string]$scenario.cold_discovery -eq 'forbidden' -and $routerCommands.Count -gt 0) {
         Add-Finding 'H003_FORBIDDEN_DISCOVERY_OBSERVED' ("{0}: {1} router invocation(s) occurred in a discovery-forbidden scenario" -f $ScenarioId, $routerCommands.Count)
@@ -200,6 +214,15 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
             [string]$_.tool -eq 'wait' -and @($_.receiver_thread_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0
         })
         $hasNativeChildEvidence = $spawnWithChildId.Count -gt 0 -or $null -ne $rolloutChild
+        $knownChildIds = @($spawnWithChildId | ForEach-Object { $_.receiver_thread_ids })
+        if ($null -ne $rolloutChild) { $knownChildIds += $rolloutChild.ChildId }
+        foreach ($wait in @($collaborationEvents | Where-Object tool -eq 'wait')) {
+            $ids = @($wait.receiver_thread_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            if (($ids.Count -eq 0 -and $null -eq $rolloutChild) -or
+                @($ids | Where-Object { $_ -notin $knownChildIds }).Count -gt 0) {
+                Add-Finding 'H014_CHILD_WAIT_UNBOUND' 'wait is not bound to an observed child'
+            }
+        }
 
         if (-not $hasNativeChildEvidence) {
             Add-Finding 'H005_NATIVE_CHILD_SPAWN_MISSING' ("{0}: native-child contract has no completed spawn_agent event" -f $ScenarioId)

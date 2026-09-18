@@ -1,9 +1,9 @@
-# CLAUDE.md - Universal Agent Protocol v9.81
+# CLAUDE.md - Universal Agent Protocol v9.82
 # Anthropic Claude Code / Claude CLI - Global User Rules
-**版本**: 9.81
+**版本**: 9.82
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-09-12
+**最后更新**: 2026-09-18
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从当前宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于事实冲突取证，不得反向覆盖高优先级指令。
@@ -58,9 +58,10 @@
 - Claude Code cloud/Web 会读取仓内项目规则和 server-managed settings，但不加载本机 `~/.claude/CLAUDE.md`；普通 Claude Web/Desktop profile/preferences 也不得假定与本机用户文件同源。
 ### B.2 诊断与强制
 - 最小诊断：`claude --version`、`claude --help`；交互场景用 `/context`、`/memory` 核对加载，用 `/status`、`/permissions`、`/hooks` 核对强制来源；终端 `claude doctor` 只读诊断，交互 `/doctor` 可能在确认后修复，不能混用。
-- 扩展命令、hook event、tool matcher 与通配符必须先由当前 help/schema/官方文档证明；可用时以 `InstructionsLoaded` 等 hook 补充加载证据。
+- 扩展命令/hook/matcher 以当前 help/schema 为准；`InstructionsLoaded` 可补加载证据。
 - Claude 先用可见 native Skill/tool；仅点名不可见技能或判定可见覆盖不足且确需专门工作流时，才将完整请求+≤2 domain hint 交给 `capability-router` 一次；宿主选候选，router 只校验 closure/contract。
-- `candidate_load_validated` 后按 root contract：`one_shot`→`cold-capability-runner`（有 child），`multi_turn_user_decision`→`design-griller` 一题一轮等同一 child；`parent_user_input` 停父任务。无 child 只能 parent-mediated/`not_observable`，禁摘要、伪造 child 或 receipt 越级。
+- 校验后按 root contract，用当前可用 Agent 承载 `one_shot` 或 `multi_turn_user_decision`；后者一题一轮等同一 child，`parent_user_input` 停父任务。无 child 仅可 parent-mediated/`not_observable`，禁摘要或伪造 child。
+- 禁止通过搜索 vendor/import/agent 绕过冷技能校验。`host_admission_required`：读已验证闭包，父代理核对操作/授权后 parent-mediated 执行；仍未知、冲突或未授权才停，禁伪造 runner admission。
 - `CLAUDE.md` 不是权限配置；敏感文件阻断、工具限制、sandbox、环境变量与强制动作放入用户/项目 `.claude/settings.json`、managed settings、permissions、hooks、MCP、仓库脚本或 CI。
 - path rules 与 permissions 的 matcher 语义不同，不能互相替代；deny/allow 必须用正反例实测。
 - Claude 内建 Bash sandbox 不支持 native Windows，只支持 macOS、Linux 与 WSL2；native Windows 按 `platform_na` 留痕，并以 permissions、`PreToolUse`、外部隔离和 CI 补位。

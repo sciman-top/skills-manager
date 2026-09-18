@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.81
-**最后更新**: 2026-09-12
+**全局规则复核**: 9.82
+**最后更新**: 2026-09-18
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 同时是 Codex、Claude 与 ZCode 的项目级规则源；ZCode 仅读取当前 Workspace 根文件。

@@ -14,7 +14,7 @@
 | 首期 intended policy default | `gpt56_sol_terra`（quick=terra/high，三个 standard 槽=terra/xhigh，deep=sol/medium 最强档）；已确认可用集合中的顺序为 Sol-Terra → Luna，只切完整 preset，不改网关、不重放任务。实际 host load、模型调用与混族强制各自验收；2026-09-15 修订后新集合的 Codex profile 须重新投影并 strict-load，C7 的九 profile 结论不外推到新 profile |
 | 其他 preset baseline | **2026-09-18 二次修订（菜单收窄）**：`gpt56_luna_only` 定为 high/xhigh（quick/标准槽=high、deep=xhigh；撤 medium，同日早间的 medium/high/xhigh 修订被取代）；`glm53_flash_only` 定为 high/max（quick/标准槽=high、deep=max；撤 low 与"标准槽=high"的三档形态）；`deepseek_flash_only` 维持 high/max（标准槽 high、deep max）不变；**2026-09-17 schema v3 双宿主化后，glm/deepseek 的 codex 面四 profile 全量投影并 strict-load，且经本机 cockpit provider 通道（`localhost:4163/v1`）live 最小请求探针 5/5 菜单档位 exit 0**（C9，详 MOR-090）；2026-09-18 严格入口实战矩阵 8/8 全过（sol_terra 两档、luna 三档、glm 三档），本次收窄后的全部菜单档位（luna high/xhigh ⊂ luna 三档、glm high/max ⊂ glm 三档）均为既有 live_accepted 元组，未引入新档；退役三套（Astra/Sol-only/Terra-only）的既有 profile 投影与 C7 strict-load 记录保留为历史证据，其他宿主仍须各自 exact fixture，且不得把 profile load 外推为 provider/live acceptance |
 | identity binding | 必须使用不可伪造、可审计的绑定来源；无法绑定时状态 `identity_unbound`，禁止持久 override 与 projection，仅允许 offline resolve 与 dry-run/manual handoff |
-| native bridge role pin | `overrides/resources/native-agent-bridge/design-griller.toml` 与 `cold-capability-runner.toml` 显式钉 `gpt-5.6-terra/high`：**pin 不被通用 route resolver 改写；进入编排槽位前必须匹配选定 preset 的 exact model/effort，否则阻断**；任何 preset 切换不得静默覆盖 bridge pin；改 pin 需配对实测（独立授权域，不在本决议内执行） |
+| native bridge route | `design-griller` 与 `cold-capability-runner` 只定义工作流、sandbox 与 delegation 边界，不写 `model`/`model_reasoning_effort`。父代理按任务性质从 active preset 的五槽中选择并显式传入该槽 tuple；未显式传入时只可继承 active preset 的 `[agents]` standard 默认。custom-agent 文件不得越过 active preset 固定到另一模型族 |
 | 普通任务 ingress | 常规入口为上游调用方/用户确认产生的结构化 RouteRequest（workload/risk_level/operation/workspace_root）；宿主 AI 不得从 prompt 私自推断；AI 分类仅可为标注建议并需确认（PRD `MOR-FR-045`） |
 | override 重确认 | 持久 override 支持可选 `requires_reconfirm_after`，仅在下一次显式 resolve 检查（无 watcher），过期返回 `manual_mapping_required`（PRD `MOR-FR-026`） |
 | private state/receipt root | canonical path：`<runtime-root>/.ai/state/` 与 `<runtime-root>/.ai/receipts/<yyyy-mm-dd>/<run-id>/`（ignored、仅当前用户可读；runbook §2 同此约定） |
@@ -37,11 +37,11 @@
 | state-root / receipt-root | `<runtime_root>\.ai\state` / `<runtime_root>\.ai\receipts` |
 | 首期 projection | `none`（仅 offline resolve + dry-run launch；`~/.codex`、Claude、ZCode、provider、gateway 均不触碰） |
 | identity binding | manual binding required；未完成可审计绑定前禁止持久 override |
-| native bridge | `design-griller`/`cold-capability-runner` 继续 `gpt-5.6-terra/high`；进入编排槽位前检查与选定 map 一致，不匹配则阻断 |
+| native bridge | `design-griller`/`cold-capability-runner` 使用 active preset 的槽位 tuple；模型与 effort 不写入 bridge 模板 |
 
 **决策输入句模板**（填入 owner 后即构成 MOR-000 正式决议）：
 
-> 批准将跨宿主模型编排 runtime 放在 `skills-manager/src/model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，现有 design-griller 与 cold-capability-runner 保持 Terra/high，进入编排槽位前必须匹配选定 preset 的 exact route，否则阻断。
+> 批准将跨宿主模型编排 runtime 放在 `skills-manager/src/model-orchestration`，owner 为 `<owner>`；首期仅接入 codex_cli，只实现 offline schema/policy/resolver 与 dry-run launch，state/receipt 使用 runtime 私有目录，暂不执行 host projection；identity 未完成可审计绑定前禁止持久 override，design-griller 与 cold-capability-runner 由父代理按 active preset 的五槽选择模型/effort，bridge 模板不覆盖该选择。
 
 **同等合法的替代决定**：暂不选择 runtime-root，继续保持 design-only；不进入 MOR-010 实现，但保留只读 MOR-090 事实审查车道。
 
@@ -56,5 +56,5 @@
 ## 5. 与既有资产的边界
 
 - 本决议不修改 `skills.json`、`skills.ps1`、`build.ps1` 主链，不读取凭据，不调用模型，不改 provider/auth/gateway。
-- bridge pin 的现值（`gpt-5.6-terra/high`）继续按既有共识运行；本决议只钉其**优先级与排除规则**，不改其值。
+- bridge 模板只定义角色语义和安全边界；模型与 effort 由 active preset 的槽位映射提供。
 - §3 基线本身**不构成创建目录的授权**；目录创建只在 owner 给出正式决议句后随 MOR-010 切片执行。

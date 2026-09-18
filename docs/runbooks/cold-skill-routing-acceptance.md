@@ -200,7 +200,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 1. 执行 pwsh -NoProfile -File .\skills.ps1 构建生效。
 2. 读取 reports/native-agent-bridge/current.json。
 3. 对 design-griller 和 cold-capability-runner，比较 source_sha256 与 target_sha256；确认 source_revision 是本次提交，backup_paths 精确、无意外 definitions。
-4. 只读检查 ~/.codex/agents 下两文件：均为 Terra/high，且无 provider/auth/base_url/secret/fallback。
+4. 只读检查 ~/.codex/agents 下两文件：均无 model/effort/provider/auth/base_url/secret/fallback，避免覆盖 active preset。
 5. 将 receipt 的 source revision、source/target hash 和 backup path 写进本 run metadata。
 
 成功仅为 filesystem_projected；不得在此时报告 host_loaded 或 live acceptance。
@@ -218,7 +218,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 1. 在独立 fresh Codex session 运行 S31-live-derived；需要显式委派意图时使用矩阵中对应的 runner dispatch 请求，保存实际原文，不把改写请求计作原样通过。
 2. parent 必须用确定性的 `ExecutionAdmission` helper 生成并重验证 schema-v2 `execution_admission` 与 `execution_plan`；两者绑定原始请求、完整 router validation、唯一 selected entry、validated closure、entrypoint/package hash、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop、同一 admission id 与 `run_once` action。raw router JSON 或手写 prose contract 不算 admission。
-3. 记录 cold-capability-runner child id、Terra/high、completed 事件、输入/输出 evidence reference。
+3. 记录 cold-capability-runner child id、实际 model/effort、active preset 与所选槽位、completed 事件、输入/输出 evidence reference。
 4. 最后用文件变更/工具 event 核对实际 write set 为空。任何写入、外部调用、第二候选或 contract mismatch 都是 fail。
 
 ### 6.4 可见直达对照
@@ -258,7 +258,7 @@ Skill 可见、目录存在或最终文本声称“已校验”均不足；必�
 | 发现 | 分类 | 当次行动 | 不要做什么 |
 | --- | --- | --- | --- |
 | catalog invalid、junction physical counterpart 缺失 | deterministic router failure | 保留 receipt，复现 focused test，定位 path/hash | 取消 reparse/containment |
-| model/effort 非 Terra/high | deployment mismatch | 保存 child/config evidence，检查 source->target hash | 改 global default 或声称历史数据通过 |
+| model/effort 不属于 active preset 所选槽位 | deployment mismatch | 保存 child/config evidence，检查 preset/slot 与 spawn 参数 | 改 global default 或声称历史数据通过 |
 | 503/auth/provider | host availability blocker | 记录 host-specific fail，停止当次 live acceptance | 重启/改 auth/provider 或将失败改为 not_applicable |
 | child 不可观测 | observability blocker | assertion=not_observable，保留较低边界 | 由 parent prose 推断 child |
 | multi-turn 被摘要 | contract violation | assertion=fail，检查 parent/bridge contract | 让 runner 给一次性结论 |

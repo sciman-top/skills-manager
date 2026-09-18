@@ -76,7 +76,7 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 | 阶段 | 名称 | 主要问题 | 进入条件 | 退出条件 | 允许声明的最高边界 |
 | --- | --- | --- | --- | --- | --- |
 | CSR-R0 | Deterministic baseline | 跨根 cold catalog 是否仍可 fail-closed 地发现与校验 | 当前 router 基线存在 | CrossRepo 与 Router focused tests 通过，Junction 正/负例保留 | `repo_verified` |
-| CSR-R1 | Bridge model determinism | bridge 是否意外继承不可用的全局 subagent 默认模型 | R0 通过 | 两个 source template 固定 Terra/high；模板测试阻止 provider/auth 字段混入 | `repo_verified` |
+| CSR-R1 | Bridge preset consistency | bridge 是否绕过 active preset 固定到另一模型族 | R0 通过 | 两个 source template 不含 model/effort；模板测试阻止 model/provider/auth 字段混入 | `repo_verified` |
 | CSR-R2 | Receipt 与场景契约 | 是否能区分预期、观测与断言，避免“代行=child 成功” | R1 通过 | tracked matrix、receipt v2 verifier、正负 fixtures 与 runbook 同步 | `repo_verified` |
 | CSR-R3 | Filesystem projection | 受管 template 是否以可回滚方式投影到 Codex agents 根 | R2 已提交且工作树洁净；当前授权允许 host projection | source/target SHA-256、backup paths、source revision 写入 receipt；未改非受管文件 | `filesystem_projected` |
 | CSR-R4 | Fresh Codex native acceptance | Codex 是否真实启动了正确 child 并遵守多轮/只读契约 | R3 收据可复查；fresh Codex 会话可用 | design-griller、runner、visible direct 对照均有可观察事件 | `host_specific_live_accepted` |
@@ -91,18 +91,13 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 - 负例：物理对照不存在、entrypoint hash 漂移、闭包越界、再解析链非允许形态、catalog 过期或 domain 超限时零执行、零候选、明确 finding。
 - 禁止为规避 junction 测试取消 reparse 检查，或把“路径存在”视为可信。
 
-### CSR-R1：原生 bridge 的静态模型确定性
+### CSR-R1：原生 bridge 与 active preset 一致
 
-两份 source template 的配置只能新增以下两个静态字段：
+两份 source template 不得包含 `model` 或 `model_reasoning_effort`。依据官方 OpenAI Subagents 文档，custom-agent 文件中的显式值优先于 spawn 值和 `[agents]` 默认；在 bridge 中硬钉 tuple 会使 Luna/GLM/DeepSeek active preset 仍启动 Terra child，破坏“每次只激活一套 preset”。父代理应按任务性质选择五槽并显式传入该槽 tuple；没有任务专属选择时，child 继承 active preset 的 standard 默认。
 
-    model = "gpt-5.6-terra"
-    model_reasoning_effort = "high"
+`design-griller` 与 `cold-capability-runner` 继续固定工作流、admission、sandbox 和副作用约束。模型/effort 属于 preset 控制面，不属于角色语义；新会话 child 事件仍是 CSR-R4 的独立门槛。
 
-目标是消除 bridge 无意继承 `[agents].default_subagent_model` 的不确定性，而非替换用户的全局默认或修复 provider/auth。依据官方 OpenAI Subagents 文档，custom-agent 文件可设置这两个字段且在文件中显式设置时优先；该规则只影响由对应 custom agent 创建的 child。
-
-`design-griller` 是高判断密度的一题一轮审问角色；`cold-capability-runner` 需要严守闭包、admission 与副作用约束。两者都固定为 Terra/high 是本项目的静态部署决策。它并不承诺 Terra 在任一 provider 上始终可用，故新会话 child 事件仍是 CSR-R4 的独立门槛。
-
-历史 Sol child 成功和 503 均仅用作故障诊断基线：前者证实 runner 过去能 fail-closed 并在完整 admission 下运行，后者说明无 template 钉选时确会解析到 Sol。它们早于本阶段的变更，绝不可充当 Terra/high 的接受证据。
+历史固定 Terra child、Sol child 成功和 503 均仅用作故障诊断基线，不可充当 active preset 路由的接受证据。
 
 ### CSR-R2：可机器校验的语义观测合同
 

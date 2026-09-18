@@ -1,3 +1,4 @@
 {"type":"thread.started","thread_id":"fixture-root"}
 {"type":"item.completed","item":{"id":"discovery","type":"command_execution","command":"pwsh route-capability.ps1 -Query request -AutoDiscover -DomainHint decision","status":"completed","exit_code":0}}
 {"type":"item.completed","item":{"id":"wait","type":"collab_tool_call","tool":"wait","receiver_thread_ids":[],"status":"completed"}}
+{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}
