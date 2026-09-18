@@ -30,6 +30,7 @@
 | 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | ai-coding-workflow 第 2 节；本文 5.3 审查模板 |
 | 缺少 build/test 命令 | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md 第 1 节 entrypoint、C 节最低门禁 |
 | 将输入或工具故障误判为模型推理不足 | 分别检查输入、工具执行、认证、额度、端点与协议；证据不足时不改模型配置 | 本文第 4 节；宿主当前工具输出与官方配置说明 |
+| 全仓灌入上下文、照搬其他仓目录约定 | 从受影响入口追踪调用方、接口定义与已有测试，只为未决问题补读；以目标仓源文件/生成物契约为准 | ai-coding-workflow 的 Scope and depth 与 Resume and capabilities |
 
 ## 3. 宿主元数据预算：观测口径
 
@@ -135,6 +136,20 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 
 同一模型可以完成以上各类任务；模板不要求跨模型交接或自动故障切换。
 
+### 5.4 失败后的有效反馈
+
+```text
+目标行为：<具体操作、输入与预期结果>
+实际行为：<原始错误、相关日志或截图；去除秘密>
+复现条件：<命令/步骤、版本、持续还是偶发>
+已尝试：<改动或假设，以及各自失败证据>
+请沿实际调用路径诊断，区分输入缺失、工具/环境失败与代码错误。
+修复后用原复现验证，并检查一个与该缺陷相关的边界情况。
+保留原需求与测试意图；不以放宽断言、扩大权限或换模型代替诊断。
+```
+
+只填写已知事实，未知项可由执行者调查；这不是额外表单。已有任务提供完整错误时直接使用，不要求用户重复整理。
+
 ## 6. 实践来源（直抓/复核日期）
 
 - Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=/goal+Stop hook 四档验证门禁、/batch、gap-hunting 审查警告；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
@@ -147,6 +162,15 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
 
 2026-09-13 读取原文后采纳的实践：[OpenAI 提示指南](https://learn.chatgpt.com/docs/prompting)用于目标、上下文、边界和验证模板；[ZCode 介绍](https://zcode.z.ai/cn/docs/welcome)与[模型配置](https://zcode.z.ai/cn/docs/configuration)用于区分模型和执行环境；[Aider](https://aider.chat/docs/usage/tips.html)用于相关上下文和小步修改；[Spec Kit](https://github.com/github/spec-kit)与[Superpowers](https://github.com/obra/superpowers)用于需求澄清、系统诊断和验收思路。这里只采纳适用方法，不引入整套框架或安装依赖。
+
+2026-09-18 直接读取以下官方/项目原文后的取舍（方法参考，不构成安装或执行外部代码的授权）：
+
+| 来源 | 采纳到现有能力 | 适用边界 |
+| --- | --- | --- |
+| [OpenAI Best practices](https://developers.openai.com/codex/learn/best-practices/) | 目标、上下文、约束和验收；复杂任务先规划；重复方法进入技能 | 小改动直接执行；MCP 只在补足实际工具/信息缺口时接入 |
+| [智谱 Coding Agent 最佳实践](https://docs.bigmodel.cn/cn/coding-plan/learning-resources/best-practice) | 区分任务、项目与执行环境上下文；实现、验证和审查闭环 | 通用工作流说明不是 ZCode 全部命令或加载行为的证明，宿主细节另查当前文档 |
+| [Aider Repository map](https://aider.chat/docs/repomap.html) | 沿相关符号与调用关系提供上下文，避免全仓全文输入 | 借鉴上下文选择思路；现有搜索和源码读取足够时不新增索引服务 |
+| [Superpowers](https://github.com/obra/superpowers) | 按需借鉴需求澄清、系统诊断与证据优先 | 不默认引入其强制完整流程、逐任务代理或严格 TDD；复杂度须由当前任务收益解释 |
 
 ## 7. 日常执行与反馈
 

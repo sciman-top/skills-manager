@@ -141,7 +141,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 | Claude | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
 | ZCode | 7 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
 
-默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试、审查与收口的薄闭环入口：它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
+默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试与收口的薄闭环入口；纯审查使用 `code-review-and-quality`。它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
 
 ### AI 编码快速用法
 

@@ -8,7 +8,7 @@
 
 ## 2. 用户与任务
 
-主要用户是同时维护多个 Codex/Claude/Gemini 技能来源和 Windows 项目仓库的个人开发者。核心任务：
+主要用户是使用 ChatGPT Desktop/Codex 与 ZCode、按任务选择 GPT/GLM，并维护多个技能来源和 Windows 项目仓库的个人开发者；既有其他宿主适配继续保留。核心任务：
 
 1. 浏览、安装、卸载、更新和锁定技能。
 2. 管理 MCP server 清单及目标配置。

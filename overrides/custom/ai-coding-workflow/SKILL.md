@@ -21,6 +21,11 @@ Minimum proof: evidence sufficient for the changed behavior
 Stop: acceptance of the authorized goal, or a concrete blocker
 ```
 
+Discover files and commands from the user's outcome, reproduction, and
+constraints. Follow the affected entrypoint, callers, and existing checks;
+expand context only for unresolved questions. Check APIs against installed
+definitions or current official docs rather than remembered APIs or old chats.
+
 Choose the lightest depth that fits the evidence:
 
 - **tiny/direct**: clear local work or a reproducible small bug; inspect, change,
@@ -41,6 +46,12 @@ protects required behavior or a real regression. Strict TDD, coverage
 thresholds, full suites, independent reviews, extra fixtures, and extra gates
 are not routine prerequisites; use them when the user, repository contract, or
 affected risk requires them. Never let a skill invent a new gate.
+
+Choose expected results from the requested behavior, including a relevant
+failure or boundary case, before judging the implementation. When fixing a bug,
+use the original reproducer to verify the fix; do not weaken assertions merely
+to obtain a pass. Separate missing inputs, tool/environment failures, and wrong
+reasoning before choosing a new attempt or changing model effort.
 
 Select observation evidence for the changed behavior only (for example, a
 rendered interaction, request-to-effect trace, repeatable projection/rollback,
@@ -64,6 +75,5 @@ capabilities are genuinely insufficient; it is not routine middleware. Load
 specialist methods such as strict TDD or design grilling only when the request,
 contract, or current risk calls for them.
 
-In `skills-manager`, use `src/`, `skills.json`, and `overrides/` as source of
-truth; build/materialize through the existing entrypoint and do not hand-edit
-`skills.ps1`, `agent/`, or runtime reports.
+Use the target repository's source/generated contract and existing entrypoints.
+Do not carry another repository's directory conventions into the current task.
