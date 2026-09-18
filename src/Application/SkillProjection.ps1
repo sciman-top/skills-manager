@@ -112,7 +112,11 @@ function Get-NativeSkillProjectionPackageHash {
 
 function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
     param([string]$Path, [string]$AllowedRoot)
-    $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
+    $root = [IO.Path]::GetFullPath($AllowedRoot)
+    $volumeRoot = [IO.Path]::GetPathRoot($root)
+    if (-not [string]::Equals($root, $volumeRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $root = $root.TrimEnd('\', '/')
+    }
     $cursor = [IO.Path]::GetFullPath($Path)
     if (-not (Test-NativeSkillProjectionPathWithinRoot $cursor $root)) { throw "Native projection path is outside its allowed root: $cursor" }
     while (-not [string]::IsNullOrWhiteSpace($cursor)) {
@@ -130,7 +134,7 @@ function Assert-NativeSkillProjectionPackageTreeHasNoReparse {
     param([Parameter(Mandatory = $true)][string]$Path, [string]$AllowedRoot = '')
 
     $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
-    $boundary = if ([string]::IsNullOrWhiteSpace($AllowedRoot)) { [IO.Path]::GetPathRoot($fullPath) } else { [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/') }
+    $boundary = if ([string]::IsNullOrWhiteSpace($AllowedRoot)) { [IO.Path]::GetPathRoot($fullPath) } else { [IO.Path]::GetFullPath($AllowedRoot) }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor $fullPath $boundary
     if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) { throw "Native projection package root is not a directory: $fullPath" }
 

@@ -33,6 +33,22 @@ Describe 'Native skill projection' {
         $script:nativeProjectionReceipts.Clear()
     }
 
+    It 'keeps a filesystem root absolute when the current directory is on that volume' {
+        $probeRoot = Join-Path $TestDrive 'current-directory'
+        $target = Join-Path $TestDrive 'sibling-target'
+        New-Item -ItemType Directory -Path $probeRoot, $target -Force | Out-Null
+
+        Push-Location -LiteralPath $probeRoot
+        try {
+            {
+                Assert-NativeSkillProjectionPathHasNoReparseAncestor $target ([IO.Path]::GetPathRoot($target))
+            } | Should -Not -Throw
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
     It 'projects complete managed packages without a repository metadata budget planner' {
         $f = New-ProjectionFixture
         $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config

@@ -51,6 +51,60 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         }
     }
 
+    It 'selects the independent preset suite without locked sources in <Mode> mode' -ForEach @(
+        @{ Mode = 'local' }, @{ Mode = 'ci' }
+    ) {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        $module = Join-Path $repo 'src/model-orchestration'
+        New-Item -ItemType Directory -Path $module | Out-Null
+        foreach ($file in @('Set-ModelPreset.ps1', 'Start-ModelSlot.ps1', 'Test-ModelPreset.ps1', 'presets.json', 'README.md', 'AGENTS.md')) {
+            Set-Content -LiteralPath (Join-Path $module $file) -Value '# fixture'
+        }
+        if ($Mode -eq 'ci') {
+            & git -C $repo add .
+            & git -C $repo commit -m 'preset change' *> $null
+        }
+        $r = Invoke-Resolver $repo @{ BaseSha = $base; Mode = $Mode }
+        $r.result.profile | Should -Be 'focused'
+        @($r.result.focused_test_paths).Count | Should -Be 1
+        $r.result.focused_test_paths[0] | Should -Be 'tests/Unit/ModelPreset.Tests.ps1'
+        $r.result.requires_locked_sources | Should -BeFalse
+    }
+
+    It 'keeps preset documentation cheap and mixed runtime changes conservative' {
+        $repo = New-ResolveGateFixture
+        $module = Join-Path $repo 'src/model-orchestration'
+        New-Item -ItemType Directory -Path $module | Out-Null
+        Set-Content -LiteralPath (Join-Path $module 'README.md') -Value '# docs'
+        (Invoke-Resolver $repo).result.profile | Should -Be 'docs'
+        Set-Content -LiteralPath (Join-Path $module 'presets.json') -Value '{}'
+        Add-Content -LiteralPath (Join-Path $repo 'src/Core.ps1') -Value '# changed'
+        $r = (Invoke-Resolver $repo).result
+        $r.profile | Should -Be 'focused'
+        $r.focused_test_paths | Should -Contain 'tests/Unit/ModelPreset.Tests.ps1'
+        $r.focused_test_paths | Should -Contain 'tests/Unit/Core.Tests.ps1'
+        Set-Content -LiteralPath (Join-Path $module 'Unknown.ps1') -Value '# unmapped'
+        (Invoke-Resolver $repo).result.profile | Should -Be 'full'
+    }
+
+    It 'maps the shared native projection seam to its affected behavior suites' {
+        $repo = New-ResolveGateFixture
+        $path = Join-Path $repo 'src/Application/SkillProjection.ps1'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) | Out-Null
+        Set-Content -LiteralPath $path -Value '# projection seam'
+
+        $r = (Invoke-Resolver $repo).result
+
+        $r.profile | Should -Be 'focused'
+        @($r.focused_test_paths | Sort-Object) | Should -Be @(
+            'tests/Unit/NativeAgentBridge.Tests.ps1',
+            'tests/Unit/NativeSkillProjection.Tests.ps1',
+            'tests/Unit/SkillProjection.Tests.ps1',
+            'tests/Unit/SkillProjectionProfiles.Tests.ps1'
+        )
+    }
+
     It 'classifies docs-only tracked changes as docs' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

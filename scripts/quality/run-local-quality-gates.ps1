@@ -116,7 +116,13 @@ try {
     }
     # Local builds regenerate the bundle; CI checks the submitted bytes before tests.
     # AllowDirtyWorktree remains accepted for existing callers.
-    Invoke-QualityGate 'build' { & .\build.ps1 -Check:($CheckGenerated -or $docsSupplemented) }
+    # The independent preset suite uses disposable host roots and never consumes
+    # the main CLI bundle. Mixed selections and full still validate that bundle.
+    $modelPresetOnly = $Profile -eq 'focused' -and $Verifier.Count -eq 0 -and $TestPath.Count -eq 1 -and
+        $TestPath[0].Replace('\', '/') -eq 'tests/Unit/ModelPreset.Tests.ps1'
+    if (-not $modelPresetOnly) {
+        Invoke-QualityGate 'build' { & .\build.ps1 -Check:($CheckGenerated -or $docsSupplemented) }
+    }
     if ($Profile -eq 'focused') {
         if ($TestPath.Count -gt 0 -and $TestName.Count -gt 0) {
             Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestPath $TestPath -TestName $TestName }
@@ -138,8 +144,8 @@ try {
         @()
     }
     else {
-        # 'mor' stays explicit-only via -Verifier: design-only MOR (MOR-000)
-        # carries no automatic gate until implementation is admitted.
+        # 'mor' validates the optional design tuple matrix. Implemented preset
+        # behavior is covered by ModelPreset.Tests.ps1 in focused/full tests.
         @('lock', 'integrity', 'config', 'scheduler')
     }
     foreach ($verifier in $selectedVerifiers) {

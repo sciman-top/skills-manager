@@ -163,6 +163,8 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 ## 5. 构建与验证
 
+独立 preset 工具不消费主 CLI bundle：其源码、配置和自测映射到 `tests/Unit/ModelPreset.Tests.ps1`，复用既有隔离宿主测试。preset-only focused 不构建主 CLI、不物化锁定技能；混合变更保留对应验证，full 包含 preset 行为测试。`-Verifier mor` 只检查可选设计矩阵，不承担实现验收。
+
 验证顺序为 `build -> test -> contract/invariant -> hotspot`：
 
 - build：生成 bundle 与 agent tree

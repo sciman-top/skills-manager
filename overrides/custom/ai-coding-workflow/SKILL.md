@@ -42,6 +42,12 @@ thresholds, full suites, independent reviews, extra fixtures, and extra gates
 are not routine prerequisites; use them when the user, repository contract, or
 affected risk requires them. Never let a skill invent a new gate.
 
+Before expanding proof, name the affected behavior the current evidence does
+not cover. Reuse passed evidence while its inputs and environment remain
+applicable; after a change, rerun only invalidated checks. A review suggestion
+is actionable only when tied to the requested outcome or a demonstrated
+failure. Do not turn optional improvements into prerequisites for completion.
+
 Select observation evidence for the changed behavior only (for example, a
 rendered interaction, request-to-effect trace, repeatable projection/rollback,
 or migration compatibility check). Project type alone does not authorize live
