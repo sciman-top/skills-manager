@@ -6,7 +6,7 @@ description: Complete implementation and maintenance tasks with repository-groun
 # AI coding workflow
 
 Use this resident entry point to complete the user's authorized coding outcome
-with the host's native planning, tools, and execution capabilities. Add a step
+with host-native planning and execution. Add a step
 only when it resolves current uncertainty or protects affected behavior.
 
 ## Scope and depth
