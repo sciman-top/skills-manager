@@ -8,6 +8,8 @@ Each preset declares host facets (`hosts`). A `codex` facet projects a complete 
 
 Use the controlled slot entrypoint for single-preset execution. It freezes the selected preset and exact slot route, disables native subagent delegation, accepts no extra model/config flags, and never retries under another preset:
 
+This is an opt-in execution constraint, not the default engineering workflow. Use the ordinary host entrypoint for tasks needing native delegation or a named specialist bridge. A strict slot cannot satisfy a skill contract that requires `design-griller` or `cold-capability-runner`: report that incompatibility before preparing admission files; do not weaken the skill contract, re-enable delegation, or silently change the preset. Existing bridge model pins are separate from preset slots and are not overridden by this tool. Model availability must come from the current execution surface, not a previously successful projection.
+
 ```powershell
 pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -WorkingDirectory D:/CODE/skills-manager -Prompt 'Your bounded task'
 pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Preset deepseek_flash_only -Slot standard_review -WorkingDirectory D:/CODE/skills-manager -Prompt 'Your review task'
@@ -42,3 +44,5 @@ claude plugin validate "$env:USERPROFILE/.claude/agents"
 ```
 
 Configuration parsing, fresh host loading, controlled requests, and natural user acceptance are separate evidence layers. The source tests do not establish live model availability or hard isolation.
+
+The shared local/CI classifier maps changes to the four preset source/config/test files to `tests/Unit/ModelPreset.Tests.ps1`, which invokes the existing disposable-host test script. Preset-only proof skips the unrelated main CLI build and locked skill materialization. Mixed changes retain their applicable checks; full tests also include this suite. The optional `-Verifier mor` checks the design tuple matrix and is not a substitute for preset behavior tests.

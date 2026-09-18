@@ -1,8 +1,9 @@
 #!/usr/bin/env pwsh
 # Validates docs/decision/MOR-090-tuple-matrix.json (canonical MOR-090 tuple contract).
 # Static doc validator: zero network, zero host write. Explicit-only entry:
-# MOR is design-only (MOR-000), so this is NOT wired into default local/CI
-# gates; run it manually or via -Verifier mor when touching MOR contracts.
+# This optional design matrix is separate from the implemented preset tool.
+# Run explicitly via -Verifier mor when touching matrix contracts; preset
+# behavior runs through tests/Unit/ModelPreset.Tests.ps1 in focused/full gates.
 # Usage: pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1
 #        [-Path <alternate matrix json>]  (tests use -Path for negative fixtures)
 param([string]$Path = '')

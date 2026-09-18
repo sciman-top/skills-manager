@@ -39,6 +39,25 @@ Describe 'Local quality gate -Profile auto routing' {
         }
     }
 
+    It 'runs preset-only proof without the main bundle and propagates failure' {
+        $repo = New-AutoGateFixture
+        New-Item -ItemType Directory -Path (Join-Path $repo 'src/model-orchestration'), (Join-Path $repo 'tests') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'tests/run.ps1') -Value @'
+param([string[]]$TestPath)
+if ($TestPath.Count -ne 1 -or $TestPath[0] -ne 'tests/Unit/ModelPreset.Tests.ps1') { throw 'Wrong preset proof' }
+Write-Host 'preset-proof-executed'
+$global:LASTEXITCODE = 0
+'@
+        & git -C $repo add .
+        & git -C $repo commit -m 'runner fixture' *> $null
+        Set-Content -LiteralPath (Join-Path $repo 'src/model-orchestration/presets.json') -Value '{}'
+        $out = Invoke-TempGate $repo @{}
+        ($out | Out-String) | Should -Match 'preset-proof-executed'
+        ($out | Out-String) | Should -Not -Match '== build =='
+        Set-Content -LiteralPath (Join-Path $repo 'tests/run.ps1') -Value '$global:LASTEXITCODE = 9'
+        { Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('tests/Unit/ModelPreset.Tests.ps1') } *> $null } | Should -Throw '*exit=9*'
+    }
+
     It 'resolves a docs-only worktree change to docs via -ResolveOnly' {
         $repo = New-AutoGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

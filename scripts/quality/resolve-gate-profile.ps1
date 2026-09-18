@@ -15,12 +15,16 @@ param(
 $riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
 $rulePath = '^(?:rules/global/(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS)\.md|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
 $sourcePath = '^(src/|tests/Unit/)'
-$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
+$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|src/model-orchestration/(?:README|AGENTS)\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
 $skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml)$'
 $skillsConfigPath = '^skills\.json$'
 # Exact source/script behavior coverage, not a smoke-test substitute.
 # Unmapped paths retain their risk classification or full fallback.
 $sourceTests = @{
+    'src/model-orchestration/Set-ModelPreset.ps1' = @('ModelPreset')
+    'src/model-orchestration/Start-ModelSlot.ps1' = @('ModelPreset')
+    'src/model-orchestration/Test-ModelPreset.ps1' = @('ModelPreset')
+    'src/model-orchestration/presets.json' = @('ModelPreset')
     'src/Core.ps1' = @('Core', 'InfrastructureSeam', 'ReadOnlyCli')
     'src/Commands/Migration.ps1' = @('Migration')
     'src/Commands/ReleaseUpdate.ps1' = @('ReleaseUpdate', 'ReleaseUpdateWorker')
@@ -39,6 +43,7 @@ $sourceTests = @{
     'src/Application/SkillCatalogCompiler.ps1' = @('SkillCatalogCompiler')
     'src/Application/SkillEligibilityPolicy.ps1' = @('SkillEligibilityPolicy')
     'src/Application/SkillProjectionPlanning.ps1' = @('SkillProjection', 'SkillProjectionProfiles')
+    'src/Application/SkillProjection.ps1' = @('SkillProjection', 'NativeSkillProjection', 'NativeAgentBridge', 'SkillProjectionProfiles')
     'src/Application/SkillSupply.ps1' = @('AgentBuild', 'SkillPackageSafety')
     'src/Commands/AuditTargets.Args.ps1' = @('AuditTargets')
     'src/Commands/AuditTargets.Snapshot.ps1' = @('AuditTargets', 'AuditTargetsHardening')
@@ -63,7 +68,7 @@ $skillFocusedTests = @(
 )
 # Only suites known to use source files and disposable fixtures can skip source
 # materialization. New or unreviewed suites retain the conservative CI setup.
-$assetFreeTests = @('AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
+$assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
@@ -225,7 +230,7 @@ if ($docsOnly) {
     exit 0
 }
 
- $sourceChanged = @($changed | Where-Object { $sourceRegex.IsMatch($_) -or $sourceTests.ContainsKey($_) })
+ $sourceChanged = @($changed | Where-Object { ($sourceRegex.IsMatch($_) -and -not $docsRegex.IsMatch($_)) -or $sourceTests.ContainsKey($_) })
  $skillFocusedChanged = @($changed | Where-Object { $skillFocusedRegex.IsMatch($_) })
  $configFocusedChanged = @($changed | Where-Object { $skillsConfigRegex.IsMatch($_) })
  $ruleChanged = @($changed | Where-Object { $ruleRegex.IsMatch($_) })

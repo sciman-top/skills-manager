@@ -82,6 +82,17 @@ Every response also includes a read-only `routing_receipt`. It contains a SHA-25
 
 ## Native cold-capability handoff
 
+Before constructing admission/plan or handoff files, compare the selected
+execution contract with this session's actual delegation permissions and
+available agent types. An explicit no-delegation mode or pinned-slot policy
+that excludes the required specialist is a concrete incompatibility: report
+it without preparing artifacts, spawning a substitute, changing models, or
+weakening an interactive contract. This is distinct from a host lacking a
+native spawn tool. A configured role or old projection receipt does not prove
+its model is currently available; after an explicit model-unavailable error,
+do not retry the same role. Use parent execution only when the selected
+contract and current instructions permit it; otherwise report the blocker.
+
 For `host_admission_required`, loading and execution are separate decisions.
 Read only the validated closure first. The catalog's `unknown` describes an
 unclassified workflow, not missing user permission. Inspect the actual skill

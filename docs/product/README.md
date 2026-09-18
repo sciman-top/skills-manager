@@ -6,9 +6,9 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Architecture](skills-manager-vnext-architecture.md)：模块、接口、数据流、真值与删除原则。
 - [Cold-skill routing roadmap](cold-skill-routing-roadmap.md)：冷目录发现、原生执行 bridge、host 验收与专项工件验收的阶段、依赖和退出条件。**当前状态：engineering-frozen（core-lean 常态主发现路径，不再扩展演进，见文内 §0）。** 已闭卷的 CSR-100–170 实施计划见 `docs/archive/`。
 
-跨宿主模型编排是一个**独立 runtime** 的 design-only 产品线，不改变 skills-manager 的模型/provider/auth 边界：
+模型能力分为两部分：已实现的[独立 preset 工具](../../src/model-orchestration/README.md)负责显式配置与受控启动；完整跨宿主编排、自动故障切换仍是 deferred design。独立工具不进入技能/MCP 主 CLI，不作为日常编码的必经入口：
 
-- [MOR-000 决议（暂缓实现）](../decision/MOR-000-brief.md)：runtime 归属、首期 host/preset、identity binding、bridge pin 优先级与 ingress 合同；2026-08-28 决定暂不实现，未来启动按 §3 基线。
+- [MOR-000 边界决议](../decision/MOR-000-brief.md)：§4 区分已实现的独立 preset 工具与仍暂缓的完整控制面；§3 仅为后者的历史设计输入。
 - [MOR-001 自动故障切换模拟准入规格](../decision/MOR-001-automatic-failover-simulation.md)：未来独立 failover module 的离线 scenario、失败分类、熔断/恢复与 receipt 合同；不改变当前人工切换禁令，也不构成 runtime 或真实探测授权。
 - [MOR-090 静态证据包](../decision/MOR-090-static-adapter-evidence.md)：Codex/ZCode/Claude/DeepSeek 的一手 model/effort/field 事实、来源与未决项，是未来 Adapter fixture 的唯一输入底稿。
 - MOR PRD 与 Architecture（约 800 行 design-only 全文）已随 2026-09-15 精简归档至 `docs/archive/`；Hermes 集成三部曲（R0–R4 已收口）与 2026-08 加固任务卡同批归档，见 [docs/archive/README.md](../archive/README.md)。
