@@ -23,7 +23,7 @@ function Get-RuleDiscovery {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [string]$CurrentDirectory = $RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity')][string]$HostName,
         [string]$UserRuleRoot,
         [string[]]$FallbackNames = @(),
         [int]$MaxCombinedBytes = 32768
@@ -36,14 +36,14 @@ function Get-RuleDiscovery {
     $precedence = 0
     if (-not [string]::IsNullOrWhiteSpace($UserRuleRoot)) {
         $user = [System.IO.Path]::GetFullPath($UserRuleRoot)
-        $globalNames = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } else { @('CLAUDE.md') }
+        $globalNames = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') { @('GEMINI.md') } else { @('CLAUDE.md') }
         foreach ($name in $globalNames) {
             $path = Join-Path $user $name
             $exists = [System.IO.File]::Exists($path)
             $nonEmpty = $exists -and (Test-RuleDiscoveryNonEmptyFile $path)
             $reason = if (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'candidate' }
             $candidates.Add([pscustomobject]@{ path = $path; scope = 'global'; exists = $exists; selected = $false; reason = $reason }) | Out-Null
-            if ($nonEmpty) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -eq 'claude') { 'platform_delta' } else { 'common' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_non_empty_candidate'; $precedence++; break }
+            if ($nonEmpty) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -in @('claude', 'antigravity')) { 'platform_delta' } else { 'common' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_non_empty_candidate'; $precedence++; break }
         }
     }
     $dirs = New-Object System.Collections.Generic.List[string]
@@ -55,9 +55,12 @@ function Get-RuleDiscovery {
         if ($null -eq $parent -or -not (Test-RuleDiscoveryPathWithin $parent.FullName $repo)) { throw 'Unable to construct a bounded repository rule chain.' }
         $cursor = $parent.FullName
     }
-    $projectDirs = if ($HostName -eq 'zcode') { @($repo) } else { @($dirs) }
+    $projectDirs = if ($HostName -in @('zcode', 'antigravity')) { @($repo) } else { @($dirs) }
     foreach ($dir in $projectDirs) {
-        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } else { @('CLAUDE.md') }
+        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') {
+            $ruleDir = Join-Path $dir '.agents\rules'
+            if ([System.IO.Directory]::Exists($ruleDir)) { @(Get-ChildItem -LiteralPath $ruleDir -Filter '*.md' -File | Sort-Object Name | ForEach-Object { Join-Path '.agents\rules' $_.Name }) } else { @() }
+        } else { @('CLAUDE.md', 'AGENTS.md') }
         $selected = $false
         foreach ($name in $names) {
             $path = Join-Path $dir $name
@@ -67,7 +70,7 @@ function Get-RuleDiscovery {
             $candidate = [pscustomobject]@{ path = $path; scope = $(if ($dir -eq $repo) { 'repo' } else { 'subtree' }); exists = $exists; selected = $false; reason = $reason }
             if ($nonEmpty -and -not $selected) {
                 $scope = if ($name -match 'override') { 'override' } elseif ($dir -eq $repo) { 'repo' } else { 'subtree' }
-                $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -eq 'claude') { 'platform_delta' } else { 'project_action' })
+                $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -in @('claude', 'antigravity')) { 'platform_delta' } else { 'project_action' })
                 if ($HostName -eq 'claude') { $document.discovery_state = 'inferred'; $document.precedence = $null }
                 $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'claude') { 'candidate_precedence_not_verified' } else { 'first_non_empty_candidate' }); $selected = $true; $precedence++
             }

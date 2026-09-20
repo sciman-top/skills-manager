@@ -7,21 +7,24 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Commands\GlobalRules.ps1')
     $script:globalRuleOriginalWriteBytes = ${function:Write-BytesAtomic}
 
-    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '') {
-        $dirs = @((Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),(Join-Path $Fixture 'rules\global\zcode'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection'))
+    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '', [string]$Antigravity = '') {
+        $dirs = @((Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),(Join-Path $Fixture 'rules\global\zcode'),(Join-Path $Fixture 'rules\global\antigravity'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection'))
         if (-not [string]::IsNullOrWhiteSpace($ZCode)) { $dirs += $ZCode }
+        if (-not [string]::IsNullOrWhiteSpace($Antigravity)) { $dirs += $Antigravity }
         New-Item -ItemType Directory -Path $dirs -Force|Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\codex\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\codex\AGENTS.md')
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\claude\CLAUDE.md') -Destination (Join-Path $Fixture 'rules\global\claude\CLAUDE.md')
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\zcode\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\zcode\AGENTS.md')
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\antigravity\GEMINI.md') -Destination (Join-Path $Fixture 'rules\global\antigravity\GEMINI.md')
         Set-Content -LiteralPath (Join-Path $Codex 'AGENTS.md') -Value '# old codex' -Encoding utf8NoBOM -NoNewline
         Set-Content -LiteralPath (Join-Path $Claude 'CLAUDE.md') -Value '# old claude' -Encoding utf8NoBOM -NoNewline
         if (-not [string]::IsNullOrWhiteSpace($ZCode)) { Set-Content -LiteralPath (Join-Path $ZCode 'AGENTS.md') -Value '# old zcode' -Encoding utf8NoBOM -NoNewline }
+        if (-not [string]::IsNullOrWhiteSpace($Antigravity)) { Set-Content -LiteralPath (Join-Path $Antigravity 'GEMINI.md') -Value '# old antigravity' -Encoding utf8NoBOM -NoNewline }
     }
 
-    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '') {
+    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '', [string]$Antigravity = '') {
         $backupRoot=Join-Path $Fixture 'reports\global-rule-projection\backups'
-        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode
+        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode -AntigravityUserRoot $Antigravity
     }
 }
 
@@ -105,6 +108,19 @@ Describe 'Global rule source contract' {
         [IO.File]::ReadAllText((Join-Path $zcode 'AGENTS.md')) | Should -Match 'ZCode 平台差异'
         (Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $receipt.rollback.required_token -RepoRoot $fixture -CodexUserRoot $codex -ClaudeUserRoot $claude -BackupRoot (Join-Path $fixture 'reports\global-rule-projection\backups') -ZCodeUserRoot $zcode).pass | Should -BeTrue
         [IO.File]::ReadAllText((Join-Path $zcode 'AGENTS.md')) | Should -Be '# old zcode'
+    }
+
+    It 'adds Antigravity as a plan-bound action only when its user root is explicitly present' {
+        $antigravity=Join-Path $TestDrive 'antigravity';Copy-GlobalRuleFixture $fixture $codex $claude '' $antigravity
+        $plan=New-GlobalRuleProjectionPlan $fixture $codex $claude '' $antigravity
+
+        @($plan.actions.id | Sort-Object) | Should -Be @('antigravity','claude','codex')
+        $receiptPath=Join-Path $fixture 'reports\global-rule-projection\antigravity-receipt.json'
+        $receipt=Invoke-TestApply $plan $fixture $codex $claude $receiptPath -Antigravity $antigravity
+        $receipt.writes | Should -Be 3
+        [IO.File]::ReadAllText((Join-Path $antigravity 'GEMINI.md')) | Should -Match 'Antigravity 平台差异'
+        (Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $receipt.rollback.required_token -RepoRoot $fixture -CodexUserRoot $codex -ClaudeUserRoot $claude -BackupRoot (Join-Path $fixture 'reports\global-rule-projection\backups') -AntigravityUserRoot $antigravity).pass | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $antigravity 'GEMINI.md')) | Should -Be '# old antigravity'
     }
 }
 
@@ -306,6 +322,7 @@ Describe 'Global rule CLI boundaries' {
             $parsed=Parse-GlobalRuleOptions @('--codex-user-root',$claude) check;$parsed.codex_user_root|Should -Be $claude;$parsed.codex_user_root_source|Should -Be 'cli'
             $parsed=Parse-GlobalRuleOptions @('--claude-user-root',$codex) check;$parsed.claude_user_root|Should -Be $codex;$parsed.claude_user_root_source|Should -Be 'cli'
             $parsed=Parse-GlobalRuleOptions @('--zcode-user-root',$codex) check;$parsed.zcode_user_root|Should -Be $codex;$parsed.zcode_user_root_source|Should -Be 'cli'
+            $parsed=Parse-GlobalRuleOptions @('--antigravity-user-root',$codex) check;$parsed.antigravity_user_root|Should -Be $codex;$parsed.antigravity_user_root_source|Should -Be 'cli'
         }finally{$env:CODEX_HOME=$oldCodex;$env:CLAUDE_CONFIG_DIR=$oldClaude}
     }
 
@@ -314,6 +331,13 @@ Describe 'Global rule CLI boundaries' {
         {
             Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude,'--zcode-user-root',$missing)
         } | Should -Throw '*ZCode user root does not exist or is not a directory*'
+    }
+
+    It 'rejects a missing explicit Antigravity root instead of treating it as disabled' {
+        $missing = Join-Path $TestDrive 'missing-antigravity-root'
+        {
+            Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude,'--antigravity-user-root',$missing)
+        } | Should -Throw '*Antigravity user root does not exist or is not a directory*'
     }
 
     It 'rejects control outputs outside the dedicated reports directory' {

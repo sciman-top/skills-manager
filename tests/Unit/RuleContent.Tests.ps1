@@ -12,7 +12,7 @@ Describe 'Checked-in rule content' {
         $result = Test-GlobalRuleSourceFamily $repoRoot $codex $claude
         $result.pass | Should -BeTrue -Because ($result.findings.code -join ', ')
         @($result.observations).Count | Should -Be 0
-        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md) -join "`n") | Should -Match 'eol: lf'
+        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md rules/global/antigravity/GEMINI.md) -join "`n") | Should -Match 'eol: lf'
     }
 
     It 'retains the cold-routing execution and observation boundaries' {
@@ -22,6 +22,10 @@ Describe 'Checked-in rule content' {
                 $text | Should -Match ([regex]::Escape($contract))
             }
         }
+        $antigravity = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md'))
+        $antigravity | Should -Match 'Antigravity 平台差异'
+        $antigravity | Should -Match '\.agents/rules/'
+        $antigravity | Should -Match '@\.\./\.\./AGENTS\.md'
     }
 
     It 'keeps the project contract bounded and its Claude wrapper canonical' {

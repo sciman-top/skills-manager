@@ -183,7 +183,7 @@ verify drift
 
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
-        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 4
+        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 5
         @($report.reference_basis | Where-Object source -eq 'https://agents.md/').Count | Should -Be 1
         @($report.reference_basis | Where-Object source -match '^[A-Za-z]:\\').Count | Should -Be 0
     }
@@ -295,7 +295,7 @@ verify drift
         @($result.registry.unregistered_paths).Count | Should -Be 0
     }
 
-    It 'builds project contract fact coverage and bounded patch candidates' {
+    It 'treats Claude project instructions as optional when AGENTS.md is present' {
         $f = New-RuleEstateFixture
         Remove-Item -LiteralPath (Join-Path $f.workspace 'repo-b\CLAUDE.md')
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
@@ -304,8 +304,8 @@ verify drift
         $report.inventory.registry.supplied | Should -Be $false
         @($report.findings.code) | Should -Not -Contain 'target_registry_drift'
         $report.summary.contract_fact_covered_count | Should -Be 10
-        $report.summary.patch_candidate_count | Should -Be 1
-        $report.patch_candidates[0].target_path | Should -Match 'repo-b\\CLAUDE\.md$'
+        $report.summary.patch_candidate_count | Should -Be 0
+        @($report.findings.code) | Should -Not -Contain 'project_claude_wrapper_missing'
         $report.writes | Should -Be 0
         $report.provider_calls | Should -Be 0
         $report.host_loaded | Should -Be 'not_run'
@@ -462,7 +462,7 @@ verify drift
         @($report.findings.code) | Should -Contain 'project_global_release_mismatch'
     }
 
-    It 'reports missing project contract sections and an invalid Claude wrapper' {
+    It 'reports missing project contract sections without requiring a Claude wrapper' {
         $f = New-RuleEstateFixture
         $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
         $text = [regex]::Replace([IO.File]::ReadAllText($agents), '(?ms)^## C\..*?(?=^## D\.)', '')
@@ -473,7 +473,7 @@ verify drift
         $repo = @($report.targets | Where-Object name -eq 'repo-a')[0]
 
         @($repo.findings.code) | Should -Contain 'project_contract_section_missing'
-        @($repo.findings.code) | Should -Contain 'project_claude_wrapper_first_line_mismatch'
+        @($repo.findings.code) | Should -Not -Contain 'project_claude_wrapper_first_line_mismatch'
         $report.structural_pass | Should -Be $false
     }
 }

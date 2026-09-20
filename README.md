@@ -199,9 +199,9 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 全局 Codex/Claude/ZCode 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
 
 ```powershell
-.\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
-.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --json
-.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --resume --json
+.\skills.ps1 global-rules-plan --antigravity-user-root "$env:USERPROFILE\.gemini" --out .\reports\global-rule-projection\plan.json --json
+.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --antigravity-user-root "$env:USERPROFILE\.gemini" --json
+.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --antigravity-user-root "$env:USERPROFILE\.gemini" --resume --json
 .\skills.ps1 global-rules-check --json
 .\skills.ps1 global-rules-rollback --receipt .\reports\global-rule-projection\receipt.json --token <receipt.rollback.required_token> --json
 ```
@@ -212,7 +212,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会按 ZCode profile 把受管 Skills 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
 
-审查默认只读。`rule-estate-audit` 默认排除 `external`、`docs` 与 `文档`，并在已配置的 ZCode 用户目录中同时呈现三宿主的静态加载面；ZCode 缺少受管用户规则会 fail closed。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
+审查默认只读。`rule-estate-audit` 默认排除 `external`、`docs` 与 `文档`，并在已配置的 ZCode/Antigravity 用户目录中同时呈现四宿主的静态加载面；缺少受管用户规则会 fail closed。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode/Antigravity 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
 
 ### 技能投影与 fallback
 

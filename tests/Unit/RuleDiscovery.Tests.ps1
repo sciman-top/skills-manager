@@ -83,6 +83,20 @@ function New-RuleFixture([string]$Name) {
         @($result.candidates | Where-Object { $_.path -match 'src\\feature\\AGENTS\.md$' }).Count | Should -Be 0
     }
 
+    It 'models Antigravity as user GEMINI plus workspace .agents/rules files' {
+        $fixture = New-RuleFixture 'antigravity'
+        Set-Content -LiteralPath (Join-Path $fixture.user 'GEMINI.md') -Value '# global antigravity' -Encoding UTF8
+        $ruleDir = Join-Path $fixture.repo '.agents\rules'
+        New-Item -ItemType Directory -Path $ruleDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $ruleDir '00-project.md') -Value '@../../AGENTS.md' -Encoding UTF8
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName antigravity -UserRuleRoot $fixture.user
+
+        @($result.documents).Count | Should -Be 2
+        $result.documents[0].path | Should -Match 'GEMINI\.md$'
+        $result.documents[1].path | Should -Match '\.agents\\rules\\00-project\.md$'
+        @($result.candidates | Where-Object { $_.path -match 'src\\feature' }).Count | Should -Be 0
+    }
+
     It 'records budget truncation without claiming files were loaded' {
         $fixture = New-RuleFixture 'budget'
         $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName codex -UserRuleRoot $fixture.user -MaxCombinedBytes 1

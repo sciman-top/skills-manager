@@ -3,15 +3,17 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
     $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $userHome '.codex' }
     $claudeRoot = if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $userHome '.claude' }
     $zcodeRoot = Join-Path $userHome '.zcode'
+    $antigravityDefaultRoot = Join-Path $userHome '.gemini'
+    $antigravityRoot = if (Test-Path -LiteralPath (Join-Path $antigravityDefaultRoot 'GEMINI.md') -PathType Leaf) { $antigravityDefaultRoot } else { '' }
     $result = [ordered]@{
         workspace_root = $null; exclude_names = @('external', 'docs', '文档'); registry_path = $null
-        codex_user_root = $codexRoot; claude_user_root = $claudeRoot; zcode_user_root = $zcodeRoot
+        codex_user_root = $codexRoot; claude_user_root = $claudeRoot; zcode_user_root = $zcodeRoot; antigravity_user_root = $antigravityRoot
         max_targets = 64; out_path = $null; json = $false
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         if ($token -eq '--json') { $result.json = $true; continue }
-        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
+        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--antigravity-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
         if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
         $i++; $value = [string]$Tokens[$i]
         switch ($token) {
@@ -21,6 +23,7 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
             '--codex-user-root' { $result.codex_user_root = $value }
             '--claude-user-root' { $result.claude_user_root = $value }
             '--zcode-user-root' { $result.zcode_user_root = $value }
+            '--antigravity-user-root' { $result.antigravity_user_root = $value }
             '--max-targets' { $result.max_targets = [int]$value }
             '--out' { $result.out_path = $value }
         }
@@ -38,7 +41,7 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         $registry = [System.IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
         $registryTargets = @($registry.targets)
     }
-    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets
+    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets -AntigravityUserRoot $options.antigravity_user_root
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass
     $exitCode = if ($pass) { 0 } else { 2 }
@@ -48,11 +51,11 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
     if ($reportRequested) {
-        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path) })
+        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path, [string]$_.antigravity_rule_path) })
         if (-not [string]::IsNullOrWhiteSpace([string]$options.registry_path)) { $protected += [System.IO.Path]::GetFullPath([string]$options.registry_path) }
         $outPath = Resolve-RuleEstateControlOutput ([string]$options.out_path) ([string]$options.workspace_root) $protected
         foreach ($target in @($report.inventory.targets)) {
-            if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
+            if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.antigravity_rule_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
         }
         Write-Utf8FileAtomic -Path $outPath -Content $json
     }
