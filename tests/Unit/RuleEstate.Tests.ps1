@@ -58,7 +58,7 @@ Build, test, contract and hotspot evidence use the repository verifier; rollback
             Set-Content -LiteralPath (Join-Path $workspace "$name\CLAUDE.md") -Value '@AGENTS.md' -Encoding UTF8
         }
         $fixtureId = [guid]::NewGuid().ToString('N')
-        $codex = Join-Path $TestDrive ('codex-' + $fixtureId); $claude = Join-Path $TestDrive ('claude-' + $fixtureId); $zcode = Join-Path $TestDrive ('zcode-' + $fixtureId); New-Item -ItemType Directory -Path $codex,$claude,$zcode -Force | Out-Null
+        $codex = Join-Path $TestDrive ('codex-' + $fixtureId); $claude = Join-Path $TestDrive ('claude-' + $fixtureId); $zcode = Join-Path $TestDrive ('zcode-' + $fixtureId); $antigravity = Join-Path $TestDrive ('antigravity-' + $fixtureId); New-Item -ItemType Directory -Path $codex,$claude,$zcode -Force | Out-Null
         $common = @'
 **版本**: 9.60
 
@@ -85,7 +85,7 @@ verify drift
         Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value ($common.Replace('host delta', 'codex host delta')) -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value ($common.Replace('host delta', 'claude host delta')) -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $zcode 'AGENTS.md') -Value ($common.Replace('host delta', 'zcode host delta')) -Encoding UTF8
-        return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude; zcode=$zcode }
+        return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude; zcode=$zcode; antigravity=$antigravity }
     }
 }
 
@@ -170,7 +170,7 @@ verify drift
         $text = [regex]::Replace([IO.File]::ReadAllText($codexPath), '(?ms)^## 1\..*?(?=^## A\.)', '')
         [IO.File]::WriteAllText($codexPath, $text)
 
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 2
@@ -238,7 +238,7 @@ verify drift
         [IO.File]::WriteAllText($claudePath, ([IO.File]::ReadAllText($claudePath).Replace('claude host delta', 'codex host delta')))
         [IO.File]::AppendAllText($codexPath, ('x' * 17000))
 
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 2
@@ -348,7 +348,7 @@ verify drift
 
     It 'returns a single JSON envelope and only writes an explicit report' {
         $f = New-RuleEstateFixture; $out = Join-Path $f.workspace 'estate.json'
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--out',$out,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--out',$out,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 0
@@ -436,7 +436,7 @@ verify drift
         if ($LASTEXITCODE -ne 0) { throw 'junction fixture creation failed' }
 
         $out = Join-Path $link 'estate.json'
-        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--out',$out,'--json') } | Should -Throw
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--out',$out,'--json') } | Should -Throw
         Test-Path -LiteralPath (Join-Path $outside 'estate.json') | Should -Be $false
     }
 
@@ -446,7 +446,7 @@ verify drift
         $registryText = '{"targets":[]}'
         [IO.File]::WriteAllText($registryPath, $registryText)
 
-        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--registry',$registryPath,'--out',$registryPath,'--json') } | Should -Throw
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--registry',$registryPath,'--out',$registryPath,'--json') } | Should -Throw
         [IO.File]::ReadAllText($registryPath) | Should -Be $registryText
     }
 
