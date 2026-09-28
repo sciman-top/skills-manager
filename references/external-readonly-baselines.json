@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "external_root": "D:\\CODE\\external",
+  "repos": [
+    {
+      "relative_path": "_shared",
+      "head": "d090a42a74ae2a1e4a68471c8aa4eefeaaa69aba",
+      "origin": null
+    },
+    {
+      "relative_path": "cockpit-tools",
+      "head": "dbe56a1edd07ac9d794c72ea4e6a12d5a3d4eb16",
+      "origin": "https://github.com/sciman-top/cockpit-tools.git"
+    },
+    {
+      "relative_path": "codex-meter",
+      "head": "a4c8873ad35bcb4769d9fee4675671eed0aec333",
+      "origin": "https://github.com/Wangnov/codex-meter.git"
+    }
+  ],
+  "note": "外置根非 manifest 仓的只读基线;refresh 或用户显式提交后由 scripts/lock-external-repos.ps1 重新钉定,不得由 AI 会话更新。"
+}

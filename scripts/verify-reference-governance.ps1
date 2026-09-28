@@ -80,9 +80,67 @@ foreach ($name in $patchNames) {
     if (-not (Test-Path -LiteralPath (Join-Path $root "overrides\patches\$name\SKILL.md") -PathType Leaf)) { Add-Finding "patch provenance points to a missing skill: $name" }
 }
 
+# --- 外置参考仓只读边界:L1 deny-write 锁 + L3 漂移核对 ---
+$externalRoot = 'D:\CODE\external'
+$baselinesPath = Join-Path $root 'references\external-readonly-baselines.json'
+if (-not (Test-Path -LiteralPath $externalRoot -PathType Container)) {
+    Add-Finding "external reference root is missing: $externalRoot"
+}
+else {
+    $denyAces = @(Get-Acl -LiteralPath $externalRoot | Select-Object -ExpandProperty Access |
+        Where-Object { $_.AccessControlType -eq 'Deny' -and -not $_.IsInherited })
+    $currentUser = $env:USERNAME
+    $lockAces = @($denyAces | Where-Object {
+            $id = [string]$_.IdentityReference.Value
+            ($id -eq $currentUser) -or ($id -like "*\$currentUser")
+        })
+    if ($lockAces.Count -eq 0) { Add-Finding "external reference root is not deny-write locked: $externalRoot" }
+
+    $knownRootRepos = @{}
+    if (-not (Test-Path -LiteralPath $baselinesPath)) {
+        Add-Finding "external readonly baselines file is missing: $baselinesPath"
+    }
+    else {
+        try { $baselines = Get-Content -Raw -LiteralPath $baselinesPath -Encoding UTF8 | ConvertFrom-Json }
+        catch { throw "external readonly baselines cannot be parsed: $($_.Exception.Message)" }
+        if ([int]$baselines.schema_version -ne 1) { Add-Finding 'external readonly baselines schema_version must be 1' }
+        if ([string]$baselines.external_root -ne $externalRoot) { Add-Finding "external readonly baselines must use $externalRoot" }
+        foreach ($entry in @($baselines.repos)) {
+            $knownRootRepos[[string]$entry.relative_path] = [string]$entry.head
+        }
+    }
+
+    $externalGitCount = 0
+    foreach ($dir in @(Get-ChildItem -LiteralPath $externalRoot -Directory)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName '.git'))) { continue }
+        $externalGitCount++
+        $statusText = (& git -C $dir.FullName status --porcelain 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { Add-Finding "external repo status check failed: $($dir.Name)"; continue }
+        if ($statusText) { Add-Finding "external repo has dirty worktree: $($dir.Name)" }
+        if ($knownRootRepos.ContainsKey($dir.Name)) {
+            $head = (& git -C $dir.FullName rev-parse HEAD 2>&1 | Out-String).Trim()
+            if ($head -ne $knownRootRepos[$dir.Name]) {
+                Add-Finding "external repo HEAD drifted from baseline: $($dir.Name) (expected $($knownRootRepos[$dir.Name]), got $head)"
+            }
+        }
+        else {
+            Add-Finding "external git repo lacks a readonly baseline: $($dir.Name)"
+        }
+    }
+
+    # manifest 仓的 HEAD 基线由 refresh 工作流闭环管理,这里只补脏工作树扫描。
+    foreach ($repo in @($manifest.repos)) {
+        if (-not (Test-ContainedReferenceRelativePath ([string]$repo.relative_path))) { continue }
+        $repoPath = [IO.Path]::GetFullPath((Join-Path ([string]$manifest.references_root) ([string]$repo.relative_path)))
+        if (-not (Test-Path -LiteralPath (Join-Path $repoPath '.git'))) { continue }
+        $statusText = (& git -C $repoPath status --porcelain 2>&1 | Out-String).Trim()
+        if ($statusText) { Add-Finding "reference repo has dirty worktree: $($repo.relative_path)" }
+    }
+}
+
 if ($findings.Count -gt 0) {
     $findings | ForEach-Object { Write-Host "- $_" -ForegroundColor Red }
     throw "reference governance verification failed with $($findings.Count) finding(s)"
 }
 
-Write-Host "Reference governance OK: repos=$($names.Count), default=$($defaults.Count), patches=$($patchNames.Count)" -ForegroundColor Green
+Write-Host "Reference governance OK: repos=$($names.Count), default=$($defaults.Count), patches=$($patchNames.Count), external-git=$externalGitCount locked=$($lockAces.Count -gt 0)" -ForegroundColor Green
