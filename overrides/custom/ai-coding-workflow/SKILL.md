@@ -7,11 +7,11 @@ description: Complete implementation and maintenance tasks with repository-groun
 
 Use this resident entry point to complete the user's authorized coding outcome
 with host-native planning and execution. Add a step
-only when it resolves current uncertainty or protects affected behavior.
+only when it resolves uncertainty or protects affected behavior.
 
 ## Scope and depth
 
-First inspect the current diff, affected caller, and repository contract. Freeze
+First inspect the diff, affected caller, and repository contract. Freeze
 the smallest useful task capsule:
 
 ```text

@@ -83,8 +83,11 @@ foreach ($name in $patchNames) {
 # --- 外置参考仓只读边界:L1 deny-write 锁 + L3 漂移核对 ---
 $externalRoot = 'D:\CODE\external'
 $baselinesPath = Join-Path $root 'references\external-readonly-baselines.json'
+$externalGitCount = 0
+$lockAces = @()
 if (-not (Test-Path -LiteralPath $externalRoot -PathType Container)) {
-    Add-Finding "external reference root is missing: $externalRoot"
+    # 工作站专属硬墙:外置根只在装机环境存在;CI/他机无此目录,降级为 observation,不阻断。
+    Write-Host "external reference root not present ($externalRoot); L1/L3 hardwall checks skipped" -ForegroundColor Yellow
 }
 else {
     $denyAces = @(Get-Acl -LiteralPath $externalRoot | Select-Object -ExpandProperty Access |
