@@ -10674,6 +10674,55 @@ function Get-McpTransportDiagnostics($cfg) {
     return @($diagnostics.ToArray())
 }
 
+function Get-DoctorMcpRiskControls($cfg) {
+    $profileConfigured = $false
+    $activeProfile = ''
+    $servers = @()
+    $activeServers = @()
+    if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('mcp_servers').Count -gt 0) {
+        $servers = @($cfg.mcp_servers)
+    }
+
+    if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('mcp_profiles').Count -gt 0 -and $null -ne $cfg.mcp_profiles) {
+        $profileConfigured = $true
+        $activeProfile = ([string]$cfg.mcp_profiles.active).Trim()
+        try {
+            # Resolve-McpProfileServers is the same profile source used by
+            # syncMCP. Keep doctor aligned with the write path while remaining
+            # read-only; malformed profiles are reported by the config contract.
+            $servers = @(Resolve-McpProfileServers $cfg)
+        }
+        catch {
+            # Preserve a useful diagnostic even when contract validation has
+            # already identified the malformed profile.
+            $servers = @($cfg.mcp_servers)
+        }
+    }
+
+    $activeServers = @($servers | Where-Object {
+            $_.PSObject.Properties.Match('enabled').Count -eq 0 -or [bool]$_.enabled
+        })
+    $activeNames = @($activeServers | ForEach-Object { ([string]$_.name).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $remoteHttpCount = @($activeServers | Where-Object {
+            [string]$_.transport -eq 'http' -and
+            (@(Get-McpTransportDiagnostics ([pscustomobject]@{ mcp_servers = @($_) })) | Where-Object { -not [bool]$_.loopback }).Count -gt 0
+        }).Count
+    $isDefaultProfile = [string]::Equals($activeProfile, 'default', [StringComparison]::OrdinalIgnoreCase)
+    $isOffProfile = [string]::Equals($activeProfile, 'off', [StringComparison]::OrdinalIgnoreCase)
+
+    return [ordered]@{
+        profile_configured = $profileConfigured
+        active_profile = $activeProfile
+        active_server_count = $activeServers.Count
+        active_server_names = @($activeNames)
+        active_remote_http_count = $remoteHttpCount
+        default_profile_empty = ($isDefaultProfile -and $activeServers.Count -eq 0)
+        off_profile_empty = ($isOffProfile -and $activeServers.Count -eq 0)
+        default_profile_has_active_servers = ($isDefaultProfile -and $activeServers.Count -gt 0)
+        read_only = $true
+    }
+}
+
 function Get-DoctorSkillProjectionConsistency {
     # Configuration/profile declaration drift silently changes what each host
     # actually projects; check every declared host, not just the Codex surface.
@@ -10831,6 +10880,11 @@ function Get-DoctorConfigRisks($cfg) {
         if ([string]$diagnostic.warning_code -eq 'remote_plaintext_http') {
             $risks += ("MCP {0} 使用非 loopback 明文 HTTP；Streamable HTTP 远端端点应使用 HTTPS：{1}" -f [string]$diagnostic.name, [string]$diagnostic.url)
         }
+    }
+
+    $mcpRiskControls = Get-DoctorMcpRiskControls $cfg
+    if ([bool]$mcpRiskControls.default_profile_has_active_servers) {
+        $risks += ("MCP 默认 profile 当前启用了 {0} 个服务；建议按任务切换到最小 profile，避免常驻工具注入。" -f [int]$mcpRiskControls.active_server_count)
     }
 
     return @($risks)
@@ -11031,6 +11085,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     try {
         if ($null -ne $cfgObj) {
             $report.checks.mcp_transport = @(Get-McpTransportDiagnostics $cfgObj)
+            $report.checks.mcp_risk_controls = Get-DoctorMcpRiskControls $cfgObj
             $risks = Get-DoctorConfigRisks $cfgObj
             $report.risks = @($risks)
             if ($risks.Count -gt 0) {

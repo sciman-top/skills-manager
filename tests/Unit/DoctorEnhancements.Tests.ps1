@@ -163,6 +163,56 @@ Describe "Doctor Enhancements" {
             @($diagnostics | Where-Object warning_code -eq 'remote_plaintext_http').Count | Should -Be 1
             @($risks | Where-Object { $_ -like '*remote-plain*明文 HTTP*' }).Count | Should -Be 1
         }
+
+        It 'reports the active MCP profile and flags a non-empty default profile' {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                mcp_servers = @(
+                    [pscustomobject]@{ name = 'context7'; transport = 'stdio'; command = 'npx'; args = @('-y', 'context7') }
+                )
+                mcp_profiles = [pscustomobject]@{
+                    active = 'default'
+                    profiles = [pscustomobject]@{
+                        default = [pscustomobject]@{ enabled = @('context7') }
+                        off = [pscustomobject]@{ enabled = @() }
+                    }
+                }
+            }
+
+            $controls = Get-DoctorMcpRiskControls $cfg
+            $controls.read_only | Should -BeTrue
+            $controls.active_profile | Should -Be 'default'
+            $controls.active_server_count | Should -Be 1
+            $controls.default_profile_empty | Should -BeFalse
+            $controls.default_profile_has_active_servers | Should -BeTrue
+
+            $risks = @(Get-DoctorConfigRisks $cfg)
+            @($risks | Where-Object { $_ -like '*默认 profile*常驻工具注入*' }).Count | Should -Be 1
+        }
+
+        It 'recognizes an empty off profile as the safest read-only state' {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                mcp_servers = @(
+                    [pscustomobject]@{ name = 'context7'; transport = 'stdio'; command = 'npx'; args = @('-y', 'context7') }
+                )
+                mcp_profiles = [pscustomobject]@{
+                    active = 'off'
+                    profiles = [pscustomobject]@{
+                        off = [pscustomobject]@{ enabled = @() }
+                    }
+                }
+            }
+
+            $controls = Get-DoctorMcpRiskControls $cfg
+            $controls.off_profile_empty | Should -BeTrue
+            $controls.active_server_count | Should -Be 0
+            @(Get-DoctorConfigRisks $cfg) | Should -BeNullOrEmpty
+        }
     }
 
 }
