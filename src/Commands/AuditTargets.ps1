@@ -2127,42 +2127,61 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills) {
+function Get-AuditCoverageNeedTokens($Need) {
+    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
+    # skill descriptions to carry signal; subject/compound/action tokens decide.
+    $domain = [string](Get-CfgObjectProperty $Need "domain")
+    $tokens = @(Merge-AuditKeywordSets @(
+            @($domain),
+            @([string](Get-CfgObjectProperty $Need "subject")),
+            @(Convert-AuditStringArray (Get-CfgObjectProperty $Need "actions"))
+        ) 40)
+    return @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not [string]::Equals($_, $domain, [System.StringComparison]::OrdinalIgnoreCase) })
+}
+
+function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {
+    $matched = New-Object System.Collections.Generic.List[string]
+    foreach ($skill in @(Convert-AuditObjectArray $Skills)) {
+        $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($hay)) { continue }
+        foreach ($token in @($NeedTokens)) {
+            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
+        }
+    }
+    return @($matched.ToArray() | Sort-Object -Unique)
+}
+
+function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills) {
     # A positive coverage assertion: for each prioritized need, which current-profile
-    # skills plausibly cover it.  Keyword plausibility only — never a proof of host
-    # loading or successful invocation — so that "no add needed" becomes checkable.
+    # skills plausibly cover it, and which cold-catalog skills would additionally
+    # cover it.  Keyword plausibility only — never a proof of host loading or
+    # successful invocation — so that "no add needed" and profile-promotion
+    # questions become checkable against data instead of intuition.
     $skills = @(Convert-AuditObjectArray $ProfileSelectedSkills)
-    if ($skills.Count -eq 0) { return @() }
+    $catalogSkills = @(Convert-AuditObjectArray $CatalogSupplySkills)
+    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0) { return @() }
     $statement = @()
     $needs = @()
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "primary_needs"))) { $needs += $need }
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "secondary_needs"))) { $needs += $need }
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "supporting_artifacts"))) { $needs += $need }
     foreach ($need in @($needs)) {
-        $needTokens = @(Merge-AuditKeywordSets @(
-                @([string](Get-CfgObjectProperty $need "domain")),
-                @([string](Get-CfgObjectProperty $need "subject")),
-                @(Convert-AuditStringArray (Get-CfgObjectProperty $need "actions"))
-            ) 40)
-        $matched = New-Object System.Collections.Generic.List[string]
-        foreach ($skill in @($skills)) {
-            $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($hay)) { continue }
-            foreach ($token in @($needTokens)) {
-                if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
-            }
-        }
+        $needTokens = @(Get-AuditCoverageNeedTokens $need)
+        $matched = @(Get-AuditCoverageKeywordMatches $needTokens $skills)
+        $catalogMatched = @(Get-AuditCoverageKeywordMatches $needTokens $catalogSkills)
+        $coldCatalogMatched = @($catalogMatched | Where-Object { $_ -notin $matched })
         $statement += [pscustomobject]([ordered]@{
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
-                covered_by = @($matched.ToArray() | Sort-Object -Unique)
+                covered_by = $matched
                 coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
+                cold_catalog_covered_by = @($coldCatalogMatched | Sort-Object -Unique)
             })
     }
     return @($statement)
 }
 
-function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null) {
+function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
@@ -2197,7 +2216,7 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null) {
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
-    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills)
+    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })

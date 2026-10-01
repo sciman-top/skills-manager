@@ -948,6 +948,38 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             (New-AuditTargetProfile @($scan)).coverage_statement.Count | Should -Be 0
         }
 
+        It "Ignores bare-domain keyword noise when matching profile coverage" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-noise"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "main.py") "from docx import Document  # docx read"
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-coverage-noise"
+            $profile = New-AuditTargetProfile @($scan) @(
+                [pscustomobject]@{ name = "my-workflow-helper"; description = "Workflow orchestration helper for daily tasks."; trigger_summary = "Use when a workflow needs orchestration."; content_hash = "x" }
+            )
+
+            $docNeed = @($profile.coverage_statement | Where-Object need -eq "workflow/document_processing")
+            $docNeed.Count | Should -Be 1
+            @($docNeed[0].covered_by).Count | Should -Be 0
+            $docNeed[0].coverage | Should -Be "keyword_unmatched_by_profile"
+        }
+
+        It "Reports cold-catalog coverage alongside resident profile coverage" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-catalog"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "main.py") "from docx import Document  # docx read"
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-coverage-catalog"
+            $profile = New-AuditTargetProfile @($scan) @(
+                [pscustomobject]@{ name = "unrelated-skill"; description = "Garden planning assistant."; trigger_summary = "Use for garden planning."; content_hash = "y" }
+            ) @(
+                [pscustomobject]@{ name = "docx"; description = "Docx document processing: read, edit, and generate Word files."; trigger_summary = "Use when creating or editing docx files."; content_hash = "z" }
+            )
+
+            $docNeed = @($profile.coverage_statement | Where-Object need -eq "workflow/document_processing")
+            $docNeed.Count | Should -Be 1
+            $docNeed[0].coverage | Should -Be "keyword_unmatched_by_profile"
+            @($docNeed[0].cold_catalog_covered_by) | Should -Be @('docx')
+        }
+
         It "Emits repository scope and source scan coverage for a single target" {
             $repo = Join-Path $TestDrive "target-repo-coverage"
             New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null

@@ -490,13 +490,15 @@ function Get-SkillProjectionProfileNames($Values, [string]$FieldName) {
 function Get-SkillProjectionTargetHost($TargetConfig) {
     $configuredHost = ([string](Get-OperationObjectProperty $TargetConfig 'host')).Trim().ToLowerInvariant()
     if (-not [string]::IsNullOrWhiteSpace($configuredHost)) {
-        if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
+        if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
         return $configuredHost
     }
 
     $path = ([string](Get-OperationObjectProperty $TargetConfig 'path')).Trim().Replace('/', '\').TrimEnd('\')
     if ($path -match '(?i)\\\.claude\\skills$') { return 'claude' }
     if ($path -match '(?i)\\\.zcode\\skills$') { return 'zcode' }
+    if ($path -match '(?i)\\\.gemini\\antigravity\\skills$') { return 'antigravity' }
+    if ($path -match '(?i)\\\.workbuddy-ai\\skills$') { return 'workbuddy' }
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }
 
@@ -531,7 +533,7 @@ function Get-SkillProjectionHostRootDeclarations($Config) {
         }
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
-        if ($hostName -notin @('codex', 'claude', 'zcode')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
+        if ($hostName -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
         $declarations.Add([pscustomobject][ordered]@{
                 host = $hostName
                 path = $path
@@ -544,7 +546,7 @@ function Get-SkillProjectionHostRootDeclarations($Config) {
 function Resolve-SkillProjectionSelection {
     param(
         [Parameter(Mandatory = $true)]$ProjectionConfig,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
         [string]$RequestedProfile = ''
     )
 
@@ -574,7 +576,7 @@ function Resolve-SkillProjectionSelection {
     $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'
     if ($null -ne $hosts) {
         foreach ($configuredHost in @(Get-SkillProjectionProfileObjectNames $hosts 'skill_projection.projection_profiles.hosts')) {
-            if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
+            if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
         }
     }
     $hostConfig = if ($null -eq $hosts) { $null } else { Get-OperationObjectProperty $hosts $HostName }
@@ -614,12 +616,12 @@ function Resolve-SkillProjectionSelection {
 }
 
 function Get-SkillProjectionEffectiveSelection {
-    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode')][string]$DefaultHost = 'codex')
+    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$DefaultHost = 'codex')
 
     $selection = Get-OperationObjectProperty $ProjectionConfig 'resolved_projection_selection'
     if ($null -ne $selection) {
         $selectionHost = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
-        if ($selectionHost -notin @('codex', 'claude', 'zcode')) { throw 'resolved_projection_selection.host 不受支持' }
+        if ($selectionHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw 'resolved_projection_selection.host 不受支持' }
         return $selection
     }
     return Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $DefaultHost
@@ -652,7 +654,7 @@ function Get-SkillProjectionProfileContractErrors($ProjectionConfig, $Targets = 
     try {
         $profiles = Get-OperationObjectProperty $profilesConfig 'profiles'
         $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
-        foreach ($projectionHost in @('codex', 'claude', 'zcode')) {
+        foreach ($projectionHost in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) {
             Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost | Out-Null
             foreach ($profileName in $profileNames) { Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost -RequestedProfile $profileName | Out-Null }
         }

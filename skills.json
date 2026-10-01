@@ -964,6 +964,18 @@
       "host": "zcode",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/zcode-native-receipt.json"
+    },
+    {
+      "path": "~/.gemini/antigravity/skills",
+      "host": "antigravity",
+      "managed_link_only": true,
+      "receipt_path": "reports/skill-projection/antigravity-native-receipt.json"
+    },
+    {
+      "path": "~/.workbuddy-ai/skills",
+      "host": "workbuddy",
+      "managed_link_only": true,
+      "receipt_path": "reports/skill-projection/workbuddy-native-receipt.json"
     }
   ],
   "update_force": true,

@@ -139,7 +139,20 @@ Describe 'Skill projection profiles' {
     It 'derives legacy target hosts and rejects unknown managed-link-only targets' {
         (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.claude/skills'; managed_link_only = $true })) | Should -Be 'claude'
         (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.zcode/skills'; managed_link_only = $true })) | Should -Be 'zcode'
+        (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.gemini/antigravity/skills'; managed_link_only = $true })) | Should -Be 'antigravity'
+        (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.workbuddy-ai/skills'; managed_link_only = $true })) | Should -Be 'workbuddy'
         { Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.other/skills'; managed_link_only = $true }) } | Should -Throw '*无法由 path 推导宿主*'
+    }
+
+    It 'resolves profile selections for the antigravity and workbuddy hosts' {
+        $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
+        foreach ($hostName in @('antigravity', 'workbuddy')) {
+            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
+            $selection.host | Should -Be $hostName
+            $selection.profile | Should -Be 'core-lean'
+            @($selection.included_names).Count | Should -BeGreaterThan 0
+        }
+        { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName notepad } | Should -Throw '*'
     }
 
     It 'derives host root declarations from managed-link targets and retains compatibility roots' {

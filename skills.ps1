@@ -4776,13 +4776,15 @@ function Get-SkillProjectionProfileNames($Values, [string]$FieldName) {
 function Get-SkillProjectionTargetHost($TargetConfig) {
     $configuredHost = ([string](Get-OperationObjectProperty $TargetConfig 'host')).Trim().ToLowerInvariant()
     if (-not [string]::IsNullOrWhiteSpace($configuredHost)) {
-        if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
+        if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
         return $configuredHost
     }
 
     $path = ([string](Get-OperationObjectProperty $TargetConfig 'path')).Trim().Replace('/', '\').TrimEnd('\')
     if ($path -match '(?i)\\\.claude\\skills$') { return 'claude' }
     if ($path -match '(?i)\\\.zcode\\skills$') { return 'zcode' }
+    if ($path -match '(?i)\\\.gemini\\antigravity\\skills$') { return 'antigravity' }
+    if ($path -match '(?i)\\\.workbuddy-ai\\skills$') { return 'workbuddy' }
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }
 
@@ -4817,7 +4819,7 @@ function Get-SkillProjectionHostRootDeclarations($Config) {
         }
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
-        if ($hostName -notin @('codex', 'claude', 'zcode')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
+        if ($hostName -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
         $declarations.Add([pscustomobject][ordered]@{
                 host = $hostName
                 path = $path
@@ -4830,7 +4832,7 @@ function Get-SkillProjectionHostRootDeclarations($Config) {
 function Resolve-SkillProjectionSelection {
     param(
         [Parameter(Mandatory = $true)]$ProjectionConfig,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
         [string]$RequestedProfile = ''
     )
 
@@ -4860,7 +4862,7 @@ function Resolve-SkillProjectionSelection {
     $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'
     if ($null -ne $hosts) {
         foreach ($configuredHost in @(Get-SkillProjectionProfileObjectNames $hosts 'skill_projection.projection_profiles.hosts')) {
-            if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
+            if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
         }
     }
     $hostConfig = if ($null -eq $hosts) { $null } else { Get-OperationObjectProperty $hosts $HostName }
@@ -4900,12 +4902,12 @@ function Resolve-SkillProjectionSelection {
 }
 
 function Get-SkillProjectionEffectiveSelection {
-    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode')][string]$DefaultHost = 'codex')
+    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$DefaultHost = 'codex')
 
     $selection = Get-OperationObjectProperty $ProjectionConfig 'resolved_projection_selection'
     if ($null -ne $selection) {
         $selectionHost = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
-        if ($selectionHost -notin @('codex', 'claude', 'zcode')) { throw 'resolved_projection_selection.host 不受支持' }
+        if ($selectionHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw 'resolved_projection_selection.host 不受支持' }
         return $selection
     }
     return Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $DefaultHost
@@ -4938,7 +4940,7 @@ function Get-SkillProjectionProfileContractErrors($ProjectionConfig, $Targets = 
     try {
         $profiles = Get-OperationObjectProperty $profilesConfig 'profiles'
         $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
-        foreach ($projectionHost in @('codex', 'claude', 'zcode')) {
+        foreach ($projectionHost in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) {
             Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost | Out-Null
             foreach ($profileName in $profileNames) { Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost -RequestedProfile $profileName | Out-Null }
         }
@@ -21179,42 +21181,61 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills) {
+function Get-AuditCoverageNeedTokens($Need) {
+    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
+    # skill descriptions to carry signal; subject/compound/action tokens decide.
+    $domain = [string](Get-CfgObjectProperty $Need "domain")
+    $tokens = @(Merge-AuditKeywordSets @(
+            @($domain),
+            @([string](Get-CfgObjectProperty $Need "subject")),
+            @(Convert-AuditStringArray (Get-CfgObjectProperty $Need "actions"))
+        ) 40)
+    return @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not [string]::Equals($_, $domain, [System.StringComparison]::OrdinalIgnoreCase) })
+}
+
+function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {
+    $matched = New-Object System.Collections.Generic.List[string]
+    foreach ($skill in @(Convert-AuditObjectArray $Skills)) {
+        $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($hay)) { continue }
+        foreach ($token in @($NeedTokens)) {
+            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
+        }
+    }
+    return @($matched.ToArray() | Sort-Object -Unique)
+}
+
+function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills) {
     # A positive coverage assertion: for each prioritized need, which current-profile
-    # skills plausibly cover it.  Keyword plausibility only — never a proof of host
-    # loading or successful invocation — so that "no add needed" becomes checkable.
+    # skills plausibly cover it, and which cold-catalog skills would additionally
+    # cover it.  Keyword plausibility only — never a proof of host loading or
+    # successful invocation — so that "no add needed" and profile-promotion
+    # questions become checkable against data instead of intuition.
     $skills = @(Convert-AuditObjectArray $ProfileSelectedSkills)
-    if ($skills.Count -eq 0) { return @() }
+    $catalogSkills = @(Convert-AuditObjectArray $CatalogSupplySkills)
+    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0) { return @() }
     $statement = @()
     $needs = @()
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "primary_needs"))) { $needs += $need }
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "secondary_needs"))) { $needs += $need }
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "supporting_artifacts"))) { $needs += $need }
     foreach ($need in @($needs)) {
-        $needTokens = @(Merge-AuditKeywordSets @(
-                @([string](Get-CfgObjectProperty $need "domain")),
-                @([string](Get-CfgObjectProperty $need "subject")),
-                @(Convert-AuditStringArray (Get-CfgObjectProperty $need "actions"))
-            ) 40)
-        $matched = New-Object System.Collections.Generic.List[string]
-        foreach ($skill in @($skills)) {
-            $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($hay)) { continue }
-            foreach ($token in @($needTokens)) {
-                if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
-            }
-        }
+        $needTokens = @(Get-AuditCoverageNeedTokens $need)
+        $matched = @(Get-AuditCoverageKeywordMatches $needTokens $skills)
+        $catalogMatched = @(Get-AuditCoverageKeywordMatches $needTokens $catalogSkills)
+        $coldCatalogMatched = @($catalogMatched | Where-Object { $_ -notin $matched })
         $statement += [pscustomobject]([ordered]@{
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
-                covered_by = @($matched.ToArray() | Sort-Object -Unique)
+                covered_by = $matched
                 coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
+                cold_catalog_covered_by = @($coldCatalogMatched | Sort-Object -Unique)
             })
     }
     return @($statement)
 }
 
-function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null) {
+function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
@@ -21249,7 +21270,7 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null) {
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
-    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills)
+    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
@@ -23452,7 +23473,7 @@ function Write-AuditThreeFileBundle {
     Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills
+    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills $installedState.configured_supply_skills
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"
