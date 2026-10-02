@@ -134,6 +134,10 @@
         }
       },
       "domain_memberships": {
+        "ai-risk-control": [
+          "antigravity-gemini-risk-triage",
+          "workbuddy-risk-triage"
+        ],
         "browser": [
           "agent-browser",
           "playwright-best-practices",
