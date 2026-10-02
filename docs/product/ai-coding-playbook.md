@@ -170,14 +170,14 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 
 ## 6. 实践来源（直抓/复核日期）
 
-- Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=/goal+Stop hook 四档验证门禁、/batch、gap-hunting 审查警告；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
-- Codex Best Practices — learn.chatgpt.com/guides/best-practices（2026-09-10 直抓、2026-09-12 复核，新增可见面=extra-high 档、/fork、子目录 AGENTS.md nearest-wins）
+- Claude Code Best Practices — code.claude.com/docs/en/best-practices（2026-09-10 直抓、2026-09-12 复核、2026-10-03 复核：auto mode 已扩至 v2.1.283+ 全 plan 默认、新增 /verify（对运行中应用确认改动）、rewind 菜单部分压缩、每回合 checkpoints、/btw 旁路问答、claude agents 研究预览与 code intelligence plugins；此前面=/goal+Stop hook 四档验证门禁、/batch、gap-hunting 审查警告；五条 pitfalls 未变；原 anthropic.com/engineering/claude-code-best-practices 308 重定向至此）
+- Codex Best Practices — learn.chatgpt.com/guides/best-practices（2026-09-10 直抓、2026-09-12 复核、2026-10-03 复核：模型面进入 GPT-6.1 世代（Sol 可用优先、Luna High 起步、Astra Light 起步；Extra High 留给长程 agentic 重推理任务），新增可见面=PLANS.md 执行计划模板、/agent 并行、config.toml 三层（~/.codex 个人+仓内 .codex+profile，CLI/IDE/desktop 共享）；此前面=extra-high 档、/fork、子目录 AGENTS.md nearest-wins；四要素 prompt 与八条 common mistakes 未变；developers.openai.com/codex/learn/best-practices 308 重定向至此）
 - AGENTS.md 开放规范 — agents.md（2026-09-10）
 - OpenAI Prompt Engineering Guide — developers.openai.com/api/docs/guides/prompt-engineering（2026-09-10）
 - GLM-5.3 模型文档 / Coding Plan 端点 — docs.z.ai/guides/llm/glm-5.3、docs.z.ai/devpack/quick-start（2026-09-10 直抓、2026-09-12 复核）
 - GLM-5.3-Flash（VLM 分区）— docs.z.ai/guides/vlm/glm-5.3-flash（2026-09-12 直抓；旧 /guides/llm/ 路径 308 重定向至此）
-- GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对，30+ agent 可用）— github.com/github/spec-kit（raw README 2026-09-12）
-- Superpowers（社区参考：方法论即 skills；与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进）— github.com/obra/superpowers（raw README 2026-09-12）
+- GitHub Spec Kit（社区参考：spec-driven development，converge 反向收敛核对；2026-10-03 复核：新增两个可选扩展=bug fixing（assess→fix→test，结论 verified/partial/failed 写入 .specify/bugs/）与 idea assessment（intake→research→define→shape→decide，终态 go/needs-clarification/kill），主链与扩展均为独立入口非强制阶段）— github.com/github/spec-kit（raw README 2026-09-12、2026-10-03）
+- Superpowers（社区参考：方法论即 skills；核心七技能链 brainstorm→worktree→2-5 分钟计划→子代理/严格 TDD→任务间审查→收尾未变，与本仓 systematic-debugging/verification-before-completion 同名同构，可定期对照演进；2026-10-03 复核：17 宿主（09-12 记录为 14）、新增 diagnosing-superpowers 会话事后诊断与 superpowers-evals 行为评测、贡献策略=一般不接受新技能）— github.com/obra/superpowers（raw README 2026-09-12、2026-10-03）
 
 2026-09-13 读取原文后采纳的实践：[OpenAI 提示指南](https://learn.chatgpt.com/docs/prompting)用于目标、上下文、边界和验证模板；[ZCode 介绍](https://zcode.z.ai/cn/docs/welcome)与[模型配置](https://zcode.z.ai/cn/docs/configuration)用于区分模型和执行环境；[Aider](https://aider.chat/docs/usage/tips.html)用于相关上下文和小步修改；[Spec Kit](https://github.com/github/spec-kit)与[Superpowers](https://github.com/obra/superpowers)用于需求澄清、系统诊断和验收思路。这里只采纳适用方法，不引入整套框架或安装依赖。
 
