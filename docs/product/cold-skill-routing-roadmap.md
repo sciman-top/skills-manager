@@ -46,7 +46,7 @@
 - Router discovery 永远只读，且 `execution_authorization.status=not_granted`。校验许可读取闭包的入口文本，不等于执行许可。
 - `execution_contract` 是分流的权威：根候选的 `one_shot`、`parent_user_input`、`multi_turn_user_decision`、缺失/unknown 必须有不同结果；依赖项是本次闭包的支持性读取，不得优先级合并成第二个 adapter。需要独立执行依赖时必须重新选择根候选并重新 admission；根契约缺失、非法或无法确定时 fail-closed，不得以“给结论”降格多轮交互。
 - `controlled_write` 必须另有用户实施请求、exact write set、最低验证和 stop；`external_read`、`unknown`、根契约冲突默认拒绝。
-- 任何子代理 template 仅可静态固定自己的 model 与 reasoning effort；不得通过 bridge 管理 provider、endpoint、auth、会话、共享 profile 或动态 model fallback。
+- 专用 bridge template 不得固定 model 与 reasoning effort；父代理从共同启用池中选择当前宿主支持的精确 tuple，未显式选择时继承子代理默认值。精确 tuple 角色可固定各自 model/effort；不得通过 bridge 管理 provider、endpoint、auth、会话、共享 profile 或动态 model fallback。
 
 ## 2. 当前基线与已收口问题
 
@@ -93,7 +93,7 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 
 ### CSR-R1：原生 bridge 与 active preset 一致
 
-两份 source template 不得包含 `model` 或 `model_reasoning_effort`。依据官方 OpenAI Subagents 文档，custom-agent 文件中的显式值优先于 spawn 值和 `[agents]` 默认；在 bridge 中硬钉 tuple 会使 Luna/GLM/DeepSeek active preset 仍启动 Terra child，破坏“每次只激活一套 preset”。父代理应按任务性质选择五槽并显式传入该槽 tuple；没有任务专属选择时，child 继承 active preset 的 standard 默认。
+两份 source template 不得包含 `model` 或 `model_reasoning_effort`，避免角色文件覆盖父代理为任务选择的模型与档位。当前共同启用池、精确 tuple 与可扩展语义槽位以 `src/model-orchestration/presets.json`（schema v4）及其 README 为准；父代理按任务性质和当前执行面的支持证据选择 tuple，没有任务专属选择时继承子代理默认值。语义槽位数量与宿主原生并发预算分别核验。
 
 `design-griller` 与 `cold-capability-runner` 继续固定工作流、admission、sandbox 和副作用约束。模型/effort 属于 preset 控制面，不属于角色语义；新会话 child 事件仍是 CSR-R4 的独立门槛。
 
@@ -132,9 +132,9 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 1. 明确 `$grill-with-docs`：cold discovery/precise validation 后，实际 `design-griller` 只给一个首问，并停在 `awaiting_user_answer`。
 2. 同一个 parent 向用户取得真实回答后，将该回答交回同一 child；不得创建替代 child 或跳成单轮摘要。
 3. 明确 `domain-modeling`：仅在有效 `one_shot` + read-only admission 下启动 `cold-capability-runner`；确认零写入。
-4. 可见 `$grill-me`：作为 direct visible 对照，不得产生 router 事件。
+4. 在 `core-lean` 中使用可见 `$code-review-and-quality` 作为 direct visible 对照，不得产生 router 事件。`grill-me` 属于冷技能；只有当前宿主确实将其列为可见技能时，才可记录为该宿主的可见直达对照。
 
-ZCode、模拟 parent、catalog reader 或测试 harness 无 native subagent 机制时，应报告 `native_child=not_supported` 或 `not_observable`，并把结果限制为 parent-mediated observability；它们是有价值的分流测试，但不能通过 CSR-R4。
+各宿主按当前工具/schema 核对原生子代理、精确 model/effort 与生命周期。原生子代理客观不可用时记录 `native_child=not_supported`，事件不可观测时记录 `not_observable`；模拟 parent、catalog reader、测试 harness 或 parent 代行结果不能通过 Codex CSR-R4，也不能替代其他宿主的独立验收。具体证据要求以验收 Runbook 为准。
 
 ### CSR-R5：隐式语言观测与专项工件验收
 
@@ -153,7 +153,7 @@ ZCode、模拟 parent、catalog reader 或测试 harness 无 native subagent 机
 | 隐式意图有歧义 | R5 | 记录 host 选择与禁止行为，不制造关键词判定器 | 要求每个自然句唯一技能名 |
 | discovery 被误用为执行 | R0-R4 | validation 与 admission 分离，router 永远 not_granted | 一次 router 成功即执行 |
 | 多轮被单轮摘要吞掉 | R2/R4 | contract + child lifecycle 验收 | runner 总结多轮决策 |
-| 全局子代理默认值漂移 | R1/R3 | source template 静态钉选，投影 hash 可追溯 | 修改用户 config 或动态 fallback |
+| 全局子代理默认值漂移 | R1/R3 | bridge template 不钉模型/档位，父代理选择受支持 tuple，投影 hash 可追溯 | bridge 覆盖任务选择或动态 fallback |
 | provider/auth 间歇故障 | R4 | 记录 host-specific 失败；不把模型枚举当健康检查 | 重试后把历史 child 当当前验收 |
 | junction/目录拓扑 | R0 | 窄规范化，其他形态 fail-closed | 广泛取消 reparse 防护 |
 | 29 场景范围膨胀 | R2/R5 | routing contract 与 artifact quality 分跑 | 把所有 Office 产物质量塞进 P0 |
