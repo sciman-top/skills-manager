@@ -3,10 +3,12 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
-    $antigravityDefaultEnabled=Test-Path -LiteralPath (Join-Path $antigravityDefaultRoot 'GEMINI.md') -PathType Leaf
     $workbuddyFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)
     $workbuddyDefaultRoot=$(if($workbuddyFromEnv){$env:CODEBUDDY_CONFIG_DIR}else{Join-Path $userProfile '.codebuddy'})
-    $workbuddyDefaultEnabled=(Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.md') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.mdc') -PathType Leaf)
+    # 默认启用只看宿主根目录是否存在，不依赖已投影文件（宿主重置删除规则文件后可自动重建投影）；
+    # CODEBUDDY_CONFIG_DIR 指向不存在目录时由 Resolve-OptionalWorkBuddyGlobalRuleRoot 抛错。
+    $antigravityDefaultEnabled=Test-Path -LiteralPath $antigravityDefaultRoot -PathType Container
+    $workbuddyDefaultEnabled=$workbuddyFromEnv -or (Test-Path -LiteralPath $workbuddyDefaultRoot -PathType Container)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})

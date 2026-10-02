@@ -391,6 +391,27 @@ Describe 'Global rule CLI boundaries' {
         } | Should -Throw '*Antigravity user root does not exist or is not a directory*'
     }
 
+    It 'enables the WorkBuddy host root without a pre-existing projected rule' {
+        $old=$env:CODEBUDDY_CONFIG_DIR
+        try{
+            $env:CODEBUDDY_CONFIG_DIR=Join-Path $TestDrive 'workbuddy-host-without-rule'
+            New-Item -ItemType Directory -Path $env:CODEBUDDY_CONFIG_DIR -Force|Out-Null
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $env:CODEBUDDY_CONFIG_DIR
+            $parsed.workbuddy_user_root_source|Should -Be 'CODEBUDDY_CONFIG_DIR'
+        }finally{$env:CODEBUDDY_CONFIG_DIR=$old}
+    }
+
+    It 'rejects a missing CODEBUDDY_CONFIG_DIR root instead of treating it as disabled' {
+        $old=$env:CODEBUDDY_CONFIG_DIR
+        try{
+            $env:CODEBUDDY_CONFIG_DIR=Join-Path $TestDrive 'missing-workbuddy-root'
+            {
+                Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude)
+            } | Should -Throw '*WorkBuddy user root does not exist or is not a directory*'
+        }finally{$env:CODEBUDDY_CONFIG_DIR=$old}
+    }
+
     It 'rejects control outputs outside the dedicated reports directory' {
         {Resolve-GlobalRuleControlPath (Join-Path $fixture 'plan.json') $fixture}|Should -Throw '*reports/global-rule-projection*'
         {Resolve-GlobalRuleControlPath (Join-Path $fixture 'rules\global\codex\AGENTS.md') $fixture}|Should -Throw '*reports/global-rule-projection*'
