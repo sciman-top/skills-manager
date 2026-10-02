@@ -23,6 +23,20 @@
           ],
           "exclude": []
         },
+        "core-ops": {
+          "include": [
+            "ai-coding-workflow",
+            "antigravity-gemini-risk-triage",
+            "capability-router",
+            "code-review-and-quality",
+            "custom-powershell-windows-automation",
+            "research",
+            "systematic-debugging",
+            "verification-before-completion",
+            "workbuddy-risk-triage"
+          ],
+          "exclude": []
+        },
         "core": {
           "include": [
             "capability-router",
@@ -73,6 +87,14 @@
             "skill-creator",
             "web-artifacts-builder"
           ]
+        },
+        "antigravity": {
+          "default_profile": "core-ops",
+          "exclude": []
+        },
+        "workbuddy": {
+          "default_profile": "core-ops",
+          "exclude": []
         }
       }
     },
