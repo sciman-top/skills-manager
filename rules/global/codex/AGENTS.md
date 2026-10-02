@@ -1,12 +1,12 @@
-# AGENTS.md - Universal Agent Protocol v9.83 | OpenAI ChatGPT Work / Codex App / Codex CLI
-**版本**: 9.83
+# AGENTS.md - Universal Agent Protocol v9.84 | OpenAI ChatGPT Work / Codex App / Codex CLI
+**版本**: 9.84
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-09-23
+**最后更新**: 2026-10-01
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从当前宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于事实冲突取证，不得反向覆盖高优先级指令。
-- 固定结构为 `1 / A / B / C / D`；A/C/D 是四宿主共同协议，B 是平台差异。渐进披露：根文件只保留高频硬规则、协同接口和诊断入口；长 runbook、示例与局部流程下沉到项目文档、skills、hooks、rules、scripts 或 CI。
+- 固定结构为 `1 / A / B / C / D`；1/A/C/D 是各宿主共同协议，B 是平台差异。共性正文与平台章节分别维护，宿主文件由构建生成后受控投影；禁止手改生成物。渐进披露：根文件只保留高频硬规则、协同接口和诊断入口；长 runbook、示例与局部流程下沉到项目文档、skills、hooks、rules、scripts 或 CI。
 - 官方文档与本机 help/schema/实测决定工具语义；社区项目只提供待验证的结构启发。
 ## A. 共性基线
 ### A.1 三层职责
@@ -16,6 +16,7 @@
 ### A.2 执行与输出
 - 默认中文沟通、解释与汇报；代码标识符、命令、日志、报错、协议字段保留英文原文。先给结论，再给改动、验证和风险边界。
 - 按用户选择、任务形态与宿主原生能力执行；切换宿主不改变需求、repo truth、范围、授权或 stop。
+- 仅当用户或适用项目/技能指令明确要求子代理、委派或并行代理时才派代理；明确禁止时优先服从。普通深度审查或“继续”不构成委派授权；任务所需约束须显式传递，成功须有真实生命周期证据。
 - Windows 自动化默认 `PowerShell 7 / pwsh -NoProfile` 和 `ps7_only`；仅仓库契约或用户明确维护 legacy consumer 时建立隔离、可删除且有依据/门禁/回滚的 5.1 兼容路径。
 - 代表用户提交时，除仓库规范另有要求，subject 用简洁中文概括真实改动；代码注释只解释不直观的业务、边界、风险或兼容原因。简单任务输出 `Result + Evidence`；复杂任务输出 `Goal / Plan / Changes / Verification / Risks`。
 - 完成=当前目标的最小充分闭环；达到 stop 即结束。日常执行合同只需 `Goal / Exact write set / Minimum proof / Stop`；仅在外部写入或真实风险需要时增加授权与回滚字段。“还能做”不等于“必须做”。
@@ -55,21 +56,21 @@
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version/help`；加载核验优先新 run 的 `codex debug prompt-input`，必要时再用官方建议的指令摘要探针。扩展命令须由当前 help 证明；不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
 - 宿主先按可见元数据选技能；仅当用户明确要求使用当前不可见的本地技能，或宿主高置信度判定可见技能不足且确需专门工作流时，才一次调用 `capability-router`（完整请求、至多两个宿主选择的 domain hint），由宿主在返回候选中语义选择并精确校验候选及依赖闭包。显式与隐式命中都必须保留 router 返回的 `execution_contract`：`one_shot` 才可按 admission 交给 `cold-capability-runner`；`parent_user_input` 必须停在用户输入；`multi_turn_user_decision` 必须由 `design-griller` 一题一轮、父任务转发并等待同一 child 的用户答案，禁止用“结论/停止”指令降格为单轮摘要；缺失/冲突契约禁止自动执行。提及/讨论技能或语义不确定时不是调用，默认通用推理或可见技能；不得作每请求 middleware。
-- 仅当至少两个切片可独立验证、write set 互斥且并行净收益为正时派代理；否则串行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
+- 已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
 - 禁止通过搜索 vendor/import/agent 绕过冷技能校验。`host_admission_required`：读已验证闭包，父代理核对操作/授权后 parent-mediated 执行；仍未知、冲突或未授权才停，禁伪造 runner admission。
 - 指定非默认 `agent_type` 时，`fork_turns` 只允许 `"none"` 或正整数字符串，禁止 `"all"`；仅观察到 `started`、有效 child thread id 与终态 `completed` 才可报告子代理成功。spawn 失败可由主代理串行接管，但必须记录 `fallback=serial`。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
-- Work Web 不继承本机 sandbox/approval，各 managed/workspace 层不混；never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
+- Work Web 不继承本机 sandbox/approval；分别核对当前执行环境的文件系统、sandbox 与 approval 边界。never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
 - 修改 auth/provider/MCP/权限前区分登录、权限、模型与代码；未经确认不得重启/停止/杀掉/拉起 Codex，只做投影、dry-run、探针与回滚证据。
 - Skills 的 `file:` locator 必须原样读取，不猜路径或回退；失败报 locator/错误并停，仅按清单另一明确 locator 重试。
 ### B.3 回退
 - 其余命令或非交互差异按 `platform_na` 留痕；替代证据不改变共同规则和门禁语义。
 ## C. 项目级承接契约
 ### C.1 边界与版本
-- 项目根 `AGENTS.md` 是四宿主共用、宿主中立的项目契约；记录 `**项目契约**: 2.0` 与 `**全局规则复核**: <release>`。
-- 四宿主全局规则使用同一发布版本；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
-- Claude 可直接读取项目根 `AGENTS.md`；仅在宿主版本/配置不支持时保留无 BOM 的独立 `@AGENTS.md` wrapper，wrapper 不是必需契约。
+- 项目根 `AGENTS.md` 是各宿主共用、宿主中立的项目契约；记录 `**项目契约**: 2.0` 与 `**全局规则复核**: <release>`。
+- 各宿主全局规则使用同一发布版本；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
+- 自动发现与 import 遵循各宿主真实加载模型；Claude 使用无 BOM 的 `CLAUDE.md` 中 `@AGENTS.md` 承接，不假定直接自动发现 `AGENTS.md`。适配器只保留引用，正文归项目真源。
 - 项目规则不复述全局 R/E 正文、语言偏好、通用 N/A 或宿主加载教程，也不复制 README/PRD/架构全文。
 ### C.2 必填落点
 - 项目根只需明确五项真实事实：source of truth、entrypoint、领域不变量、最低门禁命令、仅回滚本次切片的入口。仅在本仓确有独立风险时补充安全、供应链、数据或 full gate 边界。
@@ -80,7 +81,7 @@
 - 目标仓集合必须从用户指定工作区动态发现，不设中央白名单；控制仓可以生成 reviewed 计划并执行逐文件可回滚事务，但不得把中央副本当作目标仓真源或静默覆盖仓库差异。每个目标仓仍自行维护并验证其项目规则正文。
 - 项目缺少真实门禁、证据或回滚入口时，先从代码、scripts、CI 与 README 发现事实并补齐，再做中高风险改动。
 ## D. 维护校验清单
-- 结构保持 `1 / A / B / C / D`；四宿主全局 A/C/D 正文必须一致，B 必须体现真实平台差异。
+- 结构保持 `1 / A / B / C / D`；各宿主全局 1/A/C/D 正文必须一致，B 必须体现真实平台差异；生成物必须与共性源及对应平台章节一致。
 - 全局文件不得写仓库私有路径、命令、provider/profile 或短期机器状态；项目文件不得写宿主专属加载教程。
 - 根规则保持精简并低于 A.7 预算；超过目标先拆分，不靠 import 假装减少上下文。
 - 修改规则前做 drift review；修改后复核唯一源、active profile root、全局/项目文件一致性、fresh-session 加载证据与回滚。

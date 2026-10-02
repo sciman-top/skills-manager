@@ -82,9 +82,9 @@ Declare repository source, entrypoint, invariants, gates, and rollback.
 
 verify drift
 '@
-        Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value ($common.Replace('host delta', 'codex host delta')) -Encoding UTF8
-        Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value ($common.Replace('host delta', 'claude host delta')) -Encoding UTF8
-        Set-Content -LiteralPath (Join-Path $zcode 'AGENTS.md') -Value ($common.Replace('host delta', 'zcode host delta')) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value ($common.Replace("`nhost delta", "`ncodex host delta")) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value ($common.Replace("`nhost delta", "`nclaude host delta")) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $zcode 'AGENTS.md') -Value ($common.Replace("`nhost delta", "`nzcode host delta")) -Encoding UTF8
         return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude; zcode=$zcode; antigravity=$antigravity }
     }
 }
@@ -101,6 +101,27 @@ verify drift
         @($result.registry.unregistered_paths).Count | Should -Be 1
         @($result.registry.missing_paths).Count | Should -Be 1
         $result.registry.in_sync | Should -Be $false
+    }
+
+    It 'includes explicitly configured WorkBuddy and detects its common drift' {
+        $f = New-RuleEstateFixture
+        $workbuddy = Join-Path $TestDrive ('workbuddy-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workbuddy -Force | Out-Null
+        $path = Join-Path $workbuddy 'CODEBUDDY.mdc'
+        $text = [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')).Replace('codex host delta', 'workbuddy host delta')
+        [IO.File]::WriteAllText($path, $text)
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude -WorkBuddyUserRoot $workbuddy
+        $result.common_aligned | Should -BeTrue
+        $result.workbuddy_global_rule_present | Should -BeTrue
+        $result.workbuddy_path | Should -Be $path
+        $result.platform_deltas_distinct | Should -BeTrue
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','docs','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -WorkBuddyUserRoot $workbuddy
+        $report.targets[0].workbuddy.configuration_state | Should -Be 'configured'
+        $report.targets[0].workbuddy.load_verification | Should -Be 'not_run'
+        $report.targets[0].workbuddy.inspection_complete | Should -BeFalse
+        [IO.File]::WriteAllText($path, $text.Replace('## 1. Reading guide', '## 1. Changed guide'))
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude -WorkBuddyUserRoot $workbuddy
+        @($result.findings.code) | Should -Contain 'global_common_section_drift'
     }
 
     It 'separates aligned common sections from platform deltas' {
@@ -203,6 +224,22 @@ verify drift
         }
         finally {
             $env:CODEX_HOME = $oldCodex; $env:CLAUDE_CONFIG_DIR = $oldClaude
+        }
+    }
+
+    It 'does not implicitly inspect the current WorkBuddy user root' {
+        $f = New-RuleEstateFixture
+        $workbuddy = Join-Path $TestDrive ('workbuddy-default-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workbuddy -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $workbuddy 'CODEBUDDY.md') -Value '# host rule' -Encoding UTF8
+        $old = $env:CODEBUDDY_CONFIG_DIR
+        try {
+            $env:CODEBUDDY_CONFIG_DIR = $workbuddy
+            $options = Parse-RuleEstateAuditOptions @('--workspace-root', $f.workspace)
+            $options.workbuddy_user_root | Should -Be ''
+        }
+        finally {
+            $env:CODEBUDDY_CONFIG_DIR = $old
         }
     }
 

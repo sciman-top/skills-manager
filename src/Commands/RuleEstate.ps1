@@ -9,11 +9,12 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
         workspace_root = $null; exclude_names = @('external', 'docs', '文档'); registry_path = $null
         codex_user_root = $codexRoot; claude_user_root = $claudeRoot; zcode_user_root = $zcodeRoot; antigravity_user_root = $antigravityRoot
         max_targets = 64; out_path = $null; json = $false
+        workbuddy_user_root = ''
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         if ($token -eq '--json') { $result.json = $true; continue }
-        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--antigravity-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
+        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--antigravity-user-root', '--workbuddy-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
         if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
         $i++; $value = [string]$Tokens[$i]
         switch ($token) {
@@ -24,6 +25,7 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
             '--claude-user-root' { $result.claude_user_root = $value }
             '--zcode-user-root' { $result.zcode_user_root = $value }
             '--antigravity-user-root' { $result.antigravity_user_root = $value }
+            '--workbuddy-user-root' { $result.workbuddy_user_root = $value }
             '--max-targets' { $result.max_targets = [int]$value }
             '--out' { $result.out_path = $value }
         }
@@ -41,7 +43,7 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         $registry = [System.IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
         $registryTargets = @($registry.targets)
     }
-    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets -AntigravityUserRoot $options.antigravity_user_root
+    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets -AntigravityUserRoot $options.antigravity_user_root -WorkBuddyUserRoot $options.workbuddy_user_root
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass
     $exitCode = if ($pass) { 0 } else { 2 }

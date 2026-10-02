@@ -13,7 +13,7 @@ function Parse-RuleAuditOptions([object[]]$Tokens) {
         }
     }
     if ([string]::IsNullOrWhiteSpace([string]$result.repo)) { throw '--repo is required.' }
-    if ([string]$result.host -notin @('codex', 'claude', 'zcode')) { throw '--host supports codex, claude, or zcode.' }
+    if ([string]$result.host -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw '--host supports codex, claude, zcode, antigravity, or workbuddy.' }
     if ([string]::IsNullOrWhiteSpace([string]$result.current_directory)) { $result.current_directory = $result.repo }
     return [pscustomobject]$result
 }

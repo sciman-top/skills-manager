@@ -1,4 +1,4 @@
-# GEMINI.md - Universal Agent Protocol v9.84 | Antigravity / Gemini
+# CODEBUDDY.md - Universal Agent Protocol v9.84 | WorkBuddy / CodeBuddy
 **版本**: 9.84
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
@@ -47,20 +47,19 @@
 - 根规则仅留稳定且有重复问题/风险依据的执行判断；单次事实进 task/ADR/runbook/evidence。新规则须落到命令/字段/路径/阻断；代码/config/schema/CI 可表达的细节只留入口，项目根优先命令/证据/回退，低频流程下沉；import/wrapper 只减维护重复，不减上下文，关键安全规则不得只靠延迟触发的局部规则。
 - 新常驻治理面（gate/hook/skill/receipt/schema）默认不新增；无等价旧面可替代或删除时，须有当前真实故障或必要外部契约，并满足最低充分 proof；临时治理面才绑定可执行退役条件。
 - 硬上限：全局 `130 lines/16 KiB`、项目根 `80 lines/10 KiB`；85%=`warning`，95%=`addition_blocked`，先拆低频；例外由仓库契约记录。
-## B. Antigravity 平台差异
+## B. WorkBuddy 平台差异
 ### B.1 加载链
-- 全局规则位于 `~/.gemini/GEMINI.md`；工作区规则位于 Git 仓库或 workspace 根的 `.agents/rules/`，`.agent/rules/` 仅作官方兼容回退。
-- 本仓项目规则由 `.agents/rules/00-project.md` 以 `@../../AGENTS.md` 相对引用承接；相对 `@` 路径按规则文件所在目录解析，适配文件不是第二份项目真源。
-- 单个规则文件上限为 12,000 字符；根规则保持短小，低频说明下沉到项目文档、skills、hooks、rules、scripts 或 CI。
-- 规则激活模式以宿主当前设置为准：Manual、Always on、Model decision 或 Glob pattern；文件存在不等于已被当前会话加载。
+- 用户规则根为 `CODEBUDDY_CONFIG_DIR`，未设置时为 `~/.codebuddy`；依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
+- 项目从 cwd 向上遍历到盘符根之前，再按外层到内层加载；每层分别在目录本身与 `.codebuddy/` 中依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`、`AGENTS.md`、`AGENTS.mdc`，各取首个成功解析项。
+- 当前 cwd 的 `.codebuddy/rules/` 与 `CODEBUDDY.local.md`/`CODEBUDDY.local.mdc` 另行加载；个人主目录的 `AGENTS.md` 可能是祖先项目规则，不等同于用户级规则。
+- 项目根 `AGENTS.md` 保持唯一项目真源；优先候选存在时先审查遮蔽与 import。静态审查只读取授权仓内候选；祖先、imports、条件规则和加载顺序须由 fresh host evidence 补证。
 ### B.2 诊断与强制
-- 最小诊断使用当前 Antigravity/CLI help 与规则面板；优先在新 workspace 会话检查实际加载的规则文件，无法观察时按 `platform_na` 记录替代证据与复测条件。
-- `@` 引用只用于受控、仓库内、可审查的规则承接；不得引用凭据、用户私有状态、网络返回内容或仓库外未审查文件。
-- 权限和危险操作使用宿主 approval/policy、hooks、checkpoint/restore 或 CI；GEMINI.md 只写行为与验收，不伪装成强制执行层。
-- 修改规则后需要新会话或宿主提供的 reload/refresh 机制复核；静态文件一致最多证明 `repo_verified/filesystem_projected`，不证明 `host_loaded` 或 `live_accepted`。
-- 未经当前任务授权，不重启、停止、杀掉或启动 Antigravity，不修改账号、provider、模型、权限、会话或 MCP；能力不可观察时保留 `platform_na` 边界。
+- 用当前 WorkBuddy/CodeBuddy help、规则面板与脱敏 `InstructionsLoaded` 或 session-start 日志核对真实 root/scope/path；文件相等只证明 `filesystem_projected`。
+- 默认仅对已有用户规则或显式指定的 root 制定投影计划；未知 active root 不自动写个人主目录或 personality 文件。
+- 权限、工具限制、hooks、sandbox 与仓库脚本负责强制；规则正文不授权账号、provider、MCP、权限、会话或进程修改。宿主重启或停止需要当前任务明确授权。
+- 子代理执行须满足共同授权与生命周期证据；宿主能力不可观察时记录原因和替代验证，不假定上下文继承或伪造成功。
 ### B.3 回退
-- 若 `.agents/rules/` 或 `@` 引用在当前宿主不可用，保留项目根 `AGENTS.md` 与可选 `CLAUDE.md`/`GEMINI.md` 兼容文件，不把未验证的回退路径升级为 Antigravity `host_loaded` 证据。
+- 加载模型以当前安装包实现与本机实测为准；解析失败、条件规则、import 或配置根不确定时保留 `platform_na` 与 fresh-session 复测条件，不把静态候选报告升级为 `host_loaded`。
 ## C. 项目级承接契约
 ### C.1 边界与版本
 - 项目根 `AGENTS.md` 是各宿主共用、宿主中立的项目契约；记录 `**项目契约**: 2.0` 与 `**全局规则复核**: <release>`。

@@ -57,7 +57,7 @@ try {
 
 # ---------- 2. watchdog ----------
 $actWatch = New-ScheduledTaskAction -Execute $PWSH `
-    -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Quiet' -f $ENSURE)
+    -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Quiet -NoEgressProbe' -f $ENSURE)
 $trigWatch = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 3) `
     -RepetitionDuration (New-TimeSpan -Days 3650)

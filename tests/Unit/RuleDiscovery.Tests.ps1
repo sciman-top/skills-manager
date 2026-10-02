@@ -97,6 +97,37 @@ function New-RuleFixture([string]$Name) {
         @($result.candidates | Where-Object { $_.path -match 'src\\feature' }).Count | Should -Be 0
     }
 
+    It 'discovers WorkBuddy candidate groups and marks loading unverified' {
+        $fixture = New-RuleFixture 'workbuddy'
+        [IO.File]::WriteAllText((Join-Path $fixture.user 'CODEBUDDY.mdc'), '# user')
+        [IO.File]::WriteAllText((Join-Path $fixture.repo 'CODEBUDDY.md'), '# project')
+        $adapter = Join-Path $fixture.repo '.codebuddy'
+        $rules = Join-Path $fixture.sub '.codebuddy/rules/nested'
+        New-Item -ItemType Directory -Path $adapter, $rules -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $adapter 'AGENTS.md'), '# independent group')
+        [IO.File]::WriteAllText((Join-Path $fixture.sub 'CODEBUDDY.local.md'), '# local')
+        [IO.File]::WriteAllText((Join-Path $rules 'conditional.mdc'), '# conditional')
+        [IO.File]::WriteAllText((Join-Path $fixture.root 'CODEBUDDY.md'), '# outside repository')
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName workbuddy -UserRuleRoot $fixture.user
+        @($result.documents).Count | Should -Be 5
+        @($result.documents | Where-Object scope -eq global).Count | Should -Be 1
+        @($result.documents | Where-Object { $null -ne $_.precedence }).Count | Should -Be 0
+        @($result.candidates | Where-Object { $_.path -eq (Join-Path $fixture.repo 'AGENTS.md') })[0].reason | Should -Be 'shadowed_if_prior_candidate_parses'
+        @($result.documents.path) | Should -Not -Contain (Join-Path $fixture.root 'CODEBUDDY.md')
+        $result.omitted_sources | Should -Contain 'ancestors_outside_repo'
+        $result.omitted_sources | Should -Contain 'imports'
+        $result.inspection_complete | Should -BeFalse
+        $result.load_verification | Should -Be 'not_run'
+        $result.writes | Should -Be 0
+    }
+
+    It 'does not treat user AGENTS as a WorkBuddy global rule' {
+        $fixture = New-RuleFixture 'workbuddy-user-agents'
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.repo -HostName workbuddy -UserRuleRoot $fixture.user
+        @($result.documents | Where-Object scope -eq global).Count | Should -Be 0
+        $result.documents[0].path | Should -Be (Join-Path $fixture.repo 'AGENTS.md')
+    }
+
     It 'records budget truncation without claiming files were loaded' {
         $fixture = New-RuleFixture 'budget'
         $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName codex -UserRuleRoot $fixture.user -MaxCombinedBytes 1

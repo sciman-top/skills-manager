@@ -139,7 +139,7 @@ Describe 'Skill projection profiles' {
     It 'derives legacy target hosts and rejects unknown managed-link-only targets' {
         (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.claude/skills'; managed_link_only = $true })) | Should -Be 'claude'
         (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.zcode/skills'; managed_link_only = $true })) | Should -Be 'zcode'
-        (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.gemini/antigravity/skills'; managed_link_only = $true })) | Should -Be 'antigravity'
+        (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.gemini/config/skills'; managed_link_only = $true })) | Should -Be 'antigravity'
         (Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.workbuddy-ai/skills'; managed_link_only = $true })) | Should -Be 'workbuddy'
         { Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.other/skills'; managed_link_only = $true }) } | Should -Throw '*无法由 path 推导宿主*'
     }

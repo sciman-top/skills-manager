@@ -305,6 +305,7 @@ function Get-DoctorSkillProjectionConsistency {
                     $result.warnings += ("{0}: managed_link_includes 与 profiles.{1}.include 漂移：profiles 独有=[{2}] legacy 独有=[{3}]（profiles 优先生效，建议同步 legacy 字段）" -f $hostName, [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
                 }
             }
+            $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
             $expectedNames = @()
             if ([bool]$selection.include_all) {
                 $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
@@ -315,6 +316,7 @@ function Get-DoctorSkillProjectionConsistency {
             else {
                 $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
             }
+            $expectedNames = @($expectedNames | Where-Object { @($selection.excluded_names) -notcontains $_ })
             if (-not $rootByHost.ContainsKey($hostName)) {
                 $result.warnings += ("{0}: host_root_not_declared: projection profile has no managed-link target or compatibility root declaration." -f $hostName)
                 $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
@@ -322,17 +324,27 @@ function Get-DoctorSkillProjectionConsistency {
             }
             $hostRoot = $rootByHost[$hostName]
             $actualNames = @()
+            $managedNames = @()
             if (Test-Path -LiteralPath $hostRoot -PathType Container) {
-                $actualNames = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+                $actualEntries = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf })
+                $actualNames = @($actualEntries | ForEach-Object { [string]$_.Name })
+                $managedNames = @($actualEntries | Where-Object {
+                    $linkTargetProperty = $_.PSObject.Properties['Target']
+                    if (($null -eq $linkTargetProperty) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $false }
+                    $linkTarget = [string](@($linkTargetProperty.Value)[0])
+                    if ([string]::IsNullOrWhiteSpace($linkTarget)) { return $false }
+                    $resolvedLinkTarget = if ([IO.Path]::IsPathRooted($linkTarget)) { [IO.Path]::GetFullPath($linkTarget) } else { [IO.Path]::GetFullPath((Join-Path $hostRoot $linkTarget)) }
+                    return $resolvedLinkTarget.StartsWith(($managedSource.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+                } | ForEach-Object { [string]$_.Name })
             }
             else {
                 $result.warnings += ("{0}: 宿主技能根缺失: {1}" -f $hostName, $hostRoot)
             }
             $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
-            $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+            $extra = @($managedNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
             if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}]" -f $hostName, ($missing -join ',')) }
             if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}]" -f $hostName, ($extra -join ',')) }
-            $details += ("{0} declared={1} projected={2}" -f $hostName, @($expectedNames).Count, @($actualNames).Count)
+            $details += ("{0} declared={1} projected={2} unmanaged={3}" -f $hostName, @($expectedNames).Count, @($managedNames).Count, @($actualNames | Where-Object { $managedNames -notcontains $_ }).Count)
         }
         $result.detail = ($details -join '; ')
         if ($result.warnings.Count -gt 0) { $result.ok = $false }

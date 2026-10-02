@@ -7,11 +7,18 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Commands\GlobalRules.ps1')
     $script:globalRuleOriginalWriteBytes = ${function:Write-BytesAtomic}
 
-    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '', [string]$Antigravity = '') {
+    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '', [string]$Antigravity = '', [string]$WorkBuddy = '') {
         $dirs = @((Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),(Join-Path $Fixture 'rules\global\zcode'),(Join-Path $Fixture 'rules\global\antigravity'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection'))
         if (-not [string]::IsNullOrWhiteSpace($ZCode)) { $dirs += $ZCode }
         if (-not [string]::IsNullOrWhiteSpace($Antigravity)) { $dirs += $Antigravity }
         New-Item -ItemType Directory -Path $dirs -Force|Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $Fixture 'rules/global/platforms'), (Join-Path $Fixture 'rules/global/workbuddy') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'rules/global/common.md') -Destination (Join-Path $Fixture 'rules/global/common.md')
+        foreach ($hostName in @('codex','claude','zcode','antigravity','workbuddy')) {
+            Copy-Item -LiteralPath (Join-Path $repoRoot "rules/global/platforms/$hostName.md") -Destination (Join-Path $Fixture "rules/global/platforms/$hostName.md")
+        }
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'rules/global/workbuddy/CODEBUDDY.md') -Destination (Join-Path $Fixture 'rules/global/workbuddy/CODEBUDDY.md')
+        if (-not [string]::IsNullOrWhiteSpace($WorkBuddy)) { New-Item -ItemType Directory -Path $WorkBuddy -Force | Out-Null }
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\codex\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\codex\AGENTS.md')
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\claude\CLAUDE.md') -Destination (Join-Path $Fixture 'rules\global\claude\CLAUDE.md')
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\zcode\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\zcode\AGENTS.md')
@@ -22,9 +29,9 @@ BeforeAll {
         if (-not [string]::IsNullOrWhiteSpace($Antigravity)) { Set-Content -LiteralPath (Join-Path $Antigravity 'GEMINI.md') -Value '# old antigravity' -Encoding utf8NoBOM -NoNewline }
     }
 
-    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '', [string]$Antigravity = '') {
+    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '', [string]$Antigravity = '', [string]$WorkBuddy = '') {
         $backupRoot=Join-Path $Fixture 'reports\global-rule-projection\backups'
-        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode -AntigravityUserRoot $Antigravity
+        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode -AntigravityUserRoot $Antigravity -WorkBuddyUserRoot $WorkBuddy
     }
 }
 
@@ -33,6 +40,50 @@ Describe 'Global rule source contract' {
         $fixture=Join-Path $TestDrive 'repo';$codex=Join-Path $TestDrive 'codex';$claude=Join-Path $TestDrive 'claude'
         foreach($path in @($fixture,$codex,$claude)){if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path -Recurse -Force}}
         Copy-GlobalRuleFixture $fixture $codex $claude
+    }
+
+    It 'renders all five hosts deterministically without writing in check mode' {
+        @(Get-GlobalRuleRenderedEntries $fixture).Count | Should -Be 5
+        $path = Join-Path $fixture 'rules/global/workbuddy/CODEBUDDY.md'
+        $before = (Get-FileHash -LiteralPath $path).Hash
+        Sync-GlobalRuleGeneratedFiles $fixture -Check
+        (Get-FileHash -LiteralPath $path).Hash | Should -Be $before
+    }
+
+    It 'rejects common source drift before target writes' {
+        $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude
+        $path = Join-Path $fixture 'rules/global/common.md'
+        [IO.File]::AppendAllText($path, "`nchanged")
+        { Sync-GlobalRuleGeneratedFiles $fixture -Check } | Should -Throw '*generated_global_rule_drift*'
+        @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code) | Should -Contain 'source_generation_drift'
+        { Invoke-TestApply $plan $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/drift.json') } | Should -Throw
+        [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
+    }
+
+    It 'rejects a malformed fragment without replacing generated files' {
+        $output = Join-Path $fixture 'rules/global/codex/AGENTS.md'
+        $before = (Get-FileHash -LiteralPath $output).Hash
+        [IO.File]::WriteAllText((Join-Path $fixture 'rules/global/platforms/workbuddy.md'), 'invalid')
+        { Sync-GlobalRuleGeneratedFiles $fixture } | Should -Throw
+        (Get-FileHash -LiteralPath $output).Hash | Should -Be $before
+    }
+
+    It 'creates and rolls back an explicitly configured WorkBuddy rule' {
+        $workbuddy = Join-Path $TestDrive 'workbuddy'
+        New-Item -ItemType Directory -Path $workbuddy -Force | Out-Null
+        $target = Join-Path $workbuddy 'CODEBUDDY.md'
+        $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude -WorkBuddyUserRoot $workbuddy
+        @($plan.actions).Count | Should -Be 3
+        $receiptPath = Join-Path $fixture 'reports/global-rule-projection/workbuddy.json'
+        $receipt = Invoke-TestApply $plan $fixture $codex $claude $receiptPath -WorkBuddy $workbuddy
+        $receipt.status | Should -Be 'applied'
+        (Get-FileHash -LiteralPath $target).Hash | Should -Be (Get-FileHash -LiteralPath (Join-Path $fixture 'rules/global/workbuddy/CODEBUDDY.md')).Hash
+        $otherRoot = Join-Path $TestDrive 'other-workbuddy'
+        New-Item -ItemType Directory -Path $otherRoot -Force | Out-Null
+        { Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups') -WorkBuddyUserRoot $otherRoot } | Should -Throw
+        $rollback = Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups') -WorkBuddyUserRoot $workbuddy
+        $rollback.status | Should -Be 'rolled_back'
+        Test-Path -LiteralPath $target | Should -BeFalse
     }
 
     It 'requires the 1 section' {
@@ -63,7 +114,7 @@ Describe 'Global rule source contract' {
     }
 
     It 'rejects a ZCode global-rule version that differs from the shared release' {
-        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.83','**版本**: 99.0');[IO.File]::WriteAllText($path,$text)
+        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[regex]::Replace([IO.File]::ReadAllText($path),'(?m)^\*\*版本\*\*:.*$', '**版本**: 99.0');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_version_mismatch'
     }
 

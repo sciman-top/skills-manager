@@ -19,11 +19,91 @@ function New-ObservedRuleDocument([string]$Path, [string]$HostName, [string]$Sco
     return New-RuleDocument -Host $HostName -Scope $Scope -Responsibility $Responsibility -Path ([System.IO.Path]::GetFullPath($Path)) -Owner $(if ($Scope -eq 'global') { 'user' } else { 'repo' }) -ContentHash (Get-RuleFileSha256 $Path) -ByteSize $bytes.Length -Precedence $Precedence -DiscoveryState observed -SourceOfTruth 'filesystem' -VerificationState static_validated -Evidence @([pscustomobject]@{ type = 'file'; path = [System.IO.Path]::GetFullPath($Path) })
 }
 
+function Get-WorkBuddyRuleDiscovery {
+    param([string]$RepoRoot, [string]$CurrentDirectory, [string]$UserRuleRoot, [int]$MaxCombinedBytes)
+    $groups = [Collections.Generic.List[object]]::new()
+    $documents = [Collections.Generic.List[object]]::new()
+    $candidates = [Collections.Generic.List[object]]::new()
+    $ruleDirectories = [Collections.Generic.List[object]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($UserRuleRoot)) {
+        $user = [IO.Path]::GetFullPath($UserRuleRoot)
+        $groups.Add(@{ root = $user; names = @('CODEBUDDY.md','CODEBUDDY.mdc'); scope = 'global' })
+        $ruleDirectories.Add(@{ root = (Join-Path $user 'rules'); scope = 'global' })
+    }
+    $dirs = [Collections.Generic.List[string]]::new()
+    $cursor = $CurrentDirectory
+    while ($true) {
+        $dirs.Insert(0, $cursor)
+        if ($cursor.Equals($RepoRoot, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $cursor = [IO.Directory]::GetParent($cursor).FullName
+    }
+    foreach ($dir in $dirs) {
+        $scope = if ($dir -eq $RepoRoot) { 'repo' } else { 'subtree' }
+        foreach ($ruleRoot in @($dir, (Join-Path $dir '.codebuddy'))) {
+            $groups.Add(@{ root = $ruleRoot; names = @('CODEBUDDY.md','CODEBUDDY.mdc','AGENTS.md','AGENTS.mdc'); scope = $scope })
+        }
+    }
+    $groups.Add(@{ root = $CurrentDirectory; names = @('CODEBUDDY.local.md','CODEBUDDY.local.mdc'); scope = 'subtree' })
+    $ruleDirectories.Add(@{ root = (Join-Path $CurrentDirectory '.codebuddy/rules'); scope = 'subtree' })
+    foreach ($directory in $ruleDirectories) {
+        if (-not [IO.Directory]::Exists($directory.root)) { continue }
+        $pending = [Collections.Generic.Queue[string]]::new()
+        $pending.Enqueue($directory.root)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Dequeue()
+            if (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            foreach ($item in Get-ChildItem -LiteralPath $current -Force | Sort-Object Name) {
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+                elseif ($item.Extension -in @('.md','.mdc')) { $groups.Add(@{ root = $item.DirectoryName; names = @($item.Name); scope = $directory.scope }) }
+            }
+        }
+    }
+    foreach ($group in $groups) {
+        $selected = $false
+        foreach ($name in $group.names) {
+            $path = Join-Path $group.root $name
+            $exists = [IO.File]::Exists($path)
+            $reparse = $false
+            $pathCursor = $path
+            while (-not [string]::IsNullOrWhiteSpace($pathCursor)) {
+                if ((Test-Path -LiteralPath $pathCursor) -and (([IO.File]::GetAttributes($pathCursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { $reparse = $true; break }
+                $parent = [IO.Directory]::GetParent($pathCursor)
+                $pathCursor = if ($null -eq $parent) { '' } else { $parent.FullName }
+            }
+            $nonEmpty = $exists -and -not $reparse -and (Test-RuleDiscoveryNonEmptyFile $path)
+            $reason = if ($reparse) { 'reparse_path_not_inspected' } elseif (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'shadowed_if_prior_candidate_parses' }
+            $candidate = [pscustomobject]@{ path = $path; scope = $group.scope; exists = $exists; selected = $false; reason = $reason }
+            if ($nonEmpty -and -not $selected) {
+                $document = New-ObservedRuleDocument $path workbuddy $group.scope 0
+                $document.discovery_state = 'inferred'; $document.precedence = $null
+                $documents.Add($document)
+                $candidate.selected = $true; $candidate.reason = 'first_non_empty_candidate_parse_not_verified'
+                $selected = $true
+            }
+            $candidates.Add($candidate)
+        }
+    }
+    $consumed = 0
+    $truncated = [Collections.Generic.List[string]]::new()
+    foreach ($document in $documents) {
+        if ($consumed + $document.byte_size -gt $MaxCombinedBytes) { $truncated.Add($document.path) }
+        else { $consumed += $document.byte_size }
+    }
+    return [pscustomobject][ordered]@{
+        schema_version = 1; host = 'workbuddy'; repo_root = $RepoRoot; current_directory = $CurrentDirectory; read_only = $true
+        documents = @($documents.ToArray()); candidates = @($candidates.ToArray()); combined_bytes = $consumed
+        max_combined_bytes = $MaxCombinedBytes; truncated_paths = @($truncated.ToArray()); budget_kind = 'inspection_budget_not_host_limit'
+        inspection_complete = $false; omitted_sources = @('ancestors_outside_repo','imports','parser_validation','conditional_activation','reparse_paths')
+        load_verification = 'not_run'; writes = 0; provider_calls = 0; native_mutations = 0; profile_changed = $false
+    }
+}
+
 function Get-RuleDiscovery {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [string]$CurrentDirectory = $RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
         [string]$UserRuleRoot,
         [string[]]$FallbackNames = @(),
         [int]$MaxCombinedBytes = 32768
@@ -31,6 +111,7 @@ function Get-RuleDiscovery {
     $repo = [System.IO.Path]::GetFullPath($RepoRoot)
     $cwd = [System.IO.Path]::GetFullPath($CurrentDirectory)
     if (-not (Test-RuleDiscoveryPathWithin $cwd $repo)) { throw 'CurrentDirectory is outside the authorized repository root.' }
+    if ($HostName -eq 'workbuddy') { return Get-WorkBuddyRuleDiscovery -RepoRoot $repo -CurrentDirectory $cwd -UserRuleRoot $UserRuleRoot -MaxCombinedBytes $MaxCombinedBytes }
     $documents = New-Object System.Collections.Generic.List[object]
     $candidates = New-Object System.Collections.Generic.List[object]
     $precedence = 0

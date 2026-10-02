@@ -35,4 +35,4 @@
 - `reviewed_by_type=ai` 永远拒绝；`human/user_supplied` 是审阅声明，不是密码学签名，apply 仍要求当前命令的显式 token。
 - apply 不修改全局用户规则、provider、auth、model、sandbox、plugin/native host 配置，不自动 commit/push，也不把文件写入等同于 fresh-session 加载或真实用户验收。
 
-执行模型为 `preflight-all -> apply-one-by-one -> receipt-after-each -> fail-fast`。后续目标失败时，先前成功目标保留并可从 receipt 单独 rollback；rollback 必须重新提供与 receipt 一致的 workspace/Codex/Claude control roots，但 action allowlist 仅允许 repository。修复阻塞后可用 `--resume <receipt.json>` 继续。全局规则变更必须先修改 tracked `rules/global/codex/AGENTS.md` 或 `rules/global/claude/CLAUDE.md`，再走专用 global-rules 投影流程。
+执行模型为 `preflight-all -> apply-one-by-one -> receipt-after-each -> fail-fast`。后续目标失败时，先前成功目标保留并可从 receipt 单独 rollback；rollback 必须重新提供与 receipt 一致的 workspace/Codex/Claude control roots，但 action allowlist 仅允许 repository。修复阻塞后可用 `--resume <receipt.json>` 继续。全局规则变更先修改 `rules/global/common.md` 或 `rules/global/platforms/<host>.md`，运行 `build.ps1` 生成各宿主文件，再走专用 global-rules 投影流程；禁止手改生成文件。维护步骤见 `rules/global/README.md`。

@@ -497,7 +497,7 @@ function Get-SkillProjectionTargetHost($TargetConfig) {
     $path = ([string](Get-OperationObjectProperty $TargetConfig 'path')).Trim().Replace('/', '\').TrimEnd('\')
     if ($path -match '(?i)\\\.claude\\skills$') { return 'claude' }
     if ($path -match '(?i)\\\.zcode\\skills$') { return 'zcode' }
-    if ($path -match '(?i)\\\.gemini\\antigravity\\skills$') { return 'antigravity' }
+    if ($path -match '(?i)\\\.gemini\\config\\skills$') { return 'antigravity' }
     if ($path -match '(?i)\\\.workbuddy-ai\\skills$') { return 'workbuddy' }
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }

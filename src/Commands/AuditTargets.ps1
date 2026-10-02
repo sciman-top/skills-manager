@@ -908,7 +908,7 @@ function Get-AuditSourceFileIndex([string]$resolvedPath) {
 
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
-    if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
+    if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(test|spec)\.[a-z0-9]+$|(^|\\)test_[^\\]+\.py$|_test\.py$') { return "test" }
     if ($normalized -match '(?i)(^|\\)(examples?|samples?|fixtures?|mocks?|stubs?|benchmarks?|demos?)(\\|$)') { return "non_product_code" }
     if ($normalized -match '(?i)(^|\\)(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
     return "source_code"

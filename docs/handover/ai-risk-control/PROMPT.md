@@ -10,8 +10,8 @@
 在一台 **Windows** 电脑上复现一套已验证通过的加固方案，解决三件事：
 
 1. **Antigravity（Google 的 AI IDE）在不开 TUN 时的代理穿透** —— 让 Sign In、`language_server.exe`、`daily-cloudcode-pa.googleapis.com` 等流量确实走代理。
-2. **降低 Gemini 账号的封号 / 限流 / 降智风控命中率** —— 核心变量是**出口 IP 的类型与一致性**。
-3. **WorkBuddy（腾讯）的封号 / 限流风控防范** —— 机制与 Google 侧**方向相反**：核心是**直连（走代理=官方红线）+ 行为面纪律 + 设备指纹认知**，见第 14 节。
+2. **核验 Google 出口一致性、可达性与错误来源** —— 记录出口及第三方分类，不把分类结果视为账号安全或模型质量证明。
+3. **WorkBuddy（腾讯）的网络配置与错误分诊** —— 核验直连覆盖、配额与重试，结合真实错误记录排查，见第 14 节。
 
 **最重要的设计原则（务必遵守）**：
 > **不要把全部流量切到「干净出口」。**
@@ -238,12 +238,12 @@ geosite:google + domain:googleapis.com + domain:google.com + domain:gstatic.com
 
 | 层 | 脚本 | 证明什么 | 是否碰真实系统 |
 |---|---|---|---|
-| ① 受控验收 | `ensure-split.test.ps1` | **脚本的判定逻辑**正确（16 用例） | 否（临时目录 + 临时注册表键） |
-| ② 受控实战验收 | `ag-split-live-acceptance.ps1` | **整套自动化**真能自愈（10 用例） | 是（真故障注入，自动收尾） |
+| ① 受控验收 | `ensure-split.test.ps1` | **脚本的判定逻辑**正确（23 个断言） | 否（临时目录 + 临时注册表键） |
+| ② 受控实战验收 | `ag-split-live-acceptance.ps1` | **整套自动化**真能自愈（11 个断言） | 是（真故障注入，自动收尾） |
 | ③ 全量自检 | `ag-health-check.ps1` | 当前状态无 FAIL | 只读 |
 
 ```powershell
-pwsh -File D:\TOOL\v2rayN\ag-split\ensure-split.test.ps1   # 期望 PASS 16 / FAIL 0
+pwsh -File D:\TOOL\v2rayN\ag-split\ensure-split.test.ps1   # 期望 PASS 23 / FAIL 0
 ```
 
 夹具覆盖的分支：分流器在跑 / 不在、代理指向它 / 别处 / 被禁用、例外表完整 / 缺失、
@@ -297,7 +297,7 @@ PERMISSION_DENIED
 ### 8.5 受控实战验收（真故障注入，必做）
 
 ```powershell
-pwsh -File D:\TOOL\v2rayN\ag-split\ag-split-live-acceptance.ps1   # 期望 PASS 10 / FAIL 0
+pwsh -File D:\TOOL\v2rayN\ag-split\ag-split-live-acceptance.ps1   # 期望 PASS 11 / FAIL 0
 ```
 
 它在真机上做故障注入，约 4–5 分钟（含等真实看门狗）：
@@ -305,9 +305,14 @@ pwsh -File D:\TOOL\v2rayN\ag-split\ag-split-live-acceptance.ps1   # 期望 PASS 
 | 项 | 注入 | 断言 |
 |---|---|---|
 | L2 手动自愈 | 杀掉分流器内核 | 跑 `ensure-split.ps1` 后端口恢复、exit 0 |
-| **L3 看门狗自愈** | 杀掉内核 | **等真实看门狗（≤3 分钟）自动拉起**（实测 67 秒） |
+| **L3 看门狗自愈** | 杀掉内核 | **等真实看门狗（≤3 分钟）自动拉起**（本次实测 115.2 秒） |
 | **L4 安全阀** | 系统代理临时指向死端口 | `ensure-split.ps1` 应**回退到 10808** |
-| L5 分流正确性 | — | 默认出口 vs Google 侧出口必须不同网段 |
+| L5 出口证据 | — | 默认出口可达，并按需测量 Google 节点出口；测量不证明账号安全 |
+
+需要节点出口证据时，按需运行同目录部署的 `ag-egress-probe.ps1` 或
+`ag-health-check.ps1 -ProbeGoogleEgress`。临时实例测量所选节点的出口与第三方分类，
+不能证明已登录客户端的请求路由、模型接受情况或账号安全。
+`AgSplitWatchdog` 应附带 `-NoEgressProbe`，每三分钟只做本地自愈。
 
 **安全设计**：全程 `try/finally`，结束时**无条件**把系统恢复到「分流器在跑 + 代理指向它」；
 若分流器起不来则回退代理，**绝不把机器留在断网状态**。
@@ -483,10 +488,8 @@ Get-Content MANIFEST.sha256 | ForEach-Object {
 
 ## 14. 第二领域：WorkBuddy 风控加固（方向与 Google 侧相反）
 
-> WorkBuddy 的风控机制与 Google 完全不同：**出口 IP 质量不是主变量，「走代理」本身就是红线**。
-> 官方错误码页明写 3002/3003/3007 的处置是「关闭网络代理」；用户协议
-> （rule.tencent.com/rule/202603180001）9.2(2)(6)(8) / 8.1.2 / 9.4.1 把反向代理 / 账号共享 /
-> 超量注册列为红线，且无公开解封案例。封禁是**账号级**的（换号即恢复，实证）。
+> 本机部署选择让 WorkBuddy 相关域名直连。代理设置、多账号记录和话题相关性
+> 都不足以单独解释账号封禁；具体错误应结合时间、服务响应与当前官方说明分诊。
 
 ### 14.1 硬规则
 
@@ -497,12 +500,12 @@ Get-Content MANIFEST.sha256 | ForEach-Object {
    - 用户级 + 机器级 `NO_PROXY` 含五个域（**裸域名**，后缀匹配；写 `*.` 通配反而永远匹配不上，见第 9 节第 9 条）
    - 代理客户端路由层有 direct 规则（防只认环境变量不认例外表的客户端）
    - 代理客户端**不再接管系统代理**（v2rayN `SysProxyType=2 Unchanged`，见第 5 节）——否则它每次启动重写例外表，前两层白做
-3. **行为面（实测的最大在险变量，比连接层更容易触发）**：
-   - 网关 / CPA / 中转类工作**移出 WorkBuddy 会话**（会话主题进风控画像）
+3. **控制请求与重试**：
+   - 会话主题与历史错误的相关性不能证明风控原因，不据此安排跨产品迁移
    - 避免同一账号并发多会话跑同类任务
-   - MCP 连接器保持 `enabled=[]`、重试为 0 —— 连接器持续 422 重试会把请求面放大数百倍（本机实测单日 335 次）
-4. **设备指纹认知**：换号**不清** device-id / QIMEI，重装无效 —— 新旧账号共用同一设备指纹会延续触发面（本机实证两账号同 device-id）。
-5. **限流（429）是官方配额**：错误带 reset 时刻，等窗口即可，**不要用换号 / 挂代理绕**。
+   - 按连接器来源及是否实际启用分类认证失败，排查持续重试；避免把内置连接器的预期响应计为账号高危
+4. **设备记录**：本机存在两个账号共享设备标识的历史记录，不能据此证明封禁关联；保留现有标识。
+5. **限流（429）**：结合 Retry-After、reset 时刻与上游状态减少请求、等待窗口，避免反复重试。
 
 ### 14.2 自检与观察窗
 
@@ -511,14 +514,14 @@ pwsh -File D:\TOOL\workbuddy-risk\workbuddy-risk-selfcheck.ps1     # 只读，�
 # Git Bash 环境可用 .sh 版（两版报告文件分开命名，避免互相覆盖）；.test.sh 是脚本自身的离线验收夹具
 ```
 
-- 覆盖：代理覆盖（例外表 / `NO_PROXY`）、真实 API 错误日志（**只统计 conversations 侧**，403/11140 是封号信号；
+- 覆盖：代理覆盖（例外表 / `NO_PROXY`）、真实 API 错误日志（**只统计 conversations 侧**，403/11140 是高风险错误信号，
   429 要区分官方配额与回显假阳性）、活动自动化、MCP 认证失败重试。
-- **观察窗判据**：以 403/11140 复发为在险信号；连续 3–7 天零复发才可认为该账号稳定（源机 2026-10-01 已零复发 4 天）。
+- **观察窗**：记录真实 403/11140 是否复发，连续无错误只能说明观察窗内未检出；2026-10-01 自检中的最新历史记录是 2026-09-28。
 
 ### 14.3 与第一领域的关系
 
 - 两个领域只在「系统代理例外表」这一点交汇：本方案的 `ensure-split.ps1` 把 WorkBuddy 五域例外纳入
-  `REQUIRED_EXCEPTIONS` 守护（缺失即 FAIL 并补回），其余互不干涉。
+  `REQUIRED_EXCEPTIONS` 检查（缺失返回 1，人工确认后追加，不自动覆写）。
 - 若新电脑**不做分流**（只有一条线路），WorkBuddy 部分仍要完整做——它不依赖分流器存在。
 - 深度材料（六份报告原件）在源机 `C:\Users\sciman\WorkBuddy AI\`；本包 `tools/workbuddy/` 内含分诊提示词
   （`workbuddy-triage-prompt.md`：429 与 403/11140 分诊、版本与域名后缀、红线清单）与 `workbuddy-risk-triage`

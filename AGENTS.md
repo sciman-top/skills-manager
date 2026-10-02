@@ -1,15 +1,15 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.83
-**最后更新**: 2026-09-23
+**全局规则复核**: 9.84
+**最后更新**: 2026-10-01
 
 ## 1. 产品边界与入口
-- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode 与 Antigravity 的共同项目级规则源；Antigravity 通过 `.agents/rules/00-project.md` 的受控 `@../../AGENTS.md` 适配器承接。
+- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 通过 `.agents/rules/00-project.md` 的受控 `@../../AGENTS.md` 适配器承接。
 - 主 CLI 管理本地技能/MCP、目标仓规则审查、原生技能投影及 `rules/global/` 的受控投影，不接管模型或宿主 runtime。独立的 `src/model-orchestration/` 仅提供显式 preset 配置和受控启动，遵循其局部 `AGENTS.md`，不进入主 CLI 构建链；两者均不接管 auth、provider、权限、会话或插件缓存。
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
 
 ## A. 仓库真值与领域不变量
-- `build.ps1` 只从 `src/` 生成根 `skills.ps1`；`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
+- `build.ps1` 从 `src/` 生成根 `skills.ps1`，并从 `rules/global/common.md` 与 `platforms/*.md` 生成五份全局宿主规则；`-Check` 只读核对漂移。`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
 - 交付物目录契约固定为：`artifacts/deliveries/<version>/{standard-install,portable,source,private-snapshot}/` 是同版本四类交付物；前三项公共包不含 skills/MCP，私用快照仅限可信私有介质；`rescan/<run-id>/` 只是辅助清单，`artifacts/history/<kind>/<version-or-date>/` 是人工历史留存，`artifacts/work/<kind>/<run-id>/` 是临时构建/验证/evidence；`artifacts/` 根层不得放生成文件，正式公共下载以 GitHub Release 为准。
 - AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。
@@ -17,6 +17,7 @@
 - runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
 
 ## B. 执行边界
+- 默认主代理串行完成；子代理须有用户或适用项目/技能规则的明确委派授权，并限定独立切片、互斥 write set、最低证明与 stop；“继续”或要求深入分析不构成授权。
 - 日常合同只冻结 `Goal / Exact write set / Minimum proof / Stop`；覆盖当前明确需求或真实失败，验收满足即停止，不把额外优化吸收为任务。
 - 先用 `git diff` 分界用户/并发改动；不回退、不重排、不混入本次回滚，禁止批量改写第三方 import。
 - 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。

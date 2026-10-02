@@ -14,7 +14,7 @@ PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupporte
 
 ### Recommended: one-step Release install
 
-The current stable release is [v2026.08.27.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.27.1). Download the matching `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), verify `SHA256SUMS.txt`, extract it, and run:
+The current stable release is [v2026.08.30.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.30.1). Download the matching `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), verify `SHA256SUMS.txt`, extract it, and run:
 
 ```powershell
 .\setup.cmd

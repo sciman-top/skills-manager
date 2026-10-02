@@ -5,6 +5,14 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-10-01 日常预设修订
+
+当前菜单与任务映射以 [`presets.json`](../../src/model-orchestration/presets.json) 和[使用说明](../../src/model-orchestration/README.md)为准。用户最终修订为 schema v4 共同启用池：GPT-6.1-Sol low/medium/high、GPT-6-luna max、GLM-5.3-Flash high/max，共三个模型、六个元组；DeepSeek 已移除。`default_preset=gpt61_sol_only` 只提供缺省路线，不限制其他模型共同启用。每个语义槽位可独立选择池内受宿主支持的任意元组，不要求整套切换。初始八个语义槽位可按配置扩展；六个精确元组角色同时投影。旧 GPT preset 参数作为新 ID 的别名保留。
+
+本次子代理请求使用 `-SubagentsOnly`，保留父模型、review 与父 effort；普通宿主 AI 可在明确委派授权内按依赖拆分任务，并在新任务派发前依据复杂度选择槽位。并行仍要求独立验收、互斥写集、净收益与原生并发预算。菜单不可用的显式重选和任务复杂度升降档是两条不同路径，均不得重放已完成写入。
+
+下表涉及单套激活、active preset 五槽、旧模型菜单、默认值和 2026-09 实战结论的条目均保留为历史，已由本节共同启用池取代，不能外推为新元组验收。`普通任务 ingress` 中的结构化 RouteRequest 约束属于搁置的完整 MOR 控制面，不限制日常原生宿主 AI 的语义任务选择。本次不启用该控制面；宿主精确模型/档位支持与真实请求仍各自验收。
+
 ## 1. 已钉定决议
 
 | 决议项 | 内容 |

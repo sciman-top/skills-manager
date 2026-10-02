@@ -4783,7 +4783,7 @@ function Get-SkillProjectionTargetHost($TargetConfig) {
     $path = ([string](Get-OperationObjectProperty $TargetConfig 'path')).Trim().Replace('/', '\').TrimEnd('\')
     if ($path -match '(?i)\\\.claude\\skills$') { return 'claude' }
     if ($path -match '(?i)\\\.zcode\\skills$') { return 'zcode' }
-    if ($path -match '(?i)\\\.gemini\\antigravity\\skills$') { return 'antigravity' }
+    if ($path -match '(?i)\\\.gemini\\config\\skills$') { return 'antigravity' }
     if ($path -match '(?i)\\\.workbuddy-ai\\skills$') { return 'workbuddy' }
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }
@@ -5954,11 +5954,91 @@ function New-ObservedRuleDocument([string]$Path, [string]$HostName, [string]$Sco
     return New-RuleDocument -Host $HostName -Scope $Scope -Responsibility $Responsibility -Path ([System.IO.Path]::GetFullPath($Path)) -Owner $(if ($Scope -eq 'global') { 'user' } else { 'repo' }) -ContentHash (Get-RuleFileSha256 $Path) -ByteSize $bytes.Length -Precedence $Precedence -DiscoveryState observed -SourceOfTruth 'filesystem' -VerificationState static_validated -Evidence @([pscustomobject]@{ type = 'file'; path = [System.IO.Path]::GetFullPath($Path) })
 }
 
+function Get-WorkBuddyRuleDiscovery {
+    param([string]$RepoRoot, [string]$CurrentDirectory, [string]$UserRuleRoot, [int]$MaxCombinedBytes)
+    $groups = [Collections.Generic.List[object]]::new()
+    $documents = [Collections.Generic.List[object]]::new()
+    $candidates = [Collections.Generic.List[object]]::new()
+    $ruleDirectories = [Collections.Generic.List[object]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($UserRuleRoot)) {
+        $user = [IO.Path]::GetFullPath($UserRuleRoot)
+        $groups.Add(@{ root = $user; names = @('CODEBUDDY.md','CODEBUDDY.mdc'); scope = 'global' })
+        $ruleDirectories.Add(@{ root = (Join-Path $user 'rules'); scope = 'global' })
+    }
+    $dirs = [Collections.Generic.List[string]]::new()
+    $cursor = $CurrentDirectory
+    while ($true) {
+        $dirs.Insert(0, $cursor)
+        if ($cursor.Equals($RepoRoot, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $cursor = [IO.Directory]::GetParent($cursor).FullName
+    }
+    foreach ($dir in $dirs) {
+        $scope = if ($dir -eq $RepoRoot) { 'repo' } else { 'subtree' }
+        foreach ($ruleRoot in @($dir, (Join-Path $dir '.codebuddy'))) {
+            $groups.Add(@{ root = $ruleRoot; names = @('CODEBUDDY.md','CODEBUDDY.mdc','AGENTS.md','AGENTS.mdc'); scope = $scope })
+        }
+    }
+    $groups.Add(@{ root = $CurrentDirectory; names = @('CODEBUDDY.local.md','CODEBUDDY.local.mdc'); scope = 'subtree' })
+    $ruleDirectories.Add(@{ root = (Join-Path $CurrentDirectory '.codebuddy/rules'); scope = 'subtree' })
+    foreach ($directory in $ruleDirectories) {
+        if (-not [IO.Directory]::Exists($directory.root)) { continue }
+        $pending = [Collections.Generic.Queue[string]]::new()
+        $pending.Enqueue($directory.root)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Dequeue()
+            if (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            foreach ($item in Get-ChildItem -LiteralPath $current -Force | Sort-Object Name) {
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+                elseif ($item.Extension -in @('.md','.mdc')) { $groups.Add(@{ root = $item.DirectoryName; names = @($item.Name); scope = $directory.scope }) }
+            }
+        }
+    }
+    foreach ($group in $groups) {
+        $selected = $false
+        foreach ($name in $group.names) {
+            $path = Join-Path $group.root $name
+            $exists = [IO.File]::Exists($path)
+            $reparse = $false
+            $pathCursor = $path
+            while (-not [string]::IsNullOrWhiteSpace($pathCursor)) {
+                if ((Test-Path -LiteralPath $pathCursor) -and (([IO.File]::GetAttributes($pathCursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { $reparse = $true; break }
+                $parent = [IO.Directory]::GetParent($pathCursor)
+                $pathCursor = if ($null -eq $parent) { '' } else { $parent.FullName }
+            }
+            $nonEmpty = $exists -and -not $reparse -and (Test-RuleDiscoveryNonEmptyFile $path)
+            $reason = if ($reparse) { 'reparse_path_not_inspected' } elseif (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'shadowed_if_prior_candidate_parses' }
+            $candidate = [pscustomobject]@{ path = $path; scope = $group.scope; exists = $exists; selected = $false; reason = $reason }
+            if ($nonEmpty -and -not $selected) {
+                $document = New-ObservedRuleDocument $path workbuddy $group.scope 0
+                $document.discovery_state = 'inferred'; $document.precedence = $null
+                $documents.Add($document)
+                $candidate.selected = $true; $candidate.reason = 'first_non_empty_candidate_parse_not_verified'
+                $selected = $true
+            }
+            $candidates.Add($candidate)
+        }
+    }
+    $consumed = 0
+    $truncated = [Collections.Generic.List[string]]::new()
+    foreach ($document in $documents) {
+        if ($consumed + $document.byte_size -gt $MaxCombinedBytes) { $truncated.Add($document.path) }
+        else { $consumed += $document.byte_size }
+    }
+    return [pscustomobject][ordered]@{
+        schema_version = 1; host = 'workbuddy'; repo_root = $RepoRoot; current_directory = $CurrentDirectory; read_only = $true
+        documents = @($documents.ToArray()); candidates = @($candidates.ToArray()); combined_bytes = $consumed
+        max_combined_bytes = $MaxCombinedBytes; truncated_paths = @($truncated.ToArray()); budget_kind = 'inspection_budget_not_host_limit'
+        inspection_complete = $false; omitted_sources = @('ancestors_outside_repo','imports','parser_validation','conditional_activation','reparse_paths')
+        load_verification = 'not_run'; writes = 0; provider_calls = 0; native_mutations = 0; profile_changed = $false
+    }
+}
+
 function Get-RuleDiscovery {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [string]$CurrentDirectory = $RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
         [string]$UserRuleRoot,
         [string[]]$FallbackNames = @(),
         [int]$MaxCombinedBytes = 32768
@@ -5966,6 +6046,7 @@ function Get-RuleDiscovery {
     $repo = [System.IO.Path]::GetFullPath($RepoRoot)
     $cwd = [System.IO.Path]::GetFullPath($CurrentDirectory)
     if (-not (Test-RuleDiscoveryPathWithin $cwd $repo)) { throw 'CurrentDirectory is outside the authorized repository root.' }
+    if ($HostName -eq 'workbuddy') { return Get-WorkBuddyRuleDiscovery -RepoRoot $repo -CurrentDirectory $cwd -UserRuleRoot $UserRuleRoot -MaxCombinedBytes $MaxCombinedBytes }
     $documents = New-Object System.Collections.Generic.List[object]
     $candidates = New-Object System.Collections.Generic.List[object]
     $precedence = 0
@@ -6458,10 +6539,10 @@ function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsP
     return @($findings.ToArray())
 }
 
-function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude', 'zcode', 'antigravity')][string]$HostName) {
+function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName) {
     if ([string]::IsNullOrWhiteSpace($UserRoot)) { return $null }
     $root = Get-RuleEstateNormalizedPath $UserRoot
-    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') { @('GEMINI.md') } else { @('CLAUDE.md') }
+    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') { @('GEMINI.md') } elseif ($HostName -eq 'workbuddy') { @('CODEBUDDY.md', 'CODEBUDDY.mdc') } else { @('CLAUDE.md') }
     foreach ($name in $names) {
         $path = Join-Path $root $name
         if ([System.IO.File]::Exists($path)) {
@@ -6473,7 +6554,7 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
     return $null
 }
 
-function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '') {
+function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '', [string]$WorkBuddyUserRoot = '') {
     $codex = Get-RuleEstateGlobalDocument $CodexUserRoot codex
     $claude = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
     $zcodeRoot = ''
@@ -6490,6 +6571,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         $antigravityConfigured = [System.IO.Directory]::Exists($antigravityRoot)
     }
     $antigravity = if ($antigravityConfigured) { Get-RuleEstateGlobalDocument $antigravityRoot antigravity } else { $null }
+    $workbuddyRoot = if ([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)) { '' } else { Get-RuleEstateNormalizedPath $WorkBuddyUserRoot }
+    $workbuddyConfigured = -not [string]::IsNullOrWhiteSpace($workbuddyRoot) -and [IO.Directory]::Exists($workbuddyRoot)
+    $workbuddy = if ($workbuddyConfigured) { Get-RuleEstateGlobalDocument $workbuddyRoot workbuddy } else { $null }
     $sections = New-Object System.Collections.Generic.List[object]
     $findings = New-Object System.Collections.Generic.List[object]
     $documents = @(
@@ -6498,20 +6582,23 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     )
     if ($zcodeConfigured) { $documents += [pscustomobject]@{ host = 'zcode'; value = $zcode } }
     if ($antigravityConfigured) { $documents += [pscustomobject]@{ host = 'antigravity'; value = $antigravity } }
+    if ($workbuddyConfigured) { $documents += [pscustomobject]@{ host = 'workbuddy'; value = $workbuddy } }
     foreach ($document in $documents) {
         $text = if ($null -eq $document.value) { '' } else { [string]$document.value.text }
         if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $text '1'))) {
             $findings.Add([pscustomobject][ordered]@{ code = 'global_contract_section_missing'; severity = 'error'; host = [string]$document.host; section = '1'; path = if ($null -eq $document.value) { '' } else { [string]$document.value.path }; disposition = 'adapt'; message = 'Global rule contract section 1 is missing.' }) | Out-Null
         }
     }
-    foreach ($name in @('A', 'C', 'D')) {
+    foreach ($name in @('1', 'A', 'C', 'D')) {
         $codexText = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) $name }
         $claudeText = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) $name }
         $zcodeText = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) $name }
         $antigravityText = if ($null -eq $antigravity) { '' } else { Get-RuleEstateMarkdownSection ([string]$antigravity.text) $name }
+        $workbuddyText = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateMarkdownSection ([string]$workbuddy.text) $name }
         $aligned = -not [string]::IsNullOrWhiteSpace($codexText) -and $codexText -ceq $claudeText
         if ($zcodeConfigured) { $aligned = $aligned -and $codexText -ceq $zcodeText }
         if ($antigravityConfigured) { $aligned = $aligned -and $codexText -ceq $antigravityText }
+        if ($workbuddyConfigured) { $aligned = $aligned -and $codexText -ceq $workbuddyText }
         $sections.Add([pscustomobject][ordered]@{
             section = $name
             aligned = $aligned
@@ -6519,8 +6606,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
             claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-OperationSha256 $claudeText }
             zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-OperationSha256 $zcodeText }
             antigravity_hash = if ([string]::IsNullOrWhiteSpace($antigravityText)) { '' } else { Get-OperationSha256 $antigravityText }
+            workbuddy_hash = if ([string]::IsNullOrWhiteSpace($workbuddyText)) { '' } else { Get-OperationSha256 $workbuddyText }
         }) | Out-Null
-        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex, Claude, or configured ZCode global common section {0} is absent or different.' -f $name) }) | Out-Null }
+        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Global common section {0} is absent or different across configured hosts.' -f $name) }) | Out-Null }
         if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
             $tokens = @([regex]::Matches($codexText, '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
             $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'error'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
@@ -6530,6 +6618,11 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
     $zcodeDelta = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) 'B' }
     $antigravityDelta = if ($null -eq $antigravity) { '' } else { Get-RuleEstateMarkdownSection ([string]$antigravity.text) 'B' }
+    $workbuddyDelta = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateMarkdownSection ([string]$workbuddy.text) 'B' }
+    if ($workbuddyConfigured -and $null -eq $workbuddy) { $findings.Add([pscustomobject]@{ code = 'workbuddy_global_rule_missing'; severity = 'error'; path = (Join-Path $workbuddyRoot 'CODEBUDDY.md'); disposition = 'adapt'; message = 'Configured WorkBuddy user root has no non-empty CODEBUDDY.md or CODEBUDDY.mdc rule.' }) | Out-Null }
+    if ($workbuddyConfigured -and [string]::IsNullOrWhiteSpace($workbuddyDelta)) { $findings.Add([pscustomobject]@{ code = 'workbuddy_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'WorkBuddy global platform delta section B is missing.' }) | Out-Null }
+    $workbuddyDeltaDistinct = (-not $workbuddyConfigured) -or (-not [string]::IsNullOrWhiteSpace($workbuddyDelta) -and $workbuddyDelta -cne $codexDelta -and $workbuddyDelta -cne $claudeDelta -and $workbuddyDelta -cne $zcodeDelta -and $workbuddyDelta -cne $antigravityDelta)
+    if ($workbuddyConfigured -and -not [string]::IsNullOrWhiteSpace($workbuddyDelta) -and -not $workbuddyDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'WorkBuddy platform delta is identical to another host.' }) | Out-Null }
     if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
     if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
     if ($zcodeConfigured -and $null -eq $zcode) { $findings.Add([pscustomobject]@{ code = 'zcode_global_rule_missing'; severity = 'error'; path = (Join-Path $zcodeRoot 'AGENTS.md'); disposition = 'adapt'; message = 'Configured ZCode user root has no non-empty AGENTS.md global rule.' }) | Out-Null }
@@ -6543,7 +6636,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     if ($antigravityConfigured -and -not [string]::IsNullOrWhiteSpace($antigravityDelta) -and -not $antigravityDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Antigravity platform delta is identical to another host; preserve host-specific loading and enforcement facts.' }) | Out-Null }
 
     $budgets = New-Object System.Collections.Generic.List[object]
-    foreach ($document in @($codex, $claude, $zcode, $antigravity)) {
+    foreach ($document in @($codex, $claude, $zcode, $antigravity, $workbuddy)) {
         if ($null -eq $document) { continue }
         $text = [string]$document.text
         $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($text)
@@ -6566,7 +6659,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     $claudeRelease = if ($null -eq $claude) { '' } else { Get-RuleEstateRelease ([string]$claude.text) global }
     $zcodeRelease = if ($null -eq $zcode) { '' } else { Get-RuleEstateRelease ([string]$zcode.text) global }
     $antigravityRelease = if ($null -eq $antigravity) { '' } else { Get-RuleEstateRelease ([string]$antigravity.text) global }
+    $workbuddyRelease = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateRelease ([string]$workbuddy.text) global }
     $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease -and ((-not $zcodeConfigured) -or $codexRelease -eq $zcodeRelease) -and ((-not $antigravityConfigured) -or $codexRelease -eq $antigravityRelease)
+    $releaseAligned = $releaseAligned -and ((-not $workbuddyConfigured) -or $codexRelease -eq $workbuddyRelease)
     if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $codexRelease; observed = [pscustomobject]@{ claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; antigravity = $antigravityRelease; antigravity_configured = $antigravityConfigured }; message = 'Codex, Claude, and configured ZCode/Antigravity global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
         codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
@@ -6577,13 +6672,19 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         zcode_global_rule_present = ($null -ne $zcode)
         antigravity_configured = $antigravityConfigured
         antigravity_global_rule_present = ($null -ne $antigravity)
+        workbuddy_path = if ($null -eq $workbuddy) { if ($workbuddyConfigured) { Join-Path $workbuddyRoot 'CODEBUDDY.md' } else { '' } } else { [string]$workbuddy.path }
+        workbuddy_configured = $workbuddyConfigured
+        workbuddy_global_rule_present = ($null -ne $workbuddy)
+        workbuddy_delta_present = -not [string]::IsNullOrWhiteSpace($workbuddyDelta)
+        workbuddy_release = $workbuddyRelease
+        workbuddy_selection = 'first_non_empty_candidate_parse_not_verified'
         common_sections = @($sections.ToArray())
         common_aligned = (@($sections | Where-Object { -not $_.aligned }).Count -eq 0)
         codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
         claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
         zcode_delta_present = -not [string]::IsNullOrWhiteSpace($zcodeDelta)
         antigravity_delta_present = -not [string]::IsNullOrWhiteSpace($antigravityDelta)
-        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta -and $zcodeDeltaDistinct -and $antigravityDeltaDistinct)
+        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta -and $zcodeDeltaDistinct -and $antigravityDeltaDistinct -and $workbuddyDeltaDistinct)
         releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; antigravity = $antigravityRelease; antigravity_configured = $antigravityConfigured; aligned = $releaseAligned }
         budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
@@ -6632,18 +6733,21 @@ function Get-RuleEstateRelease([string]$Text, [ValidateSet('global', 'project')]
 }
 
 function New-RuleEstateTargetAudit {
-    param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$CodexGlobalText, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '')
+    param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$CodexGlobalText, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '', [string]$WorkBuddyUserRoot = '')
     $codexDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName codex -UserRuleRoot $CodexUserRoot
     $claudeDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName claude -UserRuleRoot $ClaudeUserRoot
     $zcodeConfigured = -not [string]::IsNullOrWhiteSpace($ZCodeUserRoot) -and [System.IO.Directory]::Exists((Get-RuleEstateNormalizedPath $ZCodeUserRoot))
     $zcodeDiscovery = if ($zcodeConfigured) { Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName zcode -UserRuleRoot $ZCodeUserRoot } else { $null }
     $antigravityConfigured = -not [string]::IsNullOrWhiteSpace($AntigravityUserRoot) -and [System.IO.Directory]::Exists((Get-RuleEstateNormalizedPath $AntigravityUserRoot))
     $antigravityDiscovery = if ($antigravityConfigured) { Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName antigravity -UserRuleRoot $AntigravityUserRoot } else { $null }
+    $workbuddyConfigured = -not [string]::IsNullOrWhiteSpace($WorkBuddyUserRoot) -and [IO.Directory]::Exists((Get-RuleEstateNormalizedPath $WorkBuddyUserRoot))
+    $workbuddyDiscovery = if ($workbuddyConfigured) { Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName workbuddy -UserRuleRoot $WorkBuddyUserRoot } else { $null }
     $scopeProfile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
     $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery $scopeProfile
     $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery $scopeProfile
     $zcodeDiagnostics = if ($null -eq $zcodeDiscovery) { $null } else { Invoke-RuleDiagnostics $zcodeDiscovery $scopeProfile }
     $antigravityDiagnostics = if ($null -eq $antigravityDiscovery) { $null } else { Invoke-RuleDiagnostics $antigravityDiscovery $scopeProfile }
+    $workbuddyDiagnostics = if ($null -eq $workbuddyDiscovery) { $null } else { Invoke-RuleDiagnostics $workbuddyDiscovery $scopeProfile }
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
     $contractFacts = @(Get-RuleEstateProjectContractFacts $Target.agents_path)
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
@@ -6654,7 +6758,7 @@ function New-RuleEstateTargetAudit {
     $projectByteHeadroom = 10240 - $projectBytes; $projectLineHeadroom = 80 - $projectLines
     $projectLowHeadroom = $projectWithinBudget -and ($projectBytes -ge [math]::Floor(10240 * 0.85) -or $projectByteHeadroom -lt 1024 -or $projectLineHeadroom -lt 5)
     $findings = New-Object System.Collections.Generic.List[object]
-    foreach ($finding in @($codexDiagnostics.findings) + @($claudeDiagnostics.findings) + $(if ($null -eq $antigravityDiagnostics) { @() } else { @($antigravityDiagnostics.findings) })) {
+    foreach ($finding in @($codexDiagnostics.findings) + @($claudeDiagnostics.findings) + $(if ($null -eq $antigravityDiagnostics) { @() } else { @($antigravityDiagnostics.findings) }) + $(if ($null -eq $workbuddyDiagnostics) { @() } else { @($workbuddyDiagnostics.findings) })) {
         $findingPath = [string](Get-OperationObjectProperty $finding 'path')
         if (-not [string]::IsNullOrWhiteSpace($findingPath) -and (Test-RuleDiscoveryPathWithin $findingPath $Target.path)) { $findings.Add($finding) | Out-Null }
     }
@@ -6696,6 +6800,7 @@ function New-RuleEstateTargetAudit {
         zcode = [pscustomobject][ordered]@{ configuration_state = $(if ($zcodeConfigured) { 'configured' } else { 'not_configured' }); documents = $(if ($null -eq $zcodeDiscovery) { @() } else { @($zcodeDiscovery.documents) }); findings = $(if ($null -eq $zcodeDiagnostics) { @() } else { @($zcodeDiagnostics.findings) }); load_verification = 'not_run' }
         antigravity = [pscustomobject][ordered]@{ configuration_state = $(if ($antigravityConfigured) { 'configured' } else { 'not_configured' }); adapter_path = [string]$Target.antigravity_rule_path; adapter_present = [bool]$Target.antigravity_rule_exists; documents = $(if ($null -eq $antigravityDiscovery) { @() } else { @($antigravityDiscovery.documents) }); findings = @($antigravityAdapterFindings.ToArray()) + $(if ($null -eq $antigravityDiagnostics) { @() } else { @($antigravityDiagnostics.findings) }); load_verification = 'not_run' }
         contract_fact_coverage_kind = 'required_project_facts_presence'
+        workbuddy = [pscustomobject][ordered]@{ configuration_state = $(if ($workbuddyConfigured) { 'configured' } else { 'not_configured' }); documents = $(if ($null -eq $workbuddyDiscovery) { @() } else { @($workbuddyDiscovery.documents) }); findings = $(if ($null -eq $workbuddyDiagnostics) { @() } else { @($workbuddyDiagnostics.findings) }); inspection_complete = $false; omitted_sources = $(if ($null -eq $workbuddyDiscovery) { @() } else { @($workbuddyDiscovery.omitted_sources) }); load_verification = 'not_run' }
         contract_facts = @($contractFacts)
         contract_fact_gap_count = @($contractFacts | Where-Object { -not $_.covered }).Count
         release = [pscustomobject][ordered]@{ global = $globalRelease; project_review = $projectRelease; aligned = (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -eq $globalRelease) }
@@ -6707,13 +6812,13 @@ function New-RuleEstateTargetAudit {
 }
 
 function Invoke-RuleEstateAudit {
-    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets = @(), [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [int]$MaxTargets = 64, [string]$AntigravityUserRoot = '')
+    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets = @(), [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [int]$MaxTargets = 64, [string]$AntigravityUserRoot = '', [string]$WorkBuddyUserRoot = '')
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $WorkspaceRoot -ExcludeNames $ExcludeNames -RegistryTargets $RegistryTargets -MaxTargets $MaxTargets
-    $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot
+    $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot $WorkBuddyUserRoot
     $codexGlobal = Get-RuleEstateGlobalDocument $CodexUserRoot codex
     $codexText = if ($null -eq $codexGlobal) { '' } else { [string]$codexGlobal.text }
     $audits = New-Object System.Collections.Generic.List[object]
-    foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot $AntigravityUserRoot)) | Out-Null }
+    foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot $AntigravityUserRoot $WorkBuddyUserRoot)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $contractFactGapCount = @($audits | ForEach-Object { $_.contract_facts } | Where-Object { -not $_.covered }).Count
@@ -7043,6 +7148,56 @@ function Invoke-RuleEstateRollback {
     return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=$(if($alreadyBefore){0}else{1});action_id=$ActionId}
 }
 
+function Get-GlobalRuleRenderedEntries {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+    $repo = [IO.Path]::GetFullPath($RepoRoot)
+    $commonPath = Join-Path $repo 'rules/global/common.md'
+    $encoding = [Text.UTF8Encoding]::new($false, $true)
+    $readInput = {
+        param([string]$Path)
+        if (Test-GlobalRuleProjectionReparsePath $Path $repo) { throw "Global rule input crosses a reparse point: $Path" }
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) { throw "Global rule input must be UTF-8 without BOM: $Path" }
+        return $encoding.GetString($bytes).Replace("`r`n", "`n").TrimEnd("`n")
+    }
+    $common = & $readInput $commonPath
+    if ([regex]::Matches($common, '(?m)^\{\{PLATFORM\}\}$').Count -ne 1) { throw 'Global common source requires exactly one PLATFORM placeholder.' }
+    $version = [regex]::Match($common, '(?m)^\*\*版本\*\*:\s*([0-9][0-9A-Za-z_.-]*)\s*$')
+    if (-not $version.Success) { throw 'Global common source requires a release version.' }
+    $hosts = @(
+        @{ id = 'codex'; file = 'AGENTS.md'; label = 'OpenAI ChatGPT Work / Codex App / Codex CLI' }
+        @{ id = 'claude'; file = 'CLAUDE.md'; label = 'Claude Code' }
+        @{ id = 'zcode'; file = 'AGENTS.md'; label = 'ZCode / GLM' }
+        @{ id = 'antigravity'; file = 'GEMINI.md'; label = 'Antigravity / Gemini' }
+        @{ id = 'workbuddy'; file = 'CODEBUDDY.md'; label = 'WorkBuddy / CodeBuddy' }
+    )
+    foreach ($hostEntry in $hosts) {
+        $platformPath = Join-Path $repo ("rules/global/platforms/{0}.md" -f $hostEntry.id)
+        $platform = & $readInput $platformPath
+        if ($platform -notmatch '^## B\.' -or [regex]::Matches($platform, '(?m)^## ').Count -ne 1) { throw "Platform source must contain only one B section: $platformPath" }
+        $text = $common.Replace('{{PLATFORM}}', $platform)
+        $title = '# {0} - Universal Agent Protocol v{1} | {2}' -f $hostEntry.file, $version.Groups[1].Value, $hostEntry.label
+        $text = [regex]::Replace($text, '\A[^\n]*', $title) + "`n"
+        if ($null -eq (Get-GlobalRuleSections $text)) { throw "Generated global rule structure is invalid: $($hostEntry.id)" }
+        $bytes = $encoding.GetBytes($text)
+        if ($bytes.Length -gt 16384 -or ($text -split "`n").Count -gt 130) { throw "Generated global rule exceeds its budget: $($hostEntry.id)" }
+        if ($hostEntry.id -eq 'antigravity' -and $text.Length -gt 12000) { throw 'Generated Antigravity rule exceeds 12,000 characters.' }
+        [pscustomobject]@{ id = $hostEntry.id; source_path = (Join-Path $repo ("rules/global/{0}/{1}" -f $hostEntry.id, $hostEntry.file)); text = $text; bytes = $bytes }
+    }
+}
+
+function Sync-GlobalRuleGeneratedFiles {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [switch]$Check)
+    $entries = @(Get-GlobalRuleRenderedEntries $RepoRoot)
+    foreach ($entry in $entries) {
+        if (Test-GlobalRuleProjectionReparsePath $entry.source_path $RepoRoot) { throw "Generated global rule crosses a reparse point: $($entry.source_path)" }
+        $matches = [IO.File]::Exists($entry.source_path) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($entry.source_path)) -ceq [Convert]::ToBase64String($entry.bytes)
+        if ($matches) { continue }
+        if ($Check) { throw "generated_global_rule_drift: run build.ps1: $($entry.source_path)" }
+        Write-BytesAtomic -Path $entry.source_path -Bytes $entry.bytes
+    }
+}
+
 function Get-GlobalRuleProperty($Object, [string]$Name) {
     if ($null -eq $Object) { return $null }
     $property = $Object.PSObject.Properties[$Name]
@@ -7083,7 +7238,8 @@ function Get-GlobalRuleProjectionEntries {
         [Parameter(Mandatory=$true)][string]$CodexUserRoot,
         [Parameter(Mandatory=$true)][string]$ClaudeUserRoot,
         [string]$ZCodeUserRoot = '',
-        [string]$AntigravityUserRoot = ''
+        [string]$AntigravityUserRoot = '',
+        [string]$WorkBuddyUserRoot = ''
     )
     $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository'
     $codex=Assert-GlobalRuleProjectionRoot $CodexUserRoot 'Codex user'
@@ -7099,6 +7255,10 @@ function Get-GlobalRuleProjectionEntries {
         $antigravity=Assert-GlobalRuleProjectionRoot $AntigravityUserRoot 'Antigravity user'
         $entries.Add([pscustomobject][ordered]@{id='antigravity';source_path=(Join-Path $repo 'rules\global\antigravity\GEMINI.md');target_path=(Join-Path $antigravity 'GEMINI.md');root=$antigravity})|Out-Null
     }
+    if (-not [string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)) {
+        $workbuddy=Assert-GlobalRuleProjectionRoot $WorkBuddyUserRoot 'WorkBuddy user'
+        $entries.Add([pscustomobject][ordered]@{id='workbuddy';source_path=(Join-Path $repo 'rules\global\workbuddy\CODEBUDDY.md');target_path=(Join-Path $workbuddy 'CODEBUDDY.md');root=$workbuddy})|Out-Null
+    }
     return @($entries.ToArray())
 }
 
@@ -7110,6 +7270,7 @@ function Get-GlobalRuleSourceEntries {
         [pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md')}
         [pscustomobject][ordered]@{id='zcode';source_path=(Join-Path $repo 'rules\global\zcode\AGENTS.md')}
         [pscustomobject][ordered]@{id='antigravity';source_path=(Join-Path $repo 'rules\global\antigravity\GEMINI.md')}
+        [pscustomobject][ordered]@{id='workbuddy';source_path=(Join-Path $repo 'rules\global\workbuddy\CODEBUDDY.md')}
     )
 }
 
@@ -7141,9 +7302,11 @@ function Get-GlobalRuleSections([string]$Text) {
 }
 
 function Test-GlobalRuleSourceFamily {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
     $findings=New-Object Collections.Generic.List[object];$observations=New-Object Collections.Generic.List[object]
-    $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot
+    $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
+    try { Sync-GlobalRuleGeneratedFiles -RepoRoot $RepoRoot -Check }
+    catch { $findings.Add((New-GlobalRuleFinding 'source_generation_drift' $RepoRoot $_.Exception.Message))|Out-Null }
     $sourceEntries=Get-GlobalRuleSourceEntries $RepoRoot;$facts=@{};$sections=@{}
     foreach($entry in $sourceEntries){
         if(Test-GlobalRuleProjectionReparsePath $entry.source_path ([IO.Path]::GetFullPath($RepoRoot))){$findings.Add((New-GlobalRuleFinding 'source_reparse_forbidden' $entry.source_path 'Global rule sources must not cross reparse points.'))|Out-Null}
@@ -7161,11 +7324,11 @@ function Test-GlobalRuleSourceFamily {
         if($null-eq$sections[$entry.id]){$findings.Add((New-GlobalRuleFinding 'source_structure_invalid' $entry.source_path 'Global rules require exactly one ordered 1/A/B/C/D section family.'))|Out-Null}
     }
     foreach($entry in $entries){if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add((New-GlobalRuleFinding 'target_reparse_forbidden' $entry.target_path 'Global rule targets must be ordinary files below the user root.'))|Out-Null}}
-    $sourceFamilyIds=@('codex','claude','zcode','antigravity')
+    $sourceFamilyIds=@('codex','claude','zcode','antigravity','workbuddy')
     $sourceFamilyPresent=@($sourceFamilyIds|Where-Object{$facts.ContainsKey($_)-and$facts[$_].exists})
     if($sourceFamilyPresent.Count-eq$sourceFamilyIds.Count){
         $sourceVersions=@($sourceFamilyIds|ForEach-Object{[string]$facts[$_].version}|Sort-Object -Unique)
-        if($sourceVersions.Count-ne1){$findings.Add((New-GlobalRuleFinding 'source_version_mismatch' '$' 'Codex, Claude, ZCode, and Antigravity global rule versions differ.'))|Out-Null}
+        if($sourceVersions.Count-ne1){$findings.Add((New-GlobalRuleFinding 'source_version_mismatch' '$' 'Global rule versions differ across hosts.'))|Out-Null}
     }
     if($facts.ContainsKey('codex')-and$facts.ContainsKey('claude')-and$facts.codex.exists-and$facts.claude.exists){
         $c=$sections['codex'];$h=$sections['claude']
@@ -7200,16 +7363,31 @@ function Test-GlobalRuleSourceFamily {
             }
         }
     }
+    if ($sections.ContainsKey('workbuddy') -and $null -ne $sections.workbuddy) {
+        $platformBody=[regex]::Replace($sections.workbuddy.b,'^[^\n]*\n?','').Trim()
+        if ([string]::IsNullOrWhiteSpace($platformBody)) { $findings.Add((New-GlobalRuleFinding 'source_platform_section_empty' '$.B' 'WorkBuddy B section must be non-empty.'))|Out-Null }
+        foreach ($otherHost in @('codex','claude','zcode','antigravity')) {
+            if ($sections.ContainsKey($otherHost) -and $null -ne $sections[$otherHost] -and $sections.workbuddy.b -ceq $sections[$otherHost].b) { $findings.Add((New-GlobalRuleFinding 'source_platform_sections_identical' '$.B' 'WorkBuddy platform delta must be distinct.'))|Out-Null }
+        }
+    }
+    foreach ($hostId in $sourceFamilyIds | Where-Object { $_ -ne 'codex' }) {
+        if ($sections.ContainsKey('codex') -and $null -ne $sections.codex -and $sections.ContainsKey($hostId) -and $null -ne $sections[$hostId]) {
+            foreach ($sectionName in @('1','a','c','d')) {
+                if ($sections.codex.$sectionName -cne $sections[$hostId].$sectionName) { $findings.Add((New-GlobalRuleFinding 'source_common_sections_drift' '$' "Common section $sectionName differs for $hostId."))|Out-Null }
+            }
+        }
+    }
     return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
 }
 
-function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[object[]]$Actions,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='') {
+function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[object[]]$Actions,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='') {
     $parts=New-Object Collections.Generic.List[string]
     $parts.Add([IO.Path]::GetFullPath($RepoRoot).ToLowerInvariant())|Out-Null
     $parts.Add([IO.Path]::GetFullPath($CodexUserRoot).ToLowerInvariant())|Out-Null
     $parts.Add([IO.Path]::GetFullPath($ClaudeUserRoot).ToLowerInvariant())|Out-Null
     if(-not[string]::IsNullOrWhiteSpace($ZCodeUserRoot)){$parts.Add([IO.Path]::GetFullPath($ZCodeUserRoot).ToLowerInvariant())|Out-Null}
     if(-not[string]::IsNullOrWhiteSpace($AntigravityUserRoot)){$parts.Add([IO.Path]::GetFullPath($AntigravityUserRoot).ToLowerInvariant())|Out-Null}
+    if(-not[string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)){$parts.Add([IO.Path]::GetFullPath($WorkBuddyUserRoot).ToLowerInvariant())|Out-Null}
     foreach($action in @($Actions|Sort-Object id)){
         $parts.Add(('{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f [string](Get-GlobalRuleProperty $action 'id'),([IO.Path]::GetFullPath([string](Get-GlobalRuleProperty $action 'source_path')).ToLowerInvariant()),([IO.Path]::GetFullPath([string](Get-GlobalRuleProperty $action 'target_path')).ToLowerInvariant()),[string](Get-GlobalRuleProperty $action 'source_hash'),[bool](Get-GlobalRuleProperty $action 'before_exists'),[string](Get-GlobalRuleProperty $action 'before_hash'),[string](Get-GlobalRuleProperty $action 'operation')))|Out-Null
     }
@@ -7218,8 +7396,8 @@ function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[st
 }
 
 function New-GlobalRuleProjectionPlan {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
-    $validation=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
+    $validation=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
     if(-not$validation.pass){throw('Global rule sources are invalid: {0}'-f(@($validation.findings.code)-join', '))}
     $actions=foreach($entry in $validation.entries){
         $source=$validation.facts[$entry.id];$target=Get-GlobalRuleFileFacts $entry.target_path
@@ -7228,12 +7406,13 @@ function New-GlobalRuleProjectionPlan {
     $repo=[IO.Path]::GetFullPath($RepoRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     $zcode=$(if([string]::IsNullOrWhiteSpace($ZCodeUserRoot)){''}else{[IO.Path]::GetFullPath($ZCodeUserRoot)})
     $antigravity=$(if([string]::IsNullOrWhiteSpace($AntigravityUserRoot)){''}else{[IO.Path]::GetFullPath($AntigravityUserRoot)})
-    $identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode $antigravity
-    return [pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$identity.operation_id;plan_hash=$identity.plan_hash;generated_at=[datetimeoffset]::UtcNow.ToString('o');repo_root=$repo;codex_user_root=$codex;claude_user_root=$claude;zcode_user_root=$zcode;antigravity_user_root=$antigravity;actions=@($actions);apply=[pscustomobject]@{required_token=$identity.apply_token;freshness='canonical_sources_and_targets';resume='explicit';rollback='operation_bound_receipt'};observations=@($validation.observations);truth_boundary='planned_not_applied';provider_calls=0;native_mutations=0}
+    $workbuddy=$(if([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)){''}else{[IO.Path]::GetFullPath($WorkBuddyUserRoot)})
+    $identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode $antigravity -WorkBuddyUserRoot $workbuddy
+    return [pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$identity.operation_id;plan_hash=$identity.plan_hash;generated_at=[datetimeoffset]::UtcNow.ToString('o');repo_root=$repo;codex_user_root=$codex;claude_user_root=$claude;zcode_user_root=$zcode;antigravity_user_root=$antigravity;workbuddy_user_root=$workbuddy;actions=@($actions);apply=[pscustomobject]@{required_token=$identity.apply_token;freshness='canonical_sources_and_targets';resume='explicit';rollback='operation_bound_receipt'};observations=@($validation.observations);truth_boundary='planned_not_applied';provider_calls=0;native_mutations=0}
 }
 
 function Test-GlobalRulePlanBinding {
-    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [switch]$AllowAppliedTargets,[switch]$ForRollback)
+    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [switch]$AllowAppliedTargets,[switch]$ForRollback,[string]$WorkBuddyUserRoot='')
     $findings=New-Object Collections.Generic.List[object]
     if($null-eq$Plan-or(Get-GlobalRuleProperty $Plan 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $Plan 'domain')-ne'global_rule_projection'){
         return [pscustomobject]@{pass=$false;findings=@((New-GlobalRuleFinding 'plan_schema_invalid' '$' 'Only global rule projection plan schema version 2 is supported; generate a new plan.'))}
@@ -7244,7 +7423,13 @@ function Test-GlobalRulePlanBinding {
     if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan 'zcode_user_root')) $zcode)){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' '$.zcode_user_root' 'CLI ZCode root must exactly match the plan root.'))|Out-Null}
     $antigravity=$(if([string]::IsNullOrWhiteSpace($AntigravityUserRoot)){''}else{[IO.Path]::GetFullPath($AntigravityUserRoot)})
     if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan 'antigravity_user_root')) $antigravity)){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' '$.antigravity_user_root' 'CLI Antigravity root must exactly match the plan root.'))|Out-Null}
-    $canonical=Get-GlobalRuleProjectionEntries $repo $codex $claude $zcode $antigravity;$actions=@(Get-GlobalRuleProperty $Plan 'actions')
+    $workbuddy=$(if([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)){''}else{[IO.Path]::GetFullPath($WorkBuddyUserRoot)})
+    if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan 'workbuddy_user_root')) $workbuddy)){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' '$.workbuddy_user_root' 'CLI WorkBuddy root must exactly match the plan root.'))|Out-Null}
+    if (-not $ForRollback) {
+        try { Sync-GlobalRuleGeneratedFiles -RepoRoot $RepoRoot -Check }
+        catch { $findings.Add((New-GlobalRuleFinding 'source_generation_drift' $RepoRoot $_.Exception.Message))|Out-Null }
+    }
+    $canonical=Get-GlobalRuleProjectionEntries $repo $codex $claude $zcode $antigravity -WorkBuddyUserRoot $workbuddy;$actions=@(Get-GlobalRuleProperty $Plan 'actions')
     if($actions.Count-ne$canonical.Count){$findings.Add((New-GlobalRuleFinding 'plan_action_set_invalid' '$.actions' 'Plan must contain exactly the canonical host actions.'))|Out-Null}
     $byId=@{};foreach($action in $actions){$id=[string](Get-GlobalRuleProperty $action 'id');if($byId.ContainsKey($id)){$byId[$id]=$null}else{$byId[$id]=$action}}
     foreach($entry in $canonical){
@@ -7261,7 +7446,7 @@ function Test-GlobalRulePlanBinding {
         if(-not$AllowAppliedTargets){$target=Get-GlobalRuleFileFacts $entry.target_path;if($target.exists-ne$beforeExists-or$target.hash-ne$beforeHash){$findings.Add((New-GlobalRuleFinding 'target_hash_stale' $entry.target_path 'Global rule target changed after planning.'))|Out-Null}}
     }
     if($actions.Count-eq$canonical.Count){
-        try{$identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode $antigravity;if([string](Get-GlobalRuleProperty $Plan 'plan_hash')-cne$identity.plan_hash-or[string](Get-GlobalRuleProperty $Plan 'operation_id')-cne$identity.operation_id-or[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')-cne$identity.apply_token){$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' 'Plan identity or token is not canonical.'))|Out-Null}}catch{$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' $_.Exception.Message))|Out-Null}
+        try{$identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode $antigravity -WorkBuddyUserRoot $workbuddy;if([string](Get-GlobalRuleProperty $Plan 'plan_hash')-cne$identity.plan_hash-or[string](Get-GlobalRuleProperty $Plan 'operation_id')-cne$identity.operation_id-or[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')-cne$identity.apply_token){$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' 'Plan identity or token is not canonical.'))|Out-Null}}catch{$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' $_.Exception.Message))|Out-Null}
     }
     return [pscustomobject]@{pass=($findings.Count-eq0);findings=@($findings.ToArray())}
 }
@@ -7272,13 +7457,14 @@ function Write-GlobalRuleReceipt([string]$Path,$Receipt) {
 }
 
 function Test-GlobalRuleReceiptBinding {
-    param($Receipt,$Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$BackupRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
+    param($Receipt,$Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$BackupRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
     $findings=New-Object Collections.Generic.List[object]
     if($null-eq$Receipt-or(Get-GlobalRuleProperty $Receipt 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $Receipt 'domain')-ne'global_rule_projection'){
         return [pscustomobject]@{pass=$false;findings=@((New-GlobalRuleFinding 'receipt_schema_invalid' '$' 'Only global rule projection receipt schema version 2 is supported.'))}
     }
     if([string](Get-GlobalRuleProperty $Receipt 'operation_id')-cne[string](Get-GlobalRuleProperty $Plan 'operation_id')-or[string](Get-GlobalRuleProperty $Receipt 'plan_hash')-cne[string](Get-GlobalRuleProperty $Plan 'plan_hash')){$findings.Add((New-GlobalRuleFinding 'receipt_plan_mismatch' '$' 'Receipt is not bound to the supplied plan.'))|Out-Null}
-    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot $AntigravityUserRoot
+    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
+    if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Receipt 'workbuddy_user_root')) $WorkBuddyUserRoot)){$findings.Add((New-GlobalRuleFinding 'receipt_root_mismatch' '$.workbuddy_user_root' 'Receipt WorkBuddy root does not match the authorized root.'))|Out-Null}
     if([string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Receipt 'rollback') 'required_token')-cne$identity.rollback_token){$findings.Add((New-GlobalRuleFinding 'receipt_rollback_token_invalid' '$.rollback.required_token' 'Receipt rollback token is not operation-bound.'))|Out-Null}
     foreach($pair in @(@('repo_root',$RepoRoot),@('codex_user_root',$CodexUserRoot),@('claude_user_root',$ClaudeUserRoot),@('zcode_user_root',$ZCodeUserRoot),@('antigravity_user_root',$AntigravityUserRoot))){if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Receipt $pair[0])) $pair[1])){$findings.Add((New-GlobalRuleFinding 'receipt_root_mismatch' ('$.'+$pair[0]) 'Receipt roots do not match the authorized roots.'))|Out-Null}}
     $planActions=@(Get-GlobalRuleProperty $Plan 'actions');$receiptActions=@(Get-GlobalRuleProperty $Receipt 'actions')
@@ -7307,8 +7493,8 @@ function Test-GlobalRuleReceiptBinding {
 }
 
 function Invoke-GlobalRuleProjectionApply {
-    param($Plan,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$BackupRoot,[Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[switch]$Resume,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
-    $binding=Test-GlobalRulePlanBinding $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -AllowAppliedTargets:$Resume
+    param($Plan,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$BackupRoot,[Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[switch]$Resume,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
+    $binding=Test-GlobalRulePlanBinding $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -AllowAppliedTargets:$Resume -WorkBuddyUserRoot $WorkBuddyUserRoot
     if(-not$binding.pass){throw('Global rule projection plan is invalid or stale: {0}'-f(@($binding.findings.code)-join', '))}
     if($Token-cne[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')){throw 'Global rule projection token does not match the plan.'}
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath);$exists=[IO.File]::Exists($receiptFile)
@@ -7317,15 +7503,16 @@ function Invoke-GlobalRuleProjectionApply {
     $backupBase=Join-Path ([IO.Path]::GetFullPath($BackupRoot)) ([string](Get-GlobalRuleProperty $Plan 'operation_id'))
     if($Resume){
         $receipt=[IO.File]::ReadAllText($receiptFile)|ConvertFrom-Json
-        $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot $AntigravityUserRoot
+        $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
         if(-not$receiptBinding.pass){throw('Global rule receipt is invalid: {0}'-f(@($receiptBinding.findings.code)-join', '))}
         if([string](Get-GlobalRuleProperty $receipt 'status')-notin@('in_progress','recovery_required')){throw 'Global rule receipt is not resumable.'}
         if(@($receipt.actions|Where-Object {$_.status-eq'rolled_back'}).Count-gt0){throw 'Global rule receipt contains rolled-back actions and is not resumable for apply.'}
     }else{
         [IO.Directory]::CreateDirectory($backupBase)|Out-Null
         $receiptActions=foreach($action in @(Get-GlobalRuleProperty $Plan 'actions')){[pscustomobject][ordered]@{id=$action.id;source_path=$action.source_path;target_path=$action.target_path;source_hash=$action.source_hash;before_exists=[bool]$action.before_exists;before_hash=$action.before_hash;operation=$action.operation;status=$(if($action.operation-eq'unchanged'){'unchanged'}else{'pending'});backup_path=$null;backup_sha256=$null;backup_length=$null}}
-        $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot $AntigravityUserRoot
+        $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
         $receipt=[pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$Plan.operation_id;plan_hash=$Plan.plan_hash;status='in_progress';started_at=[datetimeoffset]::UtcNow.ToString('o');updated_at=$null;completed_at=$null;repo_root=[IO.Path]::GetFullPath($RepoRoot);codex_user_root=[IO.Path]::GetFullPath($CodexUserRoot);claude_user_root=[IO.Path]::GetFullPath($ClaudeUserRoot);zcode_user_root=$(if([string]::IsNullOrWhiteSpace($ZCodeUserRoot)){''}else{[IO.Path]::GetFullPath($ZCodeUserRoot)});antigravity_user_root=$(if([string]::IsNullOrWhiteSpace($AntigravityUserRoot)){''}else{[IO.Path]::GetFullPath($AntigravityUserRoot)});actions=@($receiptActions);writes=0;last_error=$null;rollback=[pscustomobject]@{required_token=$identity.rollback_token};truth_boundary='filesystem_apply_in_progress_not_host_loaded'}
+        $receipt | Add-Member -NotePropertyName workbuddy_user_root -NotePropertyValue $(if([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)){''}else{[IO.Path]::GetFullPath($WorkBuddyUserRoot)})
         Write-GlobalRuleReceipt $receiptFile $receipt
     }
     foreach($field in @('updated_at','completed_at','last_error','truth_boundary')){if($null-eq$receipt.PSObject.Properties[$field]){$receipt|Add-Member -NotePropertyName $field -NotePropertyValue $null}}
@@ -7365,23 +7552,24 @@ function Invoke-GlobalRuleProjectionApply {
 }
 
 function Test-GlobalRuleProjection {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
-    $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot;$findings=New-Object Collections.Generic.List[object]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
+    $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot;$findings=New-Object Collections.Generic.List[object]
     foreach($finding in @($source.findings)){$findings.Add($finding)|Out-Null}
     if($source.pass){foreach($entry in $source.entries){$target=Get-GlobalRuleFileFacts $entry.target_path;if(-not$target.exists){$findings.Add((New-GlobalRuleFinding 'target_missing' $entry.target_path 'Projected global rule is missing.'))|Out-Null}elseif($target.hash-ne$source.facts[$entry.id].hash){$findings.Add((New-GlobalRuleFinding 'target_source_drift' $entry.target_path 'Projected global rule differs from its source.'))|Out-Null}}}
     return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($source.observations);truth_boundary=$(if($findings.Count-eq0){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})}
 }
 
 function Invoke-GlobalRuleProjectionRollback {
-    param([Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[Parameter(Mandatory=$true)][string]$BackupRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='')
+    param([Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[Parameter(Mandatory=$true)][string]$BackupRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath);if(-not[IO.File]::Exists($receiptFile)){throw 'Global rule receipt does not exist.'}
     $receipt=[IO.File]::ReadAllText($receiptFile)|ConvertFrom-Json
     if((Get-GlobalRuleProperty $receipt 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $receipt 'domain')-ne'global_rule_projection'){throw 'Only global rule projection receipt schema version 2 is supported; schema v1 receipts cannot be rolled back.'}
     $plan=[pscustomobject]@{schema_version=2;domain='global_rule_projection';operation_id=$receipt.operation_id;plan_hash=$receipt.plan_hash;repo_root=$receipt.repo_root;codex_user_root=$receipt.codex_user_root;claude_user_root=$receipt.claude_user_root;zcode_user_root=$receipt.zcode_user_root;antigravity_user_root=$receipt.antigravity_user_root;actions=@($receipt.actions|ForEach-Object{[pscustomobject]@{id=$_.id;source_path=$_.source_path;target_path=$_.target_path;source_hash=$_.source_hash;before_exists=[bool]$_.before_exists;before_hash=$_.before_hash;operation=$_.operation}});apply=[pscustomobject]@{required_token=$null}}
-    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot $plan.actions $ZCodeUserRoot $AntigravityUserRoot;$plan.apply.required_token=$identity.apply_token
-    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -AllowAppliedTargets -ForRollback
+    $plan | Add-Member -NotePropertyName workbuddy_user_root -NotePropertyValue ([string](Get-GlobalRuleProperty $receipt 'workbuddy_user_root'))
+    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot $plan.actions $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot;$plan.apply.required_token=$identity.apply_token
+    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -AllowAppliedTargets -ForRollback -WorkBuddyUserRoot $WorkBuddyUserRoot
     if(-not$planBinding.pass-or$plan.plan_hash-cne$identity.plan_hash-or$plan.operation_id-cne$identity.operation_id){throw('Global rule receipt canonical binding is invalid: {0}'-f(@($planBinding.findings.code)-join', '))}
-    $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot $AntigravityUserRoot
+    $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
     if(-not$receiptBinding.pass){throw('Global rule receipt is invalid: {0}'-f(@($receiptBinding.findings.code)-join', '))}
     if($Token-cne[string]$receipt.rollback.required_token-or$Token-cne$identity.rollback_token){throw 'Global rule rollback token is invalid.'}
     if([string]$receipt.status-notin@('applied','in_progress','recovery_required','rollback_in_progress','rolled_back')){throw 'Global rule receipt is not rollback eligible.'}
@@ -10792,6 +10980,7 @@ function Get-DoctorSkillProjectionConsistency {
                     $result.warnings += ("{0}: managed_link_includes 与 profiles.{1}.include 漂移：profiles 独有=[{2}] legacy 独有=[{3}]（profiles 优先生效，建议同步 legacy 字段）" -f $hostName, [string]$selection.profile, ($profileOnly -join ','), ($legacyOnly -join ','))
                 }
             }
+            $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
             $expectedNames = @()
             if ([bool]$selection.include_all) {
                 $managedSource = Resolve-SkillProjectionPath ([string]$projection.managed_source_path) $Root
@@ -10802,6 +10991,7 @@ function Get-DoctorSkillProjectionConsistency {
             else {
                 $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
             }
+            $expectedNames = @($expectedNames | Where-Object { @($selection.excluded_names) -notcontains $_ })
             if (-not $rootByHost.ContainsKey($hostName)) {
                 $result.warnings += ("{0}: host_root_not_declared: projection profile has no managed-link target or compatibility root declaration." -f $hostName)
                 $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
@@ -10809,17 +10999,27 @@ function Get-DoctorSkillProjectionConsistency {
             }
             $hostRoot = $rootByHost[$hostName]
             $actualNames = @()
+            $managedNames = @()
             if (Test-Path -LiteralPath $hostRoot -PathType Container) {
-                $actualNames = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } | ForEach-Object { [string]$_.Name })
+                $actualEntries = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf })
+                $actualNames = @($actualEntries | ForEach-Object { [string]$_.Name })
+                $managedNames = @($actualEntries | Where-Object {
+                    $linkTargetProperty = $_.PSObject.Properties['Target']
+                    if (($null -eq $linkTargetProperty) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $false }
+                    $linkTarget = [string](@($linkTargetProperty.Value)[0])
+                    if ([string]::IsNullOrWhiteSpace($linkTarget)) { return $false }
+                    $resolvedLinkTarget = if ([IO.Path]::IsPathRooted($linkTarget)) { [IO.Path]::GetFullPath($linkTarget) } else { [IO.Path]::GetFullPath((Join-Path $hostRoot $linkTarget)) }
+                    return $resolvedLinkTarget.StartsWith(($managedSource.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+                } | ForEach-Object { [string]$_.Name })
             }
             else {
                 $result.warnings += ("{0}: 宿主技能根缺失: {1}" -f $hostName, $hostRoot)
             }
             $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
-            $extra = @($actualNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+            $extra = @($managedNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
             if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}]" -f $hostName, ($missing -join ',')) }
             if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}]" -f $hostName, ($extra -join ',')) }
-            $details += ("{0} declared={1} projected={2}" -f $hostName, @($expectedNames).Count, @($actualNames).Count)
+            $details += ("{0} declared={1} projected={2} unmanaged={3}" -f $hostName, @($expectedNames).Count, @($managedNames).Count, @($actualNames | Where-Object { $managedNames -notcontains $_ }).Count)
         }
         $result.detail = ($details -join '; ')
         if ($result.warnings.Count -gt 0) { $result.ok = $false }
@@ -18668,7 +18868,7 @@ function Parse-RuleAuditOptions([object[]]$Tokens) {
         }
     }
     if ([string]::IsNullOrWhiteSpace([string]$result.repo)) { throw '--repo is required.' }
-    if ([string]$result.host -notin @('codex', 'claude', 'zcode')) { throw '--host supports codex, claude, or zcode.' }
+    if ([string]$result.host -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw '--host supports codex, claude, zcode, antigravity, or workbuddy.' }
     if ([string]::IsNullOrWhiteSpace([string]$result.current_directory)) { $result.current_directory = $result.repo }
     return [pscustomobject]$result
 }
@@ -18710,11 +18910,12 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
         workspace_root = $null; exclude_names = @('external', 'docs', '文档'); registry_path = $null
         codex_user_root = $codexRoot; claude_user_root = $claudeRoot; zcode_user_root = $zcodeRoot; antigravity_user_root = $antigravityRoot
         max_targets = 64; out_path = $null; json = $false
+        workbuddy_user_root = ''
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         if ($token -eq '--json') { $result.json = $true; continue }
-        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--antigravity-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
+        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--antigravity-user-root', '--workbuddy-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
         if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
         $i++; $value = [string]$Tokens[$i]
         switch ($token) {
@@ -18725,6 +18926,7 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
             '--claude-user-root' { $result.claude_user_root = $value }
             '--zcode-user-root' { $result.zcode_user_root = $value }
             '--antigravity-user-root' { $result.antigravity_user_root = $value }
+            '--workbuddy-user-root' { $result.workbuddy_user_root = $value }
             '--max-targets' { $result.max_targets = [int]$value }
             '--out' { $result.out_path = $value }
         }
@@ -18742,7 +18944,7 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         $registry = [System.IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
         $registryTargets = @($registry.targets)
     }
-    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets -AntigravityUserRoot $options.antigravity_user_root
+    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets -AntigravityUserRoot $options.antigravity_user_root -WorkBuddyUserRoot $options.workbuddy_user_root
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass
     $exitCode = if ($pass) { 0 } else { 2 }
@@ -18851,6 +19053,9 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
     $antigravityDefaultEnabled=Test-Path -LiteralPath (Join-Path $antigravityDefaultRoot 'GEMINI.md') -PathType Leaf
+    $workbuddyFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)
+    $workbuddyDefaultRoot=$(if($workbuddyFromEnv){$env:CODEBUDDY_CONFIG_DIR}else{Join-Path $userProfile '.codebuddy'})
+    $workbuddyDefaultEnabled=(Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.md') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.mdc') -PathType Leaf)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
@@ -18861,13 +19066,15 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         zcode_user_root_source='default'
         antigravity_user_root=$(if($antigravityDefaultEnabled){$antigravityDefaultRoot}else{''})
         antigravity_user_root_source=$(if($antigravityDefaultEnabled){'default'}else{'disabled_until_explicit_root'})
+        workbuddy_user_root=$(if($workbuddyDefaultEnabled){$workbuddyDefaultRoot}else{''})
+        workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){'CODEBUDDY_CONFIG_DIR'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token-eq'--json'){$result.json=$true;continue}
         if($token-eq'--resume'){$result.resume=$true;continue}
-        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--antigravity-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
+        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--antigravity-user-root','--workbuddy-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
         if($i+1-ge@($Tokens).Count){throw('{0} requires a value.'-f$token)};$i++;$value=[string]$Tokens[$i]
         switch($token){
             '--repo-root'{$result.repo_root=$value}
@@ -18875,6 +19082,7 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
             '--claude-user-root'{$result.claude_user_root=$value;$result.claude_user_root_source='cli'}
             '--zcode-user-root'{$result.zcode_user_root=$value;$result.zcode_user_root_source='cli'}
             '--antigravity-user-root'{$result.antigravity_user_root=$value;$result.antigravity_user_root_source='cli'}
+            '--workbuddy-user-root'{$result.workbuddy_user_root=$value;$result.workbuddy_user_root_source='cli'}
             '--plan'{$result.plan=$value}
             '--receipt'{$result.receipt=$value}
             '--token'{$result.token=$value}
@@ -18920,6 +19128,14 @@ function Resolve-OptionalAntigravityGlobalRuleRoot($Options) {
     return ''
 }
 
+function Resolve-OptionalWorkBuddyGlobalRuleRoot($Options) {
+    $candidate = [string]$Options.workbuddy_user_root
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return '' }
+    if (Test-Path -LiteralPath $candidate -PathType Container) { return [IO.Path]::GetFullPath($candidate) }
+    if ($Options.workbuddy_user_root_source -in @('cli','CODEBUDDY_CONFIG_DIR')) { throw "WorkBuddy user root does not exist or is not a directory: $candidate" }
+    return ''
+}
+
 function Get-GlobalRuleRootEnvelope($Options) {
     return [pscustomobject][ordered]@{
         repo_root=[IO.Path]::GetFullPath($Options.repo_root)
@@ -18931,6 +19147,8 @@ function Get-GlobalRuleRootEnvelope($Options) {
         zcode_user_root_source=$Options.zcode_user_root_source
         antigravity_user_root=(Resolve-OptionalAntigravityGlobalRuleRoot $Options)
         antigravity_user_root_source=$Options.antigravity_user_root_source
+        workbuddy_user_root=(Resolve-OptionalWorkBuddyGlobalRuleRoot $Options)
+        workbuddy_user_root_source=$Options.workbuddy_user_root_source
     }
 }
 
@@ -18938,14 +19156,15 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
     $options=Parse-GlobalRuleOptions $Tokens $Mode;$roots=Get-GlobalRuleRootEnvelope $options
     $zcodeRoot = [string]$roots.zcode_user_root
     $antigravityRoot = [string]$roots.antigravity_user_root
+    $workbuddyRoot = [string]$roots.workbuddy_user_root
     switch($Mode){
         'check'{
-            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot;$exit=if($result.pass){0}else{2}
+            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot;$exit=if($result.pass){0}else{2}
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-check';pass=$result.pass;exit_code=$exit;roots=$roots;result=$result;writes=0;provider_calls=0;native_mutations=0}
         }
         'plan'{
             $out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
-            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot
+            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
             Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 30 -Compress);$exit=0
         }
@@ -18954,13 +19173,13 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
             if(Test-GlobalRulePathEqual $planPath $out){throw 'Global rule apply receipt path must differ from the plan path.'}
             $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command-eq'global-rules-plan'){$document.plan}else{$document}
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot
+            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0
         }
         'rollback'{
             $receiptPath=Resolve-GlobalRuleControlPath $options.receipt $options.repo_root -MustExist
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot
+            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-rollback';pass=$result.pass;exit_code=0;roots=$roots;result=$result;provider_calls=0;native_mutations=0};$exit=0
         }
     }
@@ -19962,7 +20181,7 @@ function Get-AuditSourceFileIndex([string]$resolvedPath) {
 
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
-    if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(?i)(test|spec)\.[a-z0-9]+$') { return "test" }
+    if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(test|spec)\.[a-z0-9]+$|(^|\\)test_[^\\]+\.py$|_test\.py$') { return "test" }
     if ($normalized -match '(?i)(^|\\)(examples?|samples?|fixtures?|mocks?|stubs?|benchmarks?|demos?)(\\|$)') { return "non_product_code" }
     if ($normalized -match '(?i)(^|\\)(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
     return "source_code"

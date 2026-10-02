@@ -132,7 +132,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 | cold_discovery | observed / not_observed / not_observable | expected forbidden + observed 为硬失败 |
 | candidate_load_validation | observed / not_observed / not_observable | observed 表示精确 router 结果，不表示 child |
 | skill_md_loading | observed / not_observed / not_observable | 只能由 host/child 的可观察读取事件确认 |
-| native_child | started / awaiting_user_answer / completed / not_started / not_supported / not_observable | ZCode 不能写 started |
+| native_child | started / awaiting_user_answer / completed / not_started / not_supported / not_observable | 任一宿主的 started/completed 都必须有当前 native child id 与 lifecycle 事件；不可观测时写 not_observable |
 | assertion.status | pass / fail / not_observable | not_observable 不能因为 expected 满足而自动转 pass |
 
 禁止的结论：

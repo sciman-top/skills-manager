@@ -966,7 +966,7 @@
       "receipt_path": "reports/skill-projection/zcode-native-receipt.json"
     },
     {
-      "path": "~/.gemini/antigravity/skills",
+      "path": "~/.gemini/config/skills",
       "host": "antigravity",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/antigravity-native-receipt.json"

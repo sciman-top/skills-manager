@@ -73,7 +73,7 @@ bash "C:/Users/sciman/WorkBuddy AI/workbuddy-risk-selfcheck.test.sh" # 受控验
 - **`xargs` 必须带 `-d '\n'`**：Windows 下 `mktemp -d` 返回 `C:\Users\...\Temp/tmp.X` 这种混合形式，
   `xargs` 默认把反斜杠当转义符吃掉 → 文件名被破坏 → 文件找不到，表现为「明明有日志却报未命中」。
 - **两个「shell」的 `/tmp` 不是同一个目录**：Git Bash 的 `/tmp` = `%TEMP%`，而托管/系统 Python 把 `/tmp` 解析成「当前盘符 `:\tmp`」。跨 Bash/Python 传临时文件时不要用 `/tmp`。
-- 沙箱下每个外部命令约 100ms，完整受控验收（35 用例）约 15 分钟，**是环境开销不是脚本缺陷**。
+- 沙箱下每个外部命令约 100ms，完整受控验收（37 个断言）约 15 分钟，**是环境开销不是脚本缺陷**。
 - Git Bash 里 `rm` 是被注入的 safe-delete 包装函数，**拒绝带盘符前缀的路径**（`SAFE_DELETE_INVALID_PATH`）→ 给 Git Bash 传路径用 MSYS 形式 `/c/...`。
 
 ## 写脚本时的两个纪律

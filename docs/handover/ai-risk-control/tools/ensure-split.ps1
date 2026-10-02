@@ -11,7 +11,7 @@
 #      【安全阀】系统代理指着分流器、但分流器起不来 → 回退到常驻前端，避免整机断网
 #   3) 用户级 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 不是 10810 → 改回来
 #   4) Startup 快捷方式 ag-split.lnk 缺失 → 补建
-#   5) 只读验证：默认出口 vs Google 侧出口必须不同网段
+#   5) 只读验证：默认出口与 Google DNS 可达性
 #
 # 用法：
 #   pwsh -NoProfile -ExecutionPolicy Bypass -File D:\TOOL\v2rayN\ag-split\ensure-split.ps1 [-Quiet]
@@ -81,6 +81,30 @@ function Test-TcpPort {
     } catch { return $false }
 }
 
+function Test-SplitListener {
+    param([int]$ListenPort, [string]$ExpectedPath)
+    try {
+        $connections = @(Get-NetTCPConnection -LocalPort $ListenPort -State Listen -ErrorAction Stop)
+        $ownerIds = @($connections.OwningProcess | Sort-Object -Unique)
+        if ($ownerIds.Count -ne 1 -or @($connections | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -gt 0) {
+            return $false
+        }
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$($ownerIds[0])" -ErrorAction Stop
+        return ($owner.ExecutablePath -and [IO.Path]::GetFullPath($owner.ExecutablePath) -ieq [IO.Path]::GetFullPath($ExpectedPath))
+    } catch { return $false }
+}
+
+function Test-SplitTaskAction {
+    param([object[]]$Actions, [string]$ExpectedPath, [string]$ExpectedConfig)
+    if ($Actions.Count -ne 1) { return $false }
+    try {
+        return (
+            [IO.Path]::GetFullPath($Actions[0].Execute) -ieq [IO.Path]::GetFullPath($ExpectedPath) -and
+            $Actions[0].Arguments.Trim() -ieq ('run -c "{0}"' -f $ExpectedConfig)
+        )
+    } catch { return $false }
+}
+
 Write-Log '========== ensure-split 开始 =========='
 
 # ---------- 0. 前置：文件存在性 ----------
@@ -92,8 +116,17 @@ foreach ($p in @($XrayPath, $ConfigPath)) {
 $listening = Test-TcpPort $Port
 Write-Log ("分流器 {0} 监听中: {1}" -f $Port, $listening)
 
+$t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($t -and (-not (Test-SplitTaskAction @($t.Actions) $XrayPath $ConfigPath) -or $t.State -eq 'Disabled')) {
+    Write-Log 'wrong_task_action：计划任务路径、配置参数或启用状态不符'
+    exit 1
+}
+if ($listening -and -not (Test-SplitListener $Port $XrayPath)) {
+    Write-Log 'wrong_listener_owner：端口监听者路径或绑定地址不符，保持现有配置'
+    exit 1
+}
+
 if (-not $listening -and -not $NoStart) {
-    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($t) {
         Write-Log "通过计划任务拉起: $TaskName"
         Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -113,6 +146,10 @@ if (-not $listening -and -not $NoStart) {
     }
     $listening = Test-TcpPort $Port
     Write-Log ("拉起后监听中: {0}" -f $listening)
+    if ($listening -and -not (Test-SplitListener $Port $XrayPath)) {
+        Write-Log 'wrong_listener_owner：启动后端口监听者身份不符，保持现有配置'
+        exit 1
+    }
 }
 if (-not $listening) {
     Write-Log '分流器未就绪 —— 后续代理切换按「安全阀」规则处理'
@@ -188,7 +225,9 @@ if ($missing.Count -gt 0) {
 }
 
 # ---------- 3. 代理环境变量 ----------
-if (-not $NoEnvWrite) {
+if (-not $listening -and -not $NoEnvWrite) {
+    Write-Log 'env 写入已跳过：分流器未就绪，避免覆盖为失效端口'
+} elseif (-not $NoEnvWrite) {
     $envs = [ordered]@{
         'HTTP_PROXY'  = "http://$WANT"
         'HTTPS_PROXY' = "http://$WANT"
@@ -201,7 +240,7 @@ if (-not $NoEnvWrite) {
         } else {
             try {
                 [Environment]::SetEnvironmentVariable($k, $envs[$k], $EnvScope)
-                Write-Log ("env 已修正: {0}  {1} -> {2}" -f $k, $v, $envs[$k])
+                Write-Log ("env 已修正: {0} scope={1}" -f $k, $EnvScope)
             } catch {
                 Write-Log "env 设置失败 $k : $($_.Exception.Message)"
                 $pending = 1
@@ -253,24 +292,22 @@ if (-not $NoStartupLnk -and $StartupDir) {
 # ---------- 5. 只读验证：默认出口 vs Google 侧出口 ----------
 if ($listening -and -not $NoEgressProbe) {
     try {
-        $def = (curl.exe -s -m 15 -x "http://127.0.0.1:$Port" 'https://ipinfo.io/ip' 2>$null)
-        if ($def) { Write-Log ("默认出口 : {0}" -f $def.Trim()) }
-        $edns = (curl.exe -s -m 15 -x "http://127.0.0.1:$Port" 'https://dns.google/resolve?name=o-o.myaddr.l.google.com&type=TXT' 2>$null)
-        if ($edns -match 'edns0-client-subnet\s+([0-9.]+)/') {
-            Write-Log ("Google 侧出口: {0}" -f $matches[1])
-            $a = ($def -split '\.')[0..1] -join '.'
-            $b = ($matches[1] -split '\.')[0..1] -join '.'
-            if ($a -eq $b) {
-                Write-Log '警告：默认出口与 Google 侧出口同网段 —— 分流可能未生效'
-                $pending = 1
-            } else {
-                Write-Log '分流验证 OK（两个出口不同网段）'
-            }
-        } else {
-            Write-Log '分流验证跳过：未取到 edns0-client-subnet'
+        $def = (curl.exe -fsS -m 15 --noproxy "" -x "http://127.0.0.1:$Port" 'https://ipinfo.io/ip' 2>$null)
+        $defaultExit = $LASTEXITCODE
+        $parsedAddress = $null
+        if ($defaultExit -ne 0 -or -not [Net.IPAddress]::TryParse([string]$def, [ref]$parsedAddress)) {
+            throw '默认出口探测未返回有效 IP'
         }
+        Write-Log ("默认出口 : {0}" -f $parsedAddress)
+        $edns = (curl.exe -fsS -m 15 --noproxy "" -x "http://127.0.0.1:$Port" 'https://dns.google/resolve?name=o-o.myaddr.l.google.com&type=TXT' 2>$null)
+        $dnsExit = $LASTEXITCODE
+        if ($dnsExit -ne 0) { throw 'Google DNS 探测请求失败' }
+        $dnsResponse = $edns | ConvertFrom-Json -ErrorAction Stop
+        if ($dnsResponse.Status -ne 0) { throw 'Google DNS 返回失败状态' }
+        Write-Log 'Google DNS 可达；ECS 网段仅为线索，不证明实际出口 IP、分流或账号风险'
     } catch {
         Write-Log "分流验证失败: $($_.Exception.Message)"
+        $pending = 1
     }
 } elseif ($NoEgressProbe) {
     Write-Log '出口探测已跳过（-NoEgressProbe）'

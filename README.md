@@ -14,7 +14,7 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 ### 推荐：Release 一键安装
 
-当前稳定版为 [v2026.08.27.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.27.1)。从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载对应版本的 `bootstrap.zip`，先核对 `SHA256SUMS.txt`，再解压运行：
+当前稳定版为 [v2026.08.30.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.30.1)。从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载对应版本的 `bootstrap.zip`，先核对 `SHA256SUMS.txt`，再解压运行：
 
 ```powershell
 .\setup.cmd
@@ -133,19 +133,23 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core-lean`；技能集合和数量以 `skills.json` 的 profile 为准（本次 fresh read 为 7 个治理/安全边界与日常编码闭环技能）。原 9 项集合保留为显式 `core` 兼容档位；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode、Antigravity、WorkBuddy 均使用轻量 `core-lean`；技能集合和数量以 `skills.json` 的 profile 为准（当前为 7 个治理/安全边界与日常编码闭环技能）。原 9 项集合保留为显式 `core` 兼容档位；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
 | 宿主 | 默认 `core-lean` | 显式 `core` 兼容档位 | `full-compatible` 的宿主适配 |
 | --- | --- | --- | --- |
 | ChatGPT/Codex | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
 | Claude | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
 | ZCode | 7 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
+| Antigravity | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能；当前未配置宿主排除项 |
+| WorkBuddy | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能；当前未配置宿主排除项 |
+
+Antigravity 与 WorkBuddy 当前继承全局默认 profile。表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
 
 默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试与收口的薄闭环入口；纯审查使用 `code-review-and-quality`。它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
 
 ### AI 编码快速用法
 
-日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；跨 ChatGPT/Codex 与 ZCode/GLM 的分工按实际任务表现选择。
+日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。
 
 不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码效能手册](docs/product/ai-coding-playbook.md)。
 

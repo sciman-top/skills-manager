@@ -11,8 +11,16 @@ Describe 'Checked-in rule content' {
         New-Item -ItemType Directory -Path $codex, $claude -Force | Out-Null
         $result = Test-GlobalRuleSourceFamily $repoRoot $codex $claude
         $result.pass | Should -BeTrue -Because ($result.findings.code -join ', ')
-        @($result.observations).Count | Should -Be 0
-        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md rules/global/antigravity/GEMINI.md) -join "`n") | Should -Match 'eol: lf'
+        $expectedWarnings = @($result.facts.Values | Where-Object {
+            [Math]::Max($_.bytes / 16384.0, $_.lines / 130.0) -ge .85
+        })
+        @($result.observations).Count | Should -Be $expectedWarnings.Count
+        foreach ($observation in $result.observations) {
+            $observation.code | Should -Be 'source_budget_warning'
+            $observation.usage_ratio | Should -BeGreaterOrEqual .85
+            $observation.usage_ratio | Should -BeLessThan .95
+        }
+        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md rules/global/antigravity/GEMINI.md rules/global/workbuddy/CODEBUDDY.md) -join "`n") | Should -Match 'eol: lf'
     }
 
     It 'retains the cold-routing execution and observation boundaries' {

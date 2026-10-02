@@ -27,7 +27,9 @@ param(
     [string]$TaskName      = 'AgSplitEgress',
     [string]$WatchdogName  = 'AgSplitWatchdog',
     [string]$XrayPath      = 'D:\TOOL\v2rayN\ag-split\ag-split-core.exe',
+    [string]$ConfigPath    = 'D:\TOOL\v2rayN\ag-split\config.json',
     [string]$EnsureScript  = 'D:\TOOL\v2rayN\ag-split\ensure-split.ps1',
+    [string]$ProbeScript   = 'D:\TOOL\v2rayN\ag-egress-probe.ps1',
     [string]$ReportPath    = 'D:\TOOL\v2rayN\ag-split\live-acceptance-report.txt',
     [int]   $WatchdogWaitSeconds = 210
 )
@@ -58,6 +60,16 @@ function Test-Port([int]$p) {
         $c.EndConnect($iar); $c.Close(); return $true
     } catch { return $false }
 }
+function Get-SplitOwner {
+    $c = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($c.Count -eq 0) { return $null }
+    $ids = @($c.OwningProcess | Sort-Object -Unique)
+    if ($ids.Count -ne 1 -or @($c | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -gt 0) { return $null }
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($ids[0])" -ErrorAction SilentlyContinue
+    $expected = '"{0}" run -c "{1}"' -f $XrayPath, $ConfigPath
+    if ($p.ExecutablePath -ieq $XrayPath -and $p.CommandLine.Trim() -ieq $expected) { return $p }
+    return $null
+}
 function Get-Proxy { (Get-ItemProperty -Path $IS -ErrorAction SilentlyContinue).ProxyServer }
 function Set-Proxy([string]$v) { Set-ItemProperty -Path $IS -Name ProxyEnable -Value 1 -Type DWord; Set-ItemProperty -Path $IS -Name ProxyServer -Value $v -Type String }
 function Get-EgressSplit {
@@ -68,17 +80,18 @@ function Get-EgressSplit {
     return @{ Def = ($def -replace '\s', ''); Google = $g }
 }
 function Ensure-Up {
-    # 无条件把分流器拉起来（最多等 20 秒）
-    if (Test-Port $Port) { return $true }
+    if (Get-SplitOwner) { return $true }
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    for ($i = 0; $i -lt 40; $i++) { Start-Sleep -Milliseconds 500; if (Test-Port $Port) { break } }
-    return (Test-Port $Port)
+    for ($i = 0; $i -lt 40; $i++) { Start-Sleep -Milliseconds 500; if (Get-SplitOwner) { return $true } }
+    return $false
 }
 function Kill-Core {
-    $k = @(Get-Process -Name 'ag-split-core' -ErrorAction SilentlyContinue)
-    foreach ($p in $k) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    $owner = Get-SplitOwner
+    if (-not $owner) { throw '分流器监听者身份不符，停止故障注入' }
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-Process -Id $owner.ProcessId -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 800
-    return $k.Count
+    return $owner.ProcessId
 }
 
 $origProxy = Get-Proxy
@@ -92,32 +105,37 @@ Say '============================================================'
 try {
     # ---------------- L1 基线 ----------------
     Section 'L1 · 基线'
-    if (Test-Port $Port) { Pass '分流器在跑' "port $Port" } else { Fail '分流器在跑' "port $Port 未监听" }
+    if (Get-SplitOwner) { Pass '分流器在跑' "port $Port / managed owner" } else { Fail '分流器在跑' "port $Port owner invalid" }
     if ((Get-Proxy) -eq $WANT) { Pass '系统代理指向分流器' (Get-Proxy) } else { Fail '系统代理指向分流器' ("实得 " + (Get-Proxy)) }
 
     # ---------------- L2 手动自愈 ----------------
     Section 'L2 · 手动自愈（杀掉内核 -> 跑 ensure-split）'
     $n = Kill-Core
-    Say ("  注入：杀掉 {0} 个 ag-split-core 进程" -f $n)
-    if (-not (Test-Port $Port)) { Say '  分流器已确实不可用' } else { Say '  警告：杀后端口仍在监听' }
+    Say ("  注入：停止 ag-split-core pid={0}" -f $n)
+    if (-not (Get-SplitOwner)) { Say '  分流器已确实不可用' } else { throw '故障注入后分流器仍在运行' }
 
-    & $PWSH -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $EnsureScript -Quiet | Out-Null
+    & $PWSH -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $EnsureScript -Quiet -NoEnvWrite -NoStartupLnk -NoEgressProbe `
+        -XrayPath $XrayPath -ConfigPath $ConfigPath -TaskName $TaskName | Out-Null
     $rc = $LASTEXITCODE
-    if ((Test-Port $Port) -and $rc -eq 0) { Pass '手动自愈恢复' "exit=$rc 端口已监听" }
-    else { Fail '手动自愈恢复' "exit=$rc 端口监听=" + (Test-Port $Port) }
+    $owner = Get-SplitOwner
+    if ($owner -and $rc -eq 0 -and $owner.ProcessId -ne $n) { Pass '手动自愈恢复' "exit=$rc pid=$($owner.ProcessId)" }
+    else { Fail '手动自愈恢复' "exit=$rc owner_invalid" }
 
     # ---------------- L3 看门狗自愈 ----------------
     Section 'L3 · 看门狗自愈（杀掉内核 -> 等真实看门狗）'
+    $beforeWatchdog = (Get-ScheduledTaskInfo -TaskName $WatchdogName).LastRunTime
     $n = Kill-Core
-    Say ("  注入：杀掉 {0} 个进程；等看门狗（最多 {1} 秒）" -f $n, $WatchdogWaitSeconds)
+    Say ("  注入：停止 ag-split-core pid={0}；等看门狗（最多 {1} 秒）" -f $n, $WatchdogWaitSeconds)
     $t0 = Get-Date
     $recovered = $false
     while (((Get-Date) - $t0).TotalSeconds -lt $WatchdogWaitSeconds) {
         Start-Sleep -Seconds 5
-        if (Test-Port $Port) { $recovered = $true; break }
+        $wi = Get-ScheduledTaskInfo -TaskName $WatchdogName
+        $owner = Get-SplitOwner
+        if ($owner -and $owner.ProcessId -ne $n -and $wi.LastRunTime -gt $beforeWatchdog -and $wi.LastTaskResult -eq 0 -and (Get-Proxy) -eq $WANT) { $recovered = $true; break }
     }
     $elapsed = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
-    if ($recovered) { Pass '看门狗自动恢复' ("{0} 秒后端口恢复" -f $elapsed) }
+    if ($recovered) { Pass '看门狗自动恢复' ("{0} 秒后恢复，pid=$($owner.ProcessId)" -f $elapsed) }
     else { Fail '看门狗自动恢复' ("{0} 秒内未恢复" -f $WatchdogWaitSeconds) }
 
     # ---------------- L4 安全阀 ----------------
@@ -140,17 +158,12 @@ try {
     # ---------------- L5 出口分流 ----------------
     Section 'L5 · 出口分流正确性'
     if (-not (Ensure-Up)) { Fail '分流器恢复' '无法拉起' }
-    $e = Get-EgressSplit
-    Say ("  默认出口 : {0}" -f $e.Def)
-    Say ("  Google 侧: {0}" -f $e.Google)
-    if ($e.Def -and $e.Google) {
-        $a = ($e.Def -split '\.')[0..1] -join '.'
-        $b = ($e.Google -split '\.')[0..1] -join '.'
-        if ($a -ne $b) { Pass '分流生效（两出口不同网段）' "$a.x vs $b.x" }
-        else { Fail '分流生效（两出口不同网段）' "同网段 $a" }
-    } else {
-        Fail '分流生效（两出口不同网段）' '取不到出口'
-    }
+    $defaultIp = (curl.exe -fsS -m 20 --noproxy "" -x "http://127.0.0.1:$Port" 'https://ipinfo.io/ip' 2>$null)
+    $ip = $null
+    if ($LASTEXITCODE -eq 0 -and [Net.IPAddress]::TryParse([string]$defaultIp, [ref]$ip)) { Pass '默认出口可达' $ip } else { Fail '默认出口可达' '未取得有效 IP' }
+    $nodeEvidence = & $ProbeScript -ConfigPath $ConfigPath -CorePath $XrayPath
+    if ($nodeEvidence.ExitIp -and $nodeEvidence.ConfigHash -eq (Get-FileHash -LiteralPath $ConfigPath).Hash) { Pass 'Google 节点出口测量' ("$($nodeEvidence.ExitIp) hosting=$($nodeEvidence.Hosting) proxy=$($nodeEvidence.Proxy)") } else { Fail 'Google 节点出口测量' '证据无效' }
+    Say '临时节点测量不证明已登录客户端路由或账号安全。'
 
     # ---------------- L6 例外表 ----------------
     Section 'L6 · 系统代理例外表'
@@ -165,6 +178,8 @@ try {
         $t = Get-ScheduledTask -TaskName $pair[0] -ErrorAction SilentlyContinue
         if (-not $t) { Fail ("任务 " + $pair[0]) '不存在' }
         elseif ($t.State -eq 'Disabled') { Fail ("任务 " + $pair[0]) '已禁用' }
+        elseif ($pair[0] -eq $TaskName -and ($t.Actions[0].Execute -ine $XrayPath -or $t.Actions[0].Arguments -ine ('run -c "{0}"' -f $ConfigPath))) { Fail ("任务 " + $pair[0]) 'wrong_task_action' }
+        elseif ($pair[0] -eq $WatchdogName -and $t.Actions[0].Arguments -notmatch '(?:^|\s)-NoEgressProbe(?:\s|$)') { Fail ("任务 " + $pair[0]) 'missing -NoEgressProbe' }
         else { Pass ("任务 " + $pair[0]) ("state=" + $t.State) }
     }
 }

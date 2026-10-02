@@ -12,6 +12,8 @@
 #   $FRONT   分流器地址（应与 gen-config.py 的 AG_SPLIT_PORT 一致）
 #   $GOOGLE  待验证的 Google 端点
 
+param([switch]$ProbeGoogleEgress)
+
 $ErrorActionPreference = 'Continue'
 $script:rows = New-Object System.Collections.ArrayList
 
@@ -43,6 +45,17 @@ if ($v) { Add-Row 'PASS' 'v2rayN 前端' "pid=$($v.Id)" } else { Add-Row 'FAIL' 
 # —— 因为 v2rayN 启动/升级时会按镜像名清理旧 xray 进程，同名的分流器会被误杀。
 $xs = @(Get-Process -Name xray -ErrorAction SilentlyContinue)
 $sc = @(Get-Process -Name ag-split-core -ErrorAction SilentlyContinue)
+$splitConnections = @(Get-NetTCPConnection -LocalPort 10810 -State Listen -ErrorAction SilentlyContinue)
+$splitOwnerIds = @($splitConnections.OwningProcess | Sort-Object -Unique)
+$expectedCore = Join-Path $V2_DIR 'ag-split\ag-split-core.exe'
+if ($splitOwnerIds.Count -eq 1) {
+    $splitOwner = Get-CimInstance Win32_Process -Filter "ProcessId=$($splitOwnerIds[0])" -ErrorAction SilentlyContinue
+    if ($splitOwner.ExecutablePath -ieq $expectedCore -and @($splitConnections | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -eq 0) {
+        Add-Row 'PASS' '监听者身份' "pid=$($splitOwner.ProcessId) path=$($splitOwner.ExecutablePath)"
+    } else {
+        Add-Row 'FAIL' '监听者身份' "wrong_listener_owner pid=$($splitOwner.ProcessId) path=$($splitOwner.ExecutablePath)"
+    }
+} else { Add-Row 'FAIL' '监听者身份' '无法确定唯一监听者' }
 if ($sc.Count -ge 1 -and $xs.Count -ge 1) {
     Add-Row 'PASS' '内核实例' "v2rayN 核心 $($xs.Count) 个 + 分流器 $($sc.Count) 个"
 } elseif ($sc.Count -ge 1) {
@@ -101,13 +114,17 @@ try {
     Add-Row 'FAIL' '默认出口探测' "失败：$($_.Exception.Message)"
 }
 if ($googleEgress -and $generalIp) {
-    $gen24 = ($generalIp -split '\.')[0..2] -join '.'
-    if ($googleEgress.StartsWith($gen24)) {
-        Add-Row 'FAIL' '分流正确性' "Google 与默认流量同一出口（$gen24）—— 分流未生效"
-    } else {
-        Add-Row 'PASS' '分流正确性' "Google -> $googleEgress ；其余 -> $generalIp"
-    }
+    Add-Row 'INFO' '出口证据边界' "Google DNS ECS=$googleEgress；默认出口=$generalIp；ECS 不证明实际 Google 出口或账号风险"
 }
+if ($ProbeGoogleEgress) {
+    try {
+        $egress = & (Join-Path $PSScriptRoot 'ag-egress-probe.ps1')
+        $level = if ($egress.Hosting -or $egress.Proxy) { 'WARN' } else { 'INFO' }
+        Add-Row $level 'Google 节点出口属性' "$($egress.ExitIp) $($egress.Country) $($egress.Isp) hosting=$($egress.Hosting) proxy=$($egress.Proxy)；临时实例证据，第三方分类不证明账号安全"
+    } catch {
+        Add-Row 'WARN' 'Google 节点出口属性' "未验证：$($_.Exception.Message)"
+    }
+} else { Add-Row 'INFO' 'Google 节点出口属性' '按需使用 -ProbeGoogleEgress；日常自检不启动临时实例' }
 
 # --- 6. Google 端点连通性（经前门，404 = 正常）---
 foreach ($u in $GOOGLE) {
@@ -143,6 +160,8 @@ if (-not $t8) {
     Add-Row 'WARN' '分流器自启' "未找到计划任务 AgSplitEgress$why"
 } elseif ($t8.State -eq 'Disabled') {
     Add-Row 'WARN' '分流器自启' '计划任务 AgSplitEgress 已禁用'
+} elseif (@($t8.Actions).Count -ne 1 -or $t8.Actions[0].Execute -ine $expectedCore -or $t8.Actions[0].Arguments.Trim() -ine ('run -c "{0}"' -f (Join-Path $V2_DIR 'ag-split\config.json'))) {
+    Add-Row 'FAIL' '分流器自启' 'wrong_task_action：路径或配置参数不符'
 } else {
     $d = "计划任务 AgSplitEgress=$($t8.State)"
     if ($hb -eq 1) { $d += '；快速启动已开 -> 靠计划任务而非 Startup 项' }

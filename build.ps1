@@ -104,6 +104,9 @@ if (@($parseErrors).Count -gt 0) {
     throw ("bundle_parse_failed: {0}" -f $details)
 }
 $payload = $utf8NoBom.GetBytes($payloadText)
+. (Join-Path $Src 'Infrastructure/AtomicFile.ps1')
+. (Join-Path $Src 'Application/GlobalRuleProjection.ps1')
+Sync-GlobalRuleGeneratedFiles -RepoRoot $Root -Check:$Check
 $bytes = New-Object byte[] ($bom.Length + $payload.Length)
 [Array]::Copy($bom, 0, $bytes, 0, $bom.Length)
 [Array]::Copy($payload, 0, $bytes, $bom.Length, $payload.Length)

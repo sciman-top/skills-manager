@@ -37,7 +37,6 @@ function Section([string]$t) {
     W ("  " + $t)
     W ("-" * 62)
 }
-
 $riskHigh = 0
 $riskMid  = 0
 $passCount = 0
@@ -388,3 +387,5 @@ if (-not $NoFile) {
     if ($OutFile -eq "") { $OutFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'selfcheck-report-ps1.txt' }
     try { $report | Out-File -FilePath $OutFile -Encoding UTF8; Write-Output ("报告已写入: " + $OutFile) } catch { }
 }
+
+exit ([int]($riskHigh -gt 0))

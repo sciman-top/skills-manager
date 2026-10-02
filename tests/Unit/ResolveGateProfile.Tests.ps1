@@ -117,6 +117,51 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.exit_code | Should -Be 0
     }
 
+    It 'selects rule content proof for <RulePath> in <Mode> mode' -ForEach @(
+        foreach ($mode in @('local', 'ci')) {
+            foreach ($rulePath in @(
+                'rules/global/common.md',
+                'rules/global/platforms/codex.md',
+                'rules/global/platforms/workbuddy.md',
+                'rules/global/antigravity/GEMINI.md',
+                'rules/global/workbuddy/CODEBUDDY.md'
+            )) {
+                @{ RulePath = $rulePath; Mode = $mode }
+            }
+        }
+    ) {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        $path = Join-Path $repo $RulePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value '# rule change'
+        if ($Mode -eq 'ci') {
+            & git -C $repo add -- $RulePath
+            & git -C $repo commit -m 'rule change' *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'fixture rule commit failed' }
+        }
+
+        $result = Invoke-Resolver $repo @{ BaseSha = $base; Mode = $Mode }
+
+        $result.exit_code | Should -Be 0
+        $result.result.profile | Should -Be 'focused'
+        $result.result.reason | Should -Be 'rule_path'
+        @($result.result.focused_test_paths) | Should -Be @('tests/Unit/RuleContent.Tests.ps1')
+        $result.result.requires_locked_sources | Should -BeFalse
+    }
+
+    It 'keeps rule maintenance documentation cheap and unknown rule inputs conservative' {
+        $repo = New-ResolveGateFixture
+        $directory = Join-Path $repo 'rules/global'
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $directory 'README.md') -Value '# maintenance'
+        (Invoke-Resolver $repo).result.profile | Should -Be 'docs'
+        Set-Content -LiteralPath (Join-Path $directory 'common.md') -Value '# common'
+        (Invoke-Resolver $repo).result.profile | Should -Be 'focused'
+        Set-Content -LiteralPath (Join-Path $directory 'unknown.md') -Value '# unknown'
+        (Invoke-Resolver $repo).result.profile | Should -Be 'full'
+    }
+
     It 'classifies design-only MOR documents as docs' {
         $repo = New-ResolveGateFixture
         New-Item -ItemType Directory -Path (Join-Path $repo 'docs\decision') -Force | Out-Null

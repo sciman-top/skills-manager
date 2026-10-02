@@ -1,9 +1,12 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$Preset = 'gpt56_sol_terra',
+    [string]$Preset = '',
     [string[]]$AvailablePreset = @(),
-    [Parameter(Mandatory)][ValidateSet('quick_triage','routine_maintenance','standard_review','bounded_implementation','deep_investigation_or_implementation')][string]$Slot,
+    [Parameter(Mandatory)][string]$Slot,
+    [string]$Model = '',
+    [string]$Effort = '',
+    [switch]$ReadOnly,
     [string]$WorkingDirectory = (Get-Location).Path,
     [string]$Prompt = '',
     [switch]$Plan,
@@ -13,7 +16,16 @@ $ErrorActionPreference = 'Stop'
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $Preset -AvailablePreset $AvailablePreset | ConvertFrom-Json -AsHashtable
 $Preset = $resolved.preset
+if ($Slot -cnotin @($resolved.slots)) { throw "Unknown configured slot: $Slot" }
 $route = $resolved.routes[$Slot]
+if ([string]::IsNullOrWhiteSpace($Model) -xor [string]::IsNullOrWhiteSpace($Effort)) { throw 'Model and Effort must be supplied together.' }
+if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $matchingRoutes = @($resolved.enabled_routes | Where-Object { $_.model -ceq $Model -and $_.effort -ceq $Effort })
+    if ($matchingRoutes.Count -ne 1) { throw 'Exact model/effort tuple is outside the active pool.' }
+    $route = $matchingRoutes[0]
+    $Preset = $route.preset
+}
+$readOnlyTask = $ReadOnly -or $Slot -cin @($resolved.read_only_slots)
 $presetHosts = @($policy.presets[$Preset].hosts)
 # Launch on the first declared facet with a verified native interface, so the
 # primary host wins (deepseek=claude) and zcode is always skipped as
@@ -27,23 +39,23 @@ if ($targetHost -eq 'codex') {
         '-c',('model="'+$route.model+'"'),'-c',('review_model="'+$route.model+'"'),
         '-c',('model_reasoning_effort="'+$route.effort+'"'),'-c','agents.enabled=false','--disable','multi_agent')
     if ($Ephemeral) { $cliArgs += '--ephemeral' }
-    if ($Slot -in @('quick_triage','standard_review')) { $cliArgs += @('--sandbox','read-only') }
+    if ($readOnlyTask) { $cliArgs += @('--sandbox','read-only') }
     $executable = 'codex'
 }
 else {
     $cliArgs = @('--print','--output-format','json','--model',$route.model,'--effort',$route.effort,'--disallowedTools','Agent')
     if ($Ephemeral) { $cliArgs += '--no-session-persistence' }
-    if ($Slot -in @('quick_triage','standard_review')) { $cliArgs += @('--tools','Read,Glob,Grep') }
+    if ($readOnlyTask) { $cliArgs += @('--tools','Read,Glob,Grep') }
     $executable = 'claude'
 }
 if ($Plan) {
-    @{preset=$Preset;slot=$Slot;model=$route.model;effort=$route.effort;host=$targetHost;delegation_enabled=$false;working_directory=$WorkingDirectory} | ConvertTo-Json
+    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory} | ConvertTo-Json
     return
 }
 if ([string]::IsNullOrWhiteSpace($Prompt)) { throw 'Prompt is required to execute a slot.' }
 # No arbitrary CLI pass-through: the caller cannot override the frozen route or re-enable delegation.
 $scopedPrompt = "Execution slot: $Slot. Use only this session's configured model/effort. Do not delegate, start another AI process, change provider/model settings, or replay this task under another preset. "
-if ($Slot -in @('quick_triage','standard_review')) { $scopedPrompt += 'This is read-only work; do not modify files or external state. ' }
+if ($readOnlyTask) { $scopedPrompt += 'This is read-only work; do not modify files or external state. ' }
 $scopedPrompt += "`n`n"+$Prompt
 Push-Location -LiteralPath $WorkingDirectory
 try {

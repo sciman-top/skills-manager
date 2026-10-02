@@ -4,6 +4,9 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
     $antigravityDefaultEnabled=Test-Path -LiteralPath (Join-Path $antigravityDefaultRoot 'GEMINI.md') -PathType Leaf
+    $workbuddyFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)
+    $workbuddyDefaultRoot=$(if($workbuddyFromEnv){$env:CODEBUDDY_CONFIG_DIR}else{Join-Path $userProfile '.codebuddy'})
+    $workbuddyDefaultEnabled=(Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.md') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.mdc') -PathType Leaf)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
@@ -14,13 +17,15 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         zcode_user_root_source='default'
         antigravity_user_root=$(if($antigravityDefaultEnabled){$antigravityDefaultRoot}else{''})
         antigravity_user_root_source=$(if($antigravityDefaultEnabled){'default'}else{'disabled_until_explicit_root'})
+        workbuddy_user_root=$(if($workbuddyDefaultEnabled){$workbuddyDefaultRoot}else{''})
+        workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){'CODEBUDDY_CONFIG_DIR'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token-eq'--json'){$result.json=$true;continue}
         if($token-eq'--resume'){$result.resume=$true;continue}
-        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--antigravity-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
+        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--antigravity-user-root','--workbuddy-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
         if($i+1-ge@($Tokens).Count){throw('{0} requires a value.'-f$token)};$i++;$value=[string]$Tokens[$i]
         switch($token){
             '--repo-root'{$result.repo_root=$value}
@@ -28,6 +33,7 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
             '--claude-user-root'{$result.claude_user_root=$value;$result.claude_user_root_source='cli'}
             '--zcode-user-root'{$result.zcode_user_root=$value;$result.zcode_user_root_source='cli'}
             '--antigravity-user-root'{$result.antigravity_user_root=$value;$result.antigravity_user_root_source='cli'}
+            '--workbuddy-user-root'{$result.workbuddy_user_root=$value;$result.workbuddy_user_root_source='cli'}
             '--plan'{$result.plan=$value}
             '--receipt'{$result.receipt=$value}
             '--token'{$result.token=$value}
@@ -73,6 +79,14 @@ function Resolve-OptionalAntigravityGlobalRuleRoot($Options) {
     return ''
 }
 
+function Resolve-OptionalWorkBuddyGlobalRuleRoot($Options) {
+    $candidate = [string]$Options.workbuddy_user_root
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return '' }
+    if (Test-Path -LiteralPath $candidate -PathType Container) { return [IO.Path]::GetFullPath($candidate) }
+    if ($Options.workbuddy_user_root_source -in @('cli','CODEBUDDY_CONFIG_DIR')) { throw "WorkBuddy user root does not exist or is not a directory: $candidate" }
+    return ''
+}
+
 function Get-GlobalRuleRootEnvelope($Options) {
     return [pscustomobject][ordered]@{
         repo_root=[IO.Path]::GetFullPath($Options.repo_root)
@@ -84,6 +98,8 @@ function Get-GlobalRuleRootEnvelope($Options) {
         zcode_user_root_source=$Options.zcode_user_root_source
         antigravity_user_root=(Resolve-OptionalAntigravityGlobalRuleRoot $Options)
         antigravity_user_root_source=$Options.antigravity_user_root_source
+        workbuddy_user_root=(Resolve-OptionalWorkBuddyGlobalRuleRoot $Options)
+        workbuddy_user_root_source=$Options.workbuddy_user_root_source
     }
 }
 
@@ -91,14 +107,15 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
     $options=Parse-GlobalRuleOptions $Tokens $Mode;$roots=Get-GlobalRuleRootEnvelope $options
     $zcodeRoot = [string]$roots.zcode_user_root
     $antigravityRoot = [string]$roots.antigravity_user_root
+    $workbuddyRoot = [string]$roots.workbuddy_user_root
     switch($Mode){
         'check'{
-            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot;$exit=if($result.pass){0}else{2}
+            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot;$exit=if($result.pass){0}else{2}
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-check';pass=$result.pass;exit_code=$exit;roots=$roots;result=$result;writes=0;provider_calls=0;native_mutations=0}
         }
         'plan'{
             $out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
-            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot
+            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
             Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 30 -Compress);$exit=0
         }
@@ -107,13 +124,13 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
             if(Test-GlobalRulePathEqual $planPath $out){throw 'Global rule apply receipt path must differ from the plan path.'}
             $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command-eq'global-rules-plan'){$document.plan}else{$document}
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot
+            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0
         }
         'rollback'{
             $receiptPath=Resolve-GlobalRuleControlPath $options.receipt $options.repo_root -MustExist
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot
+            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-rollback';pass=$result.pass;exit_code=0;roots=$roots;result=$result;provider_calls=0;native_mutations=0};$exit=0
         }
     }

@@ -129,7 +129,7 @@ grep -riE 'bizCode=11140|statusCode.?":?403|refusal classified' \
 ### 第 5 步：验收
 
 ```bash
-bash "<交接包目录>/tools/workbuddy-risk-selfcheck.test.sh"    # 受控验收（35 用例），应 PASS 全绿
+bash "<交接包目录>/tools/workbuddy-risk-selfcheck.test.sh"    # 受控验收（37 个断言），应 PASS 全绿
 bash "<交接包目录>/tools/workbuddy-risk-selfcheck.sh"          # 复跑，确认高危归零
 ```
 

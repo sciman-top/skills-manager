@@ -40,7 +40,7 @@ function New-Fixture {
     New-ItemProperty -Path $rk -Name ProxyServer   -Value $ProxyServer  -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $rk -Name ProxyOverride -Value $ProxyOverride -PropertyType String -Force | Out-Null
     $script:REGS += $rk
-    return @{ Dir = $d; RegKey = $rk }
+    return @{ Dir = $d; RegKey = $rk; CorePath = (Get-Process -Id $PID).Path }
 }
 
 # 取一个「确定没人监听」的端口
@@ -66,7 +66,8 @@ function Run-Case {
         [switch]$PresetEnv              # 先在测试进程里把 env 设成目标值（子进程继承）
     )
     $a = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $TARGET,
-           '-XrayPath',    (Join-Path $Fx.Dir 'fake-core.exe'),
+           '-XrayPath',    $Fx.CorePath,
+           '-TaskName',    ('AgSplitFixture-' + [IO.Path]::GetFileName($TMP)),
            '-ConfigPath',  (Join-Path $Fx.Dir 'config.json'),
            '-WorkDir',     $Fx.Dir,
            '-Port',        "$Port",
@@ -170,6 +171,7 @@ Run-Case '不在 + 代理指向第三方' '系统代理 保持' $fx $PORT_DOWN @
 Section '分支 3 · 前置校验'
 
 $fx = New-Fixture 'b3_nocore' "127.0.0.1:$PORT_UP"
+$fx.CorePath = Join-Path $fx.Dir 'fake-core.exe'
 Remove-Item (Join-Path $fx.Dir 'fake-core.exe') -Force -ErrorAction SilentlyContinue
 Run-Case '缺少内核文件' '错误：缺少' $fx $PORT_UP @() 1
 
@@ -189,6 +191,9 @@ Run-Case 'env 值不对 -> 被修正' 'env 已修正: HTTP_PROXY' $fx $PORT_UP @
 $fx = New-Fixture 'b4_skip' "127.0.0.1:$PORT_UP"
 Run-Case 'NoEnvWrite 时跳过' 'env 检查已跳过' $fx $PORT_UP @('-NoEnvWrite') 0
 
+$fx = New-Fixture 'b4_down' "127.0.0.1:$PORT_DOWN"
+Run-Case '分流器失效时不覆盖环境变量' 'env 写入已跳过：分流器未就绪' $fx $PORT_DOWN @() 1 '127.0.0.1:10808'
+
 # ---------------- 分支 5：备份与开关 ----------------
 Section '分支 5 · 备份与开关'
 
@@ -202,6 +207,36 @@ if (Test-Path (Join-Path $fx.Dir 'bak.json')) {
 
 $fx = New-Fixture 'b5_noprobe' "127.0.0.1:$PORT_UP"
 Run-Case 'NoEgressProbe 时跳过探测' '出口探测已跳过' $fx $PORT_UP @() 0
+
+Section '分支 6 · 监听者身份'
+$fx = New-Fixture 'b6_wrong_owner' "127.0.0.1:$PORT_UP"
+$fx.CorePath = Join-Path $fx.Dir 'fake-core.exe'
+Run-Case '端口已开但程序路径不符' 'wrong_listener_owner' $fx $PORT_UP @() 1 ("127.0.0.1:$PORT_UP")
+if (-not (Test-Path (Join-Path $fx.Dir 'bak.json'))) {
+    Write-Host '  [PASS] 身份不符时未进入配置写入' -ForegroundColor Green; $script:PASS++
+} else {
+    Write-Host '  [FAIL] 身份不符时发生配置写入' -ForegroundColor Red; $script:FAIL++
+}
+
+$parseTokens = $null
+$parseErrors = $null
+$targetAst = [Management.Automation.Language.Parser]::ParseFile($TARGET, [ref]$parseTokens, [ref]$parseErrors)
+$taskFunction = $targetAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-SplitTaskAction' }, $true)
+. ([scriptblock]::Create($taskFunction.Extent.Text))
+$validAction = [pscustomobject]@{ Execute = $PWSH; Arguments = 'run -c "fixture.json"' }
+$wrongAction = [pscustomobject]@{ Execute = $PWSH; Arguments = 'run -c "other.json"' }
+foreach ($taskCase in @(
+    @{ Name = '正确任务动作'; Actions = @($validAction); Expected = $true },
+    @{ Name = '错误配置参数'; Actions = @($wrongAction); Expected = $false },
+    @{ Name = '无任务动作'; Actions = @(); Expected = $false },
+    @{ Name = '多个任务动作'; Actions = @($validAction, $wrongAction); Expected = $false }
+)) {
+    if ((Test-SplitTaskAction $taskCase.Actions $PWSH 'fixture.json') -eq $taskCase.Expected) {
+        Write-Host ("  [PASS] {0}" -f $taskCase.Name) -ForegroundColor Green; $script:PASS++
+    } else {
+        Write-Host ("  [FAIL] {0}" -f $taskCase.Name) -ForegroundColor Red; $script:FAIL++
+    }
+}
 
 # ---------------- 汇总 ----------------
 $listener.Stop()

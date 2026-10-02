@@ -6,7 +6,7 @@ Describe "Build script" {
     It "Concatenates <Ending> source files into the canonical bundle" -ForEach @(
         @{ Ending = 'LF'; Newline = "`n" }, @{ Ending = 'CRLF'; Newline = "`r`n" }
     ) {
-        $workspace = Join-Path $TestDrive "build-script"
+        $workspace = Join-Path $TestDrive "build-script-$Ending"
         $srcRoot = Join-Path $workspace "src"
         $commandsRoot = Join-Path $srcRoot "Commands"
         New-Item -ItemType Directory -Path $commandsRoot -Force | Out-Null
@@ -24,6 +24,9 @@ Describe "Build script" {
         for ($i = 0; $i -lt $files.Count; $i++) {
             $relativePath = $files[$i]
             $content = "# chunk-$i${Newline}chunk-$i"
+            if ($relativePath -in @('Infrastructure/AtomicFile.ps1', 'Application/GlobalRuleProjection.ps1')) {
+                $content = [IO.File]::ReadAllText((Join-Path $repoRoot "src/$relativePath")).Replace("`r`n", "`n").Replace("`n", $Newline)
+            }
             $contents[$relativePath] = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")
 
             $filePath = Join-Path $srcRoot $relativePath
@@ -34,7 +37,9 @@ Describe "Build script" {
             [System.IO.File]::WriteAllText($filePath, $content, $utf8NoBom)
         }
 
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'rules') -Destination $workspace -Recurse
         & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "build.ps1") | Out-Null
+        $LASTEXITCODE | Should -Be 0
 
         $actual = [System.IO.File]::ReadAllText((Join-Path $workspace "skills.ps1"))
         $expected = (($files | ForEach-Object { $contents[$_] + "

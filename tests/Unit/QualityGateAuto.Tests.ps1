@@ -168,6 +168,7 @@ $global:LASTEXITCODE = 0
         $sourceRoot = Split-Path (Split-Path (Split-Path $script:gateSource -Parent) -Parent) -Parent
         Copy-Item -LiteralPath (Join-Path $sourceRoot 'build.ps1') -Destination $repo
         Copy-Item -LiteralPath (Join-Path $sourceRoot 'src') -Destination $repo -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path $sourceRoot 'rules') -Destination $repo -Recurse -Force
         New-Item -ItemType Directory -Path (Join-Path $repo 'tests') | Out-Null
         Set-Content -LiteralPath (Join-Path $repo 'tests/run.ps1') -Value @'
 param([string[]]$TestPath)
