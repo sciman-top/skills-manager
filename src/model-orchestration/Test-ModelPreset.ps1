@@ -85,8 +85,10 @@ try {
     $global:ModelSlotAcceptanceExitCode = 0
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort medium -ReadOnly -Prompt 'Explicit remaining read-only work after simulated 429' | Out-Null
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 2 -and $global:ModelSlotAcceptanceCalls[1] -ccontains 'model_reasoning_effort="medium"') 'Caller can explicitly select a lower effort after failure'
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work on another supported model after simulated 429' | Out-Null
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3 -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model="gpt-6-luna"' -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model_reasoning_effort="max"') 'Caller can explicitly reselect another supported model after failure'
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort high -ReadOnly -Prompt 'New independent higher-effort task' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3 -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model_reasoning_effort="high"') 'Caller can explicitly select higher effort for new work'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4 -and $global:ModelSlotAcceptanceCalls[3] -ccontains 'model_reasoning_effort="high"') 'Caller can explicitly select higher effort for new work'
     foreach ($capturedCall in $global:ModelSlotAcceptanceCalls) {
         Assert ($capturedCall -ccontains 'read-only' -and $capturedCall -ccontains 'agents.enabled=false') 'Reselection preserves read-only mode and disabled nested delegation'
     }
