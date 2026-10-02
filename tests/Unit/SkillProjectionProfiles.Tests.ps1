@@ -49,6 +49,7 @@ Describe 'Skill projection profiles' {
             @($selection.included_names) | Should -Not -Contain 'codebase-design'
             @($selection.included_names) | Should -Not -Contain 'custom-powerpoint-accessibility'
             @($selection.included_names) | Should -Not -Contain 'grill-me'
+            @($selection.included_names) | Should -Not -Contain 'workbuddy-risk-triage'
         }
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
     }
@@ -149,8 +150,10 @@ Describe 'Skill projection profiles' {
         foreach ($hostName in @('antigravity', 'workbuddy')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.host | Should -Be $hostName
-            $selection.profile | Should -Be 'core-lean'
+            $selection.profile | Should -Be 'core-ops'
             @($selection.included_names).Count | Should -BeGreaterThan 0
+            @($selection.included_names) | Should -Contain 'antigravity-gemini-risk-triage'
+            @($selection.included_names) | Should -Contain 'workbuddy-risk-triage'
         }
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName notepad } | Should -Throw '*'
     }

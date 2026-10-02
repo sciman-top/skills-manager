@@ -10,9 +10,25 @@
 |---|---|---|---|
 | **技能源** | `overrides/custom/antigravity-gemini-risk-triage/`<br>`overrides/custom/workbuddy-risk-triage/` | **唯一真源**（`SKILL.md` + `references/`） | 是 —— `构建生效` 物化进 `agent/`，再投影到各宿主 |
 | **冷发现域** | `skills.json` → `skill_projection.discovery_catalog.domain_memberships.ai-risk-control` | 域注册（成员为上面两份技能） | 是 —— 生成 `agent/.skills-manager/catalog.json` |
+| **宿主投影 profile** | `skills.json` → `projection_profiles.profiles.core-ops` + `hosts.{antigravity,workbuddy}` | 让两份技能真正落到所针对的两个客户端宿主 | 是 —— 建 junction 指向 `agent/` |
 | **部署载荷** | `docs/handover/ai-risk-control/tools/` | 跨机复现用的**便携副本**（脚本，不含凭据） | 否 |
 
 判据：**改能力改 `overrides/custom/`；改跨机部署改 `tools/`。** 两者职责不同，不要反向同步。
+
+### 1.1 宿主投递路径（两条并行）
+
+| 路径 | 机制 | 覆盖宿主 |
+|---|---|---|
+| **热投影** | `core-ops` profile = `core-lean` 7 项 + 两份风控技能（共 9 项） | `antigravity`（`~/.gemini/config/skills`）、`workbuddy`（`~/.workbuddy-ai/skills`） |
+| **冷发现** | `ai-risk-control` 域 → `agent/.skills-manager/catalog.json` | 其余宿主（codex/claude/zcode 保持 `core-lean` 7 项） |
+
+设计约束：`core-lean` 是**冻结契约** —— `tests/Unit/SkillProjectionProfiles.Tests.ps1` 断言它恰好 7 项
+（"keeps the checked-in default core-lean profile small for every host"）。因此风控技能**不进 `core-lean`**，
+而走独立的 `core-ops`。判据：**`core-lean` 只放编码工作流技能。**
+
+> ⚠️ 投影是 **fail-closed** 的：目标路径若已存在且不是指向同一 `agent/` 的 junction，
+> 投影会抛 `Projection target conflict or drift` 而**不会**删除它。所以从「手放实体目录」切换到
+> 「项目托管 junction」时，必须先把旧实体目录移出（见 `_backup/2026-10-02-host-skills-preprojection/`）。
 
 ## 2. 已知重复与同步规则
 
