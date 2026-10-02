@@ -41,6 +41,7 @@ acl-backup-git-*.txt
 /.gemini/
 /.trae/
 /.workbuddy-ai/
+/.zcode/
 /imports/**/.venv/
 /imports/**/nohup.out
 /imports/**/.skills-manager-source.json
