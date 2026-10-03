@@ -1,6 +1,6 @@
 ---
 name: workbuddy-risk-triage
-description: 诊断并处置 WorkBuddy / CodeBuddy 客户端报「内容未通过安全审核 11140」「403 request illegal」「未知错误暂无响应」「429 Too Many Requests」等账号风控问题，并做本机环境自检与降智归因。触发词：11140、request illegal、内容未通过安全审核、风控、封号、限流、降智、账号异常、WorkBuddy 报错、Trace ID。
+description: 诊断、处置并主动防范 WorkBuddy / CodeBuddy 客户端报「内容未通过安全审核 11140」「403 request illegal」「未知错误暂无响应」「429 Too Many Requests」等账号风控问题，并做本机环境自检、降智归因与日常防范；提供账号环境初始核查单、日常守则与行为画像自查。触发词：11140、request illegal、内容未通过安全审核、风控、封号、限流、降智、账号异常、WorkBuddy 报错、Trace ID、如何防范、如何预防、如何控制风险、WorkBuddy 防封、WorkBuddy 风控、workbuddy2api、flowrebound、稳流器、反代、代理例外、出口 IP。
 ---
 
 # WorkBuddy 风控分诊
@@ -225,10 +225,20 @@ repo_verified -> filesystem_projected -> host_loaded -> live_accepted
 → **在 WorkBuddy 换号躲过的用法，会在 Google 侧以更硬的方式再收一次账**
 （真金白银的订阅 + Google 侧的二振永久封）。
 
+## 主动防范：出事之前怎么做
+
+> 以上各节是「出事之后」的分诊与处置。若目标是**防患于未然**，直接读 `references/prevention-ops.md`。
+
+核心防范逻辑三句话：
+1. **账号画像** 比单次行为重要——每天的会话主题决定中长期风险；换号只是止血，画像原样搬过去复发只是时间问题。
+2. **停止重试** 比重启更重要——协议明确反复触发会把可恢复限制升级为不可恢复封禁。
+3. **自检先于判断** ——出事后先跑自检脚本拿到环境基线，再对号入座，避免把自污染误判为账号风控。
+
 ## 参考材料（按需读取）
 
 | 文件 | 内容 |
 |---|---|
+| `references/prevention-ops.md` | **主动防范操作手册**：Pre-flight 核查单、日常守则、画像自查、自检脚本用法、代理维护、信息污染识别 |
 | `references/log-forensics.md` | 真实错误体在哪、假阳性陷阱、UUID→会话归属、账号时间线、两个日志根 |
 | `references/network-and-proxy.md` | 官方错误码页、代理双层例外、进程级出口归因 |
 | `references/official-sources.md` | 官方反馈渠道、两份协议条款对照、官方对灰产的定性、社区交叉验证 |

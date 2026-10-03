@@ -1,6 +1,6 @@
 ---
 name: antigravity-gemini-risk-triage
-description: 诊断并处置 Google Antigravity（IDE/CLI/SDK）与 Gemini（CLI/Code Assist/应用/API）的封号、限流（429 RESOURCE_EXHAUSTED / Quota exceeded）、降智三类问题。触发词：Antigravity、反重力、Gemini 封号、Gemini 限流、Gemini 降智、429 RESOURCE_EXHAUSTED、service has been disabled、ToS 违规、OAuth 接入第三方、CLIProxyAPI、OpenClaw、OpenCode、Zerogravity、Antigravity Rotator、配额耗尽、模型降级。
+description: 诊断、处置并主动防范 Google Antigravity（IDE/CLI/SDK）与 Gemini（CLI/Code Assist/应用/API）的封号、限流（429 RESOURCE_EXHAUSTED / Quota exceeded）、降智三类问题；提供账号环境初始核查单、日常防范守则与行为画像自查。触发词：Antigravity、反重力、Gemini 封号、Gemini 限流、Gemini 降智、Gemini 防封、Gemini 防限流、Gemini 风控、如何防范、如何预防、如何控制风险、429 RESOURCE_EXHAUSTED、service has been disabled、ToS 违规、OAuth 接入第三方、CLIProxyAPI、OpenClaw、OpenCode、Zerogravity、Antigravity Rotator、配额耗尽、模型降级、账号被封、出口 IP、代理加固。
 ---
 
 # Antigravity / Gemini 风控分诊
@@ -224,11 +224,21 @@ description: 诊断并处置 Google Antigravity（IDE/CLI/SDK）与 Gemini（CLI
 3. 降智第一嫌疑人是自己的上下文与配额。
 4. 所有「帮你绕过限制」的第三方工具都是封号加速器。
 
+## 主动防范：出事之前怎么做
+
+> 以上各节是「出事之后」的分诊与处置。若目标是**防患于未然**，直接读 `references/prevention-ops.md`。
+
+核心防范逻辑三句话：
+1. **账号画像** 比单次行为重要——每天的会话主题决定中长期风险。
+2. **出口稳定** 比规避工具重要——固定一个干净出口比研究绕过方案有效得多。
+3. **配额意识** 比事后补救重要——开工前看剩余额度，主动降级比被动降链安全。
+
 ## 参考材料（按需读取）
 
 | 文件 | 内容 |
 |---|---|
-| `references/ban-mechanics.md` | 条款原文、检测机制推断、封号实证、处置梯度、申诉、地区与年龄门槛 |
+| `references/prevention-ops.md` | **主动防范操作手册**：Pre-flight 核查单、日常守则、画像自查、配额管理、降智快速自查、信息污染识别 |
+| `references/ban-mechanics.md` | 条款原文、检测机制推断、封号实证、处置梯度、申诉、地区与年龄门槛、出口 IP 加固 10 条 |
 | `references/quota-and-limits.md` | Antigravity 配额模型、Gemini API 三维度、层级、CLI 免费层、429 与封号对照 |
 | `references/degradation.md` | 四类降智归因、配额驱动型机制、排查法、网上流传的「恢复满血」方案判定 |
 | `references/acceptance-and-projection.md` | **改完之后怎么证明可靠**：真值层级、三层验收（离线夹具 / 真故障注入 / 全量自检）、投影与 sha256 无漂移、可注入改造要点、用例设计的坑 |
