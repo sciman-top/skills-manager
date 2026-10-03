@@ -5,6 +5,8 @@ Describe 'CLI alias dispatch' {
         @{ Command = 'RULE-ESTATE-APPLY'; Expected = 'apply'; Tokens = @('--plan', 'fixture', '--json') }
         @{ Command = '安装MCP'; Expected = 'install'; Tokens = @('fixture', '--json') }
         @{ Command = 'mcp-install'; Expected = 'install'; Tokens = @('fixture', '--json') }
+        @{ Command = 'ai-risk-control'; Expected = 'risk'; Tokens = @('fixture', '--json') }
+        @{ Command = '风险控制'; Expected = 'risk'; Tokens = @('fixture', '--json') }
         @{ Command = '帮助'; Expected = 'help'; Tokens = @() }
         @{ Command = 'help'; Expected = 'help'; Tokens = @() }
         @{ Command = '--help'; Expected = 'help'; Tokens = @() }
@@ -29,6 +31,7 @@ Describe 'CLI alias dispatch' {
                     }
                 }
                 function 安装MCP($Tokens) { @{ handler = 'install'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
+                function Invoke-AiRiskControlCommand($Tokens) { [pscustomobject]@{ handler = 'risk'; tokens = @($Tokens) } }
                 function 帮助 { @{ handler = 'help'; tokens = @() } | ConvertTo-Json -Compress }
                 & $MainPath
             }

@@ -84,7 +84,7 @@
 
 ## 四、自检脚本的正确用法
 
-自检脚本位置：`docs/handover/ai-risk-control/tools/workbuddy/workbuddy-risk-selfcheck.sh`
+自检脚本随交接包分发：仓库检出内为 `docs/handover/ai-risk-control/tools/workbuddy/workbuddy-risk-selfcheck.sh`；已部署机器上通常为 `D:\TOOL\workbuddy-risk\workbuddy-risk-selfcheck.sh`。
 
 ```bash
 bash "<风控工具目录>/workbuddy-risk-selfcheck.sh"

@@ -41,6 +41,7 @@ $Files = @(
     "Git.ps1",
     "Config.ps1",
     "Commands/Doctor.ps1",
+    "Commands/AiRiskControl.ps1",
     "Commands/Install.ps1",
     "Commands/Update.ps1",
     "Commands/Mcp.ProfileAndSafety.ps1",

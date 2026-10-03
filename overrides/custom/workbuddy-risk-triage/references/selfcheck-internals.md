@@ -9,7 +9,7 @@ bash "<风控工具目录>/workbuddy-risk-selfcheck.sh"      # 自检（只读�
 bash "<风控工具目录>/workbuddy-risk-selfcheck.test.sh" # 受控验收
 ```
 
-> `<风控工具目录>` = 本仓 `docs/handover/ai-risk-control/tools/workbuddy/`；部署落位与资产清单见同目录 `ASSETS.md`。
+> `<风控工具目录>` = 自检脚本所在目录。仓库检出内为 `docs/handover/ai-risk-control/tools/workbuddy/`；已部署机器上通常为 `D:\TOOL\workbuddy-risk\`。两处都没有时向用户确认，不要自行遍历个人目录。
 
 覆盖 9 项：hosts 劫持、自定义模型/反代进程、客户端第三方指向、多账号共用设备指纹、
 代理例外规则、**代理例外覆盖缺口（WinINET vs 环境变量）**、重启频率、

@@ -28,7 +28,7 @@
 
 > ⚠️ 投影是 **fail-closed** 的：目标路径若已存在且不是指向同一 `agent/` 的 junction，
 > 投影会抛 `Projection target conflict or drift` 而**不会**删除它。所以从「手放实体目录」切换到
-> 「项目托管 junction」时，必须先把旧实体目录移出（见 `_backup/2026-10-02-host-skills-preprojection/`）。
+> 「项目托管 junction」时，必须先把旧实体目录移出（移出即可，不必删除）。
 
 ## 2. 唯一真源与交接边界
 

@@ -85,6 +85,13 @@ if ($MyInvocation.InvocationName -ne '.') {
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
             { $_ -in @("帮助", "help", "--help", "-h") } { 帮助 }
+            { $_ -in @("ai-risk-control", "风险控制") } {
+                $riskTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $riskTokens += $Filter }
+                $riskTokens += @($args)
+                $riskResult = Invoke-AiRiskControlCommand $riskTokens
+                Write-Output ($riskResult | ConvertTo-Json -Depth 30)
+            }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }

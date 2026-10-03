@@ -250,6 +250,8 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
+  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--mode auto|direct|v2rayn|custom-proxy] [--checks] [--json]
+  风控入口默认只读，统一检查 Antigravity/Gemini 与 WorkBuddy 资产；不会切号、轮换凭据、重启进程或修改代理。
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
 通用参数：
