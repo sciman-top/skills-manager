@@ -37,20 +37,6 @@
           ],
           "exclude": []
         },
-        "core": {
-          "include": [
-            "capability-router",
-            "codebase-design",
-            "code-review-and-quality",
-            "custom-powerpoint-accessibility",
-            "custom-powershell-windows-automation",
-            "grill-me",
-            "research",
-            "systematic-debugging",
-            "verification-before-completion"
-          ],
-          "exclude": []
-        },
         "design": {
           "include": [
             "grill-me",
@@ -1104,5 +1090,7 @@
       }
     }
   },
-  "mcp_targets": []
+  "mcp_targets": [
+    "~/.codex"
+  ]
 }

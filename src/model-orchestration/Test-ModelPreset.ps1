@@ -21,6 +21,10 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt61_sol_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 6) 'All three models and six tuples jointly active'
+$reselection = $defaultResolved.reselection
+Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
+Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'gpt6_luna_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
+Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit semantics'
 Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
 Assert ('deepseek-flash' -cnotin @($defaultResolved.enabled_routes.model)) 'DeepSeek removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt6_luna_only,gpt61_sol_only | ConvertFrom-Json
@@ -75,11 +79,25 @@ function global:codex {
 }
 try {
     $failedRequest = $false
+    $failureMessage = ''
     try {
         & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort high -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null
     }
-    catch { $failedRequest = $_.Exception.Message -like '*no replay or preset substitution performed*' }
+    catch {
+        $failureMessage = $_.Exception.Message
+        $failedRequest = $failureMessage -like '*no replay or preset substitution performed*'
+    }
     Assert $failedRequest 'Simulated 429 returns control to the caller'
+    $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
+    Assert $jsonMatch.Success 'Failure message embeds the structured slot_failure document'
+    $slotFailure = $jsonMatch.Value | ConvertFrom-Json
+    Assert ($null -ne $slotFailure.slot_failure) 'Failure emits a structured slot_failure document'
+    Assert ($slotFailure.slot_failure.failed_tuple.model -ceq 'gpt-6.1-sol' -and $slotFailure.slot_failure.failed_tuple.effort -ceq 'high') 'slot_failure records the exact failed tuple'
+    $lowerEfforts = @($slotFailure.slot_failure.reselection.within_preset_lower | ForEach-Object { $_.effort })
+    Assert ($lowerEfforts.Count -eq 2 -and $lowerEfforts[0] -ceq 'medium' -and $lowerEfforts[1] -ceq 'low') 'Rate-limit chain starts with nearest lower effort in the same preset'
+    Assert (@($slotFailure.slot_failure.reselection.cross_preset | Where-Object { $_.preset -ceq 'gpt6_luna_only' }).Count -eq 1) 'Rate-limit chain continues cross-preset in active order'
+    Assert (@($slotFailure.slot_failure.reselection.within_preset_higher_overload_only | ForEach-Object { $_.effort }) -cnotcontains 'high') 'The failed effort itself is never listed as a reselection option'
+    Assert ($slotFailure.slot_failure.reselection.prohibition.Contains('429')) 'Prohibition text pins rate-limit semantics'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 1) 'Failed request does not automatically launch another route'
     Assert ($global:ModelSlotAcceptanceCalls[0] -ccontains 'model_reasoning_effort="high"') 'Failed request retains its exact effort'
     $global:ModelSlotAcceptanceExitCode = 0
@@ -109,6 +127,10 @@ try {
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
+    Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('# availability-rules: ')) 'Shared config carries the availability re-selection rules'
+    $profileText = Get-Content -LiteralPath (Join-Path $target 'gpt61-sol-only.config.toml') -Raw
+    Assert ($profileText.Contains('429/quota/rate-limit/auth/billing: nearest lower effort within the same preset')) 'Profile instructions pin the 429 downgrade chain'
+    Assert ($profileText.Contains('confirmed service overload/unavailable: nearest lower effort, then nearest higher effort')) 'Profile instructions reserve higher effort for confirmed overload'
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null

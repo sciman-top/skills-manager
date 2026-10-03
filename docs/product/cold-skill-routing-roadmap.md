@@ -8,7 +8,7 @@
 
 ## 0. 冻结决议（2026-08-25）
 
-**状态：engineering-frozen——core-lean 常态的主发现路径，工程面不再扩展。** 决策输入：三宿主默认投影已收窄为 `core-lean`；原 9 项 `core` 与 `full-compatible` 均保留为显式能力面。在该常态下，冷链是冷目录技能的主发现路径。工程冻结的理由：工程能力面已具备，且当前没有需要扩展的新能力；运行验收仍以各自 receipt 为准，不能由冻结状态推导 CSR-160/170 闭卷、`host_loaded`、`live_accepted` 或全部业务样本通过。
+**状态：engineering-frozen——core-lean 常态的主发现路径，工程面不再扩展。** 决策输入：三宿主默认投影已收窄为 `core-lean`；Antigravity/WorkBuddy 默认使用 `core-ops`（`core-lean` 7 项 + 两份风控技能），`full-compatible` 保留为显式能力面。在该常态下，冷链是冷目录技能的主发现路径。工程冻结的理由：工程能力面已具备，且当前没有需要扩展的新能力；运行验收仍以各自 receipt 为准，不能由冻结状态推导 CSR-160/170 闭卷、`host_loaded`、`live_accepted` 或全部业务样本通过。
 
 冻结含义：
 

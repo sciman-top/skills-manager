@@ -3,7 +3,7 @@
 在另一台 Windows 电脑上复现同一套加固方案。
 
 > 版本：2026-10-01（运行身份与出口证据修订）　·　受控验收 23/0；实战验收 11/0（看门狗恢复 115.2 秒）。
-> 源码唯一落位：`D:\CODE\skills-manager\docs\handover\ai-risk-control\`；`D:\TOOL\v2rayN\` 下保留必要运行脚本投影，按 SHA256 校验同步。
+> 技能源唯一落位：`D:\CODE\skills-manager\overrides\custom\`；本目录只保留交接说明、运行脚本和分诊提示词，按 SHA256 校验同步。
 
 ## 包里有什么
 
@@ -30,19 +30,51 @@
       ├─ workbuddy-risk-selfcheck.sh      同一套检查逻辑的 Git Bash 版
       ├─ workbuddy-risk-selfcheck.test.sh 脚本自身的离线验收夹具
       ├─ workbuddy-triage-prompt.md       分诊提示词（429/403/11140 分诊流程与红线清单）
-      └─ skill\
-         └─ workbuddy-risk-triage\        分诊技能（SKILL.md + 4 份参考，装入宿主技能目录即用）
+      └─ （技能不在交接包中重复携带；由项目唯一真源构建投影）
 ```
+
+## 与 skills-manager 主链的关系
+
+本目录是跨机器复现用的**交接包**，不是本项目运行时技能的第二份真源。
+在 `D:\CODE\skills-manager` 内，相关能力沿现有技能管理主链进入宿主：
+
+```text
+overrides/custom/antigravity-gemini-risk-triage/
+overrides/custom/workbuddy-risk-triage/
+        │  唯一技能源
+        ▼
+skills.json
+  skill_projection.projection_profiles.profiles.core-ops
+  hosts.antigravity.default_profile = core-ops
+  hosts.workbuddy.default_profile    = core-ops
+        │  core-lean 7 项 + 两份风控技能 = 9 项
+        ▼
+build.ps1 / skills.ps1 构建生效
+        ▼
+agent/ 物化 → ~/.gemini/config/skills
+             ~/.workbuddy-ai/skills
+```
+
+`core-lean` 仍是 Codex、Claude、ZCode 的 7 项常驻 profile；风控技能不并入
+`core-lean`，只通过 `core-ops` 投递给 Antigravity 和 WorkBuddy。仓库内修改技能时，
+只改 `overrides/custom/`，再运行构建和投影；不要手改 `agent/`、宿主技能目录或本目录的
+便携副本。投影回执位于 `reports/skill-projection/`，它们只证明文件投影状态，不能替代
+宿主新会话加载或真实业务验收。
+
+只有在没有仓库检出、需要离线迁移到另一台电脑时，才使用下面的 `tools\` 运行脚本和分诊提示词；
+技能本身不再在交接包中重复携带。目标机取得本项目后，必须由 `overrides/custom/` 经
+`skills.ps1 构建生效` 生成并投影 `core-ops`。
 
 ## 怎么用
 
 1. 把整个文件夹拷到新电脑（U 盘 / 网盘均可）。
-2. 把 `tools\` 里的文件放到：
+2. 如果目标机有本仓库检出，先按上面的主链运行构建和投影，不要手工复制技能目录。
+   只有使用本交接包进行离线迁移时，才把 `tools\` 里的文件放到：
    - `gen-config.py`、`wire-split.ps1` → `D:\TOOL\v2rayN\ag-split\`
    - `ensure-split.ps1`、`ensure-split.test.ps1`、`ag-split-live-acceptance.ps1`、`register-split-task.ps1` → `D:\TOOL\v2rayN\ag-split\`
    - `ag-health-check.ps1`、`ag-egress-probe.ps1` → `D:\TOOL\v2rayN\`，两者放在同一目录
    - `ensure-patches.ps1`、`register-task.ps1` → `D:\TOOL\antigravity-ensure\`
-   - `workbuddy\` 的脚本与分诊材料 → `D:\TOOL\workbuddy-risk\`（只读，位置不敏感；要装分诊技能时取 `skill\workbuddy-risk-triage\` 放入宿主技能目录）
+   - `workbuddy\` 的脚本与分诊材料 → `D:\TOOL\workbuddy-risk\`（只读，位置不敏感）
 3. 打开 `PROMPT.md`，**全文复制**，粘贴到新电脑上的对话里。
 4. 按提示词的节奏走：**先侦察 → 测量出口 → 再动手**。
 5. **按顺序验收**（提示词第 8 节有完整说明）：

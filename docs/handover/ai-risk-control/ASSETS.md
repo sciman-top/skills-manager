@@ -11,7 +11,7 @@
 | **技能源** | `overrides/custom/antigravity-gemini-risk-triage/`<br>`overrides/custom/workbuddy-risk-triage/` | **唯一真源**（`SKILL.md` + `references/`） | 是 —— `构建生效` 物化进 `agent/`，再投影到各宿主 |
 | **冷发现域** | `skills.json` → `skill_projection.discovery_catalog.domain_memberships.ai-risk-control` | 域注册（成员为上面两份技能） | 是 —— 生成 `agent/.skills-manager/catalog.json` |
 | **宿主投影 profile** | `skills.json` → `projection_profiles.profiles.core-ops` + `hosts.{antigravity,workbuddy}` | 让两份技能真正落到所针对的两个客户端宿主 | 是 —— 建 junction 指向 `agent/` |
-| **部署载荷** | `docs/handover/ai-risk-control/tools/` | 跨机复现用的**便携副本**（脚本，不含凭据） | 否 |
+| **部署载荷** | `docs/handover/ai-risk-control/tools/` | 跨机复现用的运行脚本与分诊提示词（不含技能副本和凭据） | 否 |
 
 判据：**改能力改 `overrides/custom/`；改跨机部署改 `tools/`。** 两者职责不同，不要反向同步。
 
@@ -30,23 +30,14 @@
 > 投影会抛 `Projection target conflict or drift` 而**不会**删除它。所以从「手放实体目录」切换到
 > 「项目托管 junction」时，必须先把旧实体目录移出（见 `_backup/2026-10-02-host-skills-preprojection/`）。
 
-## 2. 已知重复与同步规则
+## 2. 唯一真源与交接边界
 
-`tools/workbuddy/skill/workbuddy-risk-triage/` 与 `overrides/custom/workbuddy-risk-triage/`
-**是同一份技能的两份拷贝**，服务不同目的：
+`overrides/custom/workbuddy-risk-triage/` 是 WorkBuddy 风控技能的唯一真源。
+交接包不再携带该技能的第二份副本，避免出现两份 `SKILL.md`、两套参考材料和人工同步流程。
 
-- `overrides/custom/` 是**构建源**：已去掉 `agent_created` 未知字段（元数据校验会判 error），
-  并把写死的机器绝对路径改成可移植形式。
-- `tools/...` 是**交接包快照**：供新机器离线落盘，保持自包含。
-
-**同步规则**：技能内容变更时改 `overrides/custom/`，再把两份对齐并刷新 `MANIFEST.sha256`。
-
-当前**有意保留**的差异（2 个文件）：
-
-| 文件 | 差异 |
-|---|---|
-| `SKILL.md` | 去 `agent_created: true`；自检脚本路径 `C:/Users/sciman/...` → `<风控工具目录>/...` |
-| `references/selfcheck-internals.md` | 同上路径可移植化 |
+目标机有本项目检出时，技能由 `overrides/custom/` 经 `skills.ps1 构建生效` 物化到
+`agent/`，再由 `core-ops` 投影到 Antigravity 和 WorkBuddy。交接包中的 `tools/workbuddy/`
+只保留自检脚本、受控验收脚本和分诊提示词；`MANIFEST.sha256` 只校验这些便携运行资产。
 
 ## 3. 工具资产
 
@@ -66,8 +57,6 @@
 | `tools/workbuddy/workbuddy-risk-selfcheck.ps1` | 同上，PowerShell 简化版（不含 MCP 认证细分） | `D:\TOOL\workbuddy-risk\` |
 | `tools/workbuddy/workbuddy-risk-selfcheck.test.sh` | 自检脚本自身的离线验收夹具 | `D:\TOOL\workbuddy-risk\` |
 | `tools/workbuddy/workbuddy-triage-prompt.md` | 分诊提示词（429 / 403·11140 分诊与红线清单） | `D:\TOOL\workbuddy-risk\` |
-| `tools/workbuddy/skill/workbuddy-risk-triage/` | 技能便携副本（装入宿主技能目录即用） | 见 §2 |
-
 部署顺序与三层验收见 `PROMPT.md` 第 8、13 节；日常只需跑受控验收 ①、全量自检 ③、WorkBuddy 自检 ④。
 
 ## 4. 不纳入仓库的第三方件（**刻意**）

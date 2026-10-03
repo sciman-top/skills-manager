@@ -63,6 +63,39 @@ try {
     if ($targetHost -eq 'claude') { $cliArgs += '--' }
     & $executable @cliArgs $scopedPrompt
     $code = $LASTEXITCODE
-    if ($code -ne 0) { throw "Slot process failed (exit=$code); no replay or preset substitution performed." }
+    if ($code -ne 0) {
+        # Structured failure for explicit parent re-selection.  The launcher
+        # never retries or substitutes; higher-effort entries are listed only
+        # for confirmed service overload, never for 429/quota/rate-limit.
+        $failedTuple = @{ preset = $Preset; slot = $Slot; model = $route.model; effort = $route.effort; host = $targetHost; read_only = $readOnlyTask }
+        $menuByPreset = @{}
+        foreach ($id in @($resolved.active_presets)) { $menuByPreset[$id] = @($policy.presets[$id].menu | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } }) }
+        $withinLower = @()
+        $withinHigher = @()
+        $failedIndex = -1
+        for ($i = 0; $i -lt $menuByPreset[$Preset].Count; $i++) {
+            if ($menuByPreset[$Preset][$i].model -ceq $route.model -and $menuByPreset[$Preset][$i].effort -ceq $route.effort) { $failedIndex = $i; break }
+        }
+        if ($failedIndex -gt 0) { $withinLower = @($menuByPreset[$Preset])[($failedIndex - 1)..0] }
+        if ($failedIndex -ge 0 -and $failedIndex -lt ($menuByPreset[$Preset].Count - 1)) { $withinHigher = @($menuByPreset[$Preset])[($failedIndex + 1)..($menuByPreset[$Preset].Count - 1)] }
+        $crossPreset = @()
+        foreach ($id in @($resolved.active_presets)) {
+            if ($id -ceq $Preset) { continue }
+            $crossPreset += @{ preset = $id; options = $menuByPreset[$id] }
+        }
+        $failureDoc = @{ slot_failure = [ordered]@{
+                exit = $code
+                failed_tuple = $failedTuple
+                reselection = [ordered]@{
+                    within_preset_lower = $withinLower
+                    cross_preset = $crossPreset
+                    within_preset_higher_overload_only = $withinHigher
+                    prohibition = 'Explicit parent re-selection for the next bounded task only; no automatic replay. For 429/quota/rate-limit/auth/billing use lower-effort or cross-preset entries; higher effort is reserved for confirmed service overload. Record failed tuple, failure, selected tuple and remaining scope.'
+                }
+            }
+        } | ConvertTo-Json -Depth 6 -Compress
+        $failureDoc
+        throw "Slot process failed (exit=$code); no replay or preset substitution performed. $failureDoc"
+    }
 }
 finally { Pop-Location }

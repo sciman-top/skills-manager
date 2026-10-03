@@ -523,6 +523,7 @@ pwsh -File D:\TOOL\workbuddy-risk\workbuddy-risk-selfcheck.ps1     # 只读，�
 - 两个领域只在「系统代理例外表」这一点交汇：本方案的 `ensure-split.ps1` 把 WorkBuddy 五域例外纳入
   `REQUIRED_EXCEPTIONS` 检查（缺失返回 1，人工确认后追加，不自动覆写）。
 - 若新电脑**不做分流**（只有一条线路），WorkBuddy 部分仍要完整做——它不依赖分流器存在。
-- 深度材料（六份报告原件）在源机 `C:\Users\sciman\WorkBuddy AI\`；本包 `tools/workbuddy/` 内含分诊提示词
-  （`workbuddy-triage-prompt.md`：429 与 403/11140 分诊、版本与域名后缀、红线清单）与 `workbuddy-risk-triage`
-  技能（`skill/workbuddy-risk-triage/`），跨机迁移以本节 + 这两份为准。
+- 深度材料（六份报告原件）在源机 `C:\Users\sciman\WorkBuddy AI\`；本包 `tools/workbuddy/` 只内含分诊提示词
+  （`workbuddy-triage-prompt.md`：429 与 403/11140 分诊、版本与域名后缀、红线清单）。
+  `workbuddy-risk-triage` 技能只从项目 `overrides/custom/workbuddy-risk-triage/` 构建并由 `core-ops` 投影，
+  不再保留交接包副本。

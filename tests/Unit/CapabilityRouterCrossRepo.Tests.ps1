@@ -8,6 +8,10 @@ Describe 'Portable capability-router cold discovery' {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
         $sourceRouter = Join-Path $repoRoot 'overrides\custom\capability-router\scripts\route-capability.ps1'
         $portableRoot = Join-Path $TestDrive 'portable-skills'
+        # Pester 6 keeps one TestDrive per file; earlier scenarios in this file
+        # drop a neutral .skills-manager catalog that would win the auto-discover
+        # search, so every scenario must start from a clean portable root.
+        if (Test-Path -LiteralPath $portableRoot) { Remove-Item -LiteralPath $portableRoot -Recurse -Force }
         $routerRoot = Join-Path $portableRoot 'capability-router'
         $routerScripts = Join-Path $routerRoot 'scripts'
         $targetRoot = Join-Path $portableRoot 'codebase-design'
@@ -194,5 +198,95 @@ description: >-
         $result.catalog.status | Should -Be 'invalid'
         @($result.catalog.findings.code) | Should -Contain 'catalog_path_required'
         @($result.retrieval.candidates).Count | Should -Be 0
+    }
+
+    It 'fails the whole copied router catalog when a non-resident sibling is missing from the host root' {
+        # Live-probe F4 (2026-10-03): a host root that received a *copy* of the
+        # router package (not a junction) passes the declared-vs-projected name
+        # diff, but every cold sibling outside the copy resolves to a missing
+        # file -> one stale entry fails the whole directory -> candidates zero.
+        $ghostRoot = Join-Path $portableRoot 'ghost-cold-skill'
+        $catalogDoc = Get-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Raw | ConvertFrom-Json
+        $ghostEntry = [ordered]@{
+            name = 'ghost-cold-skill'
+            description = 'Cold skill that only exists in the managed tree, never in this copied host root.'
+            relative_path = '..\ghost-cold-skill\SKILL.md'
+            entrypoint_sha256 = ('a' * 64)
+            package_sha256 = ('b' * 64)
+            domains = @('engineering')
+            load_side_effect = 'read_only'
+            side_effect = 'unknown'
+            routing_rules = @()
+        }
+        $catalogDoc.skills = @($catalogDoc.skills) + @($ghostEntry)
+        $catalogDoc.domains[0].skill_names = @($catalogDoc.domains[0].skill_names) + @('ghost-cold-skill')
+        $catalogDoc.catalog_fingerprint = Get-TestSha256 ($catalogDoc | Select-Object -Property * -ExcludeProperty catalog_fingerprint | ConvertTo-Json -Depth 20 -Compress)
+        $catalogDoc | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Encoding UTF8
+        New-Item -ItemType Directory -Path $ghostRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $ghostRoot 'SKILL.md') -Encoding UTF8 -Value 'placeholder used only to compute nothing'
+
+        # Simulate the host receiving only the router package: remove the
+        # sibling copy after the catalog (whose hashes still point at it) is in
+        # place; in a real host root the cold skills were never projected.
+        Remove-Item -LiteralPath $ghostRoot -Recurse -Force
+
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering | ConvertFrom-Json
+
+        $result.catalog.status | Should -Be 'stale'
+        $result.routing_receipt.status | Should -Be 'blocked'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        @($result.retrieval.candidates).Count | Should -Be 0
+        @($result.selected.name) | Should -Not -Contain 'codebase-design'
+        @($result.excluded | Where-Object { $_.name -eq 'ghost-cold-skill' -and $_.reason -eq 'entrypoint_unavailable' }).Count | Should -Be 1
+    }
+
+    It 'fails closed when the environment catalog is a reachable but stale copy' {
+        # A copied catalog that is still loadable (valid JSON, valid schema) but
+        # whose content no longer matches its fingerprint must not validate any
+        # candidate; otherwise a host root could keep an outdated mirror alive.
+        $staleCopyRoot = Join-Path $TestDrive 'stale-catalog-copy'
+        New-Item -ItemType Directory -Path $staleCopyRoot -Force | Out-Null
+        $catalogDoc = Get-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Raw | ConvertFrom-Json
+        $catalogDoc.skills[0].description = $catalogDoc.skills[0].description + ' (tampered after fingerprint)'
+        $catalogDoc | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $staleCopyRoot 'catalog.json') -Encoding UTF8
+
+        $env:SKILLS_MANAGER_CAPABILITY_CATALOG = Join-Path $staleCopyRoot 'catalog.json'
+        try {
+            $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
+                -Query '设计模块边界和工程终态' -Candidate 'skill|codebase-design' | ConvertFrom-Json
+        }
+        finally {
+            Remove-Item Env:\SKILLS_MANAGER_CAPABILITY_CATALOG -ErrorAction SilentlyContinue
+        }
+
+        $result.catalog_resolution.mode | Should -Be 'environment'
+        $result.catalog.status | Should -Be 'invalid'
+        @($result.catalog.findings.code) | Should -Contain 'catalog_fingerprint_mismatch'
+        @($result.retrieval.candidates).Count | Should -Be 0
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+    }
+
+    It 'restores discovery for a copy-form host root by pinning the managed catalog through the environment' {
+        # Operational mitigation for the copy-form failure: an explicit catalog
+        # pin (env or -CatalogPath) resolves siblings inside the managed tree,
+        # where the real files live, so validation succeeds again.
+        $copyHostRoot = Join-Path $TestDrive 'copy-host-skills'
+        $copyRouter = Join-Path $copyHostRoot 'capability-router'
+        New-Item -ItemType Directory -Path (Join-Path $copyRouter 'scripts') -Force | Out-Null
+        Copy-Item -LiteralPath $script:routerScript -Destination (Join-Path $copyRouter 'scripts\route-capability.ps1') -Force
+        Set-Content -LiteralPath (Join-Path $copyRouter 'catalog.json') -Encoding UTF8 -Value '{"schema_version":1,"skills":[]}'
+
+        $env:SKILLS_MANAGER_CAPABILITY_CATALOG = Join-Path $routerRoot 'catalog.json'
+        try {
+            $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $copyRouter 'scripts\route-capability.ps1') `
+                -Query '设计模块边界和工程终态' -DomainHint engineering | ConvertFrom-Json
+        }
+        finally {
+            Remove-Item Env:\SKILLS_MANAGER_CAPABILITY_CATALOG -ErrorAction SilentlyContinue
+        }
+
+        $result.catalog_resolution.mode | Should -Be 'environment'
+        $result.catalog.status | Should -Be 'current'
+        @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
     }
 }

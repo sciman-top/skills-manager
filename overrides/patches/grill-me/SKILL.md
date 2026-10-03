@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Grill Me
 
-This is the thin `core` entry for an explicit design interview. Do not perform
+This is the thin entry for an explicit design interview. Do not perform
 the interview in the parent task and do not change a shared skill profile.
 
 A request that combines interrogation with evidence gathering (official docs,
@@ -49,7 +49,7 @@ silently fall back to a parent or shared-profile interview.
    It must remain read-only: no repository edits, implementation, tickets,
    ADRs, host configuration, profile changes, or side effects.
 3. When the child closes, return its settled decisions, open risks, and
-   assumptions to the parent task. Resume normal `core` work; do not preserve
+   assumptions to the parent task. Resume normal work; do not preserve
    a `design` profile or start another child unless the user asks again.
 
 Only offer `codex exec --ephemeral` when the user explicitly asks for a

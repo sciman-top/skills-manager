@@ -10913,6 +10913,131 @@ function Get-DoctorMcpRiskControls($cfg) {
     }
 }
 
+function Test-DoctorColdSkillForm {
+    # Cold discovery requires sibling adjacency: the projected router must be a
+    # junction into the managed tree, otherwise every catalog entry resolves to
+    # a missing sibling and the whole catalog goes stale (live probe F4,
+    # 2026-10-03: 79x entrypoint_unavailable -> candidates cleared).  A copy of
+    # the router package has the right name and passes the declared-vs-projected
+    # diff above, so the form must be checked explicitly.
+    param(
+        [Parameter(Mandatory = $true)][string]$HostRoot,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ExpectedSkillNames
+    )
+    $result = [ordered]@{ ok = $true; warnings = @() }
+    if (-not (Test-Path -LiteralPath $HostRoot -PathType Container)) { return $result }
+    foreach ($name in @($ExpectedSkillNames)) {
+        $dir = Join-Path $HostRoot $name
+        $item = $null
+        try { $item = Get-Item -LiteralPath $dir -Force -ErrorAction Stop } catch { $item = $null }
+        if ($null -eq $item) { continue } # absence is already reported by the projection diff
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+            $result.warnings += ("{0}: 拷贝形态投影（非 junction），冷发现 sibling 邻接失效" -f $name)
+            $result.ok = $false
+            continue
+        }
+        $targets = @($item.Target | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+        if ($targets.Count -eq 0) {
+            $result.warnings += ("{0}: reparse 投影缺少 link target" -f $name)
+            $result.ok = $false
+            continue
+        }
+        $linkTarget = [string]$targets[0]
+        if (-not [IO.Path]::IsPathRooted($linkTarget)) { $linkTarget = [IO.Path]::GetFullPath((Join-Path $dir $linkTarget)) }
+        if (-not (Test-Path -LiteralPath $linkTarget)) {
+            $result.warnings += ("{0}: junction 目标不可达: {1}" -f $name, $linkTarget)
+            $result.ok = $false
+        }
+    }
+    return $result
+}
+
+function Test-DoctorColdCatalogHealth {
+    # Repo-side cold catalog health, independent of any host: the neutral and
+    # router-embedded mirrors must exist and stay byte-identical, and catalog
+    # entries must still match the materialized agent/ files.  Drift here fails
+    # every candidate at discovery time (entrypoint/package hash), so doctor
+    # must surface it before a host AI hits the dead catalog.
+    param(
+        [Parameter(Mandatory = $true)][string]$ManagedSourceRoot,
+        [string]$NeutralCatalogPath = '',
+        [string]$RouterCatalogMirrorPath = ''
+    )
+    $result = [ordered]@{ ok = $true; warnings = @() }
+    if (-not (Test-Path -LiteralPath $ManagedSourceRoot -PathType Container)) {
+        $result.warnings += ("cold_discovery: 受管技能源缺失: {0}" -f $ManagedSourceRoot)
+        $result.ok = $false
+        return $result
+    }
+    $neutralCatalog = if ([string]::IsNullOrWhiteSpace($NeutralCatalogPath)) { Join-Path $ManagedSourceRoot '.skills-manager\catalog.json' } else { $NeutralCatalogPath }
+    $routerMirror = if ([string]::IsNullOrWhiteSpace($RouterCatalogMirrorPath)) { Join-Path $ManagedSourceRoot 'capability-router\catalog.json' } else { $RouterCatalogMirrorPath }
+    $neutralExists = Test-Path -LiteralPath $neutralCatalog -PathType Leaf
+    $mirrorExists = Test-Path -LiteralPath $routerMirror -PathType Leaf
+    if (-not $neutralExists) {
+        $result.warnings += ("cold_discovery: 中性 catalog 缺失: {0}" -f $neutralCatalog)
+        $result.ok = $false
+    }
+    if (-not $mirrorExists) {
+        $result.warnings += ("cold_discovery: router 内 catalog 镜像缺失: {0}" -f $routerMirror)
+        $result.ok = $false
+    }
+    if ($neutralExists -and $mirrorExists) {
+        $neutralHash = (Get-FileHash -LiteralPath $neutralCatalog -Algorithm SHA256).Hash
+        $mirrorHash = (Get-FileHash -LiteralPath $routerMirror -Algorithm SHA256).Hash
+        if ($neutralHash -ne $mirrorHash) {
+            $result.warnings += "cold_discovery: 两份 catalog 镜像字节不一致（.skills-manager 与 capability-router），需重新构建"
+            $result.ok = $false
+        }
+    }
+    if ($neutralExists) {
+        try { $catalog = Get-Content -LiteralPath $neutralCatalog -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $catalog = $null }
+        if ($null -eq $catalog -or $null -eq $catalog.skills) {
+            $result.warnings += "cold_discovery: 中性 catalog 不是有效 JSON 或缺少 skills"
+            $result.ok = $false
+        }
+        else {
+            $catalogRoot = [IO.Path]::GetFullPath((Split-Path -Parent $neutralCatalog))
+            $skillNames = @($catalog.skills | ForEach-Object { [string]$_.name } | Sort-Object)
+            $packageSamples = @($skillNames | Where-Object { $_ -eq 'capability-router' })
+            $packageSamples = @($packageSamples + @($skillNames | Select-Object -First 1) + @($skillNames | Select-Object -Last 1) | Sort-Object -Unique)
+            foreach ($skill in @($catalog.skills)) {
+                $entryPath = [IO.Path]::GetFullPath((Join-Path $catalogRoot ([string]$skill.relative_path)))
+                if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
+                    $result.warnings += ("cold_discovery: {0}: catalog 入口缺失" -f $skill.name)
+                    $result.ok = $false
+                    continue
+                }
+                $actual = (Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -cne ([string]$skill.entrypoint_sha256).ToLowerInvariant()) {
+                    $result.warnings += ("cold_discovery: {0}: 入口哈希漂移，需重新构建 catalog" -f $skill.name)
+                    $result.ok = $false
+                }
+                if ($packageSamples -notcontains [string]$skill.name) { continue }
+                $packageDir = Split-Path -Parent $entryPath
+                $items = @(Get-ChildItem -LiteralPath $packageDir -Recurse -Force -ErrorAction SilentlyContinue)
+                $reparse = @($items | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+                if ($reparse.Count -gt 0) { continue }
+                $parts = [Collections.Generic.List[string]]::new()
+                foreach ($file in @($items | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName)) {
+                    $relative = $file.FullName.Substring($packageDir.Length).TrimStart('\', '/').Replace('\', '/')
+                    if ($relative -eq 'catalog.json') { continue }
+                    $parts.Add(('{0}|{1}' -f $relative, ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant())) | Out-Null
+                }
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try {
+                    $packageActual = (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($parts.ToArray() -join "`n")))) | ForEach-Object { $_.ToString('x2') }) -join ''
+                }
+                finally { $sha.Dispose() }
+                if ($packageActual -cne ([string]$skill.package_sha256).ToLowerInvariant()) {
+                    $result.warnings += ("cold_discovery: {0}: 包哈希漂移，需重新构建 catalog" -f $skill.name)
+                    $result.ok = $false
+                }
+            }
+        }
+    }
+    return $result
+}
+
 function Get-DoctorSkillProjectionConsistency {
     # Configuration/profile declaration drift silently changes what each host
     # actually projects; check every declared host, not just the Codex surface.
@@ -10956,6 +11081,7 @@ function Get-DoctorSkillProjectionConsistency {
         }
 
         $details = @()
+        $managedSource = ''
         foreach ($hostName in $declaredHosts) {
             try {
                 $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName $hostName
@@ -11020,7 +11146,13 @@ function Get-DoctorSkillProjectionConsistency {
             if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}]" -f $hostName, ($missing -join ',')) }
             if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}]" -f $hostName, ($extra -join ',')) }
             $details += ("{0} declared={1} projected={2} unmanaged={3}" -f $hostName, @($expectedNames).Count, @($managedNames).Count, @($actualNames | Where-Object { $managedNames -notcontains $_ }).Count)
+            $coldForm = Test-DoctorColdSkillForm -HostRoot $hostRoot -ExpectedSkillNames $expectedNames
+            foreach ($coldWarning in $coldForm.warnings) { $result.warnings += ("{0}: {1}" -f $hostName, $coldWarning) }
+            if (-not $coldForm.ok) { $result.ok = $false }
         }
+        $coldCatalog = Test-DoctorColdCatalogHealth -ManagedSourceRoot ([string]$managedSource)
+        foreach ($coldWarning in $coldCatalog.warnings) { $result.warnings += $coldWarning }
+        if (-not $coldCatalog.ok) { $result.ok = $false }
         $result.detail = ($details -join '; ')
         if ($result.warnings.Count -gt 0) { $result.ok = $false }
     }
@@ -17061,6 +17193,11 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
 
     $managedMap = Convert-McpServersToCodexConfigMap $codexServers $CodexRoot
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    # Ownership basis: only names declared here own a section. A section the host
+    # owns (node_repl) or one that is not declared at all is preserved verbatim --
+    # dropping undeclared sections by omission silently deleted host configuration.
+    $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedName in $managedNames) { $managedNameSet.Add([string]$managedName) | Out-Null }
     $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
     $kept = New-Object System.Collections.Generic.List[string]
@@ -17076,7 +17213,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
         foreach ($line in $lines) {
             if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*(?:#.*)?$') {
                 $serverName = [string]$Matches[1]
-                $skipMcpSection = -not $hostOwnedMcpNames.Contains($serverName)
+                $skipMcpSection = $managedNameSet.Contains($serverName) -and -not $hostOwnedMcpNames.Contains($serverName)
                 if (-not $skipMcpSection) {
                     $kept.Add($line) | Out-Null
                 }
@@ -19052,10 +19189,12 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
-    $antigravityDefaultEnabled=Test-Path -LiteralPath (Join-Path $antigravityDefaultRoot 'GEMINI.md') -PathType Leaf
     $workbuddyFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)
     $workbuddyDefaultRoot=$(if($workbuddyFromEnv){$env:CODEBUDDY_CONFIG_DIR}else{Join-Path $userProfile '.codebuddy'})
-    $workbuddyDefaultEnabled=(Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.md') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $workbuddyDefaultRoot 'CODEBUDDY.mdc') -PathType Leaf)
+    # 默认启用只看宿主根目录是否存在，不依赖已投影文件（宿主重置删除规则文件后可自动重建投影）；
+    # CODEBUDDY_CONFIG_DIR 指向不存在目录时由 Resolve-OptionalWorkBuddyGlobalRuleRoot 抛错。
+    $antigravityDefaultEnabled=Test-Path -LiteralPath $antigravityDefaultRoot -PathType Container
+    $workbuddyDefaultEnabled=$workbuddyFromEnv -or (Test-Path -LiteralPath $workbuddyDefaultRoot -PathType Container)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
@@ -21400,39 +21539,49 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
+function Normalize-AuditCoveragePhrase([string]$Text) {
+    # Subject phrases and prose use different separators ("web_ui" vs "web ui");
+    # normalizing both sides to single spaces lets one phrase form match the other.
+    if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
+    return ((($Text -replace '[_\-]+', ' ') -replace '\s+', ' ').Trim().ToLowerInvariant())
+}
+
 function Get-AuditCoverageNeedTokens($Need) {
-    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
-    # skill descriptions to carry signal; subject/compound/action tokens decide.
+    # Coverage is asserted from the subject phrase only.  The bare domain word
+    # ("workflow", "ai", "artifact", ...) matches too many descriptions to carry
+    # signal, and action verbs hit homographs ("read" in "read-only", "deliver"
+    # in "deliverable") that assert coverage the skill does not provide.
     $domain = [string](Get-CfgObjectProperty $Need "domain")
-    $tokens = @(Merge-AuditKeywordSets @(
-            @($domain),
-            @([string](Get-CfgObjectProperty $Need "subject")),
-            @(Convert-AuditStringArray (Get-CfgObjectProperty $Need "actions"))
-        ) 40)
-    return @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not [string]::Equals($_, $domain, [System.StringComparison]::OrdinalIgnoreCase) })
+    $subject = Normalize-AuditCoveragePhrase ([string](Get-CfgObjectProperty $Need "subject"))
+    if ([string]::IsNullOrWhiteSpace($subject) -or [string]::Equals($subject, (Normalize-AuditCoveragePhrase $domain), [System.StringComparison]::OrdinalIgnoreCase)) { return @() }
+    return @($subject)
 }
 
 function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {
     $matched = New-Object System.Collections.Generic.List[string]
     foreach ($skill in @(Convert-AuditObjectArray $Skills)) {
-        $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
+        $hayText = (([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")) + ' ' + ((Convert-AuditStringArray (Get-CfgObjectProperty $skill "enabled_tools")) -join ' '))
+        $hay = Normalize-AuditCoveragePhrase $hayText
         if ([string]::IsNullOrWhiteSpace($hay)) { continue }
         foreach ($token in @($NeedTokens)) {
-            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
+            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token)) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
         }
     }
     return @($matched.ToArray() | Sort-Object -Unique)
 }
 
-function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills) {
+function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills, $ExternalSkills = @(), $McpServers = @()) {
     # A positive coverage assertion: for each prioritized need, which current-profile
-    # skills plausibly cover it, and which cold-catalog skills would additionally
-    # cover it.  Keyword plausibility only — never a proof of host loading or
-    # successful invocation — so that "no add needed" and profile-promotion
-    # questions become checkable against data instead of intuition.
+    # skills plausibly cover it, which cold-catalog skills would additionally cover
+    # it, and which host-native (external) skills or MCP servers already expose it.
+    # Subject-phrase plausibility only — never a proof of host loading or successful
+    # invocation — so that "no add needed" and profile-promotion questions become
+    # checkable against data instead of intuition.
     $skills = @(Convert-AuditObjectArray $ProfileSelectedSkills)
     $catalogSkills = @(Convert-AuditObjectArray $CatalogSupplySkills)
-    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0) { return @() }
+    $externalSkills = @(Convert-AuditObjectArray $ExternalSkills)
+    $mcpServers = @(Convert-AuditObjectArray $McpServers)
+    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0 -and $externalSkills.Count -eq 0 -and $mcpServers.Count -eq 0) { return @() }
     $statement = @()
     $needs = @()
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "primary_needs"))) { $needs += $need }
@@ -21443,18 +21592,22 @@ function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $
         $matched = @(Get-AuditCoverageKeywordMatches $needTokens $skills)
         $catalogMatched = @(Get-AuditCoverageKeywordMatches $needTokens $catalogSkills)
         $coldCatalogMatched = @($catalogMatched | Where-Object { $_ -notin $matched })
+        $externalMatched = @((Get-AuditCoverageKeywordMatches $needTokens $externalSkills) | Where-Object { $_ -notin $matched })
+        $mcpMatched = @(Get-AuditCoverageKeywordMatches $needTokens $mcpServers)
         $statement += [pscustomobject]([ordered]@{
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
                 covered_by = $matched
                 coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
                 cold_catalog_covered_by = @($coldCatalogMatched | Sort-Object -Unique)
+                external_covered_by = @($externalMatched | Sort-Object -Unique)
+                mcp_covered_by = @($mcpMatched | Sort-Object -Unique)
             })
     }
     return @($statement)
 }
 
-function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null) {
+function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null, $ExternalSkills = @(), $McpServers = @()) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
@@ -21489,7 +21642,7 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $Catalog
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
-    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills)
+    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills $ExternalSkills $McpServers)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })
@@ -23692,7 +23845,7 @@ function Write-AuditThreeFileBundle {
     Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills $installedState.configured_supply_skills
+    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills $installedState.configured_supply_skills $installedState.external_skills $installedState.mcp_servers
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"

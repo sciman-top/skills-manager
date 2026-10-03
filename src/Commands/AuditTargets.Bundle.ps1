@@ -49,7 +49,7 @@ function Write-AuditThreeFileBundle {
     Need (@($Scans).Count -gt 0) "审查包至少需要一个目标仓扫描结果。"
     $installedState = New-AuditInstalledStateSnapshot "审查包生成时"
     $sourceStrategy = New-AuditSourceStrategy $Mode $Query
-    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills $installedState.configured_supply_skills
+    $targetProfile = New-AuditTargetProfile $Scans $installedState.skills $installedState.configured_supply_skills $installedState.external_skills $installedState.mcp_servers
     $decisionInsights = New-AuditDecisionInsights $targetProfile $Scans $installedState.skills $installedState.mcp_servers $installedState $installedState.external_skills
     $target = "*"
     $snapshotPath = Join-Path $ReportRoot "snapshot.json"

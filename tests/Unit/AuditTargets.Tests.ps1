@@ -980,6 +980,40 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             @($docNeed[0].cold_catalog_covered_by) | Should -Be @('docx')
         }
 
+        It "Does not assert coverage from action-verb homographs" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-homograph"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "main.py") "import fitz  # pdf render via pymupdf"
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-coverage-homograph"
+            $profile = New-AuditTargetProfile @($scan) @(
+                [pscustomobject]@{ name = "cautious-researcher"; description = "Performs read-only research and delivers a deliverable report."; trigger_summary = "Use for research."; content_hash = "x" }
+            )
+
+            foreach ($need in @($profile.coverage_statement)) {
+                @($need.covered_by) | Should -Be @()
+                $need.coverage | Should -Be "keyword_unmatched_by_profile"
+            }
+        }
+
+        It "Reports host-native external and MCP coverage dimensions" {
+            $repo = Join-Path $TestDrive "target-repo-coverage-external"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "main.py") "import fitz  # pdf render via pymupdf`nfrom pptx import Presentation  # pptx generation"
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-coverage-external"
+            $profile = New-AuditTargetProfile @($scan) @() @() @(
+                [pscustomobject]@{ name = "Presentations"; description = "Use when a presentation file (.pptx) is the primary input or output."; trigger_summary = ""; content_hash = "x" }
+            ) @(
+                [pscustomobject]@{ name = "docs-server"; transport = "stdio"; enabled_tools = @("pdf", "render") }
+            )
+
+            $pptxNeed = @($profile.coverage_statement | Where-Object need -eq "pptx")
+            $pptxNeed.Count | Should -Be 1
+            @($pptxNeed[0].external_covered_by) | Should -Be @('Presentations')
+            $pdfNeed = @($profile.coverage_statement | Where-Object need -eq "pdf")
+            $pdfNeed.Count | Should -Be 1
+            @($pdfNeed[0].mcp_covered_by) | Should -Be @('docs-server')
+        }
+
         It "Emits repository scope and source scan coverage for a single target" {
             $repo = Join-Path $TestDrive "target-repo-coverage"
             New-Item -ItemType Directory -Path (Join-Path $repo "src") -Force | Out-Null

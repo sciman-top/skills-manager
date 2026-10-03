@@ -18,7 +18,7 @@ bash "<风控工具目录>/workbuddy-risk-selfcheck.test.sh" # 受控验收
 
 同目录另有 `workbuddy-risk-selfcheck.ps1` —— 那是**刻意简化的便携版**，
 **不含 MCP 认证检测**（因为它没有精确分类逻辑），并在输出里明确指向 `.sh` 版本。
-本机 PowerShell 工具不可用，实际一律跑 `.sh`。
+本机 PowerShell 工具无 stdout（实测），实际一律跑 `.sh`；**换机器请先实测一次**再决定用哪个。
 
 ## 第 9 项「MCP 认证失败」的四重陷阱
 

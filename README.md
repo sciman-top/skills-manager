@@ -133,17 +133,17 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode、Antigravity、WorkBuddy 均使用轻量 `core-lean`；技能集合和数量以 `skills.json` 的 profile 为准（当前为 7 个治理/安全边界与日常编码闭环技能）。原 9 项集合保留为显式 `core` 兼容档位；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 9 项（`core-lean` 7 项加两份风控技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
-| 宿主 | 默认 `core-lean` | 显式 `core` 兼容档位 | `full-compatible` 的宿主适配 |
-| --- | --- | --- | --- |
-| ChatGPT/Codex | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
-| Claude | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能 |
-| ZCode | 7 个默认技能 | 原 9 个 `core` 技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
-| Antigravity | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能；当前未配置宿主排除项 |
-| WorkBuddy | 7 个默认技能 | 原 9 个 `core` 技能 | 全量受管技能；当前未配置宿主排除项 |
+| 宿主 | 默认 profile | `full-compatible` 的宿主适配 |
+| --- | --- | --- |
+| ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
+| Claude | `core-lean`：7 个默认技能 | 全量受管技能 |
+| ZCode | `core-lean`：7 个默认技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
+| Antigravity | `core-ops`：9 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| WorkBuddy | `core-ops`：9 个技能 | 全量受管技能；当前未配置宿主排除项 |
 
-Antigravity 与 WorkBuddy 当前继承全局默认 profile。表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
+表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
 
 默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试与收口的薄闭环入口；纯审查使用 `code-review-and-quality`。它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
 
@@ -224,7 +224,7 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
-显式 `core` 兼容档位另保留 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 必须有路径、`SKILL.md` hash、覆盖同包资源的 package hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。CSR-100 实现后，受管 custom-agent template 将静态声明 `model` / `model_reasoning_effort`，以优先于全局 subagent 默认值；它不改变 provider/auth，也不构成动态模型路由。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。完整阶段与任务合同见 [冷技能路由路线图](docs/product/cold-skill-routing-roadmap.md)、[实施计划](docs/archive/cold-skill-routing-implementation-plan.md) 和 [验收 Runbook](docs/runbooks/cold-skill-routing-acceptance.md)。
+`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 必须有路径、`SKILL.md` hash、覆盖同包资源的 package hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。CSR-100 实现后，受管 custom-agent template 将静态声明 `model` / `model_reasoning_effort`，以优先于全局 subagent 默认值；它不改变 provider/auth，也不构成动态模型路由。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。完整阶段与任务合同见 [冷技能路由路线图](docs/product/cold-skill-routing-roadmap.md)、[实施计划](docs/archive/cold-skill-routing-implementation-plan.md) 和 [验收 Runbook](docs/runbooks/cold-skill-routing-acceptance.md)。
 
 ```powershell
 # 默认只读取仓库侧技能面，不调用宿主 CLI

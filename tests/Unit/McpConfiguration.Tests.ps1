@@ -439,7 +439,8 @@ enabled = false
 
             $toml = Build-CodexConfigToml $existing @()
 
-            $toml | Should -Not -Match '(?m)^\[mcp_servers\.old\]'
+            # Ownership: an undeclared mcp_servers section is host-owned and must survive.
+            $toml | Should -Match '(?m)^\[mcp_servers\.old\]'
             $toml | Should -Match '(?m)^\[features\] # host-owned settings\r?$'
             $toml | Should -Match '(?m)^multi_agent = false\r?$'
             $toml | Should -Match '(?m)^\[agents\]\r?$'
@@ -455,10 +456,21 @@ command = "old-server"
 [agents]
 enabled = false
 '@
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "old"
+                    transport = "stdio"
+                    command   = "cmd"
+                    args      = @("/c", "echo", "managed")
+                }
+            )
 
-            $toml = Build-CodexConfigToml $existing @()
+            $toml = Build-CodexConfigToml $existing $servers
 
+            # A declared section is recognized despite the inline comment, so its stale
+            # body is replaced; the following non-MCP table still closes the section.
             $toml | Should -Not -Match 'old-server'
+            $toml | Should -Match '(?m)^\[mcp_servers\.old\]\r?$'
             $toml | Should -Match '(?m)^\[agents\]\r?$'
         }
 
@@ -560,7 +572,7 @@ sandbox = "elevated"
             }
         }
 
-        It "Clears existing mcp_servers tables when desired server list is empty" {
+        It "Preserves undeclared mcp_servers tables when the desired server list is empty" {
             $existing = @'
 model = "gpt-5.3-codex"
 
@@ -574,7 +586,8 @@ sandbox = "elevated"
             $toml = Build-CodexConfigToml $existing @()
             $toml | Should -Match "model = ""gpt-5.3-codex"""
             $toml | Should -Match "\[windows\]"
-            $toml | Should -Not -Match "\[mcp_servers\.old\]"
+            # No ownership basis and no explicit authorization => must not be deleted.
+            $toml | Should -Match "\[mcp_servers\.old\]"
         }
 
         It "Preserves host-owned node_repl and its child tables" {
@@ -597,7 +610,38 @@ command = "cmd"
             $toml | Should -Match "\[mcp_servers\.node_repl\]"
             $toml | Should -Match "\[mcp_servers\.node_repl\.env\]"
             $toml | Should -Match "NODE_REPL_NODE_PATH"
-            $toml | Should -Not -Match "\[mcp_servers\.old\]"
+            $toml | Should -Match "\[mcp_servers\.old\]"
+        }
+
+        It "Keeps an undeclared host MCP server while managing declared ones" {
+            $existing = @'
+model = "gpt-5.6-sol"
+
+[mcp_servers.postgres]
+command = "cmd"
+args = ["/c", "echo", "pg"]
+
+[mcp_servers.context7]
+command = "cmd"
+args = ["/c", "echo", "stale"]
+'@
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "context7"
+                    transport = "stdio"
+                    command   = "cmd"
+                    args      = @("/c", "echo", "fresh")
+                }
+            )
+
+            $toml = Build-CodexConfigToml $existing $servers
+
+            # Undeclared => host-owned => preserved verbatim.
+            $toml | Should -Match "\[mcp_servers\.postgres\]"
+            $toml | Should -Match "pg"
+            # Declared => managed => rewritten from the declared spec; stale body gone.
+            $toml | Should -Match "fresh"
+            $toml | Should -Not -Match "stale"
         }
 
         It "Skips GitHub MCP when GitHub token is unavailable" {

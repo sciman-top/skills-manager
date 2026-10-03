@@ -2127,39 +2127,49 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
+function Normalize-AuditCoveragePhrase([string]$Text) {
+    # Subject phrases and prose use different separators ("web_ui" vs "web ui");
+    # normalizing both sides to single spaces lets one phrase form match the other.
+    if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
+    return ((($Text -replace '[_\-]+', ' ') -replace '\s+', ' ').Trim().ToLowerInvariant())
+}
+
 function Get-AuditCoverageNeedTokens($Need) {
-    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
-    # skill descriptions to carry signal; subject/compound/action tokens decide.
+    # Coverage is asserted from the subject phrase only.  The bare domain word
+    # ("workflow", "ai", "artifact", ...) matches too many descriptions to carry
+    # signal, and action verbs hit homographs ("read" in "read-only", "deliver"
+    # in "deliverable") that assert coverage the skill does not provide.
     $domain = [string](Get-CfgObjectProperty $Need "domain")
-    $tokens = @(Merge-AuditKeywordSets @(
-            @($domain),
-            @([string](Get-CfgObjectProperty $Need "subject")),
-            @(Convert-AuditStringArray (Get-CfgObjectProperty $Need "actions"))
-        ) 40)
-    return @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not [string]::Equals($_, $domain, [System.StringComparison]::OrdinalIgnoreCase) })
+    $subject = Normalize-AuditCoveragePhrase ([string](Get-CfgObjectProperty $Need "subject"))
+    if ([string]::IsNullOrWhiteSpace($subject) -or [string]::Equals($subject, (Normalize-AuditCoveragePhrase $domain), [System.StringComparison]::OrdinalIgnoreCase)) { return @() }
+    return @($subject)
 }
 
 function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {
     $matched = New-Object System.Collections.Generic.List[string]
     foreach ($skill in @(Convert-AuditObjectArray $Skills)) {
-        $hay = ((([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")))).ToLowerInvariant()
+        $hayText = (([string](Get-CfgObjectProperty $skill "name")) + ' ' + ([string](Get-CfgObjectProperty $skill "description")) + ' ' + ([string](Get-CfgObjectProperty $skill "trigger_summary")) + ' ' + ((Convert-AuditStringArray (Get-CfgObjectProperty $skill "enabled_tools")) -join ' '))
+        $hay = Normalize-AuditCoveragePhrase $hayText
         if ([string]::IsNullOrWhiteSpace($hay)) { continue }
         foreach ($token in @($NeedTokens)) {
-            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token.ToLowerInvariant())) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
+            if (-not [string]::IsNullOrWhiteSpace($token) -and $hay.Contains($token)) { Add-AuditUniqueValue $matched ([string](Get-CfgObjectProperty $skill "name")); break }
         }
     }
     return @($matched.ToArray() | Sort-Object -Unique)
 }
 
-function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills) {
+function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $CatalogSupplySkills, $ExternalSkills = @(), $McpServers = @()) {
     # A positive coverage assertion: for each prioritized need, which current-profile
-    # skills plausibly cover it, and which cold-catalog skills would additionally
-    # cover it.  Keyword plausibility only — never a proof of host loading or
-    # successful invocation — so that "no add needed" and profile-promotion
-    # questions become checkable against data instead of intuition.
+    # skills plausibly cover it, which cold-catalog skills would additionally cover
+    # it, and which host-native (external) skills or MCP servers already expose it.
+    # Subject-phrase plausibility only — never a proof of host loading or successful
+    # invocation — so that "no add needed" and profile-promotion questions become
+    # checkable against data instead of intuition.
     $skills = @(Convert-AuditObjectArray $ProfileSelectedSkills)
     $catalogSkills = @(Convert-AuditObjectArray $CatalogSupplySkills)
-    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0) { return @() }
+    $externalSkills = @(Convert-AuditObjectArray $ExternalSkills)
+    $mcpServers = @(Convert-AuditObjectArray $McpServers)
+    if ($skills.Count -eq 0 -and $catalogSkills.Count -eq 0 -and $externalSkills.Count -eq 0 -and $mcpServers.Count -eq 0) { return @() }
     $statement = @()
     $needs = @()
     foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $PrioritizedNeeds "primary_needs"))) { $needs += $need }
@@ -2170,18 +2180,22 @@ function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $
         $matched = @(Get-AuditCoverageKeywordMatches $needTokens $skills)
         $catalogMatched = @(Get-AuditCoverageKeywordMatches $needTokens $catalogSkills)
         $coldCatalogMatched = @($catalogMatched | Where-Object { $_ -notin $matched })
+        $externalMatched = @((Get-AuditCoverageKeywordMatches $needTokens $externalSkills) | Where-Object { $_ -notin $matched })
+        $mcpMatched = @(Get-AuditCoverageKeywordMatches $needTokens $mcpServers)
         $statement += [pscustomobject]([ordered]@{
                 need = [string](Get-CfgObjectProperty $need "key")
                 priority_band = [string](Get-CfgObjectProperty $need "priority_band")
                 covered_by = $matched
                 coverage = if (@($matched).Count -gt 0) { "keyword_plausibly_covered_by_profile" } else { "keyword_unmatched_by_profile" }
                 cold_catalog_covered_by = @($coldCatalogMatched | Sort-Object -Unique)
+                external_covered_by = @($externalMatched | Sort-Object -Unique)
+                mcp_covered_by = @($mcpMatched | Sort-Object -Unique)
             })
     }
     return @($statement)
 }
 
-function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null) {
+function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null, $ExternalSkills = @(), $McpServers = @()) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
@@ -2216,7 +2230,7 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $Catalog
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
     $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
-    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills)
+    $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills $ExternalSkills $McpServers)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
     $capability = @($profile.capabilities | Select-Object -First 6)
     $primary = @($profile.prioritized_needs.primary_needs | ForEach-Object { [string]$_.key })

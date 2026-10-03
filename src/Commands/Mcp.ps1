@@ -1708,6 +1708,11 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
 
     $managedMap = Convert-McpServersToCodexConfigMap $codexServers $CodexRoot
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    # Ownership basis: only names declared here own a section. A section the host
+    # owns (node_repl) or one that is not declared at all is preserved verbatim --
+    # dropping undeclared sections by omission silently deleted host configuration.
+    $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedName in $managedNames) { $managedNameSet.Add([string]$managedName) | Out-Null }
     $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
     $kept = New-Object System.Collections.Generic.List[string]
@@ -1723,7 +1728,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
         foreach ($line in $lines) {
             if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*(?:#.*)?$') {
                 $serverName = [string]$Matches[1]
-                $skipMcpSection = -not $hostOwnedMcpNames.Contains($serverName)
+                $skipMcpSection = $managedNameSet.Contains($serverName) -and -not $hostOwnedMcpNames.Contains($serverName)
                 if (-not $skipMcpSection) {
                     $kept.Add($line) | Out-Null
                 }

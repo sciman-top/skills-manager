@@ -55,6 +55,24 @@ if ($activePresets.Count -ne @($requestedPool | Select-Object -Unique).Count) { 
 if (-not $explicitPreset -and $Preset -cnotin $activePresets) { $Preset = $activePresets[0] }
 if ($Preset -cnotin $activePresets) { throw 'Selected default preset is outside the active pool.' }
 if (-not $policy.presets.Contains($Preset)) { throw 'Unknown preset.' }
+# Deterministic availability re-selection contract, derived from the active
+# pool (never hard-coded model names).  Rate-limit/quota/auth failures must not
+# escalate effort (a higher effort spends more tokens against the same limit);
+# only confirmed service overload/unavailability may try a higher effort.
+function Get-ReselectionContract($Policy, [string[]]$ActiveIds) {
+    $menus = [ordered]@{}
+    foreach ($id in $ActiveIds) {
+        $menus[$id] = @($Policy.presets[$id].menu | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } })
+    }
+    return [ordered]@{
+        rule = 'Parent re-selects for the NEXT bounded task; never hot-swap a running task; record failed tuple, failure, selected tuple and remaining scope.'
+        rate_limit_order = @($ActiveIds | ForEach-Object { @{ preset = $_; menu = $menus[$_] } })
+        overload_higher_effort_allowed_presets = @($ActiveIds)
+        prohibition = 'No silent model aliasing, no effort substitution, no automatic replay; a 429/quota/rate-limit/auth/billing failure is never an effort escalation signal.'
+    }
+}
+$reselectionContract = Get-ReselectionContract $policy $activePresets
+$reselectionSummary = ('429/quota/auth: nearest lower effort within preset, then presets in order ' + (@($activePresets -join ' -> ')) + '; overload/unavailable: also nearest higher effort. Record failed tuple, failure, selected tuple, remaining scope; never hot-swap, alias, or escalate on rate limits.')
 $modelPreset = $policy.presets[$Preset]
 $routes = [ordered]@{}
 foreach ($slot in $slotNames) {
@@ -73,7 +91,7 @@ foreach ($id in $activePresets) {
         $enabledRoutes += @{preset=$id;role=$roleName;model=$entry.model;effort=$entry.effort;hosts=@($policy.presets[$id].hosts)}
     }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared' } | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Resolve') { @{ preset = $Preset; active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; reselection = (Get-ReselectionContract $policy $activePresets) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 $stateRoot = Join-Path $PSScriptRoot '.state'
 function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }; return $null }
@@ -188,7 +206,7 @@ foreach ($id in $codexIds) {
         AddFile $rolePath $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
-    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"Split work by dependencies and choose a named execution slot by task shape before dispatch. Select each child's model and effort independently from the supported tuples in the active model pool; different tasks may use different models simultaneously. Semantic slots are extensible and do not limit child count. Delegate only when explicitly authorized. Parallelize independently verifiable tasks with disjoint write sets and positive benefit within native concurrency limits. Preserve specialist execution contracts. Re-select for new bounded work without replaying completed writes. Missing input, auth errors and rate limits are not effort escalation triggers. Spawn with bounded history. No gateway selection or task replay.`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
+    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"Split work by dependencies and choose a named execution slot by task shape before dispatch. Select each child's model and effort independently from the supported tuples in the active model pool; different tasks may use different models simultaneously. Semantic slots are extensible and do not limit child count. Delegate only when explicitly authorized. Parallelize independently verifiable tasks with disjoint write sets and positive benefit within native concurrency limits. Preserve specialist execution contracts. Re-select for new bounded work without replaying completed writes. Missing input, auth errors and rate limits are not effort escalation triggers. Availability failures: stop the task with its evidence, then re-select for the next bounded task in fixed order - 429/quota/rate-limit/auth/billing: nearest lower effort within the same preset, then the next active preset; confirmed service overload/unavailable: nearest lower effort, then nearest higher effort, then cross-preset. Record the failed tuple, the failure, the selected tuple and remaining scope before re-dispatch. Spawn with bounded history. No gateway selection or task replay.`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
     $profileText = $header + "`n`n" + ($roleBlocks -join "`n") + "`n" + ($tupleBlocks -join "`n")
     AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
     if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
@@ -204,7 +222,7 @@ if (-not $SubagentsOnly) {
 }
 $config = SetScalar $config 'agents' 'default_subagent_model' ('"'+$standard.model+'"')
 $config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$standard.effort+'"')
-$config = $config.TrimEnd() + "`n# model-orchestration begin`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
+$config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
 AddFile $configPath $config
 }
 # Not elseif: a preset may carry both facets (deepseek projects Claude Code and
@@ -234,7 +252,7 @@ if ('claude' -in $modelPreset.hosts) {
     }
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
-if ($Action -eq 'Plan') { @{preset=$Preset; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; gateway_changes=0} | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Plan') { @{preset=$Preset; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; gateway_changes=0} | ConvertTo-Json -Depth 8; return }
 if ($changed.Count -eq 0) { 'No changes.'; return }
 $run = Join-Path $stateRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($run) | Out-Null

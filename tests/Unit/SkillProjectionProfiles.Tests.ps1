@@ -20,15 +20,15 @@ BeforeAll {
             }
             projection_profiles = [pscustomobject]@{
                 schema_version = 1
-                default_profile = 'core'
+                default_profile = 'fixture'
                 profiles = [pscustomobject]@{
-                    core = [pscustomobject]@{ include = @('alpha'); exclude = @() }
+                    fixture = [pscustomobject]@{ include = @('alpha'); exclude = @() }
                     'full-compatible' = [pscustomobject]@{ include_all = $true; exclude = @() }
                 }
                 hosts = [pscustomobject]@{
-                    codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() }
-                    claude = [pscustomobject]@{ default_profile = 'core'; exclude = @() }
-                    zcode = [pscustomobject]@{ default_profile = 'core'; exclude = @('zcode-only-incompatible') }
+                    codex = [pscustomobject]@{ default_profile = 'fixture'; exclude = @() }
+                    claude = [pscustomobject]@{ default_profile = 'fixture'; exclude = @() }
+                    zcode = [pscustomobject]@{ default_profile = 'fixture'; exclude = @('zcode-only-incompatible') }
                 }
             }
         }
@@ -73,16 +73,11 @@ Describe 'Skill projection profiles' {
         { Assert-Cfg $config } | Should -Not -Throw
     }
 
-    It 'retains the former nine-skill core set as an explicit compatibility profile' {
+    It 'does not expose the retired core compatibility profile' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
-        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core'
-
-        $selection.profile | Should -Be 'core'
-        $selection.include_all | Should -BeFalse
-        @($selection.included_names).Count | Should -Be 9
-        @($selection.included_names) | Should -Contain 'codebase-design'
-        @($selection.included_names) | Should -Contain 'custom-powerpoint-accessibility'
-        @($selection.included_names) | Should -Contain 'grill-me'
+        @($config.projection_profiles.profiles.PSObject.Properties.Name) | Should -Not -Contain 'core'
+        { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core' } |
+            Should -Throw '*不存在的 profile*'
     }
 
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
@@ -179,13 +174,13 @@ Describe 'Skill projection profiles' {
     It 'includes the resolved profile in the projection fingerprint' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $plan = [pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }
-        $core = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile core
+        $lean = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'core-lean'
         $full = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
 
-        (Get-SkillProjectionPlanFingerprint $plan $null $core) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $null $full)
+        (Get-SkillProjectionPlanFingerprint $plan $null $lean) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $null $full)
     }
 
-    It 'validates a full-compatible manifest against its recorded profile instead of the default core profile' {
+    It 'validates a full-compatible manifest against its recorded profile instead of the default fixture profile' {
         $source = Join-Path $TestDrive 'manifest-source'
         $target = Join-Path $TestDrive 'manifest-target'
         $receipt = Join-Path $repoRoot ('reports\skill-projection\manifest-{0}.json' -f ([guid]::NewGuid().ToString('N')))
@@ -244,8 +239,8 @@ Describe 'Skill projection profiles' {
             $fullSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile 'full-compatible'
             (Sync-CodexSkillProjection (New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $fullSelection) $promotionContext).success | Should -BeTrue
 
-            $coreSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile core
-            (Sync-CodexSkillProjection (New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $coreSelection) $promotionContext).success | Should -BeTrue
+            $fixtureSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile 'fixture'
+            (Sync-CodexSkillProjection (New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $fixtureSelection) $promotionContext).success | Should -BeTrue
 
             Test-Path -LiteralPath (Join-Path $target 'beta') | Should -BeFalse
             $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json

@@ -9,7 +9,7 @@
       "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "license": "MIT",
-      "local_delta_reason": "Keep the explicit core entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation; accept only provenance-bound human or explicitly authorized AI-delegate answers, never treating the latter as human acceptance."
+      "local_delta_reason": "Keep the explicit entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation; accept only provenance-bound human or explicitly authorized AI-delegate answers, never treating the latter as human acceptance."
     },
     {
       "name": "code-review-and-quality",
