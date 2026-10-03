@@ -108,34 +108,27 @@ bash "<风控工具目录>/workbuddy-risk-selfcheck.sh"
 
 ---
 
-## 五、代理出口稳定性维护
+## 五、直连守护与整机代理维护
 
-WorkBuddy 国际版（`.workbuddy.ai`）流量需要代理才能从中国大陆访问，出口不稳定会造成误报。
+WorkBuddy 五域的目标状态是**直连**，不是挑一个代理出口：官方错误码页对 3002/3003/3007 的建议就是「关闭网络代理」，本机直连部署后真实 API 错误归零（已验证例外表见 `network-and-proxy.md`）。对 WorkBuddy 而言代理是**风险来源**——例外表被冲掉，流量就会落到代理出口 IP，形成画像异常信号。
 
 **日常维护要点**：
 
-1. **开工前确认代理进程存活**（看任务栏/进程/监听端口）
-2. **自愈脚本必须双向**：代理活 → 系统代理指向它；代理死 → 立即回退到常驻前端（否则整机断网）
-3. **出口 IP 固定**：不频繁切换区域节点（短时间横跳多国节点是画像异常信号）
-4. **出口 IP 质量**：用 `ip-api.com` 查 `hosting`/`proxy` 字段，两项都 `false` 才干净
+1. **开工前确认五域仍在双层例外表内**（WinINET `ProxyOverride` + `NO_PROXY`；自检脚本已含该检查）
+2. **v2rayN 双写**：改例外表必须同步 `guiConfigs/guiNConfig.json` 的 `SystemProxyExceptions`，否则 v2rayN 重启会把注册表改回去
+3. **整机代理健康影响的是其他流量**（如 Antigravity）：代理死时系统代理必须立即回退到常驻前端（自愈双向），否则整机断网
+4. **不频繁切换出口区域节点**：短时间横跳多国节点对走代理的流量是画像异常信号
 
-验证出口命令：
+验证直连生效（WorkBuddy 流量应命中直连出口，而非代理出口）：
 
 ```bash
-# 默认出口 IP
+# 直连出口 IP（应为本地宽带 IP）
 curl -s --noproxy '*' https://myip.ipip.net
-# 代理出口 IP
+# 代理出口 IP（WorkBuddy 域名不应从这个出口出去）
 curl -s -x http://127.0.0.1:<端口> https://ipinfo.io/json
 ```
 
-出口 IP 质量检查：
-
-```bash
-curl "http://ip-api.com/json/<出口IP>?fields=status,isp,org,as,hosting,proxy"
-# 两项都 false → 适合走 WorkBuddy 国际版
-```
-
-完整代理配置要求见 `references/network-and-proxy.md`。
+进程级归因（确认 WorkBuddy 客户端进程没有连代理端口）见 `references/network-and-proxy.md`。
 
 ---
 

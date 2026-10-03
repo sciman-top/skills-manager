@@ -238,7 +238,7 @@ repo_verified -> filesystem_projected -> host_loaded -> live_accepted
 
 | 文件 | 内容 |
 |---|---|
-| `references/prevention-ops.md` | **主动防范操作手册**：Pre-flight 核查单、日常守则、画像自查、自检脚本用法、代理维护、信息污染识别 |
+| `references/prevention-ops.md` | **主动防范操作手册**：Pre-flight 核查单、日常守则、画像自查、自检脚本用法、直连守护与整机代理维护、信息污染识别 |
 | `references/log-forensics.md` | 真实错误体在哪、假阳性陷阱、UUID→会话归属、账号时间线、两个日志根 |
 | `references/network-and-proxy.md` | 官方错误码页、代理双层例外、进程级出口归因 |
 | `references/official-sources.md` | 官方反馈渠道、两份协议条款对照、官方对灰产的定性、社区交叉验证 |
