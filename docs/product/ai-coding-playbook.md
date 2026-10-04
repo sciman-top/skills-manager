@@ -99,6 +99,8 @@
 
 ZCode 的 Coding 套餐端点与通用 API 端点不能互换；参数和图片能力也不能仅凭模型名称推断。配置事实应查当前[官方说明](https://zcode.z.ai/cn/docs/configuration)，不在本手册复制密钥、账号或临时配置。
 
+GLM-5.3 直连 API 的 `thinking` 仅支持 `enabled`（`disabled` 已彻底废弃）。从旧 disabled 配置迁移时，必须先设 `thinking: enabled` 与 `reasoning_effort` 再切换模型 ID，顺序颠倒会直接请求失败（[官方模型页](https://docs.z.ai/guides/llm/glm-5.3)，2026-09-12 复核）；这是一次性迁移细节，不是持续生效的参数建议。
+
 ## 5. 可直接复制的任务模板
 
 以下模板是输入辅助，不是新的规则或授权层。把占位内容换成当前任务事实；
