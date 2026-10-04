@@ -426,6 +426,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
          @{ Source = 'src/Domain/ExecutionAdmission.ps1'; Expected = @('ExecutionAdmission'); ExpectedLocked = $true }
          @{ Source = 'src/Main.ps1'; Expected = @('MainDispatch', 'MenuStructure'); ExpectedLocked = $true }
          @{ Source = 'src/Commands/AiRiskControl.ps1'; Expected = @('AiRiskControl'); ExpectedLocked = $false }
+         @{ Source = 'docs/handover/ai-risk-control/MANIFEST.sha256'; Expected = @('AiRiskControlManifest'); ExpectedLocked = $false }
      ) {
         param($Source, $Expected, $ExpectedLocked)
         $repo = New-ResolveGateFixture

@@ -61,6 +61,11 @@ $sourceTests = @{
     'src/Main.ps1' = @('MainDispatch', 'MenuStructure')
     'src/Version.ps1' = @('MainDispatch', 'PowerShellCompatibility')
     'scripts/quality/resolve-gate-profile.ps1' = @('ResolveGateProfile', 'QualityGateAuto', 'CiWorkflow')
+    # The handover payload is a deployment asset, not repo runtime: a tool edit
+    # must refresh MANIFEST.sha256, so mapping the manifest to its contract test
+    # keeps the payload verifiable without falling back to the full gate. A tool
+    # edit that skips the manifest still lands on unknown_path/full on purpose.
+    'docs/handover/ai-risk-control/MANIFEST.sha256' = @('AiRiskControlManifest')
     'tests/run.ps1' = @('TestRunner')
 }
 $skillFocusedTests = @(
@@ -72,7 +77,7 @@ $skillFocusedTests = @(
 $assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
-    'AiRiskControl',
+    'AiRiskControl', 'AiRiskControlManifest',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 
