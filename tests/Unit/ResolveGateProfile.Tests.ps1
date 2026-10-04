@@ -461,6 +461,51 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.result.reason | Should -Be 'unmapped_source'
     }
 
+    It 'pins every source file as either mapped or deliberately conservative' {
+        # Fail-closed classification is only useful when the boundary between
+        # "mapped to behavior suites" and "deliberately on the full path" is
+        # explicit. A new src file that is neither fails here instead of
+        # silently costing a full gate.
+        $conservative = @(
+            'src/Application/GlobalRuleProjection.ps1'
+            'src/Application/NativeAgentBridge.ps1'
+            'src/Application/NativeSkillProjection.ps1'
+            'src/Application/NativeSkillProjectionCoordinator.ps1'
+            'src/Application/RuleEstateMutation.ps1'
+            'src/Application/RulePatchExecutor.ps1'
+            'src/Application/RulePatchGuard.ps1'
+            'src/Commands/AuditTargets.Apply.ps1'
+            'src/Commands/GlobalRules.ps1'
+            'src/Commands/Install.ps1'
+            'src/Commands/Mcp.ProfileAndSafety.ps1'
+            'src/Commands/Mcp.ps1'
+            'src/Commands/RuleEstate.ps1'
+            'src/Commands/RulePatch.ps1'
+            'src/Commands/SkillProjection.ps1'
+            'src/Commands/Update.ps1'
+            'src/Config.ps1'
+            'src/Domain/OperationPlan.ps1'
+            'src/Domain/RuleDocument.ps1'
+            'src/Domain/RuleResponsibility.ps1'
+            'src/Domain/SkillCatalog.ps1'
+            'src/Git.ps1'
+        )
+        $classifierText = [IO.File]::ReadAllText((Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1'))
+        $mapped = @([regex]::Matches($classifierText, "(?m)^\s*'((?:src|tests|docs|scripts|config)/[^']+)'\s*=\s*@\(") |
+            ForEach-Object { $_.Groups[1].Value })
+        $sourceFiles = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src') -Recurse -Filter '*.ps1' -File |
+            ForEach-Object { [IO.Path]::GetRelativePath($repoRoot, $_.FullName).Replace('\', '/') })
+        $sourceFiles.Count | Should -BeGreaterThan 0
+        foreach ($file in $sourceFiles) {
+            ($mapped -contains $file -or $conservative -contains $file) | Should -BeTrue -Because (
+                '{0} must be mapped to behavior suites or listed as deliberately conservative' -f $file)
+            ($mapped -contains $file -and $conservative -contains $file) | Should -BeFalse -Because (
+                '{0} cannot be both mapped and conservative' -f $file)
+        }
+        @($sourceFiles | Where-Object { $conservative -contains $_ } | Sort-Object) |
+            Should -Be @($conservative | Sort-Object) -Because 'the conservative inventory must stay exact'
+    }
+
     It 'uses exact behavior coverage for known gate scripts in local and CI modes' -TestCases @(
         @{ Source = 'scripts/quality/resolve-gate-profile.ps1'; Expected = @('CiWorkflow', 'QualityGateAuto', 'ResolveGateProfile') }
         @{ Source = 'tests/run.ps1'; Expected = @('TestRunner') }
