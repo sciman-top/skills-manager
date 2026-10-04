@@ -50,6 +50,7 @@ $sourceTests = @{
     'src/Commands/AuditTargets.TargetState.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Workflow.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/Capability.ps1' = @('CapabilityContracts', 'CapabilityInventory', 'CapabilityRouter', 'CapabilityRouterCrossRepo')
+    'src/Commands/AiRiskControl.ps1' = @('AiRiskControl')
     'src/Commands/Doctor.ps1' = @('DoctorCli', 'DoctorEnhancements')
     'src/Commands/RuleAudit.ps1' = @('RuleAudit')
     'src/Commands/Utils.ps1' = @('MainDispatch', 'MenuStructure', 'SelectionCancellation')
@@ -71,6 +72,7 @@ $skillFocusedTests = @(
 $assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
+    'AiRiskControl',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 

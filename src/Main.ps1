@@ -88,9 +88,15 @@ if ($MyInvocation.InvocationName -ne '.') {
             { $_ -in @("ai-risk-control", "风险控制") } {
                 $riskTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $riskTokens += $Filter }
+                # The top-level -Plan alias is shared by other commands; pass it
+                # through so ai-risk-control can keep its command-local plan API.
+                if ($RunPlan -and $PSBoundParameters.ContainsKey('RunPlan')) { $riskTokens += '--plan' }
                 $riskTokens += @($args)
                 $riskResult = Invoke-AiRiskControlCommand $riskTokens
                 Write-Output ($riskResult | ConvertTo-Json -Depth 30)
+                if ($riskResult -and $riskResult.PSObject.Properties.Match('exit_code').Count -gt 0 -and [int]$riskResult.exit_code -ne 0) {
+                    exit ([int]$riskResult.exit_code)
+                }
             }
             "doctor" {
                 $doctorTokens = @()

@@ -31,6 +31,27 @@ description: 诊断、处置并主动防范 WorkBuddy / CodeBuddy 客户端报�
 
 ## 分诊步骤（按顺序）
 
+### 0. 优先用项目统一只读入口（有项目检出时）
+
+项目已内置统一入口，**优先用它**（只读：不切号、不轮换凭据、不重启进程、不改代理）：
+
+```powershell
+# 仓库资产清点 + 内置安全政策
+.\skills.ps1 ai-risk-control --platform workbuddy --json
+
+# 日常防范 / 恢复 / 停止条件
+.\skills.ps1 ai-risk-control --platform workbuddy --plan --json
+
+# 一次事件的分诊计划（account-risk / rate-limit / degradation）
+.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-account-risk --plan --json
+
+# 可选：跑宿主只读自检；有 FAIL 时命令返回非零退出码
+.\skills.ps1 ai-risk-control --platform workbuddy --checks --json --out .\reports\ai-risk-control.json
+```
+
+**机器消费请用 `--out`**（显式 UTF-8），不要依赖 stdout 重定向的编码。
+找不到该项目检出时，回退到下面的自带脚本；两者都没有时向用户确认，**不要自行遍历个人目录**。
+
 ### 1. 先跑自检脚本，拿到环境基线
 
 ```

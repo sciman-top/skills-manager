@@ -9,11 +9,12 @@
 | 层 | 位置 | 角色 | 是否随构建投影 |
 |---|---|---|---|
 | **技能源** | `overrides/custom/antigravity-gemini-risk-triage/`<br>`overrides/custom/workbuddy-risk-triage/` | **唯一真源**（`SKILL.md` + `references/`） | 是 —— `构建生效` 物化进 `agent/`，再投影到各宿主 |
+| **统一只读入口** | `src/Commands/AiRiskControl.ps1`（CLI：`.\skills.ps1 ai-risk-control`，支持 `--plan` / `--event` / `--checks` / `--out`） | 仓库资产清点、日常防范与事件分诊计划、可选的宿主只读自检；**不**切号、轮换凭据、重启进程或修改代理 | 是 —— 经 `build.ps1` 并入根 `skills.ps1` |
 | **冷发现域** | `skills.json` → `skill_projection.discovery_catalog.domain_memberships.ai-risk-control` | 域注册（成员为上面两份技能） | 是 —— 生成 `agent/.skills-manager/catalog.json` |
 | **宿主投影 profile** | `skills.json` → `projection_profiles.profiles.core-ops` + `hosts.{antigravity,workbuddy}` | 让两份技能真正落到所针对的两个客户端宿主 | 是 —— 建 junction 指向 `agent/` |
 | **部署载荷** | `docs/handover/ai-risk-control/tools/` | 跨机复现用的运行脚本与分诊提示词（不含技能副本和凭据） | 否 |
 
-判据：**改能力改 `overrides/custom/`；改跨机部署改 `tools/`。** 两者职责不同，不要反向同步。
+判据：**改能力改 `overrides/custom/`；改跨机部署改 `tools/`；改统一入口行为改 `src/Commands/AiRiskControl.ps1`（改完必须 `build.ps1` 重建根 `skills.ps1`）。** 三者职责不同，不要反向同步。
 
 ### 1.1 宿主投递路径（两条并行）
 

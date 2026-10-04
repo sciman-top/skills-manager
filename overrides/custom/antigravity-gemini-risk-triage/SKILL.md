@@ -233,6 +233,24 @@ description: 诊断、处置并主动防范 Google Antigravity（IDE/CLI/SDK）�
 2. **出口稳定** 比规避工具重要——固定一个干净出口比研究绕过方案有效得多。
 3. **配额意识** 比事后补救重要——开工前看剩余额度，主动降级比被动降链安全。
 
+**项目统一只读入口**（有项目检出时优先用；只读：不切号、不轮换凭据、不重启进程、不改代理）：
+
+```powershell
+# 日常防范 / 恢复 / 停止条件
+.\skills.ps1 ai-risk-control --platform antigravity --plan --json
+
+# 一次事件的分诊计划（ban / rate-limit / degradation 三选一）
+.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-ban --plan --json
+.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-rate-limit --plan --json
+.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-degradation --plan --json
+
+# 可选：跑宿主只读自检（需已部署 D:\TOOL\ 工具链）；有 FAIL 时返回非零退出码
+.\skills.ps1 ai-risk-control --platform antigravity --checks --json --out .\reports\ai-risk-control.json
+```
+
+**机器消费请用 `--out`**（显式 UTF-8），不要依赖 stdout 重定向的编码。
+找不到该项目检出时，回退到本技能自带的 `references/` 与 `<风控工具目录>/` 脚本，并向用户确认路径。
+
 ## 参考材料（按需读取）
 
 | 文件 | 内容 |

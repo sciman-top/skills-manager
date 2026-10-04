@@ -18,6 +18,10 @@ Describe 'Parse-AiRiskControlArgs' {
         $opts.help | Should -BeFalse
         $opts.out_path | Should -Be ''
         $opts.v2ray_config | Should -Be ''
+        $opts.event | Should -Be ''
+        $opts.plan | Should -BeFalse
+        $opts.retry_after | Should -Be ''
+        $opts.reset_at | Should -Be ''
     }
 
     It 'parses a full option set' {
@@ -35,6 +39,14 @@ Describe 'Parse-AiRiskControlArgs' {
         $opts.help | Should -BeTrue
     }
 
+    It 'parses an incident plan request' {
+        $opts = Parse-AiRiskControlArgs @('--event', 'workbuddy-rate-limit', '--plan', '--retry-after', '60', '--reset-at', '2026-10-04T00:00:00Z')
+        $opts.event | Should -Be 'workbuddy-rate-limit'
+        $opts.plan | Should -BeTrue
+        $opts.retry_after | Should -Be '60'
+        $opts.reset_at | Should -Be '2026-10-04T00:00:00Z'
+    }
+
     It 'rejects an unknown option' {
         { Parse-AiRiskControlArgs @('--bogus') } | Should -Throw
     }
@@ -42,6 +54,9 @@ Describe 'Parse-AiRiskControlArgs' {
     It 'rejects values outside the allowed sets' {
         { Parse-AiRiskControlArgs @('--platform', 'gemini') } | Should -Throw
         { Parse-AiRiskControlArgs @('--mode', 'tor') } | Should -Throw
+        { Parse-AiRiskControlArgs @('--event', 'unknown') } | Should -Throw
+        { Parse-AiRiskControlArgs @('--event', 'workbuddy-rate-limit', '--platform', 'antigravity') } | Should -Throw
+        { Parse-AiRiskControlArgs @('--retry-after', '60') } | Should -Throw
     }
 
     It 'rejects flags that require a value' {
@@ -108,6 +123,35 @@ Describe 'Invoke-AiRiskControlReadOnlyCheck' {
         $result.exit_code | Should -Be 1
         $result.output | Should -Match 'marker-fail'
     }
+
+    It 'bounds a slow check with a timeout instead of hanging' {
+        $slowScript = Join-Path $tmp 'slow.ps1'
+        Set-Content -Path $slowScript -Value 'Start-Sleep -Seconds 30; exit 0'
+        $result = Invoke-AiRiskControlReadOnlyCheck $slowScript -TimeoutSeconds 2
+        $result.status | Should -Be 'timeout'
+        $result.exit_code | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'AI risk policy helpers' {
+    It 'does not invent a cooldown without a server hint' {
+        $result = Get-AiRiskControlCooldown
+        $result.state | Should -Be 'unknown'
+        $result.automatic_retry | Should -BeFalse
+    }
+
+    It 'uses the later of Retry-After and reset-at as the review boundary' {
+        $result = Get-AiRiskControlCooldown -RetryAfter '60' -ResetAt '2026-10-04T00:02:00Z' -Now ([datetimeoffset]'2026-10-04T00:00:00Z')
+        $result.state | Should -Be 'server_hint'
+        $result.earliest_review_at | Should -Match '00:02:00'
+        $result.automatic_retry | Should -BeFalse
+    }
+
+    It 'redacts credentials and identifiers from check output' {
+        $value = Protect-AiRiskControlOutput 'Bearer abc apiKey="secret" https://user:pass@example.com 12345678-1234-1234-1234-123456789abc'
+        $value | Should -Not -Match 'abc|secret|user:pass|12345678-1234'
+        $value | Should -Match '<redacted>'
+    }
 }
 
 Describe 'Invoke-AiRiskControlCommand' {
@@ -136,6 +180,11 @@ Describe 'Invoke-AiRiskControlCommand' {
         @($result.assets | Where-Object { -not $_.exists }) | Should -BeNullOrEmpty
         $result.controls.repository_assets | Should -Be 'present'
         $result.acceptance.repo_verified | Should -BeTrue
+        $result.status | Should -Be 'pass'
+        $result.exit_code | Should -Be 0
+        $result.policy.forbidden_operations | Should -Contain 'account_rotation_or_bulk_registration'
+        $result.policy.platform_contracts.workbuddy.blocked | Should -Contain 'token extraction or connector-proxy bypass'
+        $result.policy.enforcement | Should -Be 'advisory_only; this command does not intercept host requests or enforce client concurrency'
         @($result.checks).Count | Should -Be 0
         $result.side_effects -join ';' | Should -Match 'no configuration writes'
     }
@@ -149,6 +198,40 @@ Describe 'Invoke-AiRiskControlCommand' {
         $result.network.v2ray_config.readable | Should -BeTrue
         $result.network.v2ray_config.sha256 | Should -Be $expected
         $result.network.mutation | Should -Be 'none'
+    }
+
+    It 'returns a bounded incident plan without enabling a bypass' {
+        $result = Invoke-AiRiskControlCommand @('--platform', 'workbuddy', '--event', 'workbuddy-account-risk', '--plan')
+        $result.incident.category | Should -Be 'account_safety'
+        $result.incident.severity | Should -Be 'critical'
+        $result.plan.stop_conditions -join ';' | Should -Match '轮换|伪造|提取'
+        $result.side_effects -join ';' | Should -Match 'no configuration writes'
+    }
+
+    It 'reports a server hinted cooldown without retrying' {
+        $result = Invoke-AiRiskControlCommand @('--platform', 'workbuddy', '--event', 'workbuddy-rate-limit', '--retry-after', '60', '--plan')
+        $result.cooldown.state | Should -Be 'server_hint'
+        $result.cooldown.automatic_retry | Should -BeFalse
+        $result.incident.basis | Should -Match 'user_selected_scenario'
+    }
+
+    It 'reports not_configured rather than a risk finding when the antigravity deployment root is absent' {
+        $previous = $env:AG_RISK_V2RAY_ROOT
+        $env:AG_RISK_V2RAY_ROOT = Join-Path $tmp 'no-such-v2rayN'
+        try {
+            $result = Invoke-AiRiskControlCommand @('--platform', 'antigravity', '--checks')
+            @($result.checks).Count | Should -Be 1
+            $result.checks[0].status | Should -Be 'not_configured'
+            $result.status | Should -Be 'pass'
+            $result.exit_code | Should -Be 0
+        }
+        finally { $env:AG_RISK_V2RAY_ROOT = $previous }
+    }
+
+    It 'declares which host check variant was used' {
+        $result = Invoke-AiRiskControlCommand @()
+        $result.check_variants.workbuddy | Should -Match 'simplified'
+        $result.check_variants.timeout_seconds | Should -Be 180
     }
 
     It 'writes a JSON report when --out is given' {

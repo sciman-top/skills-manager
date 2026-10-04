@@ -111,6 +111,30 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效 -SkillProfile full-compatible
 ```
 
+### Antigravity / Gemini 与 WorkBuddy 风控控制
+
+仓库把两份风控技能、只读宿主自检和统一分诊入口收在同一条链路中。默认命令只读，不修改账号、凭据、代理、客户端或进程：
+
+```powershell
+# 查看仓库资产与内置安全政策
+.\skills.ps1 ai-risk-control --json
+
+# 输出日常防范、恢复和停止条件
+.\skills.ps1 ai-risk-control --plan --json
+
+# 针对一次已观察到的事件生成分诊计划
+.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-account-risk --plan --json
+.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-rate-limit --plan --json
+
+# 有服务端 Retry-After/reset 提示时只计算最早复查时间，不会自动重试
+.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-rate-limit --retry-after 60 --plan --json
+
+# 在确认宿主脚本可用时运行只读自检；存在 FAIL 时命令返回非零退出码
+.\skills.ps1 ai-risk-control --platform all --checks --json --out .\reports\ai-risk-control.json
+```
+
+事件计划只给出官方合规的停手、留证、等待、分段、申诉和低频观察步骤。项目明确阻断多账号轮换、OAuth 反代、Token 提取、请求指纹伪造、设备标识伪造、配额绕过和重试风暴；这些动作会放大封号风险，不能作为“修复”。`--retry-after` 和 `--reset-at` 只接受服务端提示，入口按较晚时间计算最早复查时刻，不会替用户重试，也不保证到期后请求会被接受。`--checks` 的脚本输出属于当前机器的只读观察，结果仍按 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted` 分层，不能把仓库或自检通过外推成账号已恢复。
+
 `check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。报告增加 `complete/failed` 与逐源 `reason`：超时、查询失败、未命中 ref 分别为 `timeout/query_failed/ref_not_found`，目标为 `unknown`，不代表已是最新；部分失败仍输出 JSON，调用方必须检查 `complete`，每周 runner 遇到不完整检查会停止。每次远端 Git 查询默认限时 30 秒，可通过 `SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS` 设置为 1–300 秒；同一 repo/ref 的失败在本次检查内缓存，其他源继续检查。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
 
