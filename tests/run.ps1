@@ -119,6 +119,30 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     $runId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
     $runRoot = Join-Path $ShardReportRoot $runId
     $null = New-Item -ItemType Directory -Path $runRoot -Force
+
+    # Record whether this process tree is sandbox-instrumented. Instrumented
+    # runs are slower (deletes are brokered, HTTP is proxied) so their wall
+    # clock must not be read as code cost. See
+    # docs/runbooks/agent-sandbox-instrumentation.md.
+    $shimMarkers = [ordered]@{
+        safe_delete_shim = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or $env:CODEBUDDY_SAFE_DELETE_SANDBOX)
+        sandbox_ipc      = [bool](-not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS))
+        node_shim        = [bool](([string]$env:NODE_OPTIONS) -match 'shim')
+        python_shim      = [bool](([string]$env:PYTHONPATH) -match 'shim')
+    }
+    $instrumented = @($shimMarkers.Values | Where-Object { $_ }).Count -gt 0
+    $environmentRecord = [ordered]@{
+        schema_version = 1
+        recorded_at    = [DateTimeOffset]::UtcNow.ToString('o')
+        instrumented   = $instrumented
+        markers        = $shimMarkers
+        http_proxy     = [bool](-not [string]::IsNullOrWhiteSpace($env:HTTP_PROXY))
+        max_parallel   = $MaxParallel
+        shard_count    = $shardCount
+        note           = 'Instrumented runs must not be read as code cost; re-measure outside the sandbox (CI or a plain terminal).'
+    }
+    [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environmentRecord | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+
     $selfPath = try { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
     if ([string]::IsNullOrWhiteSpace($selfPath)) { $selfPath = (Get-Command pwsh -ErrorAction Stop).Source }
 
