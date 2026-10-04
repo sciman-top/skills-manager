@@ -64,6 +64,60 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $resolver | Should -Match 'Test-SkillsConfigFocusedChange'
     }
 
+    It 'rejects invalid CI resolver output before selecting setup and proof: <case>' -ForEach @(
+        @{ case = 'missing profile'; resolverText = "'{}'; exit 0" }
+        @{ case = 'unknown profile'; resolverText = "'{`"profile`":`"skip`"}'; exit 0" }
+        @{ case = 'failed resolver'; resolverText = "'{`"profile`":`"docs`",`"reason`":`"docs_only`",`"docs_only`":true,`"requires_locked_sources`":false,`"focused_test_paths`":[]}'; exit 9" }
+        @{ case = 'non-boolean setup'; resolverText = "'{`"profile`":`"docs`",`"reason`":`"docs_only`",`"docs_only`":true,`"requires_locked_sources`":`"false`",`"focused_test_paths`":[]}'; exit 0" }
+        @{ case = 'focused without tests'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":[]}'; exit 0" }
+        @{ case = 'malformed JSON'; resolverText = "'{'; exit 0" }
+        @{ case = 'resolver exception'; resolverText = "throw 'resolver crashed'" }
+        @{ case = 'array result'; resolverText = "'[{`"profile`":`"docs`",`"reason`":`"docs_only`",`"docs_only`":true,`"requires_locked_sources`":false,`"focused_test_paths`":[]}]'; exit 0" }
+        @{ case = 'scalar test path'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":`"tests/Unit/Core.Tests.ps1`"}'; exit 0" }
+        @{ case = 'null test path'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":[null]}'; exit 0" }
+    ) {
+        $selection = [regex]::Match($script:workflow, '(?ms)^[ \t]+\$resolved = .*?^[ \t]+\$requiresLockedSources = \[bool\]\$resolved\.requires_locked_sources[^\r\n]*')
+        $selection.Success | Should -BeTrue
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'scripts/quality') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $TestDrive 'scripts/quality/resolve-gate-profile.ps1') -Value $resolverText
+        Push-Location $TestDrive
+        try {
+            $baseSha = 'HEAD'
+            { & ([scriptblock]::Create($selection.Value)) *> $null } | Should -Throw '*Gate profile resolver*'
+        }
+        finally { Pop-Location }
+    }
+
+    It 'accepts valid CI resolver output: <profile>' -ForEach @(
+        @{ profile = 'docs'; docsOnly = $true; requiresLockedSources = $false; focusedTests = @() }
+        @{ profile = 'focused'; docsOnly = $false; requiresLockedSources = $false; focusedTests = @('tests/Unit/Core.Tests.ps1') }
+        @{ profile = 'full'; docsOnly = $false; requiresLockedSources = $true; focusedTests = @() }
+    ) {
+        $selection = [regex]::Match($script:workflow, '(?ms)^[ \t]+\$resolved = .*?^[ \t]+\$requiresLockedSources = \[bool\]\$resolved\.requires_locked_sources[^\r\n]*')
+        $selection.Success | Should -BeTrue
+        $expected = [ordered]@{
+            profile = $profile
+            reason = 'valid_result'
+            docs_only = $docsOnly
+            requires_locked_sources = $requiresLockedSources
+            focused_test_paths = @($focusedTests)
+        }
+        $resolverText = "'$($expected | ConvertTo-Json -Compress)'; exit 0"
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'scripts/quality') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $TestDrive 'scripts/quality/resolve-gate-profile.ps1') -Value $resolverText
+        Push-Location $TestDrive
+        try {
+            $baseSha = 'HEAD'
+            $global:LASTEXITCODE = 7
+            $actual = & ([scriptblock]::Create($selection.Value + "`n" + '[pscustomobject]@{ profile = $profile; docsOnly = $docsOnly; focusedTests = @($focusedTests); requiresLockedSources = $requiresLockedSources }'))
+            $actual.profile | Should -Be $expected.profile
+            $actual.docsOnly | Should -Be $expected.docs_only
+            $actual.requiresLockedSources | Should -Be $expected.requires_locked_sources
+            ($actual.focusedTests -join ',') | Should -Be ($expected.focused_test_paths -join ',')
+        }
+        finally { Pop-Location }
+    }
+
     It 'routes documentation-only changes to the docs profile' {
         $resolver = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1') -Raw
         $resolver | Should -Match "Get-GateProfileResult 'docs'"

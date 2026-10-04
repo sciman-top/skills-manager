@@ -58,6 +58,25 @@ $global:LASTEXITCODE = 0
         { Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('tests/Unit/ModelPreset.Tests.ps1') } *> $null } | Should -Throw '*exit=9*'
     }
 
+    It 'rejects invalid resolver output before resolve-only success: <case>' -ForEach @(
+        @{ case = 'missing profile'; resolverText = "'{}'; exit 0" }
+        @{ case = 'unknown profile'; resolverText = "'{`"profile`":`"skip`"}'; exit 0" }
+        @{ case = 'recursive auto'; resolverText = "'{`"profile`":`"auto`"}'; exit 0" }
+        @{ case = 'array profile'; resolverText = "'{`"profile`":[`"docs`"]}'; exit 0" }
+        @{ case = 'failed resolver with valid output'; resolverText = "'{`"profile`":`"docs`",`"reason`":`"empty_diff`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":[]}'; exit 9" }
+        @{ case = 'focused without tests'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":[]}'; exit 0" }
+        @{ case = 'malformed JSON'; resolverText = "'{'; exit 0" }
+        @{ case = 'resolver exception'; resolverText = "throw 'resolver crashed'" }
+        @{ case = 'array result'; resolverText = "'[{`"profile`":`"docs`",`"reason`":`"docs_only`",`"docs_only`":true,`"requires_locked_sources`":false,`"focused_test_paths`":[]}]'; exit 0" }
+        @{ case = 'non-boolean setup'; resolverText = "'{`"profile`":`"docs`",`"reason`":`"docs_only`",`"docs_only`":true,`"requires_locked_sources`":`"false`",`"focused_test_paths`":[]}'; exit 0" }
+        @{ case = 'scalar test path'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":`"tests/Unit/Core.Tests.ps1`"}'; exit 0" }
+        @{ case = 'null test path'; resolverText = "'{`"profile`":`"focused`",`"reason`":`"source_path`",`"docs_only`":false,`"requires_locked_sources`":false,`"focused_test_paths`":[null]}'; exit 0" }
+    ) {
+        $repo = New-AutoGateFixture
+        Set-Content -LiteralPath (Join-Path $repo 'scripts/quality/resolve-gate-profile.ps1') -Value $resolverText
+        { Invoke-TempGate $repo @{ Profile = 'auto'; ResolveOnly = $true } *> $null } | Should -Throw '*Gate profile resolver*'
+    }
+
     It 'resolves a docs-only worktree change to docs via -ResolveOnly' {
         $repo = New-AutoGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
