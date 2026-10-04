@@ -55,7 +55,7 @@
 | `tools/ensure-patches.ps1` | **核心**：代理 + 汉化 + 分流器一体化幂等自愈 | `D:\TOOL\antigravity-ensure\` |
 | `tools/register-task.ps1` | 注册/更新「每 30 分钟 + 登录」自愈计划任务 | `D:\TOOL\antigravity-ensure\` |
 | `tools/workbuddy/workbuddy-risk-selfcheck.sh` | WorkBuddy 只读风控自检（Git Bash 版，含 MCP 认证细分） | `D:\TOOL\workbuddy-risk\` |
-| `tools/workbuddy/workbuddy-risk-selfcheck.ps1` | 同上，PowerShell 简化版（不含 MCP 认证细分） | `D:\TOOL\workbuddy-risk\` |
+| `tools/workbuddy/workbuddy-risk-selfcheck.ps1` | 同上，PowerShell 双实现（**含** MCP 认证细分；与 `.sh` 的剩余差异是不做 WinINET 例外覆盖的注册表比对） | `D:\TOOL\workbuddy-risk\` |
 | `tools/workbuddy/workbuddy-risk-selfcheck.test.sh` | 自检脚本自身的离线验收夹具 | `D:\TOOL\workbuddy-risk\` |
 | `tools/workbuddy/workbuddy-triage-prompt.md` | 分诊提示词（429 / 403·11140 分诊与红线清单） | `D:\TOOL\workbuddy-risk\` |
 部署顺序与三层验收见 `PROMPT.md` 第 8、13 节；日常只需跑受控验收 ①、全量自检 ③、WorkBuddy 自检 ④。
@@ -86,6 +86,12 @@ Get-Content MANIFEST.sha256 | ForEach-Object {
 
 - **技能源无漂移**：`pwsh -File build.ps1 -Check`（核对生成物）+ 质量门禁。
 - **物化无漂移**：`skills.ps1 构建生效` 后核对 `agent/<skill>/SKILL.md` 与源一致。
+- **载荷行为与字节（自动）**：`tests/Unit/AiRiskControlManifest.Tests.ps1`（逐字节核对 + 断言所有随包工具都已声明）
+  与 `tests/Unit/AiRiskControlTools.Tests.ps1`（跑 `ensure-split.test.ps1` 受控验收；并用注入夹具验证 `.ps1` 自检的
+  MCP 认证分类：自加连接器/内置插件/官方网关三分类与重试计数）。这两条路径已在 `resolve-gate-profile.ps1` 的
+  `$sourceTests` 登记，载荷改动会落到 focused；**未登记的其他载荷文件仍回落 full**。
+- **`.sh` 受控验收（手动）**：`bash tools/workbuddy/workbuddy-risk-selfcheck.test.sh`。它在本项目的沙箱里会被
+  注册表分支终止，故**未接入门禁**，需人工运行。
 - **真值边界**：本清单与 `MANIFEST.sha256` 最多证明 `repo_verified / filesystem_projected`；
   `host_loaded` 需要 fresh host probe，`live_accepted` 只能由用户真实长会话完成（见 `风控日检记录.md`）。
 

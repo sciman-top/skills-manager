@@ -11731,7 +11731,7 @@ function Invoke-AiRiskControlCommand {
                 '使用 --plan 查看内置日常防范与恢复流程；使用 --event 查看事件分诊计划。'
                 '--checks 有 180 秒上限；超时记为 timeout，不计入风险 findings。'
                 'Antigravity 自检需要 v2rayN/10810 部署根（默认 D:\TOOL\v2rayN，可用 AG_RISK_V2RAY_ROOT 覆盖）；缺失时记为 not_configured 而不是风险。'
-                'WorkBuddy 自检使用 PowerShell 简化版，不含 .sh 版的 MCP 认证细分。'
+                'WorkBuddy 自检的 PowerShell 版已含 MCP 认证细分；与 .sh 版的剩余差异是不做 WinINET 例外覆盖的注册表比对。'
                 '不提供多账号轮换、OAuth 反代、配额绕过、伪造指纹或自动重试。'
             )
             events = @('antigravity-ban', 'antigravity-rate-limit', 'antigravity-degradation', 'workbuddy-account-risk', 'workbuddy-rate-limit', 'workbuddy-degradation')
@@ -11803,7 +11803,7 @@ function Invoke-AiRiskControlCommand {
         assets = $assets; checks = $checks
         check_variants = [pscustomobject][ordered]@{
             antigravity = 'ag-health-check.ps1 over the v2rayN/10810 split deployment; needs AG_RISK_V2RAY_ROOT (default D:\TOOL\v2rayN)'
-            workbuddy = 'workbuddy-risk-selfcheck.ps1 PowerShell simplified variant; omits the MCP-auth breakdown the .sh variant covers'
+            workbuddy = 'workbuddy-risk-selfcheck.ps1 (PowerShell twin); now covers MCP connector classification, but still skips the WinINET-vs-env proxy-exception comparison the .sh twin performs'
             timeout_seconds = 180
             note = 'not_configured / not_available / timeout mean "could not assess"; only pass/findings/error feed the aggregate status.'
         }

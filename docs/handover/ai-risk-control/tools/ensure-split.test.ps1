@@ -12,7 +12,10 @@ $ErrorActionPreference = 'Continue'
 
 $HERE   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TARGET = Join-Path $HERE 'ensure-split.ps1'
-$PWSH   = 'C:\Program Files\PowerShell\7\pwsh.exe'
+# 用当前宿主解释器，避免把夹具绑死在某台机器的安装路径上（本地与 CI 都能跑）。
+# 可用 AG_SPLIT_TEST_PWSH 显式覆盖。
+$PWSH   = if ($env:AG_SPLIT_TEST_PWSH) { $env:AG_SPLIT_TEST_PWSH } else { (Get-Process -Id $PID).Path }
+if (-not (Test-Path -LiteralPath $PWSH)) { $PWSH = 'C:\Program Files\PowerShell\7\pwsh.exe' }
 $TMP    = Join-Path $env:TEMP ('nova-agsplit-test-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $TMP | Out-Null
 

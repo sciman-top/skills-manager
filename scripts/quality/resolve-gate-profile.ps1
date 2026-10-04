@@ -62,10 +62,15 @@ $sourceTests = @{
     'src/Version.ps1' = @('MainDispatch', 'PowerShellCompatibility')
     'scripts/quality/resolve-gate-profile.ps1' = @('ResolveGateProfile', 'QualityGateAuto', 'CiWorkflow')
     # The handover payload is a deployment asset, not repo runtime: a tool edit
-    # must refresh MANIFEST.sha256, so mapping the manifest to its contract test
+    # must refresh MANIFEST.sha256, so mapping the manifest to its contract tests
     # keeps the payload verifiable without falling back to the full gate. A tool
     # edit that skips the manifest still lands on unknown_path/full on purpose.
-    'docs/handover/ai-risk-control/MANIFEST.sha256' = @('AiRiskControlManifest')
+    # Only the tools actually exercised by AiRiskControlTools are mapped; every
+    # other payload file keeps the conservative unknown_path/full fallback.
+    'docs/handover/ai-risk-control/MANIFEST.sha256' = @('AiRiskControlManifest', 'AiRiskControlTools')
+    'docs/handover/ai-risk-control/tools/ensure-split.ps1' = @('AiRiskControlTools')
+    'docs/handover/ai-risk-control/tools/ensure-split.test.ps1' = @('AiRiskControlTools')
+    'docs/handover/ai-risk-control/tools/workbuddy/workbuddy-risk-selfcheck.ps1' = @('AiRiskControlTools')
     'tests/run.ps1' = @('TestRunner')
 }
 $skillFocusedTests = @(
@@ -77,7 +82,7 @@ $skillFocusedTests = @(
 $assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
-    'AiRiskControl', 'AiRiskControlManifest',
+    'AiRiskControl', 'AiRiskControlManifest', 'AiRiskControlTools',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 

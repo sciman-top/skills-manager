@@ -26,8 +26,10 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$WB   = Join-Path $env:USERPROFILE '.workbuddy-ai'
-$WBL  = Join-Path $env:USERPROFILE '.workbuddy'
+# 路径可用环境变量覆盖（供受控验收注入测试夹具使用，与 .sh 版同口径）：
+#   WB_AI_DIR / WB_APP_DIR / HOSTS_FILE / V2RAY_CONFIG / WB_DB_FILE / WB_BUILTIN_DIR
+$WB   = if ($env:WB_AI_DIR)  { $env:WB_AI_DIR }  else { Join-Path $env:USERPROFILE '.workbuddy-ai' }
+$WBL  = if ($env:WB_APP_DIR) { $env:WB_APP_DIR } else { Join-Path $env:USERPROFILE '.workbuddy' }
 $lines = New-Object System.Collections.ArrayList
 
 function W([string]$s) { [void]$lines.Add($s) }
@@ -55,7 +57,7 @@ W "============================================================"
 # ------------------------------------------------------------
 Section "1. hosts 文件劫持检测"
 # ------------------------------------------------------------
-$hostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+$hostsPath = if ($env:HOSTS_FILE) { $env:HOSTS_FILE } else { Join-Path $env:SystemRoot 'System32\drivers\etc\hosts' }
 if (Test-Path $hostsPath) {
     $bad = @()
     foreach ($ln in (Get-Content $hostsPath)) {
@@ -172,11 +174,16 @@ if ($null -eq $proxyEnable) {
     Ok "系统代理未开启" "WorkBuddy 走本机直连"
 }
 
-$v2cands = @(
-    'D:\TOOL\v2rayN\guiConfigs\guiNConfig.json',
-    (Join-Path $env:USERPROFILE 'Downloads\Compressed\v2rayN-windows-64\guiConfigs\guiNConfig.json'),
-    (Join-Path $env:APPDATA 'v2rayN\guiConfigs\guiNConfig.json')
-)
+# 显式指定 V2RAY_CONFIG 则只用它（与 .sh 版同口径），否则按常见位置探测
+$v2cands = if ($env:V2RAY_CONFIG) {
+    @($env:V2RAY_CONFIG)
+} else {
+    @(
+        'D:\TOOL\v2rayN\guiConfigs\guiNConfig.json',
+        (Join-Path $env:USERPROFILE 'Downloads\Compressed\v2rayN-windows-64\guiConfigs\guiNConfig.json'),
+        (Join-Path $env:APPDATA 'v2rayN\guiConfigs\guiNConfig.json')
+    )
+}
 $v2 = $v2cands | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($v2) {
     $vc = Get-Content $v2 -Raw
@@ -359,7 +366,125 @@ if ($null -eq $activeAuto -or $activeAuto -eq '') { Info "无法读取活动自�
 elseif ([int]$activeAuto -gt 0) { Mid ("活动自动化数量: " + $activeAuto) "请确认频率、模型与失败重试策略" }
 else { Ok "活动自动化数量: 0" "" }
 
-Info "MCP 认证检测在本 .ps1 简化版中略去" "全局计数口径会把内置插件/官方网关连接器的预期 422 误报成高危；精确分类请跑 workbuddy-risk-selfcheck.sh"
+# --- MCP 认证失败细分（与 .sh 版同口径）---
+#  只认真实连接器 id 并按 id 去重：会话日志会回显"你跑过的夹具与命令回显"，
+#  数行数会被自己污染（实测每跑一次受控验收，计数就 +18）。
+$mcpIdPat = '(custom-mcp|builtin|mcp):[a-z0-9._-]+'
+
+function Get-McpFailedIds {
+    param([object[]]$Files)
+    $ids = New-Object System.Collections.Generic.List[string]
+    foreach ($f in @($Files)) {
+        $hits = Select-String -LiteralPath $f.FullName -AllMatches -ErrorAction SilentlyContinue `
+            -Pattern ('\[MCP-ControllerState\] id=' + $script:mcpIdPat + ' state=(error|unauthorized)')
+        foreach ($h in @($hits)) {
+            foreach ($mm in @($h.Matches)) {
+                $idm = [regex]::Match($mm.Value, 'id=([^ ]+) state=')
+                if ($idm.Success) { [void]$ids.Add($idm.Groups[1].Value) }
+            }
+        }
+    }
+    return @($ids | Sort-Object -Unique)
+}
+
+#  重试必须按 id 精确计数：全局口径会把内置插件（ardot 实测 214 次）的重试算到自加连接器头上，
+#  实测曾把 genie-baas / netdrive（自身重试 0）报成"含 335 次重试"的高危。
+function Get-McpRetryCount {
+    param([object[]]$Files, [string[]]$Ids)
+    $total = 0
+    foreach ($id in @($Ids)) {
+        foreach ($f in @($Files)) {
+            $total += @(Select-String -LiteralPath $f.FullName -SimpleMatch -ErrorAction SilentlyContinue `
+                -Pattern ('[MCP-Probe] retry scheduled id=' + $id)).Count
+        }
+    }
+    return $total
+}
+
+#  真实 MCP 状态只出现在客户端主线程日志 workbuddyMainThread__*.log；
+#  项目会话日志记录的是"你自己执行过的命令"，同样含这些字符串 —— 实测就是这样把夹具 id 当成真实连接器。
+$mcpLogs = @()
+foreach ($root in $logRoots) {
+    $mcpLogs += @(Get-ChildItem $root -Recurse -File -Filter 'workbuddyMainThread__*.log' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '[/\\]sandbox[/\\]' })
+}
+# 找不到主线程日志（客户端版本/安装差异）时退回全量 *.log，避免漏检
+if ($mcpLogs.Count -eq 0) {
+    foreach ($root in $logRoots) {
+        $mcpLogs += @(Get-ChildItem $root -Recurse -File -Filter '*.log' -ErrorAction SilentlyContinue)
+    }
+}
+$mcpCutoff = (Get-Date).AddDays(-3)
+$mcpRecent = @($mcpLogs | Where-Object { $_.LastWriteTime -ge $mcpCutoff })
+$mcpFailRecent = @(Get-McpFailedIds $mcpRecent)
+$mcpFailAll    = @(Get-McpFailedIds $mcpLogs)
+
+#  内置插件（随客户端分发在 plugins/cache/workbuddy-builtin/ 下）未配令牌时返回
+#  HTTP 422 / code 10101 —— 属**预期行为**，判 [高危] 会造成"永久狼来了"。
+#  id → 目录名不是固定变换（ardot→mcp-ardot-mcp-app，miora→mcp-miora），故用子串匹配。
+$builtinDir = if ($env:WB_BUILTIN_DIR) { $env:WB_BUILTIN_DIR } else { Join-Path $WB 'plugins\cache\workbuddy-builtin' }
+function Test-McpBuiltin {
+    param([string]$Name)
+    if (-not (Test-Path $script:builtinDir)) { return $false }
+    return @(Get-ChildItem $script:builtinDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like ('*' + $Name + '*') }).Count -gt 0
+}
+#  官方网关连接器同理必须降级：URL 落在自家域名下（console/agent-gateway/…），
+#  未授权只是没配令牌（access_denied），属预期行为。实测 netdrive / genie-baas 曾被误判成
+#  「自加连接器认证失败」而长期占据 [高危]，把真实高危淹没。
+#  ⚠ 探测面不能只取"近 3 天"：连接器→URL 映射长期不变，而 MCP-Connect 行常只出现在更早的
+#    日志或 daemon 日志里（实测 netdrive 的 MCP-Connect 行只在 2026-09-24/25 的日志里）。
+$officialLogs = @($mcpLogs)
+foreach ($root in $logRoots) {
+    $officialLogs += @(Get-ChildItem $root -File -Filter 'daemon*.log' -ErrorAction SilentlyContinue)
+}
+$officialIds = New-Object System.Collections.Generic.List[string]
+foreach ($f in $officialLogs) {
+    $connHits = Select-String -LiteralPath $f.FullName -AllMatches -ErrorAction SilentlyContinue `
+        -Pattern '\[MCP-Connect\] begin configId=([^ ]+).*url=https?://([^/ ]+)'
+    foreach ($h in @($connHits)) {
+        foreach ($mm in @($h.Matches)) {
+            if ($mm.Groups[2].Value -match '(^|\.)(workbuddy|codebuddy)\.(ai|cn)$') { [void]$officialIds.Add($mm.Groups[1].Value) }
+        }
+    }
+    $gwHits = Select-String -LiteralPath $f.FullName -AllMatches -ErrorAction SilentlyContinue `
+        -Pattern 'https?://([a-zA-Z0-9-]+\.)*(workbuddy|codebuddy)\.(ai|cn)/[^" ]*agent-gateway/([a-zA-Z0-9._-]+)/'
+    foreach ($h in @($gwHits)) {
+        foreach ($mm in @($h.Matches)) { [void]$officialIds.Add('custom-mcp:' + $mm.Groups[4].Value) }
+    }
+}
+$officialIds = @($officialIds | Sort-Object -Unique)
+
+$mcpBuiltin = @(); $mcpOfficial = @(); $mcpUser = @()
+foreach ($id in $mcpFailRecent) {
+    if (Test-McpBuiltin ($id -replace '^[^:]*:', '')) { $mcpBuiltin += $id }
+    elseif ($officialIds -contains $id) { $mcpOfficial += $id }
+    else { $mcpUser += $id }
+}
+# 只统计**自加连接器**自身的重试（内置插件的重试不算在它们头上）
+$mcpRetry = Get-McpRetryCount $mcpRecent $mcpUser
+$mcpAnyRecent = @($mcpUser + $mcpBuiltin + $mcpOfficial).Count -gt 0
+
+if ($mcpUser.Count -gt 0) {
+    if ($mcpRetry -gt 0) {
+        Bad ("MCP 认证失败（自加连接器）: " + ($mcpUser -join ' ')) ("近 3 天，含 $mcpRetry 次探测重试 —— 认证失败不应持续自动重试")
+    } else {
+        Mid ("MCP 认证失败（自加连接器）: " + ($mcpUser -join ' ')) "近 3 天，当前无重试 —— 需定位凭据来源后处理"
+    }
+}
+if ($mcpBuiltin.Count -gt 0) {
+    Mid ("MCP 认证失败（内置插件，非风控信号）: " + ($mcpBuiltin -join ' ')) "内置插件未配置令牌即返回 422 / code 10101，属预期行为；不要据此改网络例外或客户端状态"
+}
+if ($mcpOfficial.Count -gt 0) {
+    Mid ("MCP 认证失败（官方网关连接器，非风控信号）: " + ($mcpOfficial -join ' ')) "URL 落在 workbuddy.ai / codebuddy.ai 自家域名下，未授权只是没配令牌，属预期行为"
+}
+if (-not $mcpAnyRecent) {
+    if ($mcpFailAll.Count -gt 0) {
+        Mid ("MCP 历史认证失败: " + ($mcpFailAll -join ' ')) "均为 3 天前，未复发"
+    } else {
+        Ok "未发现 MCP 认证失败" ""
+    }
+}
 
 # ------------------------------------------------------------
 Section "汇总"

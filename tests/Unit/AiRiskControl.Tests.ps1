@@ -230,7 +230,7 @@ Describe 'Invoke-AiRiskControlCommand' {
 
     It 'declares which host check variant was used' {
         $result = Invoke-AiRiskControlCommand @()
-        $result.check_variants.workbuddy | Should -Match 'simplified'
+        $result.check_variants.workbuddy | Should -Match 'MCP'
         $result.check_variants.timeout_seconds | Should -Be 180
     }
 
