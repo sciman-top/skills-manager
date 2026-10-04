@@ -60,6 +60,28 @@ Describe 'Global rule source contract' {
         [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md')) | Should -Be '# old codex'
     }
 
+    It 'rejects a common source whose heading version differs from its metadata version: <case>' -TestCases @(
+        @{ case = 'stale heading'; heading = '# AGENTS.md - Universal Agent Protocol v0.1 | OpenAI ChatGPT Work / Codex App / Codex CLI' },
+        @{ case = 'missing heading version'; heading = '# AGENTS.md - Universal Agent Protocol | OpenAI ChatGPT Work / Codex App / Codex CLI' }
+    ) {
+        param($case, $heading)
+        $path = Join-Path $fixture 'rules/global/common.md'
+        $text = [regex]::Replace([IO.File]::ReadAllText($path), '\A[^\n]*', $heading)
+        [IO.File]::WriteAllText($path, $text)
+        { Get-GlobalRuleRenderedEntries $fixture } | Should -Throw '*heading version must match the metadata version*'
+        { Sync-GlobalRuleGeneratedFiles $fixture } | Should -Throw
+        { New-GlobalRuleProjectionPlan $fixture $codex $claude } | Should -Throw
+    }
+
+    It 'keeps the shipped common source heading and metadata versions in sync' {
+        $text = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/common.md'))
+        $metadata = [regex]::Match($text, '(?m)^\*\*版本\*\*:\s*([0-9][0-9A-Za-z_.-]*)\s*$')
+        $heading = [regex]::Match($text, '\A#[^\r\n]*\bv([0-9][0-9A-Za-z_.-]*)\b')
+        $metadata.Success | Should -BeTrue
+        $heading.Success | Should -BeTrue
+        $heading.Groups[1].Value | Should -BeExactly $metadata.Groups[1].Value
+    }
+
     It 'rejects a malformed fragment without replacing generated files' {
         $output = Join-Path $fixture 'rules/global/codex/AGENTS.md'
         $before = (Get-FileHash -LiteralPath $output).Hash

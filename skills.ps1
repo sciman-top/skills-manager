@@ -7164,6 +7164,10 @@ function Get-GlobalRuleRenderedEntries {
     if ([regex]::Matches($common, '(?m)^\{\{PLATFORM\}\}$').Count -ne 1) { throw 'Global common source requires exactly one PLATFORM placeholder.' }
     $version = [regex]::Match($common, '(?m)^\*\*版本\*\*:\s*([0-9][0-9A-Za-z_.-]*)\s*$')
     if (-not $version.Success) { throw 'Global common source requires a release version.' }
+    $heading = [regex]::Match($common, '\A#[^\r\n]*\bv([0-9][0-9A-Za-z_.-]*)\b')
+    if (-not $heading.Success -or $heading.Groups[1].Value -cne $version.Groups[1].Value) {
+        throw 'Global common source heading version must match the metadata version.'
+    }
     $hosts = @(
         @{ id = 'codex'; file = 'AGENTS.md'; label = 'OpenAI ChatGPT Work / Codex App / Codex CLI' }
         @{ id = 'claude'; file = 'CLAUDE.md'; label = 'Claude Code' }

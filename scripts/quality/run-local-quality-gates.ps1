@@ -70,7 +70,29 @@ try {
         $resolverPath = Join-Path $root 'scripts\quality\resolve-gate-profile.ps1'
         $resolverArgs = @{ Mode = 'local'; Json = $true }
         if (-not [string]::IsNullOrWhiteSpace($DiffBase)) { $resolverArgs['BaseSha'] = $DiffBase }
-        $resolved = (& $resolverPath @resolverArgs) | ConvertFrom-Json
+        try {
+            $global:LASTEXITCODE = 0
+            $resolved = & $resolverPath @resolverArgs
+            $resolverExit = $LASTEXITCODE
+            if ($resolverExit -ne 0) { throw "exit=$resolverExit" }
+            $resolved = $resolved | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
+        }
+        catch { throw "Gate profile resolver failed: $($_.Exception.Message)" }
+        if ($resolved -isnot [pscustomobject] -or
+            $resolved.profile -isnot [string] -or $resolved.profile -notin @('docs', 'focused', 'full') -or
+            $resolved.reason -isnot [string] -or [string]::IsNullOrWhiteSpace($resolved.reason) -or
+            $resolved.docs_only -isnot [bool] -or $resolved.requires_locked_sources -isnot [bool] -or
+            $resolved.focused_test_paths -isnot [array]) {
+            throw 'Gate profile resolver returned an invalid result.'
+        }
+        foreach ($focusedPath in $resolved.focused_test_paths) {
+            if ($focusedPath -isnot [string] -or [string]::IsNullOrWhiteSpace($focusedPath)) {
+                throw 'Gate profile resolver returned an invalid focused test path.'
+            }
+        }
+        if ($resolved.profile -eq 'focused' -and $resolved.focused_test_paths.Count -eq 0) {
+            throw 'Gate profile resolver returned focused without test paths.'
+        }
         Write-Host ("Gate profile auto -> {0} (reason={1}, base={2})" -f $resolved.profile, $resolved.reason, $resolved.base_sha)
         if ($ResolveOnly) { return }
         $Profile = [string]$resolved.profile
