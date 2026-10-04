@@ -1,2 +1,9 @@
+# Byte-sensitive rule and contract files must not vary with checkout EOL:
+# rule budgets are asserted on byte counts, so a CRLF working tree would
+# inflate them. Keep the patterns explicit rather than relying on ** matching.
 rules/global/*/*.md text eol=lf
+rules/global/*.md text eol=lf
+AGENTS.md text eol=lf
+CLAUDE.md text eol=lf
+GEMINI.md text eol=lf
 skills.ps1 text eol=crlf
