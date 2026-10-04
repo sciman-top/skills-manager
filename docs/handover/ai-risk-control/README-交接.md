@@ -134,6 +134,10 @@ agent/ 物化 → ~/.gemini/config/skills
 本机**未提权**时，`Register-ScheduledTask` 只有 **`Interactive` + `Limited`** 能注册成功；
 `S4U` / `Highest` / `ServiceAccount(SYSTEM)` 全部报「拒绝访问」。
 （源机后已提权升级为 `S4U`，见提示词第 12 节。）
+（ag-split 两个任务 2026-10-04 也已升级为 `S4U`：`register-split-task.ps1` 按是否提权自选 `S4U`/`Interactive` 兜底，
+消除 watchdog 每 3 分钟闪窗与内核可见控制台（关窗=杀内核的失效面随之关闭）。
+代价：watchdog 的 `WM_SETTINGCHANGE` 广播到不了交互会话（env 立即生效增强失效，持久层写入仍有效）；
+core 实时 access log 不再可见，诊断走 `ensure-split.log` 与 `ag-split-live-acceptance.ps1`。）
 
 ## 包外的收尾动作（提示词里也会提）
 
