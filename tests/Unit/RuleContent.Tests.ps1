@@ -45,4 +45,22 @@ Describe 'Checked-in rule content' {
         $wrapper.bom | Should -BeFalse
         ($wrapper.text -split '\r?\n')[0] | Should -Be '@AGENTS.md'
     }
+
+    It 'keeps rule budgets EOL-independent so a CRLF checkout cannot falsely exceed them' {
+        # Get-GlobalRuleFileFacts counts raw bytes, which grow by one byte per
+        # line under a CRLF checkout while the line count stays stable. Bound
+        # the worst case so the budget holds under both conventions; this
+        # defect class was already fixed twice elsewhere, do not let a third
+        # instance ship.
+        $cases = @(
+            @{ Path = 'AGENTS.md'; MaxBytes = 10240; MaxLines = 80 }
+            @{ Path = 'rules/global/common.md'; MaxBytes = 16384; MaxLines = 130 }
+        )
+        foreach ($case in $cases) {
+            $facts = Get-GlobalRuleFileFacts (Join-Path $repoRoot $case.Path)
+            $facts.exists | Should -BeTrue -Because ("{0} is part of the rule estate" -f $case.Path)
+            $facts.lines | Should -BeLessOrEqual $case.MaxLines -Because ("{0} line budget" -f $case.Path)
+            ($facts.bytes + $facts.lines) | Should -BeLessOrEqual $case.MaxBytes -Because ("{0} must still fit {1} bytes after CRLF normalization" -f $case.Path, $case.MaxBytes)
+        }
+    }
 }
