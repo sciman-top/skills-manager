@@ -25,6 +25,11 @@ function Test-ConditionalReferenceContract($Repo) {
         -not [string]::IsNullOrWhiteSpace([string]$Repo.retirement_trigger)
 }
 
+# Dot-sourcing (unit tests import only the Test-* helpers above) must not run
+# the fail-closed environment checks; external reference state belongs to
+# explicit verify runs, not to ordinary test loading.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 try { $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json }
 catch { throw "reference shelf manifest cannot be parsed: $($_.Exception.Message)" }
 
