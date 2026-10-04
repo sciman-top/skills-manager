@@ -290,3 +290,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Fixture diff check failed.' }
 原始样例的行为检查应失败；合规修复应为 `cases=11 failed=0`，覆盖空/单/多项、大小写、空白、首次顺序与拼写、文化无关比较、输入不变及幂等。复验还要求没有新增文件、暂存或提交，且只有 `Labels.ps1` 的修改；无输出的普通 diff 不能独自证明这些事实。被测副本之外的基线记录和原始事件应一并保留，只有可观察到的表面才记为该宿主验收。
 
 此样例证明一条受控修复与审查路径，不证明全部技能、自然项目验收或效率提升。性能与费用仍按第 7 节在真实任务中观察；本项目不负责调度这段观察，也不以完成等待时长作为日常编码门禁。
+
+## 11. 本仓约束的裁决位置与强化边界
+
+通用根因、权限与 hook 的能力边界见[通用指南第 8 节](ai-coding-general-guide.md#8-约束为何失效怎样形成可执行裁决)。本仓沿现有入口强化，不把冷技能 admission 扩成所有普通编码任务的前置系统。
+
+| 当前约束 | 现有入口 | 证明范围与强化位置 |
+| --- | --- | --- |
+| 日常目标、写集、最低证明和 stop | 根 `AGENTS.md`、`overrides/custom/ai-coding-workflow/SKILL.md` | 语义指导；具体行为由目标仓已有测试证明，宿主副作用由其权限限制 |
+| 冷技能闭包与受控执行 | `src/Domain/ExecutionAdmission.ps1`、router、native-agent bridge、`scripts/hooks/claude-cold-skill-guard.ps1` | 只覆盖对应调用链；helper/hash 测试不是 OS 隔离，hook 覆盖另做新会话验收 |
+| 审查后的规则写入与回滚 | 现有 Rule Estate 和全局规则投影事务 | 授权、精确目标、before hash 与回滚在实际写入口裁决；文件相等只证明投影 |
+| 比例门禁与生成漂移 | `scripts/quality/resolve-gate-profile.ps1`、`run-local-quality-gates.ps1`、`.github/workflows/ci.yml` | 本地默认 auto；CI 复用同一选档并 `-CheckGenerated`，不在 Git hook 或 Stop hook 再跑一份 full |
+| 临时文件提交检查 | `.githooks/pre-commit` | 本地便利检查，可绕过；不是 CI 必需检查或任务写集准入 |
+| 集成前必须通过检查 | 现有 CI job，加远端 required status checks / ruleset | 从当前 check-runs 核实检查名与 app 来源，再经显式授权绑定主分支；workflow 存在不等于远端已强制 |
+| 工作流的实际宿主效果 | 第 10 节的隔离样例与独立复验 | 仅证明该次受控路径；`host_loaded` 和 `live_accepted` 不能由文本测试或 doctor 推导 |
+
+规则/技能源修改后按既有构建和投影链更新；用归一化正文或正确字节口径核对内容，再在目标宿主新会话观察加载。投影、信任或权限变更需其明确授权，不能用另一会话或另一宿主的成功补记验收。
+
+远端强化优先将已有 CI 检查设为必需并绑定预期 app，检查绕过权限，按生效策略走 PR 集成。规则应用前预演失败检查、未完成检查和合法通过路径；策略或权限变更与仓库内编码分别授权。当前远端状态在执行时查询，不在本文保存历史成功结论。
