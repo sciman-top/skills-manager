@@ -61,7 +61,10 @@ Describe 'Skill projection profiles' {
 
         $config.PSObject.Properties['managed_link_includes'] | Should -BeNullOrEmpty
         $config.PSObject.Properties['managed_link_excludes'] | Should -BeNullOrEmpty
-        (Get-Item -LiteralPath $skillPath).Length | Should -BeLessOrEqual 4500
+        # Budget is content bytes: normalize CRLF checkouts away so the pinned
+        # limit does not flip with the local core.autocrlf setting.
+        $lfBytes = [Text.Encoding]::UTF8.GetByteCount(([IO.File]::ReadAllText($skillPath).Replace("`r`n", "`n")))
+        $lfBytes | Should -BeLessOrEqual 4500
         $text | Should -Match 'Never let a skill invent a new gate'
         $text | Should -Match 'Strict TDD, coverage'
         $text | Should -Match 'capability-router'
