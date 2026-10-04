@@ -17,6 +17,13 @@
 #     -> the splitter uses a renamed copy: ag-split\ag-split-core.exe
 #   * Registering a task requires Interactive + Limited when not elevated;
 #     S4U / Highest / ServiceAccount are rejected with "Access denied".
+#   * 2026-10-04: both tasks upgraded to S4U (elevated registration) so the
+#     watchdog console no longer flashes every 3 min and the core console is
+#     not visible at all (closing it used to kill the splitter). S4U trade-offs:
+#     core access log no longer visible live (use ensure-split.log and
+#     ag-split-live-acceptance.ps1 instead), and WM_SETTINGCHANGE broadcast
+#     from the watchdog reaches no interactive window (persistent env/proxy
+#     registry writes still land in the real user hive while logged on).
 
 $ErrorActionPreference = 'Continue'
 
@@ -37,7 +44,18 @@ foreach ($p in @($XRAY, $CFG, $ENSURE, $PWSH)) {
     if (-not (Test-Path $p)) { Say "ERROR: missing $p"; exit 1 }
 }
 
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+# S4U ("run whether logged on or not", no stored password) runs both tasks in a
+# non-interactive session: no per-3-min console flash, no visible core console.
+# It needs an elevated shell; fall back to Interactive when not elevated
+# (the pre-2026-10-04 behavior).
+$id = [Security.Principal.WindowsIdentity]::GetCurrent()
+if (([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $logonType = 'S4U'
+} else {
+    $logonType = 'Interactive'
+    Say 'WARNING: not elevated -> Interactive registration (console will flash); re-run elevated for S4U'
+}
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType $logonType -RunLevel Limited
 $logon     = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
 # ---------- 1. splitter core ----------
