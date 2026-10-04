@@ -31,6 +31,18 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?i)current help, schema, documentation and actual inputs'
     }
 
+    It 'keeps the reusable task contract and failure recovery in the resident entrypoint' {
+        $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
+
+        foreach ($field in @('Goal:', 'Context:', 'Constraints:', 'Exact write set:', 'Minimum proof:', 'Done when:', 'Stop:')) {
+            $skill | Should -Match ([regex]::Escape($field))
+        }
+        $skill | Should -Match '(?i)After two\s+failed corrections'
+        $skill | Should -Match '(?i)fresh/cleared or compacted context'
+        $skill | Should -Match '(?i)evidence, not permission'
+        $skill | Should -Match '(?i)Report gaps, not style preferences'
+    }
+
     It 'retains the explicit-use constraint for strict TDD' {
         $metadata = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/agents/openai.yaml') -Raw
         $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/SKILL.md') -Raw

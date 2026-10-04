@@ -24,7 +24,7 @@
 
 | 实践取舍 | 本仓机制锚点 |
 | --- | --- |
-| 上下文保持相关；一个任务围绕一个可验收目标 | `ai-coding-workflow` 第 3 节：重读当前事实、按需用短胶囊交接；独立调查仅在授权且并行净收益为正时委派 |
+| 上下文保持相关；一个任务围绕一个可验收目标 | `ai-coding-workflow` 的 `Freeze the task` / `Resume and persist`：重读当前事实、按需用短胶囊交接；独立调查仅在授权且并行净收益为正时委派 |
 | AGENTS.md/skills 短而准："删掉会致错吗"检验；重复犯错→retrospective→才入规则 | `src/Domain/SkillMetadata.ps1`（description≤1024、name≤64、frontmatter、块标量）；`RuleDiagnostics.ps1`（global 16384B/130 行、project 10240B/80 行 byte/line budget） |
 | Prompt 四要素 Goal/Context/Constraints/Done-when | 根 AGENTS.md 日常合同：Goal / Exact write set / Minimum proof / Stop |
 | 探索→计划→实现→提交；清晰的小改动直接推进 | `ai-coding-workflow` 的 tiny/direct、normal、high-risk；宿主计划入口以当前可用工具为准 |
@@ -45,7 +45,7 @@
 | 逐步微管理、盯着 agent 看 | 单主执行者自主完成闭环；仅在已授权、写集互斥、能独立验证且净收益为正时并行 | ai-coding-workflow skill 的执行姿态与 task-fit 节 |
 | 做错目标或自证正确 | 用具体用户操作定义验收；重要改动独立复核需求、diff、反例 | 任务合同与已有 review skill |
 | 看不到真实行为 | 按受影响行为选观察证据；缺失时报告未验收边界 | 本文第 8 节；已有测试、日志和宿主工具 |
-| 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | ai-coding-workflow 第 2 节；本文 5.3 审查模板 |
+| 审查诱发过度设计（gap-hunting） | 审查者只报正确性/相关问题，不给风格与"可改进"建议；fresh context 审查 | `ai-coding-workflow` 的 `Executor, tools and review`；本文 5.3 审查模板 |
 | 缺少 build/test 命令 | 入口与最低门禁命令写进项目 AGENTS.md | 根 AGENTS.md 第 1 节 entrypoint、C 节最低门禁 |
 | 将输入或工具故障误判为模型推理不足 | 分别检查输入、工具执行、认证、额度、端点与协议；证据不足时不改模型配置 | 本文第 4 节；宿主当前工具输出与官方配置说明 |
 | 全仓灌入上下文、照搬其他仓目录约定 | 从受影响入口追踪调用方、接口定义与已有测试，只为未决问题补读；以目标仓源文件/生成物契约为准 | ai-coding-workflow 的 Scope and depth 与 Resume and capabilities |
