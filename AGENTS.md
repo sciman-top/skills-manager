@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.84
-**最后更新**: 2026-10-01
+**最后更新**: 2026-10-04
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 通过 `.agents/rules/00-project.md` 的受控 `@../../AGENTS.md` 适配器承接。
@@ -36,6 +36,6 @@
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 
 ## D. 回滚与收口
-- Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。
+- Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 required checks（`test`，strict）：直推 `main` 会被拒，合入走 推分支 → PR → CI 绿 → merge。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
 - 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件。
