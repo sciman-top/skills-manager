@@ -11,7 +11,11 @@ Evidence must match the claim. Before reporting completion:
    that directly proves it.
 2. Reuse an exact-current passed receipt when its source fingerprint and dirty
    policy match. Otherwise run the focused affected check.
-3. Read the exit code and relevant failure count or invariant result.
+3. Read the exit code from the runner itself and the failure count from
+   the structured summary line (e.g. `Tests: ... failed=N`); a shell
+   pipeline tail is not evidence — after `| tail`, `$?` reports the tail
+   and reads false-zero past a real failure. Capture codes pipeline-safe:
+   `pwsh -File <runner>; echo "exit=$LASTEXITCODE"`.
 4. Report the proven boundary. Distinguish repository verification, host load,
    real invocation, external effect, and live acceptance.
 
