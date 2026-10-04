@@ -1,6 +1,6 @@
 # AI 编码效能手册（参考件）
 
-**定位**：本文件是 reference，不是规则、不是门禁，也不以全文进入任何宿主上下文（AGENTS.md 与 rules/global 不引用它）。高频稳定的执行闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`；本文件保留完整映射、预算观测和模型分工背景。数字必须带来源与核实日期；与现行宿主文档冲突时以宿主文档为准。
+**定位**：本文件是 reference，不是规则、不是门禁，也不以全文进入任何宿主上下文（AGENTS.md 与 rules/global 不引用它）。跨项目通用实践（不绑定本仓机制）见 [AI 编码效能通用指南](ai-coding-general-guide.md)；本文件负责"本仓怎么映射"，该指南负责"通用为什么"。高频稳定的执行闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`；本文件保留完整映射、预算观测和模型分工背景。数字必须带来源与核实日期；与现行宿主文档冲突时以宿主文档为准。
 
 ## 1. 六杠杆 → 本仓机制映射
 

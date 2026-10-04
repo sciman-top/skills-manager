@@ -21,8 +21,12 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 - [Reviewed rule-estate change-set](rule-estate-reviewed-change-set.md)：多目标规则写入的唯一 reviewed input 格式。
 - [Reference shelf](../EXTERNAL_REFERENCE_REPO_TIERS.md)：外置参考仓的 owned-root 与刷新边界。
+
+附属参考件：
+
 - [Cold-skill routing acceptance runbook](../runbooks/cold-skill-routing-acceptance.md)：host-specific 验收的输入、receipt 和停止条件；它不替代仓库测试。
 - [AI 编码效能手册](ai-coding-playbook.md)：六杠杆/常见坑到既有机制的映射、宿主元数据预算观测口径（`capability-inventory` 的 `metadata_budget`）、GPT/GLM 分工与资产积累节奏。它仍是参考件，不是规则或门禁；高频稳定闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`，手册全文不直接进入宿主上下文。
+- [AI 编码效能通用指南](ai-coding-general-guide.md)：面向**任意项目**的通用实践与常见问题清单（上下文工程、任务定义四要素、工作流四阶段、指令减法、验证闭环、沉淀资产；六大类坑与防法），每条标注官方来源与核实日期。它同样是参考件，不是规则或门禁，也不进入宿主上下文。与手册的分工固定为：**本指南讲"通用为什么"，手册讲"本仓怎么映射"**——同一事实只在一处维护，避免两份文档漂移。
 
 运行真值不写入本目录：
 
