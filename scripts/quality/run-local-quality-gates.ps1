@@ -2,7 +2,6 @@
 param(
     [ValidateSet('docs', 'quick', 'focused', 'full', 'auto')]
     [string]$Profile = 'auto',
-    [switch]$AllowDirtyWorktree,
     [switch]$CheckGenerated,
     [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
@@ -115,7 +114,6 @@ try {
         throw 'Focused profile requires -TestPath or -TestName.'
     }
     # Local builds regenerate the bundle; CI checks the submitted bytes before tests.
-    # AllowDirtyWorktree remains accepted for existing callers.
     # The independent preset suite uses disposable host roots and never consumes
     # the main CLI bundle. Mixed selections and full still validate that bundle.
     $modelPresetOnly = $Profile -eq 'focused' -and $Verifier.Count -eq 0 -and $TestPath.Count -eq 1 -and
@@ -144,7 +142,7 @@ try {
         @()
     }
     elseif ($Profile -eq 'full') {
-        @('lock', 'integrity', 'config', 'scheduler', 'mor')
+        @('lock', 'integrity', 'config', 'scheduler')
     }
     else {
         # 'mor' validates the optional design tuple matrix. Implemented preset

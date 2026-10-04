@@ -5,7 +5,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
     }
 
     It 'pins checkout and the Pester package bytes and gives full tests a realistic bounded budget' {
-        $script:workflow | Should -Match 'timeout-minutes:\s*45'
+        $script:workflow | Should -Match 'timeout-minutes:\s*15'
         $script:workflow | Should -Match 'timeout-minutes:\s*30'
         $script:workflow | Should -Match 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         $script:workflow | Should -Not -Match 'ensure-test-runtime\.ps1'

@@ -66,7 +66,7 @@ git diff --check
 For runtime, packaging, public-contract, or cross-surface risk, freeze inputs and run the full gate once without pre-running its internal commands:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
 ```
 
 Repository verification proves `repo_verified`. It does not prove that a new shell session loaded changed files or that a live MCP/skill workflow was accepted.

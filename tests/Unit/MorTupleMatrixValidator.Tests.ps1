@@ -28,10 +28,14 @@ Describe 'MOR tuple matrix validator fail-closed behavior' {
         ($output -join "`n") | Should -Match 'MOR tuple matrix validation passed'
     }
 
-    It 'runs the implementation contract in the full gate and explicit mor verifier' {
+    It 'keeps the optional matrix verifier explicit while preset behavior stays in Pester' {
         $gate = Get-Content -LiteralPath $script:gatePath -Raw
-        $gate | Should -Match "(?s)Profile -eq 'full'.*'mor'"
-        $gate | Should -Match 'src\\model-orchestration\\Test-ModelPreset\.ps1'
+        $fullBlock = [regex]::Match($gate, '(?s)\$selectedVerifiers =.*?elseif \(\$Profile -eq ''full''\) \{(?<body>.*?)\r?\n\s*\}\r?\n\s*else').Groups['body'].Value
+        $fullBlock | Should -Match "\@\('lock', 'integrity', 'config', 'scheduler'\)"
+        $fullBlock | Should -Not -Match "'mor'"
+        $gate | Should -Match 'validate-mor-tuple-matrix\.ps1'
+        $gate | Should -Match "\[ValidateSet\('lock', 'integrity', 'config', 'scheduler', 'mor'\)\]"
+        (Get-Content -LiteralPath (Join-Path $repoRoot 'tests\\Unit\\ModelPreset.Tests.ps1') -Raw) | Should -Match 'src/model-orchestration/Test-ModelPreset\.ps1'
     }
 
     It 'rejects an empty object' {

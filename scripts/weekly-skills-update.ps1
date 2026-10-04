@@ -98,7 +98,7 @@ try {
         throw ('Weekly update produced an unexpected tracked write set: {0}' -f ($afterUpdate -join ', '))
     }
 
-    Invoke-WeeklyNative -FilePath 'pwsh' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gatePath, '-Profile', 'quick', '-AllowDirtyWorktree') | Out-Null
+    Invoke-WeeklyNative -FilePath 'pwsh' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gatePath, '-Profile', 'quick') | Out-Null
     Invoke-WeeklyNative -FilePath 'git' -Arguments @('-C', $repoRoot, 'add', '--', 'skills.lock.json') | Out-Null
     Invoke-WeeklyNative -FilePath 'git' -Arguments @('-C', $repoRoot, 'diff', '--cached', '--check') | Out-Null
     Invoke-WeeklyNative -FilePath 'git' -Arguments @('-C', $repoRoot, 'commit', '-m', 'chore: 每周更新技能来源锁定') | Out-Null
