@@ -16,22 +16,21 @@ BeforeAll {
 }
 Describe 'Workspace rule estate audit' {
     BeforeAll {
-        # One prepared git repository is copied per fixture directory instead of
-        # running `git init` five times per test. A git process spawn costs ~0.4s
-        # here (and can stall for minutes when the sandbox host is busy), while
-        # copying the 26-entry .git tree costs ~0.05s and yields byte-identical
-        # repository state (same HEAD, unborn main, no remotes, clean status).
-        # The template lives outside $TestDrive so it never enlarges the
-        # per-block TestDrive enumeration that Pester performs on every block.
-        $script:RuleEstateGitTemplate = Join-Path ([IO.Path]::GetTempPath()) ('rule-estate-git-template-' + [guid]::NewGuid().ToString('N'))
-        $null = New-Item -ItemType Directory -Path $script:RuleEstateGitTemplate -Force
-        & git -C $script:RuleEstateGitTemplate init -q -b main
-        if ($LASTEXITCODE -ne 0) { throw 'rule estate git template initialization failed' }
+        # Use one functional bare repository as the linked-worktree target for
+        # every fixture. RuleEstate validates the declared Git profile against
+        # real Git state, so a marker-only `.git` file would make the profile
+        # checks fail with Git exit code 2. A shared bare target keeps the
+        # fixture tree small without copying a nested `.git` directory for
+        # every repository.
+        $script:RuleEstateGitDir = Join-Path ([IO.Path]::GetTempPath()) ('rule-estate-git-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:RuleEstateGitDir -Force
+        & git init --bare --initial-branch=main $script:RuleEstateGitDir | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'rule estate shared git initialization failed' }
 function New-RuleEstateFixture {
         $workspace = Join-Path $TestDrive ('workspace-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $workspace -Force | Out-Null
         foreach ($name in @('repo-a', 'repo-b', 'external', 'docs', '文档')) {
             $path = Join-Path $workspace $name; New-Item -ItemType Directory -Path $path -Force | Out-Null
-            Copy-Item -LiteralPath (Join-Path $script:RuleEstateGitTemplate '.git') -Destination (Join-Path $path '.git') -Recurse
+            [IO.File]::WriteAllText((Join-Path $path '.git'), ("gitdir: {0}`n" -f $script:RuleEstateGitDir))
             if ($name -notin @('external', 'docs', '文档')) {
                 @'
 # Project
@@ -99,9 +98,10 @@ verify drift
     }
     }
     AfterAll {
-        if (-not [string]::IsNullOrWhiteSpace([string]$script:RuleEstateGitTemplate) -and (Test-Path -LiteralPath $script:RuleEstateGitTemplate)) {
-            [IO.Directory]::Delete($script:RuleEstateGitTemplate, $true)
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:RuleEstateGitDir) -and (Test-Path -LiteralPath $script:RuleEstateGitDir)) {
+            [IO.Directory]::Delete($script:RuleEstateGitDir, $true)
         }
+        $script:RuleEstateGitDir = $null
     }
 
     It 'discovers direct Git roots, applies exclusions, and reports registry drift' {

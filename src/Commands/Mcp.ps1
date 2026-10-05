@@ -1032,12 +1032,40 @@ function Get-McpServerNamesFromJsonText([string]$jsonText) {
 function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
     if ([string]::IsNullOrWhiteSpace($tomlText)) { return @() }
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in @(($tomlText -split "`r?`n"))) {
-        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\.\]\s]+)(?:\.[^\]]+)?\]\s*$')
-        if ($m.Success) {
-            $set.Add([string]$m.Groups[1].Value) | Out-Null
+    $currentName = ''
+    $currentEnabled = $true
+    $currentDirectSection = $false
+
+    $flush = {
+        if (-not [string]::IsNullOrWhiteSpace($currentName) -and $currentEnabled) {
+            $set.Add($currentName) | Out-Null
         }
     }
+
+    foreach ($line in @(($tomlText -split "`r?`n"))) {
+        $section = [regex]::Match([string]$line, '^\s*\[([^\]]+)\]\s*(?:#.*)?$')
+        if ($section.Success) {
+            & $flush
+            $currentName = ''
+            $currentEnabled = $true
+            $currentDirectSection = $false
+
+            $direct = [regex]::Match([string]$section.Groups[1].Value, '^mcp_servers\.([^\.\s]+)$')
+            if ($direct.Success) {
+                $currentName = [string]$direct.Groups[1].Value
+                $currentDirectSection = $true
+            }
+            continue
+        }
+
+        if ($currentDirectSection) {
+            $enabled = [regex]::Match([string]$line, '^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($enabled.Success) {
+                $currentEnabled = [string]::Equals($enabled.Groups[1].Value, 'true', [System.StringComparison]::OrdinalIgnoreCase)
+            }
+        }
+    }
+    & $flush
     return @($set | Sort-Object)
 }
 
