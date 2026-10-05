@@ -19515,8 +19515,13 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
-    $workbuddyFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)
-    $workbuddyDefaultRoot=$(if($workbuddyFromEnv){$env:CODEBUDDY_CONFIG_DIR}else{Join-Path $userProfile '.codebuddy'})
+    # WorkBuddy/CodeBuddy has shipped both names for its user config root.
+    # Match the host resolver: explicit WORKBUDDY_CONFIG_DIR wins, then the
+    # legacy CODEBUDDY_CONFIG_DIR, then an existing .workbuddy-ai root, and
+    # finally the documented .codebuddy default.  Do not create a root here.
+    $workbuddyEnvName = if(-not[string]::IsNullOrWhiteSpace($env:WORKBUDDY_CONFIG_DIR)){'WORKBUDDY_CONFIG_DIR'}elseif(-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)){'CODEBUDDY_CONFIG_DIR'}else{''}
+    $workbuddyFromEnv = $workbuddyEnvName -ne ''
+    $workbuddyDefaultRoot = if($workbuddyFromEnv){if($workbuddyEnvName -eq 'WORKBUDDY_CONFIG_DIR'){$env:WORKBUDDY_CONFIG_DIR}else{$env:CODEBUDDY_CONFIG_DIR}}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy-ai') -PathType Container){Join-Path $userProfile '.workbuddy-ai'}else{Join-Path $userProfile '.codebuddy'}
     # 默认启用只看宿主根目录是否存在，不依赖已投影文件（宿主重置删除规则文件后可自动重建投影）；
     # CODEBUDDY_CONFIG_DIR 指向不存在目录时由 Resolve-OptionalWorkBuddyGlobalRuleRoot 抛错。
     $antigravityDefaultEnabled=Test-Path -LiteralPath $antigravityDefaultRoot -PathType Container
@@ -19532,7 +19537,7 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         antigravity_user_root=$(if($antigravityDefaultEnabled){$antigravityDefaultRoot}else{''})
         antigravity_user_root_source=$(if($antigravityDefaultEnabled){'default'}else{'disabled_until_explicit_root'})
         workbuddy_user_root=$(if($workbuddyDefaultEnabled){$workbuddyDefaultRoot}else{''})
-        workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){'CODEBUDDY_CONFIG_DIR'}else{'default'})
+        workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){$workbuddyEnvName}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
@@ -19597,7 +19602,7 @@ function Resolve-OptionalWorkBuddyGlobalRuleRoot($Options) {
     $candidate = [string]$Options.workbuddy_user_root
     if ([string]::IsNullOrWhiteSpace($candidate)) { return '' }
     if (Test-Path -LiteralPath $candidate -PathType Container) { return [IO.Path]::GetFullPath($candidate) }
-    if ($Options.workbuddy_user_root_source -in @('cli','CODEBUDDY_CONFIG_DIR')) { throw "WorkBuddy user root does not exist or is not a directory: $candidate" }
+    if ($Options.workbuddy_user_root_source -in @('cli','WORKBUDDY_CONFIG_DIR','CODEBUDDY_CONFIG_DIR')) { throw "WorkBuddy user root does not exist or is not a directory: $candidate" }
     return ''
 }
 
