@@ -8,7 +8,6 @@ description: Complete implementation and maintenance tasks with repository-groun
 Use `ai-coding` for RO templates.
 
 ## Spend context like a budget
-
 Read the current diff, project contract, affected caller, source and checks;
 freeze the smallest useful capsule:
 
