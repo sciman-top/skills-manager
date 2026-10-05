@@ -7,6 +7,12 @@ Describe 'CLI alias dispatch' {
         @{ Command = 'mcp-install'; Expected = 'install'; Tokens = @('fixture', '--json') }
         @{ Command = 'ai-risk-control'; Expected = 'risk'; Tokens = @('fixture', '--json') }
         @{ Command = '风险控制'; Expected = 'risk'; Tokens = @('fixture', '--json') }
+        # release-update returns a string only on its --json branch (the non-JSON branch
+        # returns a PSObject), so this pins both the guard and the ASCII seam.
+        @{ Command = 'release-update'; Expected = 'release'; Tokens = @('--json') }
+        @{ Command = '发行更新'; Expected = 'release'; Tokens = @('--json') }
+        @{ Command = 'release-update-schedule'; Expected = 'release-schedule'; Tokens = @('--json') }
+        @{ Command = '发行更新调度'; Expected = 'release-schedule'; Tokens = @('--json') }
         @{ Command = '帮助'; Expected = 'help'; Tokens = @() }
         @{ Command = 'help'; Expected = 'help'; Tokens = @() }
         @{ Command = '--help'; Expected = 'help'; Tokens = @() }
@@ -35,6 +41,8 @@ Describe 'CLI alias dispatch' {
                 }
                 function 安装MCP($Tokens) { @{ handler = 'install'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
                 function Invoke-AiRiskControlCommand($Tokens) { [pscustomobject]@{ handler = 'risk'; tokens = @($Tokens) } }
+                function Invoke-ReleaseUpdateCommand($Tokens) { @{ handler = 'release'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
+                function Invoke-ReleaseUpdateScheduleCommand($Tokens) { @{ handler = 'release-schedule'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
                 function 帮助 { @{ handler = 'help'; tokens = @() } | ConvertTo-Json -Compress }
                 & $MainPath
             }
