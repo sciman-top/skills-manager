@@ -31,6 +31,21 @@ $ErrorActionPreference = 'Stop'
 $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1'
 $manifest = & $bootstrap
 
+function Stop-TestRunnerProcess([Diagnostics.Process]$Process) {
+    if ($null -eq $Process) { return }
+    # A timeout boundary is inherently racy: the worker may exit after the
+    # HasExited check but before Kill. Swallow that expected race and preserve
+    # the caller's timeout/receipt diagnostic instead of replacing it with an
+    # InvalidOperationException from Kill().
+    try {
+        if (-not $Process.HasExited) {
+            try { $Process.Kill($true) } catch { }
+        }
+    }
+    catch { }
+    try { $null = $Process.WaitForExit(5000) } catch { }
+}
+
 function Invoke-RepositoryPester {
     param(
         [string[]]$Paths,
@@ -248,7 +263,7 @@ if ($shardCandidates.Count -gt $MaxParallel) {
         Start-Sleep -Milliseconds 200
     }
     if ($shardTimedOut) {
-        foreach ($job in $jobs) { if (-not $job.process.HasExited) { $job.process.Kill($true) } }
+        foreach ($job in $jobs) { Stop-TestRunnerProcess $job.process }
         throw ("Test shards exceeded {0}s timeout." -f $ShardTimeoutSeconds)
     }
 
@@ -348,8 +363,7 @@ foreach ($argument in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PS
 $process = [Diagnostics.Process]::Start($startInfo)
 $targetedTimer = [Diagnostics.Stopwatch]::StartNew()
 if (-not $process.WaitForExit($targetedTimeoutSeconds * 1000)) {
-    if (-not $process.HasExited) { $process.Kill($true) }
-    $null = $process.WaitForExit(5000)
+    Stop-TestRunnerProcess $process
     $process.Dispose()
     throw ("Targeted tests exceeded {0}s timeout; the worker was killed. Batch: {1}. Job: {2}. Receipt: {3}" -f $targetedTimeoutSeconds, (@($paths) -join '; '), $targetedJobPath, $targetedReceiptPath)
 }
