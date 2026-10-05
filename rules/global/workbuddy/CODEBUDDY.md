@@ -49,7 +49,7 @@
 - 硬上限：全局 `130 lines/16 KiB`、项目根 `80 lines/10 KiB`；85%=`warning`，95%=`addition_blocked`，先拆低频；例外由仓库契约记录。
 ## B. WorkBuddy 平台差异
 ### B.1 加载链
-- 用户规则根为 `CODEBUDDY_CONFIG_DIR`，未设置时为 `~/.codebuddy`；依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
+- 用户规则根优先取 `WORKBUDDY_CONFIG_DIR`，其次取兼容变量 `CODEBUDDY_CONFIG_DIR`；均未设置时，已有 `~/.workbuddy-ai` 优先于 `~/.codebuddy`。依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
 - 项目从 cwd 向上遍历到盘符根之前，再按外层到内层加载；每层分别在目录本身与 `.codebuddy/` 中依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`、`AGENTS.md`、`AGENTS.mdc`，各取首个成功解析项。
 - 当前 cwd 的 `.codebuddy/rules/` 与 `CODEBUDDY.local.md`/`CODEBUDDY.local.mdc` 另行加载；个人主目录的 `AGENTS.md` 可能是祖先项目规则，不等同于用户级规则。
 - 项目根 `AGENTS.md` 保持唯一项目真源；优先候选存在时先审查遮蔽与 import。静态审查只读取授权仓内候选；祖先、imports、条件规则和加载顺序须由 fresh host evidence 补证。
