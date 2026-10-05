@@ -43,6 +43,15 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?i)Report gaps, not style preferences'
     }
 
+    It 'keeps the resident context budget and comprehension rules explicit' {
+        $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
+
+        $skill | Should -Match '(?i)removing it\s+would cause a mistake'
+        $skill | Should -Match '(?i)bloated resident\s+file makes the model\s+ignore the rules that matter'
+        $skill | Should -Match '(?i)Load the rest just in time'
+        $skill | Should -Match '(?i)Green checks prove behavior, not comprehension'
+    }
+
     It 'retains the explicit-use constraint for strict TDD' {
         $metadata = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/agents/openai.yaml') -Raw
         $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/test-driven-development/SKILL.md') -Raw
