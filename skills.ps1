@@ -16498,7 +16498,6 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server, [string]$CodexRoot =
     }
     $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-node-cache-wrapper.mjs"
     $entry = [ordered]@{
-        transport = "stdio"
         command = "node"
         args = @($wrapperPath, $packageSpec, $binRel) + @($extraArgs)
     }
@@ -16512,7 +16511,6 @@ function Convert-CodexPostgresServerToCachedNodeWrapper($server, [string]$CodexR
 
     $wrapperPath = Join-Path (Get-CodexMcpScriptsRoot $CodexRoot) "mcp-postgres-env-wrapper.mjs"
     $entry = [ordered]@{
-        transport = "stdio"
         command = "node"
         args = @($wrapperPath)
     }
@@ -16568,7 +16566,11 @@ function Convert-McpServersToCodexConfigMap($servers, [string]$CodexRoot = '') {
         }
         $entry = [ordered]@{}
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
-        $entry.transport = $transport
+        # Codex infers the transport from `command` (stdio) vs `url` (http) and does
+        # not recognise an explicit `transport` key: `codex --strict-config` fails
+        # closed with "unknown configuration field mcp_servers.<name>.transport",
+        # and non-strict sessions log "unrecognized configuration setting ... is
+        # ignored" once per server. `$transport` is kept for branching only.
         if ($transport -eq "stdio") {
             $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s $CodexRoot
             if ($null -eq $wrapped) {
