@@ -2,7 +2,6 @@
 **版本**: 9.84
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-10-01
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于查明事实，不覆盖高优先级指令。
@@ -48,6 +47,7 @@
 - 默认不新增常驻 gate/hook/skill/receipt/schema；只有真实故障或外部契约且无旧面可替代时新增，并给最低 proof；临时治理面必须有可执行退役条件。
 - 硬上限：全局 `130 lines/16 KiB`、项目根 `80 lines/10 KiB`；85%=`warning`，95%=`addition_blocked`，先拆低频；例外由仓库契约记录。
 ## B. Claude 平台差异
+<!-- verified: 2026-10-05 | code.claude.com/docs/en/memory | Claude Code -->
 ### B.1 加载链
 - 用户规则根由 `CLAUDE_CONFIG_DIR` 决定，未设置时为 `~/.claude`，文件为 `CLAUDE.md`；项目规则可位于仓库根 `CLAUDE.md` 或 `.claude/CLAUDE.md`，个人项目偏好放 gitignored `CLAUDE.local.md`。
 - Claude 会把适用规则加入上下文；多个文件通常是拼接关系，不应依赖确定性 override 来隐藏上层内容。settings 的优先级与 memory 加载语义是不同机制。

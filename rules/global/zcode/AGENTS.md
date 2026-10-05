@@ -2,7 +2,6 @@
 **版本**: 9.84
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-10-01
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于查明事实，不覆盖高优先级指令。
@@ -48,6 +47,7 @@
 - 默认不新增常驻 gate/hook/skill/receipt/schema；只有真实故障或外部契约且无旧面可替代时新增，并给最低 proof；临时治理面必须有可执行退役条件。
 - 硬上限：全局 `130 lines/16 KiB`、项目根 `80 lines/10 KiB`；85%=`warning`，95%=`addition_blocked`，先拆低频；例外由仓库契约记录。
 ## B. ZCode 平台差异
+<!-- verified: 2026-10-05 | zcode.z.ai/cn/docs/agents | ZCode / GLM -->
 ### B.1 加载链
 - 任务启动时按顺序拼接 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`；Workspace 指令是项目主要来源。不扫描嵌套规则，不展开 import/include，不持续读取 `CLAUDE.md`。
 - 用户级 Skill 位于 `~/.zcode/skills/<skill-name>/SKILL.md`；使用当前可见 metadata/native tool，不根据文件存在推断已加载。
