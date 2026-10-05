@@ -6577,11 +6577,22 @@ function Get-RuleEstateTargets {
     $excluded = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @('external', 'docs', '文档') + @($ExcludeNames)) { if (-not [string]::IsNullOrWhiteSpace($name)) { $excluded.Add($name.Trim()) | Out-Null } }
     $targets = New-Object System.Collections.Generic.List[object]
+    $unclassified = New-Object System.Collections.Generic.List[object]
     foreach ($directory in @([System.IO.Directory]::GetDirectories($root) | Sort-Object)) {
         $name = [System.IO.Path]::GetFileName($directory)
         if ($excluded.Contains($name)) { continue }
         $gitMarker = Join-Path $directory '.git'
-        if (-not [System.IO.Directory]::Exists($gitMarker) -and -not [System.IO.File]::Exists($gitMarker)) { continue }
+        if (-not [System.IO.Directory]::Exists($gitMarker) -and -not [System.IO.File]::Exists($gitMarker)) {
+            # A non-excluded workspace directory must not disappear from the
+            # inventory merely because it lacks a Git marker. The caller may
+            # classify it explicitly, but the audit must expose the boundary.
+            $unclassified.Add([pscustomobject][ordered]@{
+                name = $name
+                path = [System.IO.Path]::GetFullPath($directory).TrimEnd('\', '/')
+                reason = 'missing_git_marker'
+            }) | Out-Null
+            continue
+        }
         $targets.Add([pscustomobject][ordered]@{
             name = $name
             path = [System.IO.Path]::GetFullPath($directory).TrimEnd('\', '/')
@@ -6616,6 +6627,8 @@ function Get-RuleEstateTargets {
         exclusion_names = @($excluded | Sort-Object)
         targets = @($targets.ToArray())
         target_count = $targets.Count
+        unclassified_directories = @($unclassified.ToArray())
+        unclassified_count = $unclassified.Count
         registry = [pscustomobject][ordered]@{
             supplied = $registrySupplied
             registered_count = $registered.Count
@@ -7078,6 +7091,13 @@ function Invoke-RuleEstateAudit {
     $audits = New-Object System.Collections.Generic.List[object]
     foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot $AntigravityUserRoot $WorkBuddyUserRoot)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
+    foreach ($directory in @($inventory.unclassified_directories)) {
+        $findings += [pscustomobject][ordered]@{
+            code = 'workspace_target_unclassified'; severity = 'error'; path = [string]$directory.path
+            disposition = 'adapt'; reason = [string]$directory.reason
+            message = 'A non-excluded workspace directory is not a discovered Git target; classify or initialize it before relying on the estate audit.'
+        }
+    }
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $geminiAdapterPresent = @($audits | Where-Object { [bool]$_.gemini.adapter_present })
     if ($geminiAdapterPresent.Count -gt 0 -and $geminiAdapterPresent.Count -lt $audits.Count) { $findings += [pscustomobject]@{ code = 'workspace_gemini_adapter_presence_mixed'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = ('Repository-root GEMINI.md adapter is present in {0} of {1} targets; unify the Gemini/Antigravity project adapter surface.' -f $geminiAdapterPresent.Count, $audits.Count) } }
@@ -17194,12 +17214,40 @@ function Get-McpServerNamesFromJsonText([string]$jsonText) {
 function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
     if ([string]::IsNullOrWhiteSpace($tomlText)) { return @() }
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in @(($tomlText -split "`r?`n"))) {
-        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\.\]\s]+)(?:\.[^\]]+)?\]\s*$')
-        if ($m.Success) {
-            $set.Add([string]$m.Groups[1].Value) | Out-Null
+    $currentName = ''
+    $currentEnabled = $true
+    $currentDirectSection = $false
+
+    $flush = {
+        if (-not [string]::IsNullOrWhiteSpace($currentName) -and $currentEnabled) {
+            $set.Add($currentName) | Out-Null
         }
     }
+
+    foreach ($line in @(($tomlText -split "`r?`n"))) {
+        $section = [regex]::Match([string]$line, '^\s*\[([^\]]+)\]\s*(?:#.*)?$')
+        if ($section.Success) {
+            & $flush
+            $currentName = ''
+            $currentEnabled = $true
+            $currentDirectSection = $false
+
+            $direct = [regex]::Match([string]$section.Groups[1].Value, '^mcp_servers\.([^\.\s]+)$')
+            if ($direct.Success) {
+                $currentName = [string]$direct.Groups[1].Value
+                $currentDirectSection = $true
+            }
+            continue
+        }
+
+        if ($currentDirectSection) {
+            $enabled = [regex]::Match([string]$line, '^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($enabled.Success) {
+                $currentEnabled = [string]::Equals($enabled.Groups[1].Value, 'true', [System.StringComparison]::OrdinalIgnoreCase)
+            }
+        }
+    }
+    & $flush
     return @($set | Sort-Object)
 }
 
@@ -19638,11 +19686,11 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
     if ($reportRequested) {
-        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path, [string]$_.antigravity_rule_path) })
+        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path, [string]$_.antigravity_rule_path, [string]$_.gemini_path) })
         if (-not [string]::IsNullOrWhiteSpace([string]$options.registry_path)) { $protected += [System.IO.Path]::GetFullPath([string]$options.registry_path) }
         $outPath = Resolve-RuleEstateControlOutput ([string]$options.out_path) ([string]$options.workspace_root) $protected
         foreach ($target in @($report.inventory.targets)) {
-            if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.antigravity_rule_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
+            if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.antigravity_rule_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.gemini_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
         }
         Write-Utf8FileAtomic -Path $outPath -Content $json
     }
@@ -21108,25 +21156,6 @@ function ConvertTo-AuditRequirementSignalArray($Accumulator) {
     return @($result.ToArray())
 }
 
-function Get-AuditEvidenceLines([string]$Content) {
-    if ([string]::IsNullOrWhiteSpace($Content)) { return @() }
-    # 逐行解释器循环是扫描热路径的主体：规则定义行探测用预编译实例（静态
-    # IsMatch 在 15-slot 缓存内反复重解析），容量预分配减少 List 扩容。
-    if ($null -eq $script:AuditRuleDefinitionRegex) {
-        $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
-    }
-    $lines = $Content -split "`r?`n"
-    $result = New-Object System.Collections.Generic.List[object] $lines.Count
-    for ($index = 0; $index -lt $lines.Count; $index++) {
-        $text = $lines[$index]
-        # Scanner metadata is not target behaviour.  Excluding these declarations keeps
-        # a repository from self-reporting the vocabulary used by the scanner itself.
-        if ([string]::IsNullOrWhiteSpace($text) -or $script:AuditRuleDefinitionRegex.IsMatch($text)) { continue }
-        $result.Add([pscustomobject]@{ number = $index + 1; text = $text }) | Out-Null
-    }
-    return @($result.ToArray())
-}
-
 function Test-AuditScannerSelfFile([string]$RelativePath) {
     # When a configured target IS this repository, the scanner's own sources and
     # fixtures describe signal vocabulary; they must not become target evidence.
@@ -21165,7 +21194,11 @@ function Get-AuditRequirementSignalTable {
             [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; regex = [regex]::new("(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*") },
             [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; regex = [regex]::new("(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b") },
             [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; regex = [regex]::new("(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test") },
-            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b") }
+            # backup/recovery 只在有真实数据/状态恢复语义时才算需求。裸
+            # \bbackup\b/\brestore\b 会把包管理器的 NuGet/dotnet restore、
+            # 构建 `--no-restore`、以及 `backup/pre-sync` 这类分支名误判为
+            # 备份能力（实测 9/9 目标仓被误报）。这里要求更明确的搭配。
+            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)|(?:(?:备份|还原|恢复)(?:数据库|数据|系统|配置|状态))") }
         )
     }
     return $script:AuditRequirementSignalTable
@@ -21177,24 +21210,42 @@ function Add-AuditRequirementFactsFromText {
         [string]$Content,
         [string]$Kind,
         [string]$RelativePath,
-        # 热路径调用方对同一内容先解析一次行集再喂两个提取器；传入时跳过重复解析。
-        $Lines = $null
+        # 调用方已做过文件级预筛时把候选集透传进来，跳过重复的整表预筛。
+        [object[]]$CandidateSignals = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
-    # 信号词均不跨行匹配（无 '.'/'\s' 类跨行结构），全内容无命中时任何行
+    # 信号词均不跨行匹配（无 '.'/'\s' 跨行结构），全内容无命中时任何行
     # 也不会命中：先做一轮文件级预筛，把必然为空的行循环整个短路掉。
     # 预筛保持原信号顺序，嵌套序（行外层×信号内层）不变，输出与逐行全表
     # 匹配严格一致。
-    $candidateSignals = @()
-    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
-        if ($signal.regex.IsMatch($Content)) { $candidateSignals += $signal }
+    if ($null -ne $CandidateSignals) {
+        $candidateSignals = @($CandidateSignals)
+    }
+    else {
+        $candidateSignals = @()
+        foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+            if ($signal.regex.IsMatch($Content)) { $candidateSignals += $signal }
+        }
     }
     if ($candidateSignals.Count -eq 0) { return }
-    if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
-    foreach ($line in @($Lines)) {
+    # 行级提取不再物化逐行对象（旧版为每行建 number/text 包装，实测占
+    # 热点主体）。split 行数组 + 候选并集单次探测：探测未命中的行任何
+    # 候选都不会命中（alternation 与逐 pattern 命中性等价），直接跳过，
+    # 命中行才逐候选展开。空行/规则定义行的排除与旧行集准入一致，行号
+    # = 索引+1，证据顺序（行升序×候选表序）不变。
+    $combined = Get-AuditLineProbeRegex @($candidateSignals | ForEach-Object { $_.regex })
+    $lines = [regex]::Split($Content, "\r?\n")
+    if ($null -eq $script:AuditRuleDefinitionRegex) {
+        $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
+    }
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $text = $lines[$index]
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if (-not $combined.IsMatch($text)) { continue }
+        if ($script:AuditRuleDefinitionRegex.IsMatch($text)) { continue }
         foreach ($signal in $candidateSignals) {
-            if ($signal.regex.IsMatch([string]$line.text)) {
-                Add-AuditRequirementEvidence $Accumulator $signal.domain $signal.subject $signal.action $Kind $RelativePath ("{0}:{1}@L{2}" -f $signal.domain, $signal.subject, $line.number)
+            if ($signal.regex.IsMatch($text)) {
+                Add-AuditRequirementEvidence $Accumulator $signal.domain $signal.subject $signal.action $Kind $RelativePath ("{0}:{1}@L{2}" -f $signal.domain, $signal.subject, ($index + 1))
             }
         }
     }
@@ -21222,39 +21273,93 @@ function Get-AuditArtifactSignalTable {
     return $script:AuditArtifactSignalTable
 }
 
+function Get-AuditSourceSignalCandidates([string]$Content) {
+    # 文件级预筛结果同时是下游两个提取器的候选集：同一内容上「哪些信号
+    # 全内容命中」只算一次。此前预筛先跑一遍整表、提取器入口再各跑一遍，
+    # 同一份 pattern 对同一份内容被匹配三次（实测占热点 25-35%）。
+    # 候选集保持信号表顺序，下游行级循环的相对顺序不变，输出严格一致。
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return [pscustomobject]([ordered]@{ requirements = @(); artifacts = @() })
+    }
+    $requirements = New-Object System.Collections.Generic.List[object]
+    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+        if ($signal.regex.IsMatch($Content)) { $requirements.Add($signal) | Out-Null }
+    }
+    $artifacts = New-Object System.Collections.Generic.List[object]
+    foreach ($artifact in @((Get-AuditArtifactSignalTable).artifacts)) {
+        if ($artifact.regex.IsMatch($Content)) { $artifacts.Add($artifact) | Out-Null }
+    }
+    return [pscustomobject]([ordered]@{
+            requirements = @($requirements.ToArray())
+            artifacts    = @($artifacts.ToArray())
+        })
+}
+
+function Get-AuditLineProbeRegex([regex[]]$Regexes) {
+    # 行级单次探测用的合并 alternation（(?i) 前缀已在各 pattern 内联，体
+    # 为去掉前缀后的原文）。alternation 命中 <=> 某个成员 pattern 命中，
+    # 未命中行可整行跳过而不改变任何证据。候选组合在文件间高度重复，
+    # 按 pattern 并集缓存实例，避免每次重建。
+    if ($null -eq $script:AuditLineProbeRegexCache) { $script:AuditLineProbeRegexCache = @{} }
+    $key = ($Regexes | ForEach-Object { $_.ToString() }) -join "|"
+    if (-not $script:AuditLineProbeRegexCache.ContainsKey($key)) {
+        $bodies = @($Regexes | ForEach-Object { $s = $_.ToString(); if ($s.StartsWith("(?i)")) { $s.Substring(4) } else { $s } })
+        $script:AuditLineProbeRegexCache[$key] = [regex]::new("(?:(?i)(?:" + ($bodies -join "|") + "))")
+    }
+    return $script:AuditLineProbeRegexCache[$key]
+}
+
 function Add-AuditArtifactFactsFromText {
     param(
         $Accumulator,
         [string]$Content,
         [string]$Kind,
         [string]$RelativePath,
-        # 同 Add-AuditRequirementFactsFromText：调用方可复用同一份行集。
-        $Lines = $null
+        # 同 Add-AuditRequirementFactsFromText：调用方可透传已算好的候选集。
+        [object[]]$CandidateArtifacts = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
     $table = Get-AuditArtifactSignalTable
     # 与 requirement 同理：artifact 词不跨行，全内容无命中时行级（含 next 行）
     # 必然全空，预筛保持原相对顺序后整表短路。
-    $candidateArtifacts = @()
-    foreach ($artifact in @($table.artifacts)) {
-        if ($artifact.regex.IsMatch($Content)) { $candidateArtifacts += $artifact }
+    if ($null -ne $CandidateArtifacts) {
+        $candidateArtifacts = @($CandidateArtifacts)
+    }
+    else {
+        $candidateArtifacts = @()
+        foreach ($artifact in @($table.artifacts)) {
+            if ($artifact.regex.IsMatch($Content)) { $candidateArtifacts += $artifact }
+        }
     }
     if ($candidateArtifacts.Count -eq 0) { return }
-    if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
-    $lines = @($Lines)
+    # 与 requirement 同理：split 行数组 + （候选 artifact ∪ 全部 action）
+    # 并集单次探测，未命中行零证据直接跳过。旧版 next 取自行集相邻且原始
+    # 行号连续的下一行；这里行号天然连续，next 有效 = 下一行非空且非规则
+    # 定义行，与旧行集准入一致。判定树与 location 形态逐分支复刻。
+    $all = @($candidateArtifacts) + @($table.actions)
+    $combined = Get-AuditLineProbeRegex @($all | ForEach-Object { $_.regex })
+    $lines = [regex]::Split($Content, "\r?\n")
+    if ($null -eq $script:AuditRuleDefinitionRegex) {
+        $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
+    }
     for ($index = 0; $index -lt $lines.Count; $index++) {
-        $current = $lines[$index]
-        $next = if ($index + 1 -lt $lines.Count -and [int]$lines[$index + 1].number -eq [int]$current.number + 1) { $lines[$index + 1] } else { $null }
+        $text = $lines[$index]
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if (-not $combined.IsMatch($text)) { continue }
+        if ($script:AuditRuleDefinitionRegex.IsMatch($text)) { continue }
+        $nextText = if ($index + 1 -lt $lines.Count) { $lines[$index + 1] } else { $null }
+        $nextAdmissible = ($null -ne $nextText) -and (-not [string]::IsNullOrWhiteSpace($nextText)) -and (-not $script:AuditRuleDefinitionRegex.IsMatch($nextText))
+        $lineNumber = $index + 1
         foreach ($artifact in $candidateArtifacts) {
-            $artifactOnCurrentLine = $artifact.regex.IsMatch([string]$current.text)
-            $artifactOnNextLine = $null -ne $next -and $artifact.regex.IsMatch([string]$next.text)
+            $artifactOnCurrentLine = $artifact.regex.IsMatch($text)
+            $artifactOnNextLine = $nextAdmissible -and $artifact.regex.IsMatch($nextText)
             if (-not $artifactOnCurrentLine -and -not $artifactOnNextLine) { continue }
             foreach ($action in @($table.actions)) {
-                $actionOnCurrentLine = $action.regex.IsMatch([string]$current.text)
-                $actionOnNextLine = $null -ne $next -and $action.regex.IsMatch([string]$next.text)
+                $actionOnCurrentLine = $action.regex.IsMatch($text)
+                $actionOnNextLine = $nextAdmissible -and $action.regex.IsMatch($nextText)
                 $matched = ($artifactOnCurrentLine -and ($actionOnCurrentLine -or $actionOnNextLine)) -or ($actionOnCurrentLine -and $artifactOnNextLine)
                 if ($matched) {
-                    $location = if ($null -ne $next -and ($artifactOnNextLine -or $actionOnNextLine) -and -not ($artifactOnCurrentLine -and $actionOnCurrentLine)) { "L{0}-L{1}" -f $current.number, $next.number } else { "L{0}" -f $current.number }
+                    $location = if ($nextAdmissible -and ($artifactOnNextLine -or $actionOnNextLine) -and -not ($artifactOnCurrentLine -and $actionOnCurrentLine)) { "L{0}-L{1}" -f $lineNumber, ($lineNumber + 1) } else { "L{0}" -f $lineNumber }
                     Add-AuditArtifactEvidence $Accumulator $artifact.artifact $action.action $Kind $RelativePath ("{0}:{1}@{2}" -f $artifact.artifact, $action.action, $location)
                 }
             }
@@ -21350,11 +21455,14 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
-            # 行集只解析一次：两个提取器对同一内容各自解析曾是每仓 ~2 倍的
-            # 逐行解释器开销。
-            $sharedLines = @(Get-AuditEvidenceLines $content)
-            Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath $sharedLines
-            Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath $sharedLines
+            # 大量源文件不包含任何能力信号。文件级预筛只跑一次，命中的候选集
+            # 直接透传给两个提取器；行级提取在提取器内部用合并探测跳过无关
+            # 行，不再预拆行集。证据顺序与内容与旧实现严格一致。
+            $candidates = Get-AuditSourceSignalCandidates $content
+            if (@($candidates.requirements).Count -gt 0 -or @($candidates.artifacts).Count -gt 0) {
+                Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath $candidates.artifacts
+                Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath $candidates.requirements
+            }
         }
         catch {
             $sourceScanReadFailureCount++
@@ -21522,7 +21630,10 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
         Add-AuditUniqueValue $capabilities "assessment_analytics"
         Add-AuditUniqueValue $capabilities "spreadsheet_import"
     }
-    if ([regex]::IsMatch($combined, "(?i)\bbackup\b|\brestore\b|\bdisaster recovery\b|\b恢复\b|\b迁移\b|\bmanifest hash\b|\bwinpe\b")) {
+    # 同 requirement 表的 backup_recovery：裸 \brestore\b 会被包管理器
+    # restore、`--no-restore`、`restore point`（git 分支）误触。要求
+    # 备份/恢复与数据/状态/快照等词同现，或出现明确的备份产物短语。
+    if ([regex]::IsMatch($combined, "(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)")) {
         Add-AuditUniqueValue $capabilities "backup_recovery"
         Add-AuditUniqueValue $capabilities "migration_recovery"
     }
@@ -21568,7 +21679,18 @@ function Get-AuditPlainDirectoryFingerprint([string]$dirPath) {
     $pairs = New-Object System.Collections.Generic.List[string]
     foreach ($file in @(Get-ChildItem -LiteralPath $fullBase -Recurse -File -Force)) {
         $relative = [string]$file.FullName.Substring($fullBase.Length).TrimStart('\', '/').Replace('/', '\')
-        $pairs.Add(("file|{0}|{1}" -f $relative, [string](Get-FileContentHash $file.FullName))) | Out-Null
+        # 目录里常含正在写入的运行日志（并发会话/计划任务）。读不了的文件
+        # 把不可读状态连同长度与最后写入时间计入指纹：单靠异常类型会让持续
+        # 被锁的追加型日志在两次扫描间得到相同指纹、掩盖真实 drift；长度/时
+        # 间仍随内容追加变化，保持 drift 敏感。单个被占文件不再炸掉整次扫描
+        # （实测 artifacts\work 下的活动日志以写锁持有，OpenRead 直接抛）。
+        try {
+            $hash = [string](Get-FileContentHash $file.FullName)
+        }
+        catch {
+            $hash = "unreadable:{0}:{1}:{2}" -f $_.Exception.GetType().Name, $file.Length, $file.LastWriteTimeUtc.Ticks
+        }
+        $pairs.Add(("file|{0}|{1}" -f $relative, $hash)) | Out-Null
     }
     $ordered = $pairs.ToArray()
     [Array]::Sort($ordered, [System.StringComparer]::Ordinal)
@@ -21624,6 +21746,8 @@ function Get-AuditGitPathStatePairs($paths) {
 }
 
 function Get-AuditGitInfo([string]$resolvedPath) {
+    # Git 状态是漂移检测的 live 证据；每次调用都必须重新取证，
+    # 不能跨调用复用快照，否则会把真实的 HEAD/工作树变化隐藏掉。
     $info = [ordered]@{
         is_repo = $false
         branch = ""

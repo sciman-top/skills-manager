@@ -1,6 +1,8 @@
 BeforeAll {
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
+    . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+    Initialize-TestGitIdentity
 }
 
 Describe "Reference shelf governance" {
@@ -152,8 +154,6 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $fixtureManifest = Join-Path $TestDrive "reference-manifest.json"
         & git init --bare -q $remote
         & git clone -q $remote $publisher
-        & git -C $publisher config user.name fixture
-        & git -C $publisher config user.email fixture@example.invalid
         Set-Content -LiteralPath (Join-Path $publisher "README.md") -Value "one" -Encoding UTF8
         & git -C $publisher add README.md
         & git -C $publisher commit -q -m one

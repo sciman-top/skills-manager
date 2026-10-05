@@ -27,11 +27,22 @@ function Get-RuleEstateTargets {
     $excluded = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($name in @('external', 'docs', '文档') + @($ExcludeNames)) { if (-not [string]::IsNullOrWhiteSpace($name)) { $excluded.Add($name.Trim()) | Out-Null } }
     $targets = New-Object System.Collections.Generic.List[object]
+    $unclassified = New-Object System.Collections.Generic.List[object]
     foreach ($directory in @([System.IO.Directory]::GetDirectories($root) | Sort-Object)) {
         $name = [System.IO.Path]::GetFileName($directory)
         if ($excluded.Contains($name)) { continue }
         $gitMarker = Join-Path $directory '.git'
-        if (-not [System.IO.Directory]::Exists($gitMarker) -and -not [System.IO.File]::Exists($gitMarker)) { continue }
+        if (-not [System.IO.Directory]::Exists($gitMarker) -and -not [System.IO.File]::Exists($gitMarker)) {
+            # A non-excluded workspace directory must not disappear from the
+            # inventory merely because it lacks a Git marker. The caller may
+            # classify it explicitly, but the audit must expose the boundary.
+            $unclassified.Add([pscustomobject][ordered]@{
+                name = $name
+                path = [System.IO.Path]::GetFullPath($directory).TrimEnd('\', '/')
+                reason = 'missing_git_marker'
+            }) | Out-Null
+            continue
+        }
         $targets.Add([pscustomobject][ordered]@{
             name = $name
             path = [System.IO.Path]::GetFullPath($directory).TrimEnd('\', '/')
@@ -66,6 +77,8 @@ function Get-RuleEstateTargets {
         exclusion_names = @($excluded | Sort-Object)
         targets = @($targets.ToArray())
         target_count = $targets.Count
+        unclassified_directories = @($unclassified.ToArray())
+        unclassified_count = $unclassified.Count
         registry = [pscustomobject][ordered]@{
             supplied = $registrySupplied
             registered_count = $registered.Count
@@ -528,6 +541,13 @@ function Invoke-RuleEstateAudit {
     $audits = New-Object System.Collections.Generic.List[object]
     foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot $AntigravityUserRoot $WorkBuddyUserRoot)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
+    foreach ($directory in @($inventory.unclassified_directories)) {
+        $findings += [pscustomobject][ordered]@{
+            code = 'workspace_target_unclassified'; severity = 'error'; path = [string]$directory.path
+            disposition = 'adapt'; reason = [string]$directory.reason
+            message = 'A non-excluded workspace directory is not a discovered Git target; classify or initialize it before relying on the estate audit.'
+        }
+    }
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $geminiAdapterPresent = @($audits | Where-Object { [bool]$_.gemini.adapter_present })
     if ($geminiAdapterPresent.Count -gt 0 -and $geminiAdapterPresent.Count -lt $audits.Count) { $findings += [pscustomobject]@{ code = 'workspace_gemini_adapter_presence_mixed'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = ('Repository-root GEMINI.md adapter is present in {0} of {1} targets; unify the Gemini/Antigravity project adapter surface.' -f $geminiAdapterPresent.Count, $audits.Count) } }

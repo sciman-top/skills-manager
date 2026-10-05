@@ -1773,6 +1773,29 @@ TOKEN = "redacted"
             ($names -contains "context7") | Should -Be $true
             ($names -contains "github") | Should -Be $true
         }
+
+        It "Excludes explicitly disabled servers while preserving nested sections" {
+            $toml = @'
+[mcp_servers.context7]
+command = "node"
+enabled = false
+
+[mcp_servers.context7.env]
+TOKEN = "redacted"
+
+[mcp_servers.node_repl]
+command = "node_repl.exe"
+
+[mcp_servers.playwright]
+command = "node"
+enabled = true
+'@
+            $names = Get-CodexMcpServerNamesFromTomlText $toml
+            @($names).Count | Should -Be 2
+            ($names -contains "node_repl") | Should -Be $true
+            ($names -contains "playwright") | Should -Be $true
+            ($names -contains "context7") | Should -Be $false
+        }
     }
 
     Context "Get-McpExpectedServersByCli" {

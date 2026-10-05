@@ -1,5 +1,6 @@
 BeforeAll {
 . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+    Initialize-TestGitIdentity
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
 
@@ -564,7 +565,7 @@ exit /b 0
             $workspace = Join-Path $TestDrive 'estate-cli-workspace'; $repo = Join-Path $workspace 'repo-a'; $repoB = Join-Path $workspace 'repo-b'; $reviewRoot = Join-Path $workspace 'review'
             $codex = Join-Path $TestDrive 'estate-cli-codex'; $claude = Join-Path $TestDrive 'estate-cli-claude'
             foreach ($path in @($repo,$repoB,$reviewRoot,$codex,$claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
-            foreach ($targetRepo in @($repo,$repoB)) { git -C $targetRepo init --quiet; git -C $targetRepo config user.email fixture@example.invalid; git -C $targetRepo config user.name fixture }
+            foreach ($targetRepo in @($repo,$repoB)) { git -C $targetRepo init --quiet }
             [IO.File]::WriteAllText((Join-Path $repo 'AGENTS.md'), '# repo before'); git -C $repo add AGENTS.md; git -C $repo commit -m init --quiet
             [IO.File]::WriteAllText((Join-Path $repoB 'AGENTS.md'), '# repo-b before'); git -C $repoB add AGENTS.md; git -C $repoB commit -m init --quiet
             [IO.File]::WriteAllText((Join-Path $codex 'AGENTS.md'), '# global before'); [IO.File]::WriteAllText((Join-Path $claude 'CLAUDE.md'), '# claude')

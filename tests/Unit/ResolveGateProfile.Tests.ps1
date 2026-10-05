@@ -1,6 +1,8 @@
 Describe 'Resolve-QualityGateProfile shared classifier' {
     BeforeAll {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+        . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+        Initialize-TestGitIdentity
         $script:resolverPath = Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1'
         $script:repos = [System.Collections.Generic.List[string]]::new()
 
@@ -10,8 +12,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             $script:repos.Add($dir) | Out-Null
             & git -C $dir init -b main *> $null
             if ($LASTEXITCODE -ne 0) { throw "git init failed for fixture" }
-            & git -C $dir config user.email 'fixture@example.invalid'
-            & git -C $dir config user.name 'Fixture'
             New-Item -ItemType Directory -Path (Join-Path $dir 'docs'), (Join-Path $dir 'src'), (Join-Path $dir 'tests\Unit'), (Join-Path $dir 'scripts\quality'), (Join-Path $dir 'config') | Out-Null
             Set-Content -LiteralPath (Join-Path $dir 'README.md') -Value '# fixture'
             Set-Content -LiteralPath (Join-Path $dir 'docs\x.md') -Value 'doc'

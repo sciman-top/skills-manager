@@ -11,6 +11,30 @@ BeforeAll {
 }
 Describe 'Reviewed rule estate mutation' {
     BeforeAll {
+        # Prepare two committed repositories once, then copy one per fixture.
+        # The mutation code needs real Git state (HEAD, one commit, a tracked
+        # AGENTS.md that `git checkout -- AGENTS.md` can restore, clean status),
+        # so a marker-only placeholder will not do.
+        #
+        # 24 fixtures x 2 repositories previously ran `git init` + `config` x2 +
+        # `add` + `commit` = 240 process spawns. In the agent sandbox every spawn
+        # is billed and can stall for minutes (docs/runbooks/agent-sandbox-instrumentation.md),
+        # so the per-fixture Git setup dominated the file's runtime. Two prepared
+        # templates reduce that to a handful of spawns plus cheap directory copies.
+        $script:EstateTemplateRoot = Join-Path ([IO.Path]::GetTempPath()) ('rule-estate-mutation-template-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:EstateTemplateRoot -Force
+        $script:EstateTemplates = @{}
+        foreach ($repoName in @('repo-a', 'repo-b')) {
+            $repoPath = Join-Path $script:EstateTemplateRoot $repoName
+            $null = New-Item -ItemType Directory -Path $repoPath -Force
+            git -C $repoPath init --quiet
+            git -C $repoPath config user.email fixture@example.invalid
+            git -C $repoPath config user.name fixture
+            Set-Content -LiteralPath (Join-Path $repoPath 'AGENTS.md') -Value "# $repoName`n" -Encoding UTF8
+            git -C $repoPath add AGENTS.md
+            git -C $repoPath commit -m init --quiet
+            $script:EstateTemplates[$repoName] = $repoPath
+        }
 function New-EstateMutationFixture {
         $fixtureId = [guid]::NewGuid().ToString('N')
         $workspace = Join-Path $TestDrive ('workspace-' + $fixtureId)
@@ -19,15 +43,10 @@ function New-EstateMutationFixture {
         $reviewRoot = Join-Path $workspace 'review'
         $codex = Join-Path $TestDrive ('codex-' + $fixtureId)
         $claude = Join-Path $TestDrive ('claude-' + $fixtureId)
-        foreach ($path in @($repoA, $repoB, $reviewRoot, $codex, $claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
-        foreach ($path in @($repoA, $repoB)) {
-            git -C $path init --quiet
-            git -C $path config user.email fixture@example.invalid
-            git -C $path config user.name fixture
-            Set-Content -LiteralPath (Join-Path $path 'AGENTS.md') -Value "# $([IO.Path]::GetFileName($path))`n" -Encoding UTF8
-            git -C $path add AGENTS.md
-            git -C $path commit -m init --quiet
-        }
+        $null = New-Item -ItemType Directory -Path $workspace -Force
+        Copy-Item -LiteralPath $script:EstateTemplates['repo-a'] -Destination $repoA -Recurse
+        Copy-Item -LiteralPath $script:EstateTemplates['repo-b'] -Destination $repoB -Recurse
+        foreach ($path in @($reviewRoot, $codex, $claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
         Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value "# global codex`n" -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value "# global claude`n" -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $reviewRoot 'repo-a.desired.md') -Value "# repo-a improved`n" -Encoding UTF8
@@ -46,6 +65,13 @@ function New-EstateMutationFixture {
         $reviewPath = Join-Path $reviewRoot 'review.json'
         $review | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reviewPath -Encoding UTF8
         return [pscustomobject]@{ workspace=$workspace; repo_a=$repoA; repo_b=$repoB; codex=$codex; claude=$claude; review=$reviewPath }
+    }
+    AfterAll {
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:EstateTemplateRoot) -and (Test-Path -LiteralPath $script:EstateTemplateRoot)) {
+            [IO.Directory]::Delete($script:EstateTemplateRoot, $true)
+        }
+        $script:EstateTemplateRoot = $null
+        $script:EstateTemplates = $null
     }
 }
 

@@ -77,6 +77,21 @@ function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath, 
     Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
 }
 
+# Fixture commits draw their identity from process-scoped environment
+# variables instead of per-repository `git config user.*` calls: every
+# `git config` is a full process spawn, which costs ~1s in instrumented
+# agent sandboxes (and can stall for minutes when the host is busy). The
+# identity itself is never asserted by any test. Call once from a file-level
+# BeforeAll before any fixture commit.
+function Initialize-TestGitIdentity {
+    if ([string]::IsNullOrWhiteSpace($env:GIT_AUTHOR_NAME)) {
+        $env:GIT_AUTHOR_NAME = 'skills-manager tests'
+        $env:GIT_AUTHOR_EMAIL = 'tests@skills-manager.invalid'
+        $env:GIT_COMMITTER_NAME = $env:GIT_AUTHOR_NAME
+        $env:GIT_COMMITTER_EMAIL = $env:GIT_AUTHOR_EMAIL
+    }
+}
+
 function Set-TestWorkspace([string]$root) {
         $values = @{
             Root = $root

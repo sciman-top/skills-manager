@@ -19,6 +19,9 @@
 !/artifacts/history/*/
 /artifacts/history/*/*
 !/artifacts/work/
+# work 根层散文件（并发会话运行日志、临时产物）全部本地化：漏网会使
+# untracked 集永不为空，宿主投影的 clean 门槛被永久卡死。
+/artifacts/work/*
 !/artifacts/work/README.md
 !/artifacts/work/*/
 /artifacts/work/*/*

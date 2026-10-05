@@ -46,6 +46,35 @@ function Stop-TestRunnerProcess([Diagnostics.Process]$Process) {
     try { $null = $Process.WaitForExit(5000) } catch { }
 }
 
+# Shared by the sharded and targeted paths: whether this process tree is
+# sandbox-instrumented. Instrumented runs are slower (deletes are brokered,
+# HTTP is proxied) so their wall clock must not be read as code cost. See
+# docs/runbooks/agent-sandbox-instrumentation.md. Persisted next to every
+# receipt so any slow run can be attributed to its environment after the
+# fact, instead of re-deriving the cause from scratch.
+function Get-TestEnvironmentRecord {
+    param([ValidateSet('sharded', 'targeted')][string]$Mode)
+    $shimMarkers = [ordered]@{
+        safe_delete_shim = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or $env:CODEBUDDY_SAFE_DELETE_SANDBOX)
+        sandbox_ipc      = [bool](-not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS))
+        node_shim        = [bool](([string]$env:NODE_OPTIONS) -match 'shim')
+        python_shim      = [bool](([string]$env:PYTHONPATH) -match 'shim')
+    }
+    $instrumented = @($shimMarkers.Values | Where-Object { $_ }).Count -gt 0
+    [pscustomobject]@{
+        Record = [ordered]@{
+            schema_version = 1
+            mode           = $Mode
+            recorded_at    = [DateTimeOffset]::UtcNow.ToString('o')
+            instrumented   = $instrumented
+            markers        = $shimMarkers
+            http_proxy     = [bool](-not [string]::IsNullOrWhiteSpace($env:HTTP_PROXY))
+            note           = 'Instrumented runs must not be read as code cost; re-measure outside the sandbox (CI or a plain terminal).'
+        }
+        Instrumented = $instrumented
+    }
+}
+
 function Invoke-RepositoryPester {
     param(
         [string[]]$Paths,
@@ -197,28 +226,13 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     $runRoot = Join-Path $ShardReportRoot $runId
     $null = New-Item -ItemType Directory -Path $runRoot -Force
 
-    # Record whether this process tree is sandbox-instrumented. Instrumented
-    # runs are slower (deletes are brokered, HTTP is proxied) so their wall
-    # clock must not be read as code cost. See
-    # docs/runbooks/agent-sandbox-instrumentation.md.
-    $shimMarkers = [ordered]@{
-        safe_delete_shim = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or $env:CODEBUDDY_SAFE_DELETE_SANDBOX)
-        sandbox_ipc      = [bool](-not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS))
-        node_shim        = [bool](([string]$env:NODE_OPTIONS) -match 'shim')
-        python_shim      = [bool](([string]$env:PYTHONPATH) -match 'shim')
-    }
-    $instrumented = @($shimMarkers.Values | Where-Object { $_ }).Count -gt 0
-    $environmentRecord = [ordered]@{
-        schema_version = 1
-        recorded_at    = [DateTimeOffset]::UtcNow.ToString('o')
-        instrumented   = $instrumented
-        markers        = $shimMarkers
-        http_proxy     = [bool](-not [string]::IsNullOrWhiteSpace($env:HTTP_PROXY))
-        max_parallel   = $MaxParallel
-        shard_count    = $shardCount
-        note           = 'Instrumented runs must not be read as code cost; re-measure outside the sandbox (CI or a plain terminal).'
-    }
-    [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environmentRecord | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+    # Record whether this process tree is sandbox-instrumented (see
+    # Get-TestEnvironmentRecord above) so instrumented wall clock is never
+    # misread as code cost.
+    $environment = Get-TestEnvironmentRecord -Mode 'sharded'
+    $environment.Record.max_parallel = $MaxParallel
+    $environment.Record.shard_count = $shardCount
+    [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environment.Record | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
     # Pester 6.1.0 initializes its TestRegistry fixture by creating the shared
     # HKCU:\Software\Pester parent key on first use. On a fresh profile (CI
@@ -347,10 +361,21 @@ $targetedReceiptPath = Join-Path $targetedRunRoot 'targeted.receipt.json'
 $targetedJobSpec = [ordered]@{ paths = @($paths); names = @($TestName); tags = @($Tag); excludeTags = @($ExcludeTag); receipt = $targetedReceiptPath }
 [IO.File]::WriteAllText($targetedJobPath, ($targetedJobSpec | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
+# Same attribution record as sharded runs: a slow targeted run must be
+# attributable to its environment from the run directory alone.
+$targetedEnvironment = Get-TestEnvironmentRecord -Mode 'targeted'
+[IO.File]::WriteAllText((Join-Path $targetedRunRoot 'environment.json'), ($targetedEnvironment.Record | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+
 # Emit the bound up front so a redirected log is never silently empty: batch,
 # wall-clock limit and receipt path are visible from second one, and a quiet
 # log means "waiting for the worker", never "nothing is running".
-Write-Host ("Targeted run started: batch=[{0}] timeout={1}s receipt={2}" -f (@($paths) -join '; '), $targetedTimeoutSeconds, $targetedReceiptPath)
+$startLine = ("Targeted run started: batch=[{0}] timeout={1}s receipt={2}" -f (@($paths) -join '; '), $targetedTimeoutSeconds, $targetedReceiptPath)
+if ($targetedEnvironment.Instrumented) {
+    # Suffix keeps the line regex-compatible (unanchored end) while flagging,
+    # at second zero, that wall clock on this host includes sandbox cost.
+    $startLine += ' instrumented_sandbox=yes (wall clock may be sandbox cost, not code cost; see docs/runbooks/agent-sandbox-instrumentation.md)'
+}
+Write-Host $startLine
 
 $selfPath = try { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
 if ([string]::IsNullOrWhiteSpace($selfPath)) { $selfPath = (Get-Command pwsh -ErrorAction Stop).Source }

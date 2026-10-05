@@ -1,6 +1,8 @@
 Describe 'Local quality gate -Profile auto routing' {
     BeforeAll {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+        . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+        Initialize-TestGitIdentity
         $script:gateSource = Join-Path $repoRoot 'scripts\quality\run-local-quality-gates.ps1'
         $script:resolverSource = Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1'
         $script:repos = [System.Collections.Generic.List[string]]::new()
@@ -15,8 +17,6 @@ Describe 'Local quality gate -Profile auto routing' {
             Set-Content -LiteralPath (Join-Path $dir 'src\Core.ps1') -Value '# source'
             Set-Content -LiteralPath (Join-Path $dir 'skills.json') -Value '{}'
             & git -C $dir init -b main *> $null
-            & git -C $dir config user.email 'fixture@example.invalid'
-            & git -C $dir config user.name 'Fixture'
             & git -C $dir add -A
             & git -C $dir commit -m baseline *> $null
             if ($LASTEXITCODE -ne 0) { throw 'fixture commit failed' }
