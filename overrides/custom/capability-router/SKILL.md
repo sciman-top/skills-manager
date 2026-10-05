@@ -46,6 +46,17 @@ $result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query 
 $result.retrieval.candidates
 ```
 
+The router writes a pure-ASCII JSON document: every non-ASCII character in a
+skill description is emitted as a `\uXXXX` escape. Keep the plain
+`| ConvertFrom-Json` form. A host decodes a child process's stdout with its own
+console code page (gb2312/GBK on a zh-CN Windows host), so a raw UTF-8 body
+containing a non-ASCII description was mis-decoded and made `ConvertFrom-Json`
+throw; the host then silently concluded cold discovery was unavailable. ASCII
+output survives any code page and `ConvertFrom-Json` reconstructs the original
+text. Do not "fix" a parse error by pre-setting `[Console]::OutputEncoding` in
+the parent or by re-encoding the payload — a parse error now means the router
+did not run, not that the transport is broken.
+
 Use functional domains, not arbitrary task keywords: `decision`, `engineering`,
 `coding`, `frontend`, `design`, `writing`, `content`, `presentation`, `diagram`,
 `animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, or
@@ -78,7 +89,7 @@ availability, and the selected skill's declared dependency closure. A passing
 must separately review every closure member's declared workflow side effect and
 apply ordinary approval, sandbox, MCP, and external-write controls.
 
-Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance.
+Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance. An explicitly named candidate that the catalog cannot validate reports `status=blocked` and `truth_boundary=candidate_discovery_blocked` with `excluded[].reason=not_available` — never `candidate_discovery_only`, which would read as success while `selected` is empty.
 
 ## Native cold-capability handoff
 
