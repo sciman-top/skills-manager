@@ -78,10 +78,17 @@ try {
         }
         if ($failedIndex -gt 0) { $withinLower = @($menuByPreset[$Preset])[($failedIndex - 1)..0] }
         if ($failedIndex -ge 0 -and $failedIndex -lt ($menuByPreset[$Preset].Count - 1)) { $withinHigher = @($menuByPreset[$Preset])[($failedIndex + 1)..($menuByPreset[$Preset].Count - 1)] }
+        # Cross-preset fallback follows the declared active order without
+        # wrapping around to entries that precede the failed preset.  A failed
+        # final preset therefore has no implicit cross-model retry; the parent
+        # must make a fresh operator choice instead of silently cycling back.
         $crossPreset = @()
-        foreach ($id in @($resolved.active_presets)) {
-            if ($id -ceq $Preset) { continue }
-            $crossPreset += @{ preset = $id; options = $menuByPreset[$id] }
+        $failedPresetIndex = [array]::IndexOf([string[]]@($resolved.active_presets), [string]$Preset)
+        if ($failedPresetIndex -ge 0) {
+            for ($j = $failedPresetIndex + 1; $j -lt @($resolved.active_presets).Count; $j++) {
+                $id = @($resolved.active_presets)[$j]
+                $crossPreset += @{ preset = $id; options = $menuByPreset[$id] }
+            }
         }
         $failureDoc = @{ slot_failure = [ordered]@{
                 exit = $code

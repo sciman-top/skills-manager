@@ -23,6 +23,9 @@ Describe 'CLI alias dispatch' {
                 $Filter = 'fixture'
                 $RunPlan = $true
                 function Merge-FilterAndArgs($Filter, $Remaining) { return ,(@($Filter) + $Remaining) }
+                # The dispatch seam escapes non-ASCII JSON for stdout; this runspace is
+                # bare, so stub it — routing is what this test pins, not the escaping.
+                function ConvertTo-AsciiJson([string]$Json) { return $Json }
                 function Invoke-RuleEstateApplyCommand($Tokens) {
                     return [pscustomobject]@{
                         json = $true

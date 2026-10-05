@@ -414,14 +414,35 @@ Describe 'Global rule CLI boundaries' {
     }
 
     It 'enables the WorkBuddy host root without a pre-existing projected rule' {
-        $old=$env:CODEBUDDY_CONFIG_DIR
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
         try{
+            $env:WORKBUDDY_CONFIG_DIR=$null
             $env:CODEBUDDY_CONFIG_DIR=Join-Path $TestDrive 'workbuddy-host-without-rule'
             New-Item -ItemType Directory -Path $env:CODEBUDDY_CONFIG_DIR -Force|Out-Null
             $parsed=Parse-GlobalRuleOptions @() check
             $parsed.workbuddy_user_root|Should -Be $env:CODEBUDDY_CONFIG_DIR
             $parsed.workbuddy_user_root_source|Should -Be 'CODEBUDDY_CONFIG_DIR'
-        }finally{$env:CODEBUDDY_CONFIG_DIR=$old}
+        }finally{$env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork}
+    }
+
+    It 'prefers WORKBUDDY_CONFIG_DIR and auto-detects an existing .workbuddy-ai root' {
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
+        $profileRoot=[Environment]::GetFolderPath('UserProfile');$legacy=Join-Path $profileRoot '.workbuddy-ai';$hadLegacy=Test-Path -LiteralPath $legacy
+        try{
+            $env:CODEBUDDY_CONFIG_DIR=$null;$env:WORKBUDDY_CONFIG_DIR=Join-Path $TestDrive 'workbuddy-new-root'
+            New-Item -ItemType Directory -Path $env:WORKBUDDY_CONFIG_DIR -Force|Out-Null
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $env:WORKBUDDY_CONFIG_DIR
+            $parsed.workbuddy_user_root_source|Should -Be 'WORKBUDDY_CONFIG_DIR'
+            $env:WORKBUDDY_CONFIG_DIR=$null
+            if(-not $hadLegacy){New-Item -ItemType Directory -Path $legacy -Force|Out-Null}
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $legacy
+            $parsed.workbuddy_user_root_source|Should -Be 'default'
+        }finally{
+            $env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork
+            if(-not $hadLegacy -and (Test-Path -LiteralPath $legacy)){Remove-Item -LiteralPath $legacy -Recurse -Force}
+        }
     }
 
     It 'rejects a missing CODEBUDDY_CONFIG_DIR root instead of treating it as disabled' {

@@ -5,9 +5,9 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
 $expected = @{
-    gpt61_sol_only     = @{ menu = @(@('gpt-6.1-sol','low'),@('gpt-6.1-sol','medium'),@('gpt-6.1-sol','high')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=1;deep_investigation_or_implementation=2;test_execution=1;documentation_review=0;architecture_review=2} }
+    gpt61_sol_only     = @{ menu = @(@('gpt-6.1-sol','medium'),@('gpt-6.1-sol','low')); map = @{quick_triage=1;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=1;architecture_review=0} }
     gpt6_luna_only     = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','high'),@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=1;test_execution=0;documentation_review=0;architecture_review=1} }
+    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','max'),@('glm-5.3-flash','high')); map = @{quick_triage=1;routine_maintenance=0;standard_review=1;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=1;documentation_review=1;architecture_review=0} }
 }
 Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
@@ -20,7 +20,7 @@ foreach ($id in $expected.Keys) {
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt61_sol_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 6) 'All three models and six tuples jointly active'
+Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 5) 'All three models and five tuples jointly active'
 $reselection = $defaultResolved.reselection
 Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'gpt6_luna_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
@@ -29,7 +29,7 @@ Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -
 Assert ('deepseek-flash' -cnotin @($defaultResolved.enabled_routes.model)) 'DeepSeek removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt6_luna_only,gpt61_sol_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'gpt61_sol_only') 'Ordered selection'
-Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 4) 'AvailablePreset retains the whole selected pool'
+Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 3) 'AvailablePreset retains the whole selected pool'
 $cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt6_luna_only,gpt61_sol_only' -Plan | ConvertFrom-Json
 Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt61_sol_only' -and $cliSelection.effort -eq 'medium' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
 foreach ($legacyId in $policy.aliases.Keys) {
@@ -81,7 +81,7 @@ try {
     $failedRequest = $false
     $failureMessage = ''
     try {
-        & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort high -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null
+        & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort low -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null
     }
     catch {
         $failureMessage = $_.Exception.Message
@@ -92,24 +92,43 @@ try {
     Assert $jsonMatch.Success 'Failure message embeds the structured slot_failure document'
     $slotFailure = $jsonMatch.Value | ConvertFrom-Json
     Assert ($null -ne $slotFailure.slot_failure) 'Failure emits a structured slot_failure document'
-    Assert ($slotFailure.slot_failure.failed_tuple.model -ceq 'gpt-6.1-sol' -and $slotFailure.slot_failure.failed_tuple.effort -ceq 'high') 'slot_failure records the exact failed tuple'
+    Assert ($slotFailure.slot_failure.failed_tuple.model -ceq 'gpt-6.1-sol' -and $slotFailure.slot_failure.failed_tuple.effort -ceq 'low') 'slot_failure records the exact failed tuple'
     $lowerEfforts = @($slotFailure.slot_failure.reselection.within_preset_lower | ForEach-Object { $_.effort })
-    Assert ($lowerEfforts.Count -eq 2 -and $lowerEfforts[0] -ceq 'medium' -and $lowerEfforts[1] -ceq 'low') 'Rate-limit chain starts with nearest lower effort in the same preset'
+    Assert ($lowerEfforts.Count -eq 1 -and $lowerEfforts[0] -ceq 'medium') 'Rate-limit chain starts with nearest lower effort in the same preset'
     Assert (@($slotFailure.slot_failure.reselection.cross_preset | Where-Object { $_.preset -ceq 'gpt6_luna_only' }).Count -eq 1) 'Rate-limit chain continues cross-preset in active order'
     Assert (@($slotFailure.slot_failure.reselection.within_preset_higher_overload_only | ForEach-Object { $_.effort }) -cnotcontains 'high') 'The failed effort itself is never listed as a reselection option'
     Assert ($slotFailure.slot_failure.reselection.prohibition.Contains('429')) 'Prohibition text pins rate-limit semantics'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 1) 'Failed request does not automatically launch another route'
-    Assert ($global:ModelSlotAcceptanceCalls[0] -ccontains 'model_reasoning_effort="high"') 'Failed request retains its exact effort'
+    Assert ($global:ModelSlotAcceptanceCalls[0] -ccontains 'model_reasoning_effort="low"') 'Failed request retains its exact effort'
     $global:ModelSlotAcceptanceExitCode = 0
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort medium -ReadOnly -Prompt 'Explicit remaining read-only work after simulated 429' | Out-Null
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 2 -and $global:ModelSlotAcceptanceCalls[1] -ccontains 'model_reasoning_effort="medium"') 'Caller can explicitly select a lower effort after failure'
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work on another supported model after simulated 429' | Out-Null
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3 -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model="gpt-6-luna"' -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model_reasoning_effort="max"') 'Caller can explicitly reselect another supported model after failure'
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort high -ReadOnly -Prompt 'New independent higher-effort task' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4 -and $global:ModelSlotAcceptanceCalls[3] -ccontains 'model_reasoning_effort="high"') 'Caller can explicitly select higher effort for new work'
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort medium -ReadOnly -Prompt 'New independent medium-effort task' | Out-Null
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4 -and $global:ModelSlotAcceptanceCalls[3] -ccontains 'model_reasoning_effort="medium"') 'Caller can explicitly select medium effort for new work'
     foreach ($capturedCall in $global:ModelSlotAcceptanceCalls) {
         Assert ($capturedCall -ccontains 'read-only' -and $capturedCall -ccontains 'agents.enabled=false') 'Reselection preserves read-only mode and disabled nested delegation'
     }
+    # Cross-preset fallback follows active order and must not wrap around to
+    # presets that precede the failed one.
+    $global:ModelSlotAcceptanceExitCode = 1
+    foreach ($failedRoute in @(
+        @{ model = 'gpt-6-luna'; effort = 'max'; next = @('glm53_flash_only') },
+        @{ model = 'glm-5.3-flash'; effort = 'high'; next = @() }
+    )) {
+        $failureMessage = ''
+        try {
+            & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -Prompt 'Simulated ordered fallback' | Out-Null
+        }
+        catch { $failureMessage = $_.Exception.Message }
+        $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
+        Assert $jsonMatch.Success 'Ordered fallback failure embeds structured slot_failure'
+        $orderedFailure = $jsonMatch.Value | ConvertFrom-Json
+        $cross = @($orderedFailure.slot_failure.reselection.cross_preset | ForEach-Object { $_.preset })
+        Assert (($cross -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-preset fallback does not wrap around active order'
+    }
+    $global:ModelSlotAcceptanceExitCode = 0
 }
 finally {
     Remove-Item Function:/global:codex

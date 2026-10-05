@@ -1,36 +1,112 @@
 {
   "schema_version": 4,
   "default_preset": "gpt61_sol_only",
-  "active_presets": ["gpt61_sol_only", "gpt6_luna_only", "glm53_flash_only"],
-  "role_prefixes": {"gpt61_sol_only": "sol", "gpt6_luna_only": "luna", "glm53_flash_only": "glm"},
-  "codex_order": ["gpt61_sol_only", "gpt6_luna_only"],
-  "aliases": {"gpt56_sol_terra": "gpt61_sol_only", "gpt56_luna_only": "gpt6_luna_only"},
-  "slots": ["quick_triage", "routine_maintenance", "standard_review", "bounded_implementation", "deep_investigation_or_implementation", "test_execution", "documentation_review", "architecture_review"],
-  "read_only_slots": ["quick_triage", "standard_review", "documentation_review", "architecture_review"],
+  "active_presets": [
+    "gpt61_sol_only",
+    "gpt6_luna_only",
+    "glm53_flash_only"
+  ],
+  "role_prefixes": {
+    "gpt61_sol_only": "sol",
+    "gpt6_luna_only": "luna",
+    "glm53_flash_only": "glm"
+  },
+  "codex_order": [
+    "gpt61_sol_only",
+    "gpt6_luna_only"
+  ],
+  "aliases": {
+    "gpt56_sol_terra": "gpt61_sol_only",
+    "gpt56_luna_only": "gpt6_luna_only"
+  },
+  "slots": [
+    "quick_triage",
+    "routine_maintenance",
+    "standard_review",
+    "bounded_implementation",
+    "deep_investigation_or_implementation",
+    "test_execution",
+    "documentation_review",
+    "architecture_review"
+  ],
+  "read_only_slots": [
+    "quick_triage",
+    "standard_review",
+    "documentation_review",
+    "architecture_review"
+  ],
   "presets": {
     "gpt61_sol_only": {
-      "hosts": ["codex"],
-      "menu": [
-        {"model": "gpt-6.1-sol", "effort": "low"},
-        {"model": "gpt-6.1-sol", "effort": "medium"},
-        {"model": "gpt-6.1-sol", "effort": "high"}
+      "hosts": [
+        "codex"
       ],
-      "slot_map": {"quick_triage": 0, "routine_maintenance": 1, "standard_review": 1, "bounded_implementation": 1, "deep_investigation_or_implementation": 2, "test_execution": 1, "documentation_review": 0, "architecture_review": 2}
+      "menu": [
+        {
+          "effort": "medium",
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "effort": "low",
+          "model": "gpt-6.1-sol"
+        }
+      ],
+      "slot_map": {
+        "routine_maintenance": 0,
+        "architecture_review": 0,
+        "documentation_review": 1,
+        "bounded_implementation": 0,
+        "deep_investigation_or_implementation": 0,
+        "standard_review": 0,
+        "quick_triage": 1,
+        "test_execution": 0
+      }
     },
     "gpt6_luna_only": {
-      "hosts": ["codex"],
-      "menu": [
-        {"model": "gpt-6-luna", "effort": "max"}
+      "hosts": [
+        "codex"
       ],
-      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 0, "test_execution": 0, "documentation_review": 0, "architecture_review": 0}
+      "menu": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "max"
+        }
+      ],
+      "slot_map": {
+        "quick_triage": 0,
+        "routine_maintenance": 0,
+        "standard_review": 0,
+        "bounded_implementation": 0,
+        "deep_investigation_or_implementation": 0,
+        "test_execution": 0,
+        "documentation_review": 0,
+        "architecture_review": 0
+      }
     },
     "glm53_flash_only": {
-      "hosts": ["zcode", "codex"],
-      "menu": [
-        {"model": "glm-5.3-flash", "effort": "high"},
-        {"model": "glm-5.3-flash", "effort": "max"}
+      "hosts": [
+        "zcode",
+        "codex"
       ],
-      "slot_map": {"quick_triage": 0, "routine_maintenance": 0, "standard_review": 0, "bounded_implementation": 0, "deep_investigation_or_implementation": 1, "test_execution": 0, "documentation_review": 0, "architecture_review": 1}
+      "menu": [
+        {
+          "effort": "max",
+          "model": "glm-5.3-flash"
+        },
+        {
+          "effort": "high",
+          "model": "glm-5.3-flash"
+        }
+      ],
+      "slot_map": {
+        "routine_maintenance": 0,
+        "architecture_review": 0,
+        "documentation_review": 1,
+        "bounded_implementation": 0,
+        "deep_investigation_or_implementation": 0,
+        "standard_review": 1,
+        "quick_triage": 1,
+        "test_execution": 1
+      }
     }
   }
 }

@@ -267,6 +267,28 @@ function Get-ContentUtf8([string]$path) {
     # Strip a leading UTF-8 BOM: ConvertFrom-Json rejects U+FEFF outright.
     return ([System.Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xFEFF)
 }
+function ConvertTo-AsciiJson([string]$Json) {
+    # Every `--json` document leaves this process through stdout, and the documented
+    # consumer is `pwsh ... --json | ConvertFrom-Json`: the parent decodes the child's
+    # stdout with its own console code page (gb2312/GBK on a zh-CN Windows host), not
+    # UTF-8. Values that cross a native/CIM boundary are the fragile ones — measured
+    # 2026-10-05 on this host, `(Get-CimInstance Win32_OperatingSystem).Caption` written
+    # to stdout arrived as mojibake with a byte replaced by '?', which consumed the
+    # closing quote and left `doctor --json` structurally invalid (ConvertFrom-Json
+    # threw at checks.os), while a literal string emitted by the same child survived.
+    # Escaping every non-ASCII UTF-16 code unit as \uXXXX makes the document pure
+    # ASCII: it survives any code page and ConvertFrom-Json rebuilds the original text.
+    # Surrogate pairs are escaped per code unit, which is valid JSON. ASCII documents
+    # pass through byte-identical, so this is safe to apply at every JSON stdout seam.
+    if ([string]::IsNullOrEmpty($Json)) { return $Json }
+    $builder = [Text.StringBuilder]::new($Json.Length + 64)
+    foreach ($ch in $Json.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -gt 127) { [void]$builder.AppendFormat('\u{0:x4}', $code) }
+        else { [void]$builder.Append($ch) }
+    }
+    return $builder.ToString()
+}
 function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
     if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
     if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }

@@ -7,7 +7,7 @@
 
 ## 2026-10-01 日常预设修订
 
-当前菜单与任务映射以 [`presets.json`](../../src/model-orchestration/presets.json) 和[使用说明](../../src/model-orchestration/README.md)为准。用户最终修订为 schema v4 共同启用池：GPT-6.1-Sol low/medium/high、GPT-6-luna max、GLM-5.3-Flash high/max，共三个模型、六个元组；DeepSeek 已移除。`default_preset=gpt61_sol_only` 只提供缺省路线，不限制其他模型共同启用。每个语义槽位可独立选择池内受宿主支持的任意元组，不要求整套切换。初始八个语义槽位可按配置扩展；六个精确元组角色同时投影。旧 GPT preset 参数作为新 ID 的别名保留。
+当前菜单与任务映射以 [`presets.json`](../../src/model-orchestration/presets.json) 和[使用说明](../../src/model-orchestration/README.md)为准。用户最终修订为 schema v4 共同启用池：GPT-6.1-Sol medium/low、GPT-6-luna max、GLM-5.3-Flash max/high，共三个模型、五个元组；DeepSeek 已移除。`default_preset=gpt61_sol_only` 只提供缺省路线，不限制其他模型共同启用。每个语义槽位可独立选择池内受宿主支持的任意元组，不要求整套切换。初始八个语义槽位可按配置扩展；五个精确元组角色同时投影。旧 GPT preset 参数作为新 ID 的别名保留。
 
 本次子代理请求使用 `-SubagentsOnly`，保留父模型、review 与父 effort；普通宿主 AI 可在明确委派授权内按依赖拆分任务，并在新任务派发前依据复杂度选择槽位。并行仍要求独立验收、互斥写集、净收益与原生并发预算。菜单不可用的显式重选和任务复杂度升降档是两条不同路径，均不得重放已完成写入。
 
