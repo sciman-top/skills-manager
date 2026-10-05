@@ -939,7 +939,7 @@ args = ["/c", "echo", "stale"]
             (Test-McpServerEquivalent $first $second) | Should -Be $true
         }
 
-        It "Writes OpenAI developer docs MCP for codex when configured as http transport" {
+        It "Writes OpenAI developer docs MCP for codex without an explicit transport key" {
             $servers = @(
                 [pscustomobject]@{
                     name                = "openaiDeveloperDocs"
@@ -951,9 +951,11 @@ args = ["/c", "echo", "stale"]
 
             $toml = Build-CodexConfigToml "" $servers
             $toml | Should -Match "\[mcp_servers\.openaiDeveloperDocs\]"
-            $toml | Should -Match "transport = ""http"""
             $toml | Should -Match "url = ""https://developers.openai.com/mcp"""
             $toml | Should -Match "startup_timeout_sec = 120"
+            # Codex infers the transport from url/command; an explicit `transport`
+            # key makes `codex --strict-config` fail closed.
+            $toml | Should -Not -Match "transport"
         }
 
         It "Wraps Codex npx stdio MCP servers through the Node cache wrapper" {
@@ -986,6 +988,7 @@ args = ["/c", "echo", "stale"]
                 $toml | Should -Match "D:\\\\CODE"
                 $toml | Should -Match "--isolated"
                 $toml | Should -Not -Match "command = ""npx"""
+                $toml | Should -Not -Match "transport"
             }
             finally {
                 if ($null -ne $oldIncludeLeaky) {
