@@ -103,6 +103,21 @@ GLM-5.3 直连 API 的 `thinking` 仅支持 `enabled`（`disabled` 已彻底废�
 
 ## 5. 可直接复制的任务模板
 
+### 5.0 CLI 快捷入口
+
+本仓提供只读模板命令，避免每次从长文档中复制日常合同。它不写文件、
+不调用 provider、不修改宿主状态：
+
+```powershell
+pwsh -NoProfile -File .\skills.ps1 ai-coding
+pwsh -NoProfile -File .\skills.ps1 ai-coding --template implementation
+pwsh -NoProfile -File .\skills.ps1 ai-coding --template review --json
+```
+
+可用模板为 `implementation`、`review`、`failure`、`handoff` 和
+`checklist`。模板只是输入辅助；真实写入、测试和宿主验收仍按当前任务
+合同、项目规则和现有入口执行。
+
 以下模板是输入辅助，不是新的规则或授权层。把占位内容换成当前任务事实；
 跨宿主交接时传递任务胶囊，不复制整段历史对话。
 

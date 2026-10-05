@@ -13,6 +13,8 @@ Describe 'CLI alias dispatch' {
         @{ Command = '发行更新'; Expected = 'release'; Tokens = @('--json') }
         @{ Command = 'release-update-schedule'; Expected = 'release-schedule'; Tokens = @('--json') }
         @{ Command = '发行更新调度'; Expected = 'release-schedule'; Tokens = @('--json') }
+        @{ Command = 'ai-coding'; Expected = 'ai-coding'; Tokens = @('fixture', '--json') }
+        @{ Command = 'AI编码'; Expected = 'ai-coding'; Tokens = @('fixture', '--json') }
         @{ Command = '帮助'; Expected = 'help'; Tokens = @() }
         @{ Command = 'help'; Expected = 'help'; Tokens = @() }
         @{ Command = '--help'; Expected = 'help'; Tokens = @() }
@@ -43,6 +45,7 @@ Describe 'CLI alias dispatch' {
                 function Invoke-AiRiskControlCommand($Tokens) { [pscustomobject]@{ handler = 'risk'; tokens = @($Tokens) } }
                 function Invoke-ReleaseUpdateCommand($Tokens) { @{ handler = 'release'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
                 function Invoke-ReleaseUpdateScheduleCommand($Tokens) { @{ handler = 'release-schedule'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
+                function Invoke-AiCodingCommand($Tokens) { [pscustomobject]@{ handler = 'ai-coding'; tokens = @($Tokens); json = $true; output = (@{ handler = 'ai-coding'; tokens = @($Tokens) } | ConvertTo-Json -Compress); exit_code = 0 } }
                 function 帮助 { @{ handler = 'help'; tokens = @() } | ConvertTo-Json -Compress }
                 & $MainPath
             }

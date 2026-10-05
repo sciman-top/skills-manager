@@ -69,6 +69,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             }
             { $_ -in @("MCP配置", "mcp-profile") } { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             { $_ -in @("审查目标", "audit-targets") } { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
+            { $_ -in @("ai-coding", "AI编码") } { $result = Invoke-AiCodingCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Output $result.output } }
             { $_ -in @("能力清单", "capability-inventory") } { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             { $_ -in @("规则审查", "rule-audit") } { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             { $_ -in @("规则全域审查", "rule-estate-audit") } { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }

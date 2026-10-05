@@ -153,6 +153,7 @@ Skills 管理器（中文菜单）
   2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
   3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
   4) 目标仓审查：扫描目标仓 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
+  5) 日常 AI 编码：ai-coding 输出任务、审查、失败反馈、交接或收口模板
 
 菜单地图：
   - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
@@ -183,6 +184,7 @@ Skills 管理器（中文菜单）
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
 
 常用命令：
+  .\skills.ps1 ai-coding [--template implementation|review|failure|handoff|checklist] [--json]
   .\skills.ps1 发现
   .\skills.ps1 安装
   .\skills.ps1 命令导入安装
