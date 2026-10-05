@@ -10,6 +10,7 @@ Describe 'Weekly skills-only update automation' {
         $text | Should -Match "'check-updates', '--json'"
         $text | Should -Match "'更新', '-Upgrade'"
         $text | Should -Match "'add', '--', 'skills.lock.json'"
+        $text | Should -Match "'-Profile', 'quick', '-Verifier', 'lock'"
         $text | Should -Not -Match '同步MCP'
         $text | Should -Not -Match "'push'"
     }

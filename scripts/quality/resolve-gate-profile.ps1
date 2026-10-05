@@ -92,7 +92,8 @@ function Resolve-GitOutput([string[]]$GitArgs) {
     return [pscustomobject]@{ exit_code = $LASTEXITCODE; lines = @($output) }
 }
 
-function Get-GateProfileResult([string]$Profile, [string]$Reason, [string]$BaseSha, [string]$HeadSha, [bool]$DocsOnly, [string[]]$FocusedTestPaths, [int]$ChangedCount, [int]$UntrackedCount) {
+function Get-GateProfileResult([string]$Profile, [string]$Reason, [string]$BaseSha, [string]$HeadSha, [bool]$DocsOnly, [string[]]$FocusedTestPaths, [int]$ChangedCount, [int]$UntrackedCount, [bool]$RequiresBuild = $true) {
+    $effectiveRequiresBuild = $RequiresBuild -and $Profile -ne 'docs'
     return [pscustomobject]@{
         profile            = $Profile
         reason             = $Reason
@@ -102,6 +103,7 @@ function Get-GateProfileResult([string]$Profile, [string]$Reason, [string]$BaseS
         focused_test_paths = @($FocusedTestPaths)
         requires_locked_sources = ($Profile -notin @('docs', 'focused') -or
             ($Profile -eq 'focused' -and @($FocusedTestPaths | Where-Object { $_ -notin $assetFreeTests }).Count -gt 0))
+        requires_build       = $effectiveRequiresBuild
         changed_count      = $ChangedCount
         untracked_count    = $UntrackedCount
     }
@@ -283,7 +285,12 @@ if ($sourceChanged.Count -gt 0 -or $skillFocusedChanged.Count -gt 0 -or $configF
     }
     $focused += @($changed | Where-Object { $_ -match '^tests/Unit/.*\.Tests\.ps1$' })
     $focused = @($focused | Sort-Object -Unique)
-    $result = Get-GateProfileResult 'focused' $reason $baseShaValue $headShaValue $false $focused $changedCount $untrackedCount
+    # A focused test-only change does not consume the generated CLI bundle. Keep
+    # source/config/rule/skill changes conservative, while allowing the common
+    # test-runner and test-fixture loop to skip an otherwise unrelated build.
+    $testOnlyPathRegex = [regex]::new('^(?:tests/Unit/.*\.Tests\.ps1|tests/run\.ps1|docs/handover/ai-risk-control/.*)$')
+    $requiresBuild = @($changed | Where-Object { -not $testOnlyPathRegex.IsMatch($_) }).Count -gt 0
+    $result = Get-GateProfileResult 'focused' $reason $baseShaValue $headShaValue $false $focused $changedCount $untrackedCount $requiresBuild
     if ($Json) { $result | ConvertTo-Json } else { $result }
     exit 0
 }

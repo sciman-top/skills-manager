@@ -17,6 +17,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $autoProfile = $Profile -eq 'auto'
 $docsSupplemented = $false
+$requiresBuild = $true
 # Cost signal: total wall clock is printed on success so a caller can see the
 # price of the chosen profile. On this host a sandboxed full run is dominated
 # by shim overhead, not code cost; CI is the intended full runner.
@@ -103,6 +104,10 @@ try {
         if ($ResolveOnly) { return }
         $Profile = [string]$resolved.profile
         if ($Profile -eq 'focused') { $TestPath = @(@($resolved.focused_test_paths) + $TestPath | Sort-Object -Unique) }
+        if ($resolved.PSObject.Properties.Name -contains 'requires_build') {
+            if ($resolved.requires_build -isnot [bool]) { throw 'Gate profile resolver returned an invalid requires_build value.' }
+            $requiresBuild = [bool]$resolved.requires_build
+        }
     }
 
     if ($Profile -eq 'full' -and -not $env:CI) {
@@ -163,7 +168,7 @@ try {
     # the main CLI bundle. Mixed selections and full still validate that bundle.
     $modelPresetOnly = $Profile -eq 'focused' -and $Verifier.Count -eq 0 -and $TestPath.Count -eq 1 -and
         $TestPath[0].Replace('\', '/') -eq 'tests/Unit/ModelPreset.Tests.ps1'
-    if (-not $modelPresetOnly) {
+    if (-not $modelPresetOnly -and $requiresBuild) {
         Invoke-QualityGate 'build' { & .\build.ps1 -Check:($CheckGenerated -or $docsSupplemented) }
     }
     if ($Profile -eq 'focused') {

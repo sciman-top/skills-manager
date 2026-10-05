@@ -293,7 +293,7 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile doc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
-本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
+本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；纯测试运行器/测试夹具变更只运行 focused 测试，不重建未被使用的 CLI bundle；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
