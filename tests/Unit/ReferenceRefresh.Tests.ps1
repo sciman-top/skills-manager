@@ -10,6 +10,11 @@ BeforeAll {
         $publisher = Join-Path $Root ($Name + '-publisher')
         $referencesRoot = Join-Path $Root ($Name + '-references')
         $consumer = Join-Path $referencesRoot 'core\demo'
+        # Pester 6 keeps one TestDrive per file, and two scenarios in this file
+        # share the 'github-equivalent' root; without this reset the second
+        # fixture's clones hit "destination path already exists" fatals and the
+        # scenario then asserts against the first scenario's leftover state.
+        if (Test-Path -LiteralPath $Root) { Remove-Item -LiteralPath $Root -Recurse -Force }
         New-Item -ItemType Directory -Path (Split-Path $consumer -Parent) -Force | Out-Null
 
         & git init --bare --initial-branch=main -q $remote
