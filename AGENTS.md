@@ -31,7 +31,7 @@
 - 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，检查 `HEAD` 后编辑（含未跟踪文件）；集成范围显式用 `-DiffBase <revision>`。具体选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；可用 `-TestPath` 追加回归证明，显式 focused 用于已确定范围。
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
-- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；在 AI 沙箱内因 safe-delete shim 代理每次删除可膨胀到数小时，属环境成本而非代码成本 ⇒ 沙箱内默认走 docs/focused（`-TestPath` 跑受影响文件），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
+- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；2026-10-04 的 WorkBuddy 桌面会话记录过小时级膨胀，且命中 `docs/runbooks/agent-sandbox-instrumentation.md` 所列指纹，不能外推到无指纹的 ZCode 或其他宿主，也不能单独证明全部延迟都由删除 shim 造成 ⇒ 门禁按指纹拦截此类宿主的非 CI full（`-AllowShimmedFull` 显式豁免），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 

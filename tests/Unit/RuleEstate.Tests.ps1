@@ -513,4 +513,34 @@ verify drift
         @($repo.findings.code) | Should -Not -Contain 'project_claude_wrapper_first_line_mismatch'
         $report.structural_pass | Should -Be $false
     }
+
+    It 'validates the repository-root GEMINI.md adapter when present' {
+        $f = New-RuleEstateFixture
+        $gemini = Join-Path $f.workspace 'repo-a\GEMINI.md'
+        Set-Content -LiteralPath $gemini -Value '@AGENTS.md' -Encoding UTF8
+
+        $clean = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        @($clean.findings.code) | Should -Not -Contain 'project_gemini_adapter_reference_mismatch'
+
+        Set-Content -LiteralPath $gemini -Value '# host-only rules' -Encoding UTF8
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $repo = @($report.targets | Where-Object name -eq 'repo-a')[0]
+
+        $repo.gemini.adapter_present | Should -Be $true
+        @($repo.findings.code) | Should -Contain 'project_gemini_adapter_reference_mismatch'
+        $report.structural_pass | Should -Be $false
+    }
+
+    It 'reports mixed repository-root GEMINI.md adapter presence as a warning only' {
+        $f = New-RuleEstateFixture
+        Set-Content -LiteralPath (Join-Path $f.workspace 'repo-a\GEMINI.md') -Value '@AGENTS.md' -Encoding UTF8
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $mixed = @($report.findings | Where-Object code -eq 'workspace_gemini_adapter_presence_mixed')
+
+        $mixed.Count | Should -Be 1
+        $mixed[0].severity | Should -Be 'warning'
+        $report.structural_pass | Should -Be $true
+        $report.semantic_coverage_pass | Should -Be $true
+    }
 }

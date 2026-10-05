@@ -149,6 +149,17 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     }
     [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environmentRecord | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
+    # Pester 6.1.0 initializes its TestRegistry fixture by creating the shared
+    # HKCU:\Software\Pester parent key on first use. On a fresh profile (CI
+    # runner) several shard processes race to create that key and the losers
+    # abort their whole container ("A key in this path already exists" —
+    # observed as random CONTAINER FAILED runs). Priming the key here removes
+    # the race; a profile that already has the key skips straight through.
+    $pesterRegistryKey = 'Registry::HKEY_CURRENT_USER\Software\Pester'
+    if (-not (Test-Path $pesterRegistryKey)) {
+        try { New-Item -Path $pesterRegistryKey -Force -ErrorAction Stop | Out-Null } catch { }
+    }
+
     $selfPath = try { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
     if ([string]::IsNullOrWhiteSpace($selfPath)) { $selfPath = (Get-Command pwsh -ErrorAction Stop).Source }
 
