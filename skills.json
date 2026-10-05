@@ -281,6 +281,7 @@
         ],
         "skill-management": [
           "capability-router",
+          "find-skills",
           "skill-creator"
         ],
         "writing": [

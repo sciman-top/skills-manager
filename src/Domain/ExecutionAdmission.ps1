@@ -233,7 +233,9 @@ function Get-ExecutionAdmissionValidationSnapshot {
 
     $contract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $Validation 'execution_contract')
     $receiptContract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $receipt 'execution_contract')
-    if ([string]::IsNullOrWhiteSpace((Get-ExecutionAdmissionContractMode $contract)) -or (ConvertTo-ExecutionAdmissionCanonicalJson $contract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $receiptContract)) { throw 'execution_contract_invalid' }
+    # Non-bridge modes (e.g. host_admission_required) belong to the parent-decision path, not this structured admission.
+    if ([string]::IsNullOrWhiteSpace((Get-ExecutionAdmissionContractMode $contract))) { throw 'execution_contract_mode_unsupported' }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson $contract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $receiptContract)) { throw 'execution_contract_invalid' }
 
     $closurePaths = New-Object System.Collections.Generic.List[string]
     $closureRows = New-Object System.Collections.Generic.List[object]
@@ -353,7 +355,8 @@ function New-ExecutionAdmission {
 
     $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     $profile = Get-ExecutionAdmissionProfile ([string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $validationSnapshot 'effective_execution_contract') 'mode'))
-    if ($null -eq $profile) { throw 'execution_contract_invalid' }
+    # host_admission_required and other non-bridge modes reach the parent-decision path, not this structured admission.
+    if ($null -eq $profile) { throw 'execution_contract_mode_unsupported' }
     $allowedReadSet = @(Get-ExecutionAdmissionFileSnapshot -Paths $AllowedReadSet -RepoRoot $RepoRoot -FieldName 'allowed_read_set')
     if ($RequestedOperation -eq 'read_only' -and $ExactWriteSet.Count -gt 0) { throw 'read_only_write_set_not_empty' }
     if ($RequestedOperation -eq 'controlled_write') {
