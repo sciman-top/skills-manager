@@ -58,7 +58,7 @@ pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <recei
 
 `AvailablePreset` is explicitly declared. The two-menu example keeps both Sol and Luna available while retaining Sol fallback defaults. New projections affect future host loads; an existing child's route stays fixed for its bounded task.
 
-Codex projections create three native profiles (`gpt61-sol-only`, `gpt6-luna-only`, `glm53-flash-only`), eight semantic role files per profile and five shared tuple role files. Each profile and the active root expose the tuple pool. A profile's fallback defaults use `routine_maintenance`: Sol medium, Luna max or GLM max. `-SubagentsOnly` preserves parent/review fields. Provider, auth, permissions, concurrency, hooks and unrelated roles remain intact. DeepSeek historical files are not deleted and are not managed or selected by this policy.
+Codex projections create three native profiles (`gpt61-sol-only`, `gpt6-luna-only`, `glm53-flash-only`), eight semantic role files per profile and six shared tuple role files. Each profile and the active root expose the tuple pool. A profile's fallback defaults use `routine_maintenance`: Sol medium, Luna max or GLM max. `-SubagentsOnly` preserves parent/review fields. Provider, auth, permissions, concurrency, hooks and unrelated roles remain intact. DeepSeek historical files are not deleted and are not managed or selected by this policy.
 
 Codex 0.153.4's specialized delegation path bypassed a trusted hook in two controlled live tests. That ineffective hook was retired. The chosen entrypoint disables native delegation instead; no global `code_mode_host` change is required.
 
