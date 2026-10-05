@@ -1,5 +1,8 @@
 BeforeAll {
 . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+    # Git 夹具的提交身份走进程级环境变量（Initialize-TestGitIdentity），
+    # 省去每仓 2 次 `git config user.*` 进程启动；见 TestHelpers.ps1 注释。
+    Initialize-TestGitIdentity
     # Dot-source the main script to load functions
     . $PSScriptRoot\..\..\skills.ps1
     $script:Root = $Root
@@ -585,8 +588,6 @@ Describe "Audit Targets" {
             Push-Location $repo
             try {
                 git init | Out-Null
-                git config user.email "test@example.com" | Out-Null
-                git config user.name "Test User" | Out-Null
                 Set-Content -Path "package.json" -Value '{"scripts":{"build":"vite build","test":"vitest"},"dependencies":{"vite":"latest","react":"latest"}}'
                 Set-Content -Path "vite.config.ts" -Value "export default {}"
                 Set-Content -Path "AGENTS.md" -Value "rules"
@@ -2534,8 +2535,6 @@ Describe "Audit git evidence fail-closed" {
         $repo = Join-Path $TestDrive "audit-git-repo"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         & git -C $repo init -q 2>$null
-        & git -C $repo config user.email "t@t.invalid"
-        & git -C $repo config user.name "t"
         Set-ContentUtf8 (Join-Path $repo "tracked.txt") "hello"
         & git -C $repo add tracked.txt
         & git -C $repo commit -q -m init
@@ -2562,8 +2561,6 @@ Describe "Audit git evidence fail-closed" {
         $repo = Join-Path $TestDrive "audit-git-info-repo"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         & git -C $repo init -q 2>$null
-        & git -C $repo config user.email "t@t.invalid"
-        & git -C $repo config user.name "t"
         Set-ContentUtf8 (Join-Path $repo "a.txt") "alpha"
         Set-ContentUtf8 (Join-Path $repo "b.txt") "beta"
         & git -C $repo add a.txt b.txt
@@ -2596,8 +2593,6 @@ Describe "Audit git evidence fail-closed" {
         $repo = Join-Path $TestDrive "audit-git-dir-evidence"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         & git -C $repo init -q 2>$null
-        & git -C $repo config user.email "t@t.invalid"
-        & git -C $repo config user.name "t"
         Set-ContentUtf8 (Join-Path $repo "root.txt") "root"
         & git -C $repo add root.txt
         & git -C $repo commit -q -m init
@@ -2608,8 +2603,6 @@ Describe "Audit git evidence fail-closed" {
         $nestedPath = Join-Path $repo "nested"
         New-Item -ItemType Directory -Path $nestedPath -Force | Out-Null
         & git -C $nestedPath init -q 2>$null
-        & git -C $nestedPath config user.email "t@t.invalid"
-        & git -C $nestedPath config user.name "t"
         Set-ContentUtf8 (Join-Path $nestedPath "inner.txt") "inner"
         & git -C $nestedPath add inner.txt
         & git -C $nestedPath commit -q -m nested-init
