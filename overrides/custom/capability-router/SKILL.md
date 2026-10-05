@@ -197,6 +197,10 @@ The parent check does not replace this child check. Record its actual tool
 result bound to the admission id; never infer it from the child's final prose.
 Deliver full objects with `Export-ExecutionAdmissionHandoff` into a unique file
 in the authorized run directory (create that directory before admission).
+`Export-ExecutionAdmissionHandoff` is called with the same `-RepoRoot` and
+`-SkillRoot` values as the creation call, and the handoff path must be a new
+file inside `RepoRoot` that is outside the task's read and write sets; a path
+outside `RepoRoot` fails closed as a write-set violation.
 This parent-owned transport file is separate from the child's task write set.
 Pass the returned path, SHA-256 and admission id, plus helper path/hash and both
 roots, explicitly in the child message with `fork_turns="none"`. Do not rely on
