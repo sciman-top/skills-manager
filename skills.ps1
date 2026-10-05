@@ -6361,6 +6361,8 @@ function Get-RuleEstateTargets {
             claude_exists = [System.IO.File]::Exists((Join-Path $directory 'CLAUDE.md'))
             antigravity_rule_path = Join-Path $directory '.agents\rules\00-project.md'
             antigravity_rule_exists = [System.IO.File]::Exists((Join-Path $directory '.agents\rules\00-project.md'))
+            gemini_path = Join-Path $directory 'GEMINI.md'
+            gemini_exists = [System.IO.File]::Exists((Join-Path $directory 'GEMINI.md'))
         }) | Out-Null
     }
     if ($targets.Count -gt $MaxTargets) { throw ('Discovered target count exceeds the bounded limit: {0} > {1}.' -f $targets.Count, $MaxTargets) }
@@ -6788,6 +6790,14 @@ function New-RuleEstateTargetAudit {
         if ($adapterLines.Count -eq 0 -or $adapterLines[0] -cne '@../../AGENTS.md') { $antigravityAdapterFindings.Add([pscustomobject]@{ code = 'project_antigravity_adapter_reference_mismatch'; severity = 'error'; path = $Target.antigravity_rule_path; disposition = 'adapt'; message = 'Antigravity workspace adapter must reference the repository AGENTS.md with the official relative @ syntax.' }) | Out-Null }
     }
     foreach ($finding in @($antigravityAdapterFindings.ToArray())) { $findings.Add($finding) | Out-Null }
+    $geminiAdapterFindings = New-Object System.Collections.Generic.List[object]
+    if ([bool]$Target.gemini_exists) {
+        $geminiBytes = [System.IO.File]::ReadAllBytes([string]$Target.gemini_path)
+        $geminiLines = @([System.IO.File]::ReadAllText([string]$Target.gemini_path) -split "`r?`n")
+        if ($geminiBytes.Length -ge 3 -and $geminiBytes[0] -eq 0xEF -and $geminiBytes[1] -eq 0xBB -and $geminiBytes[2] -eq 0xBF) { $geminiAdapterFindings.Add([pscustomobject]@{ code = 'project_gemini_adapter_bom'; severity = 'error'; path = $Target.gemini_path; disposition = 'adapt'; message = 'Repository-root GEMINI.md adapter must be UTF-8 without BOM.' }) | Out-Null }
+        if ($geminiLines.Count -eq 0 -or $geminiLines[0] -cne '@AGENTS.md') { $geminiAdapterFindings.Add([pscustomobject]@{ code = 'project_gemini_adapter_reference_mismatch'; severity = 'error'; path = $Target.gemini_path; disposition = 'adapt'; message = 'Repository-root GEMINI.md must reference the repository AGENTS.md with @AGENTS.md.' }) | Out-Null }
+    }
+    foreach ($finding in @($geminiAdapterFindings.ToArray())) { $findings.Add($finding) | Out-Null }
     if (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -ne $globalRelease) { $findings.Add([pscustomobject]@{ code = 'project_global_release_mismatch'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; expected = $globalRelease; observed = $projectRelease; message = ('Project global-rule review is {0}; current global release is {1}.' -f $(if ([string]::IsNullOrWhiteSpace($projectRelease)) { 'undeclared' } else { $projectRelease }), $globalRelease) }) | Out-Null }
     foreach ($finding in @(Get-RuleEstateNaFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
     foreach ($finding in @(Get-RuleEstateGitProfileFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
@@ -6799,6 +6809,7 @@ function New-RuleEstateTargetAudit {
         claude = [pscustomobject][ordered]@{ documents = @($claudeDiscovery.documents); findings = @($claudeDiagnostics.findings); load_verification = 'not_run' }
         zcode = [pscustomobject][ordered]@{ configuration_state = $(if ($zcodeConfigured) { 'configured' } else { 'not_configured' }); documents = $(if ($null -eq $zcodeDiscovery) { @() } else { @($zcodeDiscovery.documents) }); findings = $(if ($null -eq $zcodeDiagnostics) { @() } else { @($zcodeDiagnostics.findings) }); load_verification = 'not_run' }
         antigravity = [pscustomobject][ordered]@{ configuration_state = $(if ($antigravityConfigured) { 'configured' } else { 'not_configured' }); adapter_path = [string]$Target.antigravity_rule_path; adapter_present = [bool]$Target.antigravity_rule_exists; documents = $(if ($null -eq $antigravityDiscovery) { @() } else { @($antigravityDiscovery.documents) }); findings = @($antigravityAdapterFindings.ToArray()) + $(if ($null -eq $antigravityDiagnostics) { @() } else { @($antigravityDiagnostics.findings) }); load_verification = 'not_run' }
+        gemini = [pscustomobject][ordered]@{ adapter_path = [string]$Target.gemini_path; adapter_present = [bool]$Target.gemini_exists; findings = @($geminiAdapterFindings.ToArray()) }
         contract_fact_coverage_kind = 'required_project_facts_presence'
         workbuddy = [pscustomobject][ordered]@{ configuration_state = $(if ($workbuddyConfigured) { 'configured' } else { 'not_configured' }); documents = $(if ($null -eq $workbuddyDiscovery) { @() } else { @($workbuddyDiscovery.documents) }); findings = $(if ($null -eq $workbuddyDiagnostics) { @() } else { @($workbuddyDiagnostics.findings) }); inspection_complete = $false; omitted_sources = $(if ($null -eq $workbuddyDiscovery) { @() } else { @($workbuddyDiscovery.omitted_sources) }); load_verification = 'not_run' }
         contract_facts = @($contractFacts)
@@ -6821,6 +6832,8 @@ function Invoke-RuleEstateAudit {
     foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot $AntigravityUserRoot $WorkBuddyUserRoot)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
+    $geminiAdapterPresent = @($audits | Where-Object { [bool]$_.gemini.adapter_present })
+    if ($geminiAdapterPresent.Count -gt 0 -and $geminiAdapterPresent.Count -lt $audits.Count) { $findings += [pscustomobject]@{ code = 'workspace_gemini_adapter_presence_mixed'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = ('Repository-root GEMINI.md adapter is present in {0} of {1} targets; unify the Gemini/Antigravity project adapter surface.' -f $geminiAdapterPresent.Count, $audits.Count) } }
     $contractFactGapCount = @($audits | ForEach-Object { $_.contract_facts } | Where-Object { -not $_.covered }).Count
     $structuralPass = @($findings | Where-Object severity -eq 'error').Count -eq 0
     $semanticCoveragePass = $contractFactGapCount -eq 0
