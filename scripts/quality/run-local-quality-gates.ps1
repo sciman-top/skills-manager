@@ -8,7 +8,9 @@ param(
     [string[]]$TestName = @(),
     [ValidateSet('lock', 'integrity', 'config', 'scheduler', 'mor')]
     [string[]]$Verifier = @(),
-    [string]$DiffBase = ''
+    [string]$DiffBase = '',
+    # Explicit escape hatch for the shimmed-sandbox full block below.
+    [switch]$AllowShimmedFull
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,7 +106,20 @@ try {
     }
 
     if ($Profile -eq 'full' -and -not $env:CI) {
-        Write-Host 'Cost note: -Profile full runs the entire suite. On a plain terminal or CI this is about 3-5 minutes (sharded, ~1267 cases); inside the AI sandbox the safe-delete shim inflates it to hours, which is environment cost, not code cost. Prefer docs/focused in the sandbox and let CI run full.'
+        # Fingerprint-based block, per docs/runbooks/agent-sandbox-instrumentation.md:
+        # the hour-scale full inflation (19303s recorded) was measured on hosts whose
+        # sandbox sets these env markers or wraps Remove-Item as a Function. ZCode
+        # sessions measured clean (Cmdlet, 0.01s/30-file delete), so absence of
+        # markers genuinely means no known shim here, not a detection gap.
+        $shimInstrumented = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or $env:CODEBUDDY_SAFE_DELETE_SANDBOX `
+                -or -not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS) `
+                -or (([string]$env:NODE_OPTIONS) -match 'shim') `
+                -or (([string]$env:PYTHONPATH) -match 'shim') `
+                -or ((Get-Command Remove-Item).CommandType -eq 'Function'))
+        if ($shimInstrumented -and -not $AllowShimmedFull) {
+            throw "Profile full is blocked inside an instrumented sandbox (safe-delete shim fingerprints detected): the suite can inflate from ~3-5 minutes to hours of environment cost. Run docs/focused with -TestPath here and let CI run full, or pass -AllowShimmedFull to accept the cost explicitly."
+        }
+        Write-Host 'Cost note: -Profile full runs the entire suite. On a plain terminal or CI this is about 3-5 minutes (sharded, ~1267 cases); on a shim-instrumented sandbox host (see docs/runbooks/agent-sandbox-instrumentation.md) it can inflate to hours, which is environment cost, not code cost. Prefer docs/focused in such hosts and let CI run full.'
     }
 
     if ($Profile -eq 'docs') {

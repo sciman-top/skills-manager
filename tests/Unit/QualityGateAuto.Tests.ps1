@@ -230,4 +230,17 @@ $global:LASTEXITCODE = 0
         ($out | Out-String) | Should -Match '== diff-check =='
         ($out | Out-String) | Should -Match 'Local quality gates passed \(focused\)'
     }
+
+    It 'blocks a non-CI full run when sandbox shim fingerprints are present' {
+        $repo = New-AutoGateFixture
+        $env:CODEBUDDY_SAFE_DELETE_SANDBOX = '1'
+        try {
+            # The block must fire before any build/test gate starts, so the
+            # fixture needs no runnable tests: the throw itself is the proof.
+            { Invoke-TempGate $repo @{ Profile = 'full' } *> $null } | Should -Throw '*blocked inside an instrumented sandbox*'
+        }
+        finally {
+            Remove-Item Env:\CODEBUDDY_SAFE_DELETE_SANDBOX -ErrorAction SilentlyContinue
+        }
+    }
 }

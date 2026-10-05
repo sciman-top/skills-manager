@@ -60,6 +60,13 @@
 
 **尚未定论**：`HTTP_PROXY` 对**联网测试**的额外延迟未实测。含网络调用的测试应单独怀疑。
 
+### 3.1 ZCode 会话实测（2026-10-05，指纹面外）
+
+ZCode 沙箱会话内（Bash 工具直跑 pwsh 子进程）：§2.1 全部环境变量为空、`(Get-Command Remove-Item).CommandType` 为 `Cmdlet`（未包装）、30 文件递归删除微基准 **0.01s**——当前指纹面内**无任何仪表化**，主工作树全量分片实测 211s（≈CI 水平）。含义：
+
+- 小时级膨胀的实证（§1）属**设置这些指纹的宿主**（WorkBuddy 系），不得外推到所有 AI 会话；反之，无指纹会话跑出的耗时也不是其他宿主的通行证。
+- `run-local-quality-gates.ps1` 已按 §2 指纹（env 标记 + `Remove-Item` Function 包装）阻断非 CI 的 `-Profile full`（`-AllowShimmedFull` 显式豁免）；指纹面外的偶发慢（如跨盘 Temp worktree、代理下 vendor 克隆）不在该阻断的覆盖内，仍按 §4 规则报告条件与缺口。
+
 ---
 
 ## 4. 操作规则（防重现）
