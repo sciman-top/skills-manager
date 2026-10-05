@@ -182,6 +182,9 @@ Describe "Doctor CLI behavior" {
         }
 
         $thrown | Should -Be $false
+        # The real consumer decodes this stdout with its own console code page, so the
+        # document itself must stay pure ASCII (see ConvertTo-AsciiJson).
+        ([regex]::IsMatch($text, '[^\x00-\x7F]')) | Should -Be $false
         $parsed.checks.git.ok | Should -Be $true
         $parsed.checks.config.ok | Should -Be $true
         $parsed.offline_contract | Should -Be $true
@@ -192,8 +195,18 @@ Describe "Doctor CLI behavior" {
 
     It "Emits --json output on stdout from the Main dispatch, not from Invoke-Doctor" {
         $mainScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Main.ps1') -Raw
-        $mainScript | Should -Match 'Write-Output \(\$doctorResult \| ConvertTo-Json -Depth 30\)'
+        $mainScript | Should -Match 'Write-Output \(ConvertTo-AsciiJson \(\$doctorResult \| ConvertTo-Json -Depth 30\)\)'
         $doctorScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\src\Commands\Doctor.ps1') -Raw
         $doctorScript | Should -Not -Match 'Write-Host \(\$report \| ConvertTo-Json'
+    }
+
+    It "Emits ASCII-only JSON so a non-ASCII value survives the consumer code page" {
+        # 2026-10-05: on a zh-CN host the CIM OS caption crossed the stdout code page as
+        # mojibake with a byte replaced by '?', which ate the closing quote and left
+        # `doctor --json` structurally invalid (ConvertFrom-Json threw at checks.os).
+        # Escaping every non-ASCII code unit keeps the document code-page independent.
+        $document = ConvertTo-AsciiJson ([pscustomobject]@{ os = "Microsoft Windows 11 专业版 64 位" } | ConvertTo-Json -Depth 5)
+        ([regex]::IsMatch($document, '[^\x00-\x7F]')) | Should -Be $false
+        ($document | ConvertFrom-Json).os | Should -Be "Microsoft Windows 11 专业版 64 位"
     }
 }

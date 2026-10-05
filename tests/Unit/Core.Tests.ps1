@@ -84,6 +84,32 @@ Describe "Core Functions" {
         }
     }
 
+    Context "ConvertTo-AsciiJson" {
+        It "Escapes non-ASCII code units and round-trips the original text" {
+            $json = '{"os":"Microsoft Windows 11 专业版 64 位"}'
+            $ascii = ConvertTo-AsciiJson $json
+            ([regex]::IsMatch($ascii, '[^\x00-\x7F]')) | Should -Be $false
+            ($ascii | ConvertFrom-Json).os | Should -Be "Microsoft Windows 11 专业版 64 位"
+        }
+
+        It "Leaves pure ASCII documents byte-identical" {
+            $json = '{"pass":true,"count":3,"name":"skill-x"}'
+            (ConvertTo-AsciiJson $json) | Should -Be $json
+        }
+
+        It "Escapes surrogate pairs per code unit without breaking the document" {
+            $emoji = [char]::ConvertFromUtf32(0x1F680)
+            $ascii = ConvertTo-AsciiJson ('{"v":"' + $emoji + '"}')
+            ([regex]::IsMatch($ascii, '[^\x00-\x7F]')) | Should -Be $false
+            ($ascii | ConvertFrom-Json).v | Should -Be $emoji
+        }
+
+        It "Returns null and empty input unchanged" {
+            (ConvertTo-AsciiJson $null) | Should -BeNullOrEmpty
+            (ConvertTo-AsciiJson "") | Should -Be ""
+        }
+    }
+
     Context "Split-Args" {
         It "Splits simple arguments" {
             $tokens = Split-Args "foo bar baz"
