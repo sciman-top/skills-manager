@@ -51,7 +51,7 @@ Describe 'Skill projection profiles' {
             @($selection.included_names) | Should -Not -Contain 'grill-me'
             @($selection.included_names) | Should -Not -Contain 'workbuddy-risk-triage'
         }
-        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
+        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
     }
 
     It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
@@ -90,7 +90,7 @@ Describe 'Skill projection profiles' {
         $selection.profile | Should -Be 'full-compatible'
         $selection.include_all | Should -BeTrue
         @($selection.included_names).Count | Should -Be 0
-        @($selection.excluded_names) | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
+        @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
         @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
