@@ -559,3 +559,24 @@ verify drift
         $report.semantic_coverage_pass | Should -Be $true
     }
 }
+
+Describe 'Rule estate path normalization' {
+    It 'expands tilde paths without touching the read-only HOME variable' {
+        # $home is a read-only automatic variable; the pre-2026-10 implementation
+        # assigned it, which becomes a terminating error under EAP=Stop and made
+        # every tilde path crash rule-estate-audit. Pin both the value and the
+        # non-throwing behavior under Stop.
+        $ErrorActionPreference = 'Stop'
+        $userProfile = [Environment]::GetFolderPath('UserProfile')
+        Get-RuleEstateNormalizedPath '~' | Should -Be $userProfile
+        Get-RuleEstateNormalizedPath '~\sub dir' | Should -Be (Join-Path $userProfile 'sub dir')
+        Get-RuleEstateNormalizedPath '~/x' | Should -Be (Join-Path $userProfile 'x')
+    }
+
+    It 'rejects relative paths without a base and joins them when a base is given' {
+        { Get-RuleEstateNormalizedPath 'relative\path' } | Should -Throw '*explicit base path*'
+        $base = Join-Path $TestDrive 'base'
+        New-Item -ItemType Directory -Path $base -Force | Out-Null
+        Get-RuleEstateNormalizedPath 'relative\path' $base | Should -Be (Join-Path $base 'relative\path')
+    }
+}

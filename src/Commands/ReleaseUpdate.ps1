@@ -129,11 +129,15 @@ function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest)
         Need ($actual -eq ([string]$entry.sha256).ToLowerInvariant()) ("本地发行文件已修改：{0}；请使用 Git 源码开发版或先迁移定制内容" -f $relative)
     }
     # The worker swaps the whole installation directory. Keep its owned
-    # receipt across repeated updates, but block every other unmanifested file
+    # receipts across repeated updates, but block every other unmanifested file
     # before the swap so local data cannot be silently discarded.
     [void]$expectedPaths.Add('RELEASE-MANIFEST.json')
     $ownedRuntimeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     [void]$ownedRuntimeFiles.Add('reports/release-update/last.json')
+    # release-update-scheduled-runner.ps1 persists its own receipt into the same
+    # directory; without this exemption every update after enabling the schedule
+    # is blocked by the scheduler's own bookkeeping.
+    [void]$ownedRuntimeFiles.Add('reports/release-update/scheduled-last.json')
     $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
             [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
         })
