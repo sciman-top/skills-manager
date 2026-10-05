@@ -1,4 +1,5 @@
 ## B. Claude 平台差异
+<!-- verified: 2026-10-05 | code.claude.com/docs/en/memory | Claude Code -->
 ### B.1 加载链
 - 用户规则根由 `CLAUDE_CONFIG_DIR` 决定，未设置时为 `~/.claude`，文件为 `CLAUDE.md`；项目规则可位于仓库根 `CLAUDE.md` 或 `.claude/CLAUDE.md`，个人项目偏好放 gitignored `CLAUDE.local.md`。
 - Claude 会把适用规则加入上下文；多个文件通常是拼接关系，不应依赖确定性 override 来隐藏上层内容。settings 的优先级与 memory 加载语义是不同机制。

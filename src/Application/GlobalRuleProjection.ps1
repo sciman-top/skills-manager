@@ -157,7 +157,7 @@ function Get-GlobalRuleSections([string]$Text) {
 
 function Test-GlobalRuleSourceFamily {
     param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
-    $findings=New-Object Collections.Generic.List[object];$observations=New-Object Collections.Generic.List[object]
+    $findings=New-Object Collections.Generic.List[object];$observations=New-Object Collections.Generic.List[object];$budget=New-Object Collections.Generic.List[object]
     $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
     try { Sync-GlobalRuleGeneratedFiles -RepoRoot $RepoRoot -Check }
     catch { $findings.Add((New-GlobalRuleFinding 'source_generation_drift' $RepoRoot $_.Exception.Message))|Out-Null }
@@ -171,6 +171,12 @@ function Test-GlobalRuleSourceFamily {
         if($fact.bytes -gt 16384){$findings.Add((New-GlobalRuleFinding 'source_byte_budget_exceeded' $entry.source_path 'Global rule exceeds 16 KiB.'))|Out-Null}
         if($fact.lines -gt 130){$findings.Add((New-GlobalRuleFinding 'source_line_budget_exceeded' $entry.source_path 'Global rule exceeds 130 lines.'))|Out-Null}
         $ratio=[Math]::Max($fact.bytes/16384.0,$fact.lines/130.0)
+        # 恒定的预算成本信号：无论是否越过 85%/95%，都回显距离硬墙的余量，
+        # 让每次检查都暴露「再改一次会不会撞墙」。observations 保持阈值语义不变。
+        # Antigravity 另有宿主硬限（渲染文件 ≤12000 字符，见 Sync-GlobalRuleGeneratedFiles），
+        # 源文件比率看不到它，故单独标注 host_char_limit 供选档参考。
+        $hostCharLimit=$(if($entry.id -eq 'antigravity'){12000}else{0})
+        $budget.Add([pscustomobject][ordered]@{host=$entry.id;path=$entry.source_path;bytes=$fact.bytes;max_bytes=16384;lines=$fact.lines;max_lines=130;usage_ratio=[Math]::Round($ratio,4);host_char_limit=$hostCharLimit;state=$(if($ratio-ge .95){'addition_blocked'}elseif($ratio-ge .85){'warning'}else{'healthy'})})|Out-Null
         if($ratio-ge .95){$observations.Add([pscustomobject]@{code='source_budget_addition_blocked';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         elseif($ratio-ge .85){$observations.Add([pscustomobject]@{code='source_budget_warning';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         if([string]::IsNullOrWhiteSpace([string]$fact.version)){$findings.Add((New-GlobalRuleFinding 'source_version_missing' $entry.source_path 'Global rule version is missing.'))|Out-Null}
@@ -231,7 +237,7 @@ function Test-GlobalRuleSourceFamily {
             }
         }
     }
-    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
+    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());budget=@($budget.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
 }
 
 function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[object[]]$Actions,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='') {
@@ -410,7 +416,7 @@ function Test-GlobalRuleProjection {
     $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot;$findings=New-Object Collections.Generic.List[object]
     foreach($finding in @($source.findings)){$findings.Add($finding)|Out-Null}
     if($source.pass){foreach($entry in $source.entries){$target=Get-GlobalRuleFileFacts $entry.target_path;if(-not$target.exists){$findings.Add((New-GlobalRuleFinding 'target_missing' $entry.target_path 'Projected global rule is missing.'))|Out-Null}elseif($target.hash-ne$source.facts[$entry.id].hash){$findings.Add((New-GlobalRuleFinding 'target_source_drift' $entry.target_path 'Projected global rule differs from its source.'))|Out-Null}}}
-    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($source.observations);truth_boundary=$(if($findings.Count-eq0){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})}
+    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($source.observations);budget=@($source.budget);truth_boundary=$(if($findings.Count-eq0){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})}
 }
 
 function Invoke-GlobalRuleProjectionRollback {

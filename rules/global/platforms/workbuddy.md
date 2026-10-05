@@ -1,4 +1,5 @@
 ## B. WorkBuddy 平台差异
+<!-- verified: 2026-10-05 | 本机 CODEBUDDY_CONFIG_DIR 实测 | WorkBuddy / CodeBuddy -->
 ### B.1 加载链
 - 用户规则根优先取 `WORKBUDDY_CONFIG_DIR`，其次取兼容变量 `CODEBUDDY_CONFIG_DIR`；均未设置时，已有 `~/.workbuddy-ai` 优先于 `~/.codebuddy`。依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
 - 项目从 cwd 向上遍历到盘符根之前，再按外层到内层加载；每层分别在目录本身与 `.codebuddy/` 中依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`、`AGENTS.md`、`AGENTS.mdc`，各取首个成功解析项。
