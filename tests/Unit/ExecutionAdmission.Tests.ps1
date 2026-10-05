@@ -369,6 +369,16 @@ finally {
         { New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*execution_contract_invalid*'
     }
 
+    It 'reports mode_unsupported (not a data violation) for a consistent host_admission_required contract' {
+        $root = Join-Path $TestDrive 'unsupported-mode'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $unsupported = [pscustomobject]@{ mode = 'host_admission_required'; native_agent = ''; conversation_owner = 'parent'; stop_condition = 'admission_required' }
+        $fixture.validation.execution_contract = $unsupported
+        $fixture.validation.routing_receipt.execution_contract = $unsupported
+
+        { New-ExecutionAdmission -OriginalRequest 'read-only review' -AdmittedGoal 'review' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*execution_contract_mode_unsupported*'
+    }
+
     It 'derives a successor only after predecessor revalidation and an attributable user answer' {
         $root = Join-Path $TestDrive 'successor'
         $fixture = New-ExecutionAdmissionFixture $root
