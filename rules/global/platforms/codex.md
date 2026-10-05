@@ -1,4 +1,5 @@
 ## B. Codex 平台差异
+<!-- verified: 2026-10-05 | learn.chatgpt.com/docs/agent-configuration | codex-strict-config -->
 ### B.1 加载链
 - 全局在 `CODEX_HOME`（默认 `~/.codex`）取首个非空的 `AGENTS.override.md > AGENTS.md`；项目从 Git root 到 cwd 逐层按同顺序及 fallback 每层取一个，越近 cwd 越晚生效。
 - `project_doc_max_bytes` 默认 32 KiB，约束整条项目规则链；关键规则前置、超限下沉。fallback 只认显式文件名，不假定 `CLAUDE.md` 或未经官方证明的选项有效。

@@ -1,4 +1,5 @@
 ## B. ZCode 平台差异
+<!-- verified: 2026-10-05 | zcode.z.ai/cn/docs/agents | ZCode / GLM -->
 ### B.1 加载链
 - 任务启动时按顺序拼接 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`；Workspace 指令是项目主要来源。不扫描嵌套规则，不展开 import/include，不持续读取 `CLAUDE.md`。
 - 用户级 Skill 位于 `~/.zcode/skills/<skill-name>/SKILL.md`；使用当前可见 metadata/native tool，不根据文件存在推断已加载。

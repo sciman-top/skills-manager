@@ -142,8 +142,19 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
         }
     }
     $json=$envelope|ConvertTo-Json -Depth 30 -Compress
+    $budgetHeadline=if($Mode-eq'check'){
+        # 摘取全局压力最大的一项：优先看宿主硬限（如 Antigravity 12000 字符），
+        # 无宿主硬限时退回源文件 16 KiB/130 行预算。
+        $worstHost='';$worstPressure=-1.0
+        foreach($entry in @($envelope.result.budget)){
+            $limit=[int]$entry.host_char_limit
+            $p=if($limit -gt 0){1.0*[int]$entry.bytes/$limit}else{[double]$entry.usage_ratio}
+            if($p -gt $worstPressure){$worstPressure=$p;$worstHost=[string]$entry.host}
+        }
+        if($worstPressure -lt 0){''}else{'{0} {1:P1} used' -f $worstHost,$worstPressure}
+    }else{''}
     $summary=switch($Mode){
-        'check'{'Global rules check: pass={0}, findings={1}'-f$envelope.pass,@($envelope.result.findings).Count}
+        'check'{'Global rules check: pass={0}, findings={1}, budget={2}'-f$envelope.pass,@($envelope.result.findings).Count,$budgetHeadline}
         'plan'{'Global rules plan: actions={0}, token={1}'-f@($envelope.plan.actions).Count,$envelope.plan.apply.required_token}
         'apply'{'Global rules apply: writes={0}, boundary={1}'-f$envelope.receipt.writes,$envelope.receipt.truth_boundary}
         'rollback'{'Global rules rollback: writes={0}'-f$envelope.result.writes}
