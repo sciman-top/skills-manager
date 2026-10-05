@@ -49,7 +49,7 @@ Describe 'Filter fixture' {
         ($output -join "`n") | Should -Match 'No tests executed'
     }
 
-    It 'prints one stable summary line for a passing run' {
+    It 'prints a start line and one stable summary line for a passing run' {
         $fixture = New-RunnerFixture 'pass' @'
 Describe 'Noisy fixture' {
     It 'passes without leaking output' {
@@ -63,8 +63,9 @@ Describe 'Noisy fixture' {
         $exitCode = $LASTEXITCODE
 
         $exitCode | Should -Be 0
-        @($output).Count | Should -Be 1
-        [string]$output[0] | Should -Match '^Tests: total=1 passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
+        @($output).Count | Should -Be 2
+        [string]$output[0] | Should -Match '^Targeted run started: batch=\[.+\] timeout=[0-9]+s receipt=.+'
+        [string]$output[1] | Should -Match '^Tests: total=1 passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
         ($output -join "`n") | Should -Not -Match 'fixture-noise-marker'
     }
 
@@ -102,7 +103,7 @@ Describe 'Filtered fixture' {
         $exitCode = $LASTEXITCODE
 
         $exitCode | Should -Be 0
-        [string]$output[0] | Should -Match '^Tests: total=[0-9]+ passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
+        [string]$output[1] | Should -Match '^Tests: total=[0-9]+ passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
     }
 
     It 'fails when one test container cannot be parsed even if another container passes' {

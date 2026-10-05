@@ -8,8 +8,8 @@ param(
     [string[]]$ExcludeTag = @(),
     # Unfiltered full-suite runs are split across isolated shard processes.
     # Targeted runs (explicit -TestPath/-TestName) run in one isolated worker
-    # process so the parent's output contract stays exactly one summary line
-    # while the wall clock stays bounded.
+    # process so the parent's output contract is a start line (batch, wall-clock
+    # bound, receipt path) followed by one summary line.
     [ValidateRange(1, 16)][int]$MaxParallel = [Math]::Max(1, [Math]::Min(4, [Environment]::ProcessorCount)),
     [ValidateRange(1, 7200)][int]$ShardTimeoutSeconds = 3600,
     # Bounds the isolated worker that runs an explicit targeted selection
@@ -320,7 +320,8 @@ if ($shardCandidates.Count -gt $MaxParallel) {
 # Targeted runs execute in an isolated worker process so the wall clock is
 # bounded: a wedged test file is killed and reported instead of hanging the
 # caller forever. The parent reproduces the original single-process output
-# contract (exactly one summary line, plus bounded failure diagnostics).
+# contract (a start line, then one summary line, plus bounded failure
+# diagnostics).
 $targetedTimeoutSeconds = if ($TargetedTimeoutSeconds -gt 0) { $TargetedTimeoutSeconds } else { $ShardTimeoutSeconds }
 $targetedRunId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
 $targetedRunRoot = Join-Path $ShardReportRoot ('targeted-{0}' -f $targetedRunId)
@@ -329,6 +330,11 @@ $targetedJobPath = Join-Path $targetedRunRoot 'targeted.job.json'
 $targetedReceiptPath = Join-Path $targetedRunRoot 'targeted.receipt.json'
 $targetedJobSpec = [ordered]@{ paths = @($paths); names = @($TestName); tags = @($Tag); excludeTags = @($ExcludeTag); receipt = $targetedReceiptPath }
 [IO.File]::WriteAllText($targetedJobPath, ($targetedJobSpec | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+
+# Emit the bound up front so a redirected log is never silently empty: batch,
+# wall-clock limit and receipt path are visible from second one, and a quiet
+# log means "waiting for the worker", never "nothing is running".
+Write-Host ("Targeted run started: batch=[{0}] timeout={1}s receipt={2}" -f (@($paths) -join '; '), $targetedTimeoutSeconds, $targetedReceiptPath)
 
 $selfPath = try { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
 if ([string]::IsNullOrWhiteSpace($selfPath)) { $selfPath = (Get-Command pwsh -ErrorAction Stop).Source }
