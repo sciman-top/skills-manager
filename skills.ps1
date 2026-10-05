@@ -150,8 +150,15 @@ function Invoke-CodexCliJson {
 
     $command = Get-Command codex -ErrorAction SilentlyContinue
     if ($null -eq $command) { throw 'codex_cli_unavailable' }
-    $output = @(& $command.Source @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    # A wedged host CLI (waiting on network, auth, or a locked state database)
+    # must not block the caller forever. Every caller degrades to
+    # platform_na/not_observed when this throws, so a bounded timeout becomes a
+    # reportable observation instead of an unbounded hang.
+    $timeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_CODEX_CLI_TIMEOUT_SECONDS' 60 1 600
+    $capture = Invoke-ExternalCommandCapture -command $command.Source -args $Arguments -timeoutSeconds $timeoutSeconds
+    if ([bool]$capture.timed_out) { throw ('codex_cli_timeout: exceeded {0}s' -f $timeoutSeconds) }
+    $output = @($capture.output)
+    $exitCode = [int]$capture.exit_code
     try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50 -NoEnumerate) }
     catch {
         if ($exitCode -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
@@ -1001,7 +1008,171 @@ function Resolve-PowerShellExecutable {
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($pwsh) { return [string]$pwsh.Source }
 
+    $bundledPwsh = Join-Path $PSHOME ($(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }))
+    if (Test-Path -LiteralPath $bundledPwsh -PathType Leaf) { return $bundledPwsh }
+
     throw "未找到 PowerShell 7 (pwsh)。本项目不支持 Windows PowerShell 5.1，请先安装 PowerShell 7。"
+}
+function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    if ([IO.Path]::GetExtension($command).ToLowerInvariant() -eq '.ps1' -and (Test-Path -LiteralPath $command -PathType Leaf)) {
+        return [pscustomobject]@{
+            file = Resolve-PowerShellExecutable
+            args = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', [IO.Path]::GetFullPath($command)) + @($commandArgs)
+        }
+    }
+    $resolved = @(Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($resolved.Count -gt 0 -and $null -ne $resolved[0]) {
+        # Get-Command normally exposes Path, while lightweight callers and
+        # test doubles may only provide Source. Treat both as the executable
+        # location so PowerShell scripts are launched through pwsh reliably.
+        $resolvedPath = [string]$resolved[0].Path
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) { $resolvedPath = [string]$resolved[0].Source }
+        if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+            $ext = [System.IO.Path]::GetExtension($resolvedPath).ToLowerInvariant()
+            if ($ext -eq ".ps1") {
+                return [pscustomobject]@{
+                    file = Resolve-PowerShellExecutable
+                    args = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $resolvedPath) + @($commandArgs)
+                }
+            }
+            return [pscustomobject]@{
+                file = $resolvedPath
+                args = @($commandArgs)
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        file = $command
+        args = @($commandArgs)
+    }
+}
+function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$errText) {
+    $combined = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
+        if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
+    }
+    return [pscustomobject]@{
+        output = @($combined)
+        error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
+    }
+}
+function Invoke-ExternalCommandWithTimeout(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [string]$workingDir = $null,
+    [int]$timeoutSeconds = 30,
+    [hashtable]$EnvironmentOverrides = $null
+) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
+
+    $proc = $null
+    $stdoutTask = $null
+    $stderrTask = $null
+    try {
+        $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
+        $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
+        $argList = @($invocation.args | ForEach-Object { [string]$_ })
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = [string]$invocation.file
+        $startInfo.WorkingDirectory = $effectiveWorkingDir
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        if ($EnvironmentOverrides -ne $null) {
+            foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
+                $key = [string]$entry.Key
+                if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                if ($null -eq $entry.Value) {
+                    [void]$startInfo.Environment.Remove($key)
+                    continue
+                }
+                $startInfo.Environment[$key] = [string]$entry.Value
+            }
+        }
+        foreach ($arg in $argList) {
+            [void]$startInfo.ArgumentList.Add([string]$arg)
+        }
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $startInfo
+        [void]$proc.Start()
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        $exited = $proc.WaitForExit($timeoutSeconds * 1000)
+        if (-not $exited) {
+            try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
+            try { $proc.WaitForExit(2000) | Out-Null } catch {}
+            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+            return [pscustomobject]@{
+                timed_out = $true
+                exit_code = 124
+                output = @($captured.output)
+                error = if ([string]::IsNullOrWhiteSpace([string]$captured.error)) { ("timeout_after_{0}s" -f $timeoutSeconds) } else { ("timeout_after_{0}s: {1}" -f $timeoutSeconds, [string]$captured.error) }
+            }
+        }
+
+        try { $proc.WaitForExit() | Out-Null } catch {}
+        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = [int]$proc.ExitCode
+            output = @($captured.output)
+            error = [string]$captured.error
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = 1
+            output = @()
+            error = $_.Exception.Message
+        }
+    }
+    finally {
+        if ($null -ne $proc) { $proc.Dispose() }
+    }
+}
+function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [int]$minSeconds = 1, [int]$maxSeconds = 600) {
+    $value = $defaultSeconds
+    if ([string]::IsNullOrWhiteSpace($envName)) { return $value }
+
+    $raw = [System.Environment]::GetEnvironmentVariable($envName)
+    $parsed = 0
+    if ([int]::TryParse([string]$raw, [ref]$parsed)) {
+        $value = $parsed
+    }
+
+    if ($value -lt $minSeconds) { $value = $minSeconds }
+    if ($value -gt $maxSeconds) { $value = $maxSeconds }
+    return $value
+}
+function Invoke-ExternalCommandCapture(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [int]$timeoutSeconds = 120,
+    [hashtable]$EnvironmentOverrides = $null,
+    [string]$workingDir = $null
+) {
+    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $workingDir $timeoutSeconds $EnvironmentOverrides
+    return [pscustomobject]@{
+        command = $command
+        args = @($CommandArgs)
+        exit_code = [int]$result.exit_code
+        timed_out = [bool]$result.timed_out
+        error = [string]$result.error
+        output = @($result.output)
+    }
 }
 function Read-HostSafe([string]$prompt) {
     $value = Read-Host $prompt
@@ -6507,6 +6678,11 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
 }
 
 function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
+    $seconds = 30
+    $configured = 0
+    if ([int]::TryParse($env:SKILLS_RULE_ESTATE_GIT_TIMEOUT_SECONDS, [ref]$configured)) {
+        $seconds = [Math]::Clamp($configured, 1, 600)
+    }
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = 'git'
     $start.UseShellExecute = $false
@@ -6523,7 +6699,18 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
         # Read both pipes concurrently to avoid blocking on a full stderr pipe.
         $outputTask = $process.StandardOutput.ReadToEndAsync()
         $errorTask = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
+        # A wedged git (index lock, hung helper) must not block the audit forever.
+        # Bound the wait, kill the tree on timeout, then bound the output reads too:
+        # a grandchild inheriting the pipe would otherwise keep ReadToEndAsync from
+        # ever reaching EOF. Mirrors the remote-query guard in src/Git.ps1.
+        if (-not $process.WaitForExit($seconds * 1000)) {
+            if (-not $process.HasExited) { $process.Kill($true) }
+            $null = $process.WaitForExit(5000)
+            return [pscustomobject]@{ exit_code = 124; output = ''; error = ("git_query_timeout_after_{0}s" -f $seconds) }
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($outputTask, $errorTask), 5000)) {
+            return [pscustomobject]@{ exit_code = 124; output = ''; error = 'git_query_output_timeout' }
+        }
         $output = $outputTask.GetAwaiter().GetResult().Trim()
         $errorText = $errorTask.GetAwaiter().GetResult().Trim()
         return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
@@ -16761,143 +16948,6 @@ function Ensure-GhAuthForGithubMcp($servers) {
     Log ("GitHub MCP 凭据预检通过：source_scope={0}，仅注入当前同步进程。" -f $sourceScope) "INFO"
 }
 
-function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
-    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
-    $resolved = @(Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($resolved.Count -gt 0 -and $null -ne $resolved[0]) {
-        $resolvedPath = [string]$resolved[0].Path
-        if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
-            $ext = [System.IO.Path]::GetExtension($resolvedPath).ToLowerInvariant()
-            if ($ext -eq ".ps1") {
-                return [pscustomobject]@{
-                    file = Resolve-PowerShellExecutable
-                    args = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $resolvedPath) + @($commandArgs)
-                }
-            }
-            return [pscustomobject]@{
-                file = $resolvedPath
-                args = @($commandArgs)
-            }
-        }
-    }
-
-    return [pscustomobject]@{
-        file = $command
-        args = @($commandArgs)
-    }
-}
-
-function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$errText) {
-    $combined = New-Object System.Collections.Generic.List[string]
-    foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
-        if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
-    }
-    return [pscustomobject]@{
-        output = @($combined)
-        error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
-    }
-}
-
-function Invoke-ExternalCommandWithTimeout(
-    [string]$command,
-    [Alias("args")]
-    [string[]]$CommandArgs = @(),
-    [string]$workingDir = $null,
-    [int]$timeoutSeconds = 30,
-    [hashtable]$EnvironmentOverrides = $null
-) {
-    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
-    if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
-
-    $proc = $null
-    $stdoutTask = $null
-    $stderrTask = $null
-    try {
-        $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
-        $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
-        $argList = @($invocation.args | ForEach-Object { [string]$_ })
-        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = [string]$invocation.file
-        $startInfo.WorkingDirectory = $effectiveWorkingDir
-        $startInfo.UseShellExecute = $false
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError = $true
-        $startInfo.CreateNoWindow = $true
-        if ($EnvironmentOverrides -ne $null) {
-            foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
-                $key = [string]$entry.Key
-                if ([string]::IsNullOrWhiteSpace($key)) { continue }
-                if ($null -eq $entry.Value) {
-                    [void]$startInfo.Environment.Remove($key)
-                    continue
-                }
-                $startInfo.Environment[$key] = [string]$entry.Value
-            }
-        }
-        foreach ($arg in $argList) {
-            [void]$startInfo.ArgumentList.Add([string]$arg)
-        }
-
-        $proc = [System.Diagnostics.Process]::new()
-        $proc.StartInfo = $startInfo
-        [void]$proc.Start()
-        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-        $stderrTask = $proc.StandardError.ReadToEndAsync()
-        $exited = $proc.WaitForExit($timeoutSeconds * 1000)
-        if (-not $exited) {
-            try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
-            try { $proc.WaitForExit(2000) | Out-Null } catch {}
-            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
-            return [pscustomobject]@{
-                timed_out = $true
-                exit_code = 124
-                output = @($captured.output)
-                error = if ([string]::IsNullOrWhiteSpace([string]$captured.error)) { ("timeout_after_{0}s" -f $timeoutSeconds) } else { ("timeout_after_{0}s: {1}" -f $timeoutSeconds, [string]$captured.error) }
-            }
-        }
-
-        try { $proc.WaitForExit() | Out-Null } catch {}
-        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
-
-        return [pscustomobject]@{
-            timed_out = $false
-            exit_code = [int]$proc.ExitCode
-            output = @($captured.output)
-            error = [string]$captured.error
-        }
-    }
-    catch {
-        return [pscustomobject]@{
-            timed_out = $false
-            exit_code = 1
-            output = @()
-            error = $_.Exception.Message
-        }
-    }
-    finally {
-        if ($null -ne $proc) { $proc.Dispose() }
-    }
-}
-
-function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [int]$minSeconds = 1, [int]$maxSeconds = 600) {
-    $value = $defaultSeconds
-    if ([string]::IsNullOrWhiteSpace($envName)) { return $value }
-
-    $raw = [System.Environment]::GetEnvironmentVariable($envName)
-    $parsed = 0
-    if ([int]::TryParse([string]$raw, [ref]$parsed)) {
-        $value = $parsed
-    }
-
-    if ($value -lt $minSeconds) { $value = $minSeconds }
-    if ($value -gt $maxSeconds) { $value = $maxSeconds }
-    return $value
-}
-
 function Test-EnvFlagEnabled([string]$envName) {
     if ([string]::IsNullOrWhiteSpace($envName)) { return $false }
     $raw = [System.Environment]::GetEnvironmentVariable($envName)
@@ -16935,25 +16985,6 @@ function Should-VerifyGeminiCli() {
 
 function Get-NativeMcpCommandTimeoutSeconds() {
     return (Resolve-TimeoutSecondsFromEnv "SKILLS_MCP_NATIVE_TIMEOUT_SECONDS" 30 1 600)
-}
-
-function Invoke-ExternalCommandCapture(
-    [string]$command,
-    [Alias("args")]
-    [string[]]$CommandArgs = @(),
-    [int]$timeoutSeconds = 120,
-    [hashtable]$EnvironmentOverrides = $null,
-    [string]$workingDir = $null
-) {
-    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $workingDir $timeoutSeconds $EnvironmentOverrides
-    return [pscustomobject]@{
-        command = $command
-        args = @($CommandArgs)
-        exit_code = [int]$result.exit_code
-        timed_out = [bool]$result.timed_out
-        error = [string]$result.error
-        output = @($result.output)
-    }
 }
 
 function Get-McpCliProcessEnvOverrides([string]$cli) {

@@ -7,13 +7,24 @@ param(
     [string[]]$Tag = @(),
     [string[]]$ExcludeTag = @(),
     # Unfiltered full-suite runs are split across isolated shard processes.
-    # Targeted runs (explicit -TestPath/-TestName) keep the single-process path
-    # so their output contract stays exactly one summary line.
+    # Targeted runs (explicit -TestPath/-TestName) run in one isolated worker
+    # process so the parent's output contract stays exactly one summary line
+    # while the wall clock stays bounded.
     [ValidateRange(1, 16)][int]$MaxParallel = [Math]::Max(1, [Math]::Min(4, [Environment]::ProcessorCount)),
     [ValidateRange(1, 7200)][int]$ShardTimeoutSeconds = 3600,
+    # Bounds the isolated worker that runs an explicit targeted selection
+    # (-TestPath/-TestName/-Tag) or an unsharded default run. The 900s default
+    # keeps the bound meaningful for targeted batches (seconds in a healthy
+    # terminal, minutes on a slow first run that still bootstraps Pester);
+    # passing 0 falls back to ShardTimeoutSeconds instead. Every path through
+    # this runner has a wall-clock bound: a wedged test file must fail with a
+    # diagnostic, not hang forever.
+    [ValidateRange(0, 7200)][int]$TargetedTimeoutSeconds = 900,
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
     # Internal: set only by the parent process when spawning a shard worker.
-    [string]$ShardJobPath = ''
+    [string]$ShardJobPath = '',
+    # Internal: set only by the parent process when spawning a targeted worker.
+    [string]$TargetedJobPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,6 +88,51 @@ if (-not [string]::IsNullOrWhiteSpace($ShardJobPath)) {
     }
     try {
         $run = Invoke-RepositoryPester -Paths @($job.files | ForEach-Object { [string]$_ }) -Names @() -Tags @() -ExcludeTags @()
+        $result = $run.result
+        if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
+        $receipt.duration_seconds = [Math]::Round([double]$run.seconds, 3)
+        $receipt.total_count = [int]$result.TotalCount
+        $receipt.passed_count = [int]$result.PassedCount
+        $receipt.failed_count = [int]$result.FailedCount
+        $receipt.skipped_count = [int]$result.SkippedCount
+        $receipt.failures = @(Get-FailedTestDetail $result)
+        $receipt.container_failures = @($result.FailedContainers | ForEach-Object { [string]$_.Item })
+        $receipt.container_failure_details = @($result.FailedContainers | ForEach-Object {
+                [pscustomobject]@{
+                    container = [string]$_.Item
+                    error     = if ($_.ErrorRecord) { [string]$_.ErrorRecord } else { '' }
+                }
+            })
+        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
+    }
+    catch {
+        $receipt.status = 'error'
+        $receipt.error = $_.Exception.Message
+    }
+    [IO.File]::WriteAllText([string]$job.receipt, ($receipt | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    exit $(if ([string]$receipt.status -eq 'passed') { 0 } else { 1 })
+}
+
+# Targeted worker: run the requested selection in an isolated process so a
+# wedged test file cannot block the caller forever. Persist a machine-readable
+# receipt and print nothing so the parent's output contract is unaffected.
+if (-not [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
+    $job = Get-Content -LiteralPath $TargetedJobPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $receipt = [ordered]@{
+        schema_version            = 1
+        status                    = 'error'
+        total_count               = 0
+        passed_count              = 0
+        failed_count              = 0
+        skipped_count             = 0
+        duration_seconds          = 0.0
+        failures                  = @()
+        container_failures        = @()
+        container_failure_details = @()
+        error                     = ''
+    }
+    try {
+        $run = Invoke-RepositoryPester -Paths @($job.paths | ForEach-Object { [string]$_ }) -Names @($job.names | ForEach-Object { [string]$_ }) -Tags @($job.tags | ForEach-Object { [string]$_ }) -ExcludeTags @($job.excludeTags | ForEach-Object { [string]$_ })
         $result = $run.result
         if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
         $receipt.duration_seconds = [Math]::Round([double]$run.seconds, 3)
@@ -261,28 +317,63 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     exit 0
 }
 
-$run = Invoke-RepositoryPester -Paths $paths -Names $TestName -Tags $Tag -ExcludeTags $ExcludeTag
-$result = $run.result
-if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
-Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f [int]$result.TotalCount, [int]$result.PassedCount, [int]$result.FailedCount, [int]$result.SkippedCount, $run.seconds)
-if ([int]$result.FailedContainersCount -gt 0) {
-    foreach ($container in @($result.FailedContainers)) {
-        Write-Host ("CONTAINER FAILED: {0}" -f [string]$container.Item)
-        if ($container.ErrorRecord) { Write-Host ([string]$container.ErrorRecord) }
+# Targeted runs execute in an isolated worker process so the wall clock is
+# bounded: a wedged test file is killed and reported instead of hanging the
+# caller forever. The parent reproduces the original single-process output
+# contract (exactly one summary line, plus bounded failure diagnostics).
+$targetedTimeoutSeconds = if ($TargetedTimeoutSeconds -gt 0) { $TargetedTimeoutSeconds } else { $ShardTimeoutSeconds }
+$targetedRunId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+$targetedRunRoot = Join-Path $ShardReportRoot ('targeted-{0}' -f $targetedRunId)
+$null = New-Item -ItemType Directory -Path $targetedRunRoot -Force
+$targetedJobPath = Join-Path $targetedRunRoot 'targeted.job.json'
+$targetedReceiptPath = Join-Path $targetedRunRoot 'targeted.receipt.json'
+$targetedJobSpec = [ordered]@{ paths = @($paths); names = @($TestName); tags = @($Tag); excludeTags = @($ExcludeTag); receipt = $targetedReceiptPath }
+[IO.File]::WriteAllText($targetedJobPath, ($targetedJobSpec | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+
+$selfPath = try { [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { '' }
+if ([string]::IsNullOrWhiteSpace($selfPath)) { $selfPath = (Get-Command pwsh -ErrorAction Stop).Source }
+$startInfo = [Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = $selfPath
+$startInfo.UseShellExecute = $false
+foreach ($argument in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-TargetedJobPath', $targetedJobPath)) {
+    $startInfo.ArgumentList.Add($argument)
+}
+$process = [Diagnostics.Process]::Start($startInfo)
+$targetedTimer = [Diagnostics.Stopwatch]::StartNew()
+if (-not $process.WaitForExit($targetedTimeoutSeconds * 1000)) {
+    if (-not $process.HasExited) { $process.Kill($true) }
+    $null = $process.WaitForExit(5000)
+    $process.Dispose()
+    throw ("Targeted tests exceeded {0}s timeout; the worker was killed. Batch: {1}" -f $targetedTimeoutSeconds, (@($paths) -join '; '))
+}
+$process.Dispose()
+$targetedTimer.Stop()
+
+if (-not (Test-Path -LiteralPath $targetedReceiptPath -PathType Leaf)) {
+    throw ("Targeted test worker exited without a receipt (batch: {0})." -f (@($paths) -join '; '))
+}
+$receipt = Get-Content -LiteralPath $targetedReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([string]$receipt.status -eq 'error') { throw [string]$receipt.error }
+
+Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f [int]$receipt.total_count, [int]$receipt.passed_count, [int]$receipt.failed_count, [int]$receipt.skipped_count, [double]$receipt.duration_seconds)
+if (@($receipt.container_failures).Count -gt 0) {
+    foreach ($container in @($receipt.container_failures)) { Write-Host ("CONTAINER FAILED: {0}" -f [string]$container) }
+    foreach ($detail in @($receipt.container_failure_details)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$detail.error)) { Write-Host ([string]$detail.error) }
     }
     $global:LASTEXITCODE = 1
-    throw ("Pester container failures: {0}" -f $result.FailedContainersCount)
+    throw ("Pester container failures: {0}" -f @($receipt.container_failures).Count)
 }
-if ([int]$result.FailedCount -gt 0) {
-    foreach ($test in @(Get-FailedTestDetail $result)) {
-        Write-Host ("FAILED: {0}" -f $test.name)
+if ([int]$receipt.failed_count -gt 0) {
+    foreach ($test in @($receipt.failures)) {
+        Write-Host ("FAILED: {0}" -f [string]$test.name)
         if (-not [string]::IsNullOrWhiteSpace([string]$test.message)) { Write-Host ([string]$test.message) }
     }
     $global:LASTEXITCODE = 1
-    throw ("Pester failures: {0}" -f $result.FailedCount)
+    throw ("Pester failures: {0}" -f [int]$receipt.failed_count)
 }
 
-if ([int]$result.PassedCount -eq 0) {
+if ([int]$receipt.passed_count -eq 0) {
     $global:LASTEXITCODE = 1
     throw 'No tests executed successfully; check filters and skipped tests.'
 }
