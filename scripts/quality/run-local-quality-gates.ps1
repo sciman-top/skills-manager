@@ -15,6 +15,10 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $autoProfile = $Profile -eq 'auto'
 $docsSupplemented = $false
+# Cost signal: total wall clock is printed on success so a caller can see the
+# price of the chosen profile. On this host a sandboxed full run is dominated
+# by shim overhead, not code cost; CI is the intended full runner.
+$suiteStopwatch = [Diagnostics.Stopwatch]::StartNew()
 
 function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
     Write-Host ("== {0} ==" -f $Name)
@@ -99,6 +103,10 @@ try {
         if ($Profile -eq 'focused') { $TestPath = @(@($resolved.focused_test_paths) + $TestPath | Sort-Object -Unique) }
     }
 
+    if ($Profile -eq 'full' -and -not $env:CI) {
+        Write-Host 'Cost note: -Profile full runs the entire suite. On a plain terminal or CI this is about 3-5 minutes (sharded, ~1267 cases); inside the AI sandbox the safe-delete shim inflates it to hours, which is environment cost, not code cost. Prefer docs/focused in the sandbox and let CI run full.'
+    }
+
     if ($Profile -eq 'docs') {
         if ($autoProfile -or [string]::IsNullOrWhiteSpace($DiffBase)) {
             Invoke-QualityGate 'diff-check' {
@@ -122,7 +130,7 @@ try {
             Invoke-QualityGate 'diff-check' { & git diff --check $DiffBase HEAD -- }
         }
         if ($TestPath.Count -eq 0 -and $TestName.Count -eq 0 -and $Verifier.Count -eq 0) {
-            Write-Host 'Local quality gates passed (docs).'
+            Write-Host ("Local quality gates passed (docs). elapsed={0:n1}s" -f $suiteStopwatch.Elapsed.TotalSeconds)
             return
         }
         # Explicit proof supplements the classification, including an empty diff.
@@ -185,7 +193,7 @@ try {
             }
         }
     }
-    Write-Host ("Local quality gates passed ({0})." -f $Profile)
+    Write-Host ("Local quality gates passed ({0}). elapsed={1:n1}s" -f $Profile, $suiteStopwatch.Elapsed.TotalSeconds)
 }
 finally {
     Pop-Location

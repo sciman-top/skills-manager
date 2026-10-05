@@ -10,3 +10,5 @@
 | cold-skill-routing-implementation-plan.md | CSR-100–170 任务卡已闭卷；验收口径以 `docs/runbooks/cold-skill-routing-acceptance.md` 为准 |
 
 恢复方式：`git log --follow docs/archive/<file>` 追溯，或直接 `git mv` 移回 `docs/product/` 并更新 `docs/product/README.md` 索引。
+
+**这不是已批准的待办清单。** 本目录只保留历史设计输入，不构成对任何能力的承诺或调用方证据。任何恢复或新实现都必须先过根 `AGENTS.md` B 节的准入三问（当前调用方 / 替代或删除了什么 / 最小验证）；答不上即拒绝，不以"计划里写过"为理由扩展 runtime、门禁或治理面。`docs/product/skills-manager-vnext-prd.md` §5.7 的 `FR-HER-*`/`FR-EVO-*` 属于此类设计输入，当前均未实现。
