@@ -70,8 +70,11 @@
           "default_profile": "core-lean",
           "exclude": [
             "agent-browser",
+            "docx",
+            "pptx",
             "skill-creator",
-            "web-artifacts-builder"
+            "web-artifacts-builder",
+            "xlsx"
           ]
         },
         "antigravity": {
