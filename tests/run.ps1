@@ -31,6 +31,29 @@ $ErrorActionPreference = 'Stop'
 $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1'
 $manifest = & $bootstrap
 
+# Reclaim TestDrive trees leaked by previously interrupted runs before doing any
+# real work. Pester removes a TestDrive only on a normal exit, so a killed or
+# timed-out worker leaves its whole tree (one run can create thousands of
+# directories) in %TEMP% forever; in a sandboxed host every leftover directory
+# makes later deletions and cleanups more expensive, which is why the slowness
+# keeps coming back. The reclaim is best-effort and must never fail the run.
+# Workers are skipped: the parent process has already reclaimed before spawning.
+if ([string]::IsNullOrWhiteSpace($ShardJobPath) -and [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
+    try {
+        $reclaimPath = Join-Path $PSScriptRoot '..\scripts\quality\reclaim-test-temp.ps1'
+        if (Test-Path -LiteralPath $reclaimPath -PathType Leaf) {
+            $reclaimSummary = & $reclaimPath
+            if ($reclaimSummary) {
+                Write-Host ("Temp reclaim: leftover={0} parked={1} deleted={2} deferred={3} in {4:n1}s" -f `
+                        [int]$reclaimSummary.scanned, [int]$reclaimSummary.parked, [int]$reclaimSummary.deleted, [int]$reclaimSummary.delete_deferred, [double]$reclaimSummary.seconds)
+            }
+        }
+    }
+    catch {
+        Write-Host ("Temp reclaim skipped: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Stop-TestRunnerProcess([Diagnostics.Process]$Process) {
     if ($null -eq $Process) { return }
     # A timeout boundary is inherently racy: the worker may exit after the
