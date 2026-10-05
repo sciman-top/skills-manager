@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.84
-**最后更新**: 2026-10-04
+**最后更新**: 2026-10-06
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 通过 `.agents/rules/00-project.md` 的受控 `@../../AGENTS.md` 适配器承接。
@@ -26,6 +26,7 @@
 - `D:\CODE\external\` 整根持有 deny-write ACL 硬墙（外层仓基线见 `references/external-readonly-baselines.json`）；写入/构建被拒属预期，解锁仅经 `scripts/lock-external-repos.ps1 -Unlock` 且为用户显式授权动作，AI 会话不得自行改 ACL 或重钉基线。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
 - 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。准入三问（当前调用方 / 替代或删除了什么 / 最小验证）任一答不上即拒绝，PR 模板同栏。
+- 元治理测试五套（ResolveGateProfile / QualityGateAuto / CiWorkflow / TestRunner / BuildScript）冻结：仅真实故障触发式维护，不做主动性增强或扩面。
 
 ## C. 最低门禁
 - 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，检查 `HEAD` 后编辑（含未跟踪文件）；集成范围显式用 `-DiffBase <revision>`。具体选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；可用 `-TestPath` 追加回归证明，显式 focused 用于已确定范围。
@@ -34,6 +35,7 @@
 - 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；2026-10-04 的 WorkBuddy 桌面会话记录过小时级膨胀，且命中 `docs/runbooks/agent-sandbox-instrumentation.md` 所列指纹，不能外推到无指纹的 ZCode 或其他宿主，也不能单独证明全部延迟都由删除 shim 造成 ⇒ 门禁按指纹拦截此类宿主的非 CI full（`-AllowShimmedFull` 显式豁免），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
+- 全面审查按比例止损：距上次「维持现状」结论不足 30 天且 src/config 变更不足 10 文件时，只做增量核对并引用该结论，不重开全量重审。
 
 ## D. 回滚与收口
 - Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 required checks（`test`，strict）：直推 `main` 会被拒，合入走 推分支 → PR → CI 绿 → merge。
