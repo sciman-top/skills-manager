@@ -1141,7 +1141,9 @@ function Get-AuditEvidenceLines([string]$Content) {
         $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
     }
     $lines = $Content -split "`r?`n"
-    $result = New-Object System.Collections.Generic.List[object] $lines.Count
+    # number 是真实行号（证据位置与相邻行判定都依赖它），必须保留。
+    # 只在过滤后用单次循环构造对象，跳过空/规则定义行，容量一次给足。
+    $result = New-Object System.Collections.Generic.List[object]
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $text = $lines[$index]
         # Scanner metadata is not target behaviour.  Excluding these declarations keeps
@@ -1190,7 +1192,11 @@ function Get-AuditRequirementSignalTable {
             [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; regex = [regex]::new("(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*") },
             [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; regex = [regex]::new("(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b") },
             [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; regex = [regex]::new("(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test") },
-            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b") }
+            # backup/recovery 只在有真实数据/状态恢复语义时才算需求。裸
+            # \bbackup\b/\brestore\b 会把包管理器的 NuGet/dotnet restore、
+            # 构建 `--no-restore`、以及 `backup/pre-sync` 这类分支名误判为
+            # 备份能力（实测 9/9 目标仓被误报）。这里要求更明确的搭配。
+            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)|(?:(?:备份|还原|恢复)(?:数据库|数据|系统|配置|状态))") }
         )
     }
     return $script:AuditRequirementSignalTable
@@ -1203,16 +1209,23 @@ function Add-AuditRequirementFactsFromText {
         [string]$Kind,
         [string]$RelativePath,
         # 热路径调用方对同一内容先解析一次行集再喂两个提取器；传入时跳过重复解析。
-        $Lines = $null
+        $Lines = $null,
+        # 调用方已做过文件级预筛时把候选集透传进来，跳过重复的整表预筛。
+        [object[]]$CandidateSignals = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
     # 信号词均不跨行匹配（无 '.'/'\s' 类跨行结构），全内容无命中时任何行
     # 也不会命中：先做一轮文件级预筛，把必然为空的行循环整个短路掉。
     # 预筛保持原信号顺序，嵌套序（行外层×信号内层）不变，输出与逐行全表
     # 匹配严格一致。
-    $candidateSignals = @()
-    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
-        if ($signal.regex.IsMatch($Content)) { $candidateSignals += $signal }
+    if ($null -ne $CandidateSignals) {
+        $candidateSignals = @($CandidateSignals)
+    }
+    else {
+        $candidateSignals = @()
+        foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+            if ($signal.regex.IsMatch($Content)) { $candidateSignals += $signal }
+        }
     }
     if ($candidateSignals.Count -eq 0) { return }
     if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
@@ -1247,6 +1260,40 @@ function Get-AuditArtifactSignalTable {
     return $script:AuditArtifactSignalTable
 }
 
+function Get-AuditSourceSignalCandidates([string]$Content) {
+    # 文件级预筛结果同时是下游两个提取器的候选集：同一内容上「哪些信号
+    # 全内容命中」只算一次。此前预筛先跑一遍整表、提取器入口再各跑一遍，
+    # 同一份 pattern 对同一份内容被匹配三次（实测占热点 25-35%）。
+    # 候选集保持信号表顺序，下游行级循环的相对顺序不变，输出严格一致。
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return [pscustomobject]([ordered]@{ requirements = @(); artifacts = @() })
+    }
+    $requirements = New-Object System.Collections.Generic.List[object]
+    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+        if ($signal.regex.IsMatch($Content)) { $requirements.Add($signal) | Out-Null }
+    }
+    $artifacts = New-Object System.Collections.Generic.List[object]
+    foreach ($artifact in @((Get-AuditArtifactSignalTable).artifacts)) {
+        if ($artifact.regex.IsMatch($Content)) { $artifacts.Add($artifact) | Out-Null }
+    }
+    return [pscustomobject]([ordered]@{
+            requirements = @($requirements.ToArray())
+            artifacts    = @($artifacts.ToArray())
+        })
+}
+
+function Test-AuditSourceContentHasSignal([string]$Content) {
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
+    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+        if ($signal.regex.IsMatch($Content)) { return $true }
+    }
+    $artifactTable = Get-AuditArtifactSignalTable
+    foreach ($artifact in @($artifactTable.artifacts)) {
+        if ($artifact.regex.IsMatch($Content)) { return $true }
+    }
+    return $false
+}
+
 function Add-AuditArtifactFactsFromText {
     param(
         $Accumulator,
@@ -1254,15 +1301,22 @@ function Add-AuditArtifactFactsFromText {
         [string]$Kind,
         [string]$RelativePath,
         # 同 Add-AuditRequirementFactsFromText：调用方可复用同一份行集。
-        $Lines = $null
+        $Lines = $null,
+        # 同 Add-AuditRequirementFactsFromText：调用方可透传已算好的候选集。
+        [object[]]$CandidateArtifacts = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
     $table = Get-AuditArtifactSignalTable
     # 与 requirement 同理：artifact 词不跨行，全内容无命中时行级（含 next 行）
     # 必然全空，预筛保持原相对顺序后整表短路。
-    $candidateArtifacts = @()
-    foreach ($artifact in @($table.artifacts)) {
-        if ($artifact.regex.IsMatch($Content)) { $candidateArtifacts += $artifact }
+    if ($null -ne $CandidateArtifacts) {
+        $candidateArtifacts = @($CandidateArtifacts)
+    }
+    else {
+        $candidateArtifacts = @()
+        foreach ($artifact in @($table.artifacts)) {
+            if ($artifact.regex.IsMatch($Content)) { $candidateArtifacts += $artifact }
+        }
     }
     if ($candidateArtifacts.Count -eq 0) { return }
     if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
@@ -1375,11 +1429,15 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
-            # 行集只解析一次：两个提取器对同一内容各自解析曾是每仓 ~2 倍的
-            # 逐行解释器开销。
-            $sharedLines = @(Get-AuditEvidenceLines $content)
-            Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath $sharedLines
-            Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath $sharedLines
+            # 大量源文件不包含任何能力信号。文件级预筛只跑一次，命中的候选集
+            # 直接透传给两个提取器，避免同一份 pattern 对同一份内容匹配三遍；
+            # 命中时两个提取器仍复用同一份行集，证据顺序与内容不变。
+            $candidates = Get-AuditSourceSignalCandidates $content
+            if (@($candidates.requirements).Count -gt 0 -or @($candidates.artifacts).Count -gt 0) {
+                $sharedLines = @(Get-AuditEvidenceLines $content)
+                Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath $sharedLines $candidates.artifacts
+                Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath $sharedLines $candidates.requirements
+            }
         }
         catch {
             $sourceScanReadFailureCount++
@@ -1547,7 +1605,10 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
         Add-AuditUniqueValue $capabilities "assessment_analytics"
         Add-AuditUniqueValue $capabilities "spreadsheet_import"
     }
-    if ([regex]::IsMatch($combined, "(?i)\bbackup\b|\brestore\b|\bdisaster recovery\b|\b恢复\b|\b迁移\b|\bmanifest hash\b|\bwinpe\b")) {
+    # 同 requirement 表的 backup_recovery：裸 \brestore\b 会被包管理器
+    # restore、`--no-restore`、`restore point`（git 分支）误触。要求
+    # 备份/恢复与数据/状态/快照等词同现，或出现明确的备份产物短语。
+    if ([regex]::IsMatch($combined, "(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)")) {
         Add-AuditUniqueValue $capabilities "backup_recovery"
         Add-AuditUniqueValue $capabilities "migration_recovery"
     }
