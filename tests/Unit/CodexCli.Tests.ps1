@@ -1,12 +1,17 @@
 BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    # Core.ps1 owns the bounded external-command runner Invoke-CodexCliJson now
+    # depends on; load it before the Infrastructure seam under test.
+    . (Join-Path $repoRoot 'src\Core.ps1')
     . (Join-Path $repoRoot 'src\Infrastructure\CodexCli.ps1')
 }
 
 Describe 'Codex CLI plugin inventory' {
     It 'accepts valid JSON from a nonzero exit only when explicitly allowed' {
         $fixtureCodex = Join-Path $TestDrive 'codex-fixture.ps1'
-        [IO.File]::WriteAllText($fixtureCodex, "Write-Output '{`"status`":`"degraded`"}'`n`$global:LASTEXITCODE = 1`n", [Text.UTF8Encoding]::new($false))
+        # Out-of-process execution reports the child's real exit code, so the
+        # fixture must exit rather than only set $LASTEXITCODE.
+        [IO.File]::WriteAllText($fixtureCodex, "Write-Output '{`"status`":`"degraded`"}'`nexit 1`n", [Text.UTF8Encoding]::new($false))
         Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
 
         { Invoke-CodexCliJson -Arguments @('doctor', '--json') } | Should -Throw 'codex_cli_failed*'
@@ -49,7 +54,7 @@ Describe 'Codex CLI host observation' {
         @{ Json = '[{"name":"one","enabled":true},{"name":"two","enabled":false}]'; Count = 2 }
     ) {
         $fixtureCodex = Join-Path $TestDrive 'codex-array.ps1'
-        [IO.File]::WriteAllText($fixtureCodex, "Write-Output '$Json'`n`$global:LASTEXITCODE = 0`n")
+        [IO.File]::WriteAllText($fixtureCodex, "Write-Output '$Json'`nexit 0`n")
         Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
         $payload = Invoke-CodexCliJson -Arguments @('mcp', 'list', '--json')
         ($payload -is [array]) | Should -BeTrue
@@ -83,5 +88,23 @@ Describe 'Codex CLI host observation' {
         Mock Invoke-CodexCliJson { throw 'unavailable' }
         (Get-CodexMcpObservation).coverage | Should -Be 'platform_na'
         (Get-CodexDoctorObservation).coverage | Should -Be 'platform_na'
+    }
+
+    It 'bounds a wedged codex CLI with a timeout instead of hanging forever' {
+        $env:SKILLS_CODEX_CLI_TIMEOUT_SECONDS = '1'
+        try {
+            $fixtureCodex = Join-Path $TestDrive 'codex-hang.ps1'
+            [IO.File]::WriteAllText($fixtureCodex, "Start-Sleep -Seconds 30`nexit 0`n", [Text.UTF8Encoding]::new($false))
+            Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
+
+            { Invoke-CodexCliJson -Arguments @('doctor', '--json') } | Should -Throw 'codex_cli_timeout*'
+
+            $observation = Get-CodexDoctorObservation
+            $observation.coverage | Should -Be 'platform_na'
+            @($observation.warnings.code) | Should -Contain 'codex_doctor_observation_unavailable'
+        }
+        finally {
+            $env:SKILLS_CODEX_CLI_TIMEOUT_SECONDS = $null
+        }
     }
 }

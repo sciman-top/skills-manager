@@ -7,8 +7,15 @@ function Invoke-CodexCliJson {
 
     $command = Get-Command codex -ErrorAction SilentlyContinue
     if ($null -eq $command) { throw 'codex_cli_unavailable' }
-    $output = @(& $command.Source @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    # A wedged host CLI (waiting on network, auth, or a locked state database)
+    # must not block the caller forever. Every caller degrades to
+    # platform_na/not_observed when this throws, so a bounded timeout becomes a
+    # reportable observation instead of an unbounded hang.
+    $timeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_CODEX_CLI_TIMEOUT_SECONDS' 60 1 600
+    $capture = Invoke-ExternalCommandCapture -command $command.Source -args $Arguments -timeoutSeconds $timeoutSeconds
+    if ([bool]$capture.timed_out) { throw ('codex_cli_timeout: exceeded {0}s' -f $timeoutSeconds) }
+    $output = @($capture.output)
+    $exitCode = [int]$capture.exit_code
     try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50 -NoEnumerate) }
     catch {
         if ($exitCode -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }

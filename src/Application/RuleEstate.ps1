@@ -151,6 +151,11 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
 }
 
 function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
+    $seconds = 30
+    $configured = 0
+    if ([int]::TryParse($env:SKILLS_RULE_ESTATE_GIT_TIMEOUT_SECONDS, [ref]$configured)) {
+        $seconds = [Math]::Clamp($configured, 1, 600)
+    }
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = 'git'
     $start.UseShellExecute = $false
@@ -167,7 +172,18 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
         # Read both pipes concurrently to avoid blocking on a full stderr pipe.
         $outputTask = $process.StandardOutput.ReadToEndAsync()
         $errorTask = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
+        # A wedged git (index lock, hung helper) must not block the audit forever.
+        # Bound the wait, kill the tree on timeout, then bound the output reads too:
+        # a grandchild inheriting the pipe would otherwise keep ReadToEndAsync from
+        # ever reaching EOF. Mirrors the remote-query guard in src/Git.ps1.
+        if (-not $process.WaitForExit($seconds * 1000)) {
+            if (-not $process.HasExited) { $process.Kill($true) }
+            $null = $process.WaitForExit(5000)
+            return [pscustomobject]@{ exit_code = 124; output = ''; error = ("git_query_timeout_after_{0}s" -f $seconds) }
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($outputTask, $errorTask), 5000)) {
+            return [pscustomobject]@{ exit_code = 124; output = ''; error = 'git_query_output_timeout' }
+        }
         $output = $outputTask.GetAwaiter().GetResult().Trim()
         $errorText = $errorTask.GetAwaiter().GetResult().Trim()
         return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
