@@ -165,13 +165,17 @@ function Invoke-AiRiskControlReadOnlyCheck([string]$Path, [string[]]$Arguments =
         $stderrTask = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
             try { $proc.Kill($true) } catch { }
+            $partial = Read-ExternalCommandTaskText $stdoutTask
             return [pscustomobject][ordered]@{
                 status = 'timeout'; path = $Path; exit_code = $null
-                output = Protect-AiRiskControlOutput (("check exceeded {0}s and was terminated; a timeout is not a risk finding. partial output: {1}" -f $TimeoutSeconds, $stdoutTask.Result))
+                output = Protect-AiRiskControlOutput (("check exceeded {0}s and was terminated; a timeout is not a risk finding. partial output: {1}" -f $TimeoutSeconds, $partial.text))
             }
         }
-        $proc.WaitForExit()
-        $out = @($stdoutTask.Result, $stderrTask.Result) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        # Bounded reads: a grandchild holding the pipe must not bypass the
+        # timeout above (see Read-ExternalCommandTaskText in src/Core.ps1).
+        $outRead = Read-ExternalCommandTaskText $stdoutTask
+        $errRead = Read-ExternalCommandTaskText $stderrTask
+        $out = @($outRead.text, $errRead.text) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         return [pscustomobject][ordered]@{
             status = if ($proc.ExitCode -eq 0) { 'pass' } else { 'findings' }
             path = $Path; exit_code = [int]$proc.ExitCode

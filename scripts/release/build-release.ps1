@@ -102,15 +102,31 @@ function Export-GitBlob([string]$RepositoryRoot, [string]$ObjectSpec, [string]$D
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     $output = $null
+    $copyTask = $null
     try {
         if (-not $process.Start()) { throw "Unable to start git while exporting $ObjectSpec." }
         $errorTask = $process.StandardError.ReadToEndAsync()
         $output = [IO.File]::Create($Destination)
-        $process.StandardOutput.BaseStream.CopyTo($output)
+        # Bound every step: a wedged git must fail the release build with a
+        # diagnostic, not hang it. The stdout copy is async so the wait below
+        # can actually time out (a synchronous CopyTo would block first).
+        $exportTimeoutSeconds = 120
+        $configuredTimeout = 0
+        if ([int]::TryParse([string]$env:SKILLS_RELEASE_GIT_TIMEOUT_SECONDS, [ref]$configuredTimeout)) {
+            $exportTimeoutSeconds = [Math]::Clamp($configuredTimeout, 1, 1800)
+        }
+        $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($output)
+        if (-not $process.WaitForExit($exportTimeoutSeconds * 1000)) {
+            try { $process.Kill($true) } catch { }
+            throw ("git export of {0} exceeded {1}s and was terminated." -f $ObjectSpec, $exportTimeoutSeconds)
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($copyTask, $errorTask), 5000)) {
+            throw ("git export of {0} exited but left an open output pipe." -f $ObjectSpec)
+        }
+        $copyTask.GetAwaiter().GetResult()
+        $errorText = $errorTask.GetAwaiter().GetResult()
         $output.Dispose()
         $output = $null
-        $process.WaitForExit()
-        $errorText = $errorTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
             throw "Unable to export pinned git blob $ObjectSpec`: $errorText"
         }

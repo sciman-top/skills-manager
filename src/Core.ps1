@@ -559,6 +559,20 @@ function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$
         error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
     }
 }
+function Read-ExternalCommandTaskText($task, [int]$TimeoutMilliseconds = 5000) {
+    # Bounded read. A grandchild that inherited the stdout/stderr pipe keeps
+    # ReadToEndAsync from ever reaching EOF, so an unbounded GetResult() would
+    # silently bypass the process timeout above. Mirrors the remote-query guard
+    # in src/Git.ps1.
+    if ($null -eq $task) { return [pscustomobject]@{ text = ''; timed_out = $false } }
+    try {
+        if (-not $task.Wait($TimeoutMilliseconds)) { return [pscustomobject]@{ text = ''; timed_out = $true } }
+        return [pscustomobject]@{ text = [string]$task.GetAwaiter().GetResult(); timed_out = $false }
+    }
+    catch {
+        return [pscustomobject]@{ text = ''; timed_out = $false }
+    }
+}
 function Invoke-ExternalCommandWithTimeout(
     [string]$command,
     [Alias("args")]
@@ -608,9 +622,9 @@ function Invoke-ExternalCommandWithTimeout(
         if (-not $exited) {
             try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
             try { $proc.WaitForExit(2000) | Out-Null } catch {}
-            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+            $outRead = Read-ExternalCommandTaskText $stdoutTask
+            $errRead = Read-ExternalCommandTaskText $stderrTask
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
             return [pscustomobject]@{
                 timed_out = $true
                 exit_code = 124
@@ -619,16 +633,22 @@ function Invoke-ExternalCommandWithTimeout(
             }
         }
 
-        try { $proc.WaitForExit() | Out-Null } catch {}
-        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+        # No parameterless WaitForExit() here: the bounded wait above already
+        # returned true, and the output is drained through Read-ExternalCommandTaskText
+        # rather than the async event handlers that overload exists for.
+        $outRead = Read-ExternalCommandTaskText $stdoutTask
+        $errRead = Read-ExternalCommandTaskText $stderrTask
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
+        $errorText = [string]$captured.error
+        if ([bool]$outRead.timed_out -or [bool]$errRead.timed_out) {
+            $errorText = if ([string]::IsNullOrWhiteSpace($errorText)) { 'output_read_timeout' } else { ('output_read_timeout: ' + $errorText) }
+        }
 
         return [pscustomobject]@{
             timed_out = $false
             exit_code = [int]$proc.ExitCode
             output = @($captured.output)
-            error = [string]$captured.error
+            error = $errorText
         }
     }
     catch {

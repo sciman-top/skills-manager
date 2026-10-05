@@ -431,13 +431,16 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
         "User-Agent" = "skills-manager"
         "Accept" = "application/vnd.github+json"
     }
+    # GitHub snapshot fallback runs during `add`/`update`; an unresponsive API or
+    # a stalled proxy must fail with a diagnostic instead of hanging the command.
+    $httpTimeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_HTTP_TIMEOUT_SECONDS' 120 1 600
     $encodedRef = [System.Uri]::EscapeDataString($ref)
     $commitUrl=("https://api.github.com/repos/{0}/{1}/commits/{2}" -f $ownerRepo.owner,$ownerRepo.name,$encodedRef)
-    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop
+    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds
     $commitSha=[string]$commitResp.sha;$treeSha=[string]$commitResp.commit.tree.sha
     Need ($commitSha -match '^[a-fA-F0-9]{40}$' -and $treeSha -match '^[a-fA-F0-9]{40}$') 'GitHub commit response does not provide immutable commit/tree SHA.'
     $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $treeSha)
-    $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop
+    $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds
     Need ($treeResp -and $treeResp.tree) ("GitHub 树接口返回为空：{0}" -f $treeUrl)
     Need (-not [bool]$treeResp.truncated) 'GitHub tree response is truncated; refusing an incomplete snapshot.'
 
@@ -482,7 +485,7 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
             EnsureDir (Split-Path $dstPath -Parent)
             $encodedBlobPath = ((@($blobPath -split '/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
             $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $commitSha, $encodedBlobPath)
-            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds | Out-Null
             Need ((Get-GitBlobSha1ForFile $dstPath) -eq ([string]$blob.sha).ToLowerInvariant()) ("GitHub blob SHA mismatch: {0}" -f $blobPath)
         }
         Install-StagedDirectoryAtomic $extractDir $path $forceClean

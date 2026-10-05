@@ -16,12 +16,22 @@ BeforeAll {
 }
 Describe 'Workspace rule estate audit' {
     BeforeAll {
+        # One prepared git repository is copied per fixture directory instead of
+        # running `git init` five times per test. A git process spawn costs ~0.4s
+        # here (and can stall for minutes when the sandbox host is busy), while
+        # copying the 26-entry .git tree costs ~0.05s and yields byte-identical
+        # repository state (same HEAD, unborn main, no remotes, clean status).
+        # The template lives outside $TestDrive so it never enlarges the
+        # per-block TestDrive enumeration that Pester performs on every block.
+        $script:RuleEstateGitTemplate = Join-Path ([IO.Path]::GetTempPath()) ('rule-estate-git-template-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:RuleEstateGitTemplate -Force
+        & git -C $script:RuleEstateGitTemplate init -q -b main
+        if ($LASTEXITCODE -ne 0) { throw 'rule estate git template initialization failed' }
 function New-RuleEstateFixture {
         $workspace = Join-Path $TestDrive ('workspace-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $workspace -Force | Out-Null
         foreach ($name in @('repo-a', 'repo-b', 'external', 'docs', '文档')) {
             $path = Join-Path $workspace $name; New-Item -ItemType Directory -Path $path -Force | Out-Null
-            & git -C $path init -q -b main
-            if ($LASTEXITCODE -ne 0) { throw ('git fixture initialization failed: {0}' -f $path) }
+            Copy-Item -LiteralPath (Join-Path $script:RuleEstateGitTemplate '.git') -Destination (Join-Path $path '.git') -Recurse
             if ($name -notin @('external', 'docs', '文档')) {
                 @'
 # Project
@@ -87,7 +97,12 @@ verify drift
         Set-Content -LiteralPath (Join-Path $zcode 'AGENTS.md') -Value ($common.Replace("`nhost delta", "`nzcode host delta")) -Encoding UTF8
         return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude; zcode=$zcode; antigravity=$antigravity }
     }
-}
+    }
+    AfterAll {
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:RuleEstateGitTemplate) -and (Test-Path -LiteralPath $script:RuleEstateGitTemplate)) {
+            [IO.Directory]::Delete($script:RuleEstateGitTemplate, $true)
+        }
+    }
 
     It 'discovers direct Git roots, applies exclusions, and reports registry drift' {
         $f = New-RuleEstateFixture
