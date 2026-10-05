@@ -877,10 +877,22 @@ function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
 }
 
 function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
-    return @(
+    # Several manifest probes ask for the same bounded recursive listing.  Keep
+    # the exact filtered result per target/filter/limit so one scan does not
+    # enumerate the repository once for every language detector.  The cache is
+    # scoped to this scan process; a new scan always observes fresh filesystem
+    # state and no evidence semantics change.
+    $cacheKey = "{0}|{1}|{2}" -f ([System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')), [string]$filter, [int]$limit
+    if ($null -eq $script:AuditRecursiveFilesCache) { $script:AuditRecursiveFilesCache = @{} }
+    if ($script:AuditRecursiveFilesCache.ContainsKey($cacheKey)) {
+        return @($script:AuditRecursiveFilesCache[$cacheKey])
+    }
+    $result = @(
         Get-AuditPrunedFiles $resolvedPath $filter |
             Select-Object -First $limit
     )
+    $script:AuditRecursiveFilesCache[$cacheKey] = $result
+    return @($result)
 }
 
 function Get-AuditSourceFileIndex([string]$resolvedPath) {
@@ -1676,8 +1688,12 @@ function Get-AuditGitInfo([string]$resolvedPath) {
 
 function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
     # A scan is a single consistency window.  Do not reuse a source index from a
-    # prior scan invocation where the target may have changed.
+    # prior scan invocation where the target may have changed.  The recursive-file
+    # cache added for the per-scan speedup is process-scoped, so it has to be reset
+    # here too — otherwise a same-process re-scan (host probes, tests) would keep
+    # enumerating the previous filesystem state.
     $script:AuditSourceFileIndexCache = @{}
+    $script:AuditRecursiveFilesCache = @{}
     $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
     $risks = New-Object System.Collections.Generic.List[string]
     $languages = New-Object System.Collections.Generic.List[string]

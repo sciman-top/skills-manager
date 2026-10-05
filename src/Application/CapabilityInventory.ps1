@@ -199,12 +199,25 @@ function New-SkillSurfaceView {
             $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared {0} host skill root is missing on this machine: {1}' -f $hostName, $hostRootName) }) | Out-Null
             continue
         }
+        # Host roots may use different default profiles.  Reusing the Codex
+        # selection here marks valid core-ops entries (Antigravity/WorkBuddy)
+        # as stale simply because they are not part of Codex core-lean.
+        try {
+            $hostSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName $hostName
+            $hostManagedIncludes = @((Get-OperationObjectProperty $hostSelection 'included_names') | ForEach-Object { [string]$_ })
+            $hostManagedIncludeAll = [bool](Get-OperationObjectProperty $hostSelection 'include_all')
+        }
+        catch {
+            $findings.Add([pscustomobject]@{ code = 'host_projection_selection_invalid'; severity = 'error'; surface = 'host_skill_roots'; path = $hostRoot; message = $_.Exception.Message }) | Out-Null
+            $hostManagedIncludes = @()
+            $hostManagedIncludeAll = $false
+        }
         foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
             $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
-            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
+            $managedName = $hostManagedIncludeAll -or $hostManagedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
             $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }

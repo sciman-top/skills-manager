@@ -45,8 +45,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
-            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
+            { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
+            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             "锁定" { 锁定 }
             { $_ -in @("验证锁定", "verify-lock") } { 验证锁定 }
             { $_ -in @("清理无效映射", "prune-invalid-mappings") } { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
