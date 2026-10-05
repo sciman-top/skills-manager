@@ -27,6 +27,24 @@ function Get-TextSha256([string]$Value) {
     finally { $sha.Dispose() }
 }
 
+function ConvertTo-AsciiJson([string]$Json) {
+    # A host consumes this document through the documented `pwsh ... | ConvertFrom-Json`
+    # pattern, which decodes the child's stdout with the *parent* console code page
+    # (gb2312/GBK on a zh-CN Windows host).  Correct UTF-8 bytes containing a
+    # non-ASCII skill description are then mis-decoded and ConvertFrom-Json throws,
+    # so the host silently concludes cold discovery is unavailable.  Escaping every
+    # non-ASCII UTF-16 code unit as \uXXXX makes the document pure ASCII: it
+    # survives any code page, and ConvertFrom-Json reconstructs the original text.
+    # Surrogate pairs are escaped per code unit, which is valid JSON.
+    $builder = [Text.StringBuilder]::new($Json.Length + 64)
+    foreach ($ch in $Json.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -gt 127) { [void]$builder.AppendFormat('\u{0:x4}', $code) }
+        else { [void]$builder.Append($ch) }
+    }
+    return $builder.ToString()
+}
+
 function Get-SkillPackageSha256([string]$SkillDirectory) {
     if ([string]::IsNullOrWhiteSpace($SkillDirectory) -or -not (Test-Path -LiteralPath $SkillDirectory -PathType Container)) { return '' }
     $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
@@ -633,6 +651,10 @@ $loadValidation = [ordered]@{
     scope = 'skill_dependency_closure_load_only'
     checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'single_root_candidate', 'dependency_closure', 'execution_contract')
 }
+# An explicitly named candidate that the catalog cannot validate is a blocked
+# discovery, not a successful one.  Reporting candidate_discovery_only here would
+# let a host read "discovery succeeded" from a receipt whose selected set is empty.
+$requestedUnavailable = $requestedNames.Count -gt 0 -and $selectedRows.Count -eq 0
 $routingReceiptInput = [ordered]@{
     query_sha256 = Get-TextSha256 $Query
     domain_hints = $domainNames
@@ -652,14 +674,14 @@ $routingReceipt = [ordered]@{
     validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
     validated_closure = @(if ($loadPass) { $validatedClosureRows | ForEach-Object { [string]$_.name } })
     execution_contract = $effectiveExecutionContract
-    status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
-    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
+    status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable) { 'blocked' } elseif ($catalogStatus -eq 'current' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
+    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable) { 'candidate_discovery_blocked' } elseif ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0
 }
 
-[pscustomobject][ordered]@{
+$document = [pscustomobject][ordered]@{
     schema_version = 1
     decision_owner = 'host_ai'
     semantic_routing_performed = $false
@@ -680,4 +702,5 @@ $routingReceipt = [ordered]@{
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0
-} | ConvertTo-Json -Depth 20 -Compress
+}
+ConvertTo-AsciiJson ($document | ConvertTo-Json -Depth 20 -Compress)

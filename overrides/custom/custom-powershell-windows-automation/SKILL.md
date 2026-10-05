@@ -16,6 +16,16 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 5. For scheduled tasks or startup helpers, use hidden wrappers when visible consoles would disturb the desktop.
 6. Use `pwsh` and PowerShell 7 syntax by default. Do not add a `powershell.exe` fallback unless the user explicitly asks to maintain an external Windows PowerShell 5.1 consumer.
 7. Invoke native tools directly when ordinary argument passing is sufficient. Check `$LASTEXITCODE` immediately; stderr alone is not failure. Use `Start-Process` only when the workflow needs process-level control such as a hidden window, redirected streams, credentials, or a different working directory, and use `-Wait -PassThru` when the exit code is evidence.
+8. Cross-process JSON is a transport contract, not a text blob. When a child
+   emits JSON that a parent parses (`pwsh -File x.ps1 ... | ConvertFrom-Json`),
+   the parent decodes the child's stdout with the **parent's** console code page
+   (`gb2312`/GBK on zh-CN Windows), not UTF-8. Emit ASCII-safe JSON — escape every
+   non-ASCII UTF-16 code unit as `\uXXXX` — so the payload survives any code page
+   and the consumer reconstructs the original text. Setting
+   `[Console]::OutputEncoding` inside the child fixes only the **producer**; it
+   does not make the documented consumer correct, and a payload that parses in a
+   UTF-8-aware test harness can still fail in the real host. Test cross-process
+   JSON through the consumer's actual decode path, never a hand-picked encoding.
 
 ## Patterns
 

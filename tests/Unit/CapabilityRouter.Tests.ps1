@@ -75,6 +75,7 @@ Describe 'Capability router fallback' {
             $raw = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
             return [pscustomobject]@{
                 raw = $raw
+                bytes = $bytes
                 result = $raw | ConvertFrom-Json
             }
         }
@@ -117,7 +118,7 @@ Describe 'Capability router fallback' {
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'session_plan'
     }
 
-    It 'emits valid UTF-8 JSON to a separate PowerShell process for non-ASCII skill metadata' {
+    It 'emits code-page-independent ASCII JSON for non-ASCII skill metadata' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
         $document.skills[0].description = '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
         Write-TestCatalog $document $catalog
@@ -129,11 +130,23 @@ Describe 'Capability router fallback' {
             '-Candidate', 'skill|codebase-design'
         )
 
-        $child.raw | Should -Match '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
+        # A host consumes this document with the documented
+        # `pwsh ... | ConvertFrom-Json` pattern, which decodes the child's stdout
+        # with the PARENT console code page (gb2312/GBK on zh-CN Windows).  A raw
+        # UTF-8 body carrying this non-ASCII description was mis-decoded and made
+        # ConvertFrom-Json throw, so the host silently concluded cold discovery was
+        # unavailable.  Pure-ASCII stdout survives any code page.
+        @($child.bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
         $child.result.catalog.status | Should -Be 'current'
         $child.result.load_validation.pass | Should -Be $true
         $child.result.selected[0].description | Should -Be '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
         $child.result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
+        # The escapes are real \uXXXX sequences, not dropped characters.
+        $child.raw | Should -Match '\\u6a21\\u5757'
+
+        # The exact host-side decode path must reconstruct the original text.
+        $viaHostCodePage = [Text.Encoding]::GetEncoding([Console]::OutputEncoding.CodePage).GetString($child.bytes) | ConvertFrom-Json
+        $viaHostCodePage.selected[0].description | Should -Be '模块设计：保留中文元数据，供 UTF-8 宿主解析。'
     }
 
     It 'validates an exact candidate and reports disclosed side effects' {
@@ -158,6 +171,22 @@ Describe 'Capability router fallback' {
         $result.execution_contract.mode | Should -Be 'host_admission_required'
         $result.routing_receipt.execution_contract.stop_condition | Should -Be 'admission_required'
         $result.execution_authorization.reason | Should -Be 'execution_contract_requires_host_admission'
+    }
+
+    It 'reports a blocked discovery when an explicitly named candidate is absent' {
+        # A named candidate the catalog cannot validate is a blocked discovery.
+        # Reporting candidate_discovery_only here would let a host read "discovery
+        # succeeded" from a receipt whose selected set is empty.
+        $result = & $router -Query 'use totally-made-up-skill' -CatalogPath $catalog -Candidate 'skill|totally-made-up-skill' | ConvertFrom-Json
+
+        $result.load_validation.pass | Should -Be $false
+        @($result.selected).Count | Should -Be 0
+        @($result.validated_closure).Count | Should -Be 0
+        @($result.excluded | Where-Object { $_.name -eq 'totally-made-up-skill' -and $_.reason -eq 'not_available' }).Count | Should -Be 1
+        $result.routing_receipt.status | Should -Be 'blocked'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        $result.execution_authorization.reason | Should -Be 'no_candidate_selected'
+        $result.writes_performed | Should -Be $false
     }
 
     It 'preserves an interactive closure contract and refuses to reduce it to one-shot runner execution' {
