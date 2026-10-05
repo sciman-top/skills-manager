@@ -25,17 +25,18 @@
 - `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
 - `D:\CODE\external\` 整根持有 deny-write ACL 硬墙（外层仓基线见 `references/external-readonly-baselines.json`）；写入/构建被拒属预期，解锁仅经 `scripts/lock-external-repos.ps1 -Unlock` 且为用户显式授权动作，AI 会话不得自行改 ACL 或重钉基线。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
-- 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。
+- 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。准入三问（当前调用方 / 替代或删除了什么 / 最小验证）任一答不上即拒绝，PR 模板同栏。
 
 ## C. 最低门禁
 - 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，检查 `HEAD` 后编辑（含未跟踪文件）；集成范围显式用 `-DiffBase <revision>`。具体选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；可用 `-TestPath` 追加回归证明，显式 focused 用于已确定范围。
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
-- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。
+- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；在 AI 沙箱内因 safe-delete shim 代理每次删除可膨胀到数小时，属环境成本而非代码成本 ⇒ 沙箱内默认走 docs/focused（`-TestPath` 跑受影响文件），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 
 ## D. 回滚与收口
 - Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 required checks（`test`，strict）：直推 `main` 会被拒，合入走 推分支 → PR → CI 绿 → merge。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
+- 收口报告必须含 `Removed:` 行（删除或合并的测试、门禁、文档数）；连续 0 视为只加不减，触发一次减法复核。
 - 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件。

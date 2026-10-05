@@ -86,6 +86,12 @@ if (-not [string]::IsNullOrWhiteSpace($ShardJobPath)) {
         $receipt.skipped_count = [int]$result.SkippedCount
         $receipt.failures = @(Get-FailedTestDetail $result)
         $receipt.container_failures = @($result.FailedContainers | ForEach-Object { [string]$_.Item })
+        $receipt.container_failure_details = @($result.FailedContainers | ForEach-Object {
+                [pscustomobject]@{
+                    container = [string]$_.Item
+                    error     = if ($_.ErrorRecord) { [string]$_.ErrorRecord } else { '' }
+                }
+            })
         $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
     }
     catch {
@@ -185,6 +191,7 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     $skipped = 0
     $failureDetails = [Collections.Generic.List[object]]::new()
     $containerNames = [Collections.Generic.List[string]]::new()
+    $containerErrors = [Collections.Generic.List[string]]::new()
     $shardErrors = [Collections.Generic.List[string]]::new()
     foreach ($job in $jobs) {
         $job.process.WaitForExit()
@@ -201,6 +208,11 @@ if ($shardCandidates.Count -gt $MaxParallel) {
         $skipped += [int]$receipt.skipped_count
         foreach ($detail in @($receipt.failures)) { $failureDetails.Add($detail) | Out-Null }
         foreach ($name in @($receipt.container_failures)) { $containerNames.Add([string]$name) | Out-Null }
+        foreach ($detail in @($receipt.container_failure_details)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$detail.error)) {
+                $containerErrors.Add(("[{0}] {1}" -f $detail.container, $detail.error)) | Out-Null
+            }
+        }
         if ([string]$receipt.status -eq 'error') {
             $shardErrors.Add([string]$receipt.error) | Out-Null
         }
@@ -217,6 +229,7 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     }
     if ($containerNames.Count -gt 0) {
         foreach ($name in $containerNames) { Write-Host ("CONTAINER FAILED: {0}" -f $name) }
+        foreach ($message in $containerErrors) { Write-Host ("CONTAINER ERROR: {0}" -f $message) }
         $global:LASTEXITCODE = 1
         throw ("Pester container failures: {0}" -f $containerNames.Count)
     }
