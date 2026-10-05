@@ -107,10 +107,10 @@ try {
 
     if ($Profile -eq 'full' -and -not $env:CI) {
         # Fingerprint-based block, per docs/runbooks/agent-sandbox-instrumentation.md:
-        # the hour-scale full inflation (19303s recorded) was measured on hosts whose
-        # sandbox sets these env markers or wraps Remove-Item as a Function. ZCode
-        # sessions measured clean (Cmdlet, 0.01s/30-file delete), so absence of
-        # markers genuinely means no known shim here, not a detection gap.
+        # the hour-scale full inflation (19303s recorded) came from a WorkBuddy
+        # desktop session whose sandbox exposed these markers or wrapped Remove-Item.
+        # A ZCode session measured clean (Cmdlet, 0.01s/30-file sample), so this
+        # blocks known fingerprints without claiming every host has the same cause.
         $shimInstrumented = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or $env:CODEBUDDY_SAFE_DELETE_SANDBOX `
                 -or -not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS) `
                 -or (([string]$env:NODE_OPTIONS) -match 'shim') `

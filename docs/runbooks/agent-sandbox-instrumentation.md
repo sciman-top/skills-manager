@@ -9,9 +9,9 @@
 
 同一份代码、同一份测试，**在 agent 工具里跑和在普通终端/CI 里跑，耗时可能差一个数量级**。历史实例：
 
-- 本仓 full 门禁顺序运行记录为 **19303s（≈5.4h）**。
+- 本仓 full 门禁顺序运行记录为 **19303s（≈5.4h）**；该记录来自 2026-10-04 的 WorkBuddy Windows 桌面会话，不是 ZCode 会话的通用基线。
 - 分片全量：agent 工具启动的分片 **1319.6s**（361 用例）vs 另一路启动的**同分片 124.9s**（同样 361 用例）——**10.6 倍**。
-- 若照字面采信，会得出"门禁太慢、需要砍测试"的错误结论。
+- 若把这组 WorkBuddy 记录外推到所有宿主，会得出"门禁太慢、需要砍测试"的错误结论。
 
 ---
 
@@ -62,10 +62,10 @@
 
 ### 3.1 ZCode 会话实测（2026-10-05，指纹面外）
 
-ZCode 沙箱会话内（Bash 工具直跑 pwsh 子进程）：§2.1 全部环境变量为空、`(Get-Command Remove-Item).CommandType` 为 `Cmdlet`（未包装）、30 文件递归删除微基准 **0.01s**——当前指纹面内**无任何仪表化**，主工作树全量分片实测 211s（≈CI 水平）。含义：
+ZCode 沙箱会话内（Bash 工具直跑 pwsh 子进程）：§2.1 全部环境变量为空、`(Get-Command Remove-Item).CommandType` 为 `Cmdlet`（未包装）、30 文件递归删除历史诊断样本 **0.01s**——当前指纹面内**无任何仪表化**，主工作树全量分片实测 211s（≈CI 水平）。该样本只作历史诊断记录，不是 full 门禁的前置测量。
 
-- 小时级膨胀的实证（§1）属**设置这些指纹的宿主**（WorkBuddy 系），不得外推到所有 AI 会话；反之，无指纹会话跑出的耗时也不是其他宿主的通行证。
-- `run-local-quality-gates.ps1` 已按 §2 指纹（env 标记 + `Remove-Item` Function 包装）阻断非 CI 的 `-Profile full`（`-AllowShimmedFull` 显式豁免）；指纹面外的偶发慢（如跨盘 Temp worktree、代理下 vendor 克隆）不在该阻断的覆盖内，仍按 §4 规则报告条件与缺口。
+- 小时级膨胀的实证（§1）来自**命中这些指纹的 WorkBuddy 系宿主会话**，不能外推到所有 AI 会话；无指纹会话的正常耗时也不证明其他宿主永远不会变慢。
+- `run-local-quality-gates.ps1` 已按 §2 的 shim/environment 指纹（safe-delete 环境标记、sandbox IPC、Node/Python shim、`Remove-Item` Function 包装）阻断非 CI 的 `-Profile full`（`-AllowShimmedFull` 显式豁免）；普通代理、跨盘 Temp worktree 等未被证明属于同一原因的慢路径不在该阻断覆盖内，仍按 §4 报告条件与缺口。
 
 ---
 
