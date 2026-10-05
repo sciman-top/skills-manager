@@ -50,6 +50,33 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         @($withTrae | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.path) }).Count | Should -Be 0
     }
 
+    It 'uses the WorkBuddy bare mcp.json name instead of the dot-prefixed sidecar' {
+        # WorkBuddy reads "<configDir>/mcp.json"; a ".mcp.json" there is never loaded,
+        # so the generic default would make the sync a silent no-op on that host.
+        $root = Join-Path $TestDrive 'workbuddy-root'
+        $workbuddy = Join-Path $root '.workbuddy-ai'
+        $specs = @(Get-McpSyncManagedTargetSpecs -Roots @($workbuddy) -RepoRoot $root)
+
+        @($specs.kind) | Should -Be @('generic_json')
+        $specs[0].path | Should -Be (Join-Path $workbuddy 'mcp.json')
+    }
+
+    It 'honours an env-declared WorkBuddy config dir with a custom folder name' {
+        $oldEnv = [string]$env:WORKBUDDY_CONFIG_DIR
+        try {
+            $root = Join-Path $TestDrive 'branded-workbuddy'
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $env:WORKBUDDY_CONFIG_DIR = $root
+            $specs = @(Get-McpSyncManagedTargetSpecs -Roots @($root) -RepoRoot $TestDrive)
+
+            @($specs.kind) | Should -Be @('generic_json')
+            $specs[0].path | Should -Be (Join-Path $root 'mcp.json')
+        }
+        finally {
+            if ($oldEnv) { $env:WORKBUDDY_CONFIG_DIR = $oldEnv } else { Remove-Item Env:\WORKBUDDY_CONFIG_DIR -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'fails closed when no MCP target roots resolve' {
         $oldCfgPath = $CfgPath
         try {

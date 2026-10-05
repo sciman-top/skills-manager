@@ -2201,6 +2201,23 @@ function 卸载MCP([string[]]$tokens = @()) {
     同步MCP
 }
 
+function Get-McpGenericConfigFileName([string]$Root) {
+    # WorkBuddy resolves its MCP file as "<configDir>/mcp.json" (no dot prefix):
+    # its own resolveWorkbuddyConfigDir() is WORKBUDDY_CONFIG_DIR || CODEBUDDY_CONFIG_DIR
+    # || ~/<dataFolderName> (default ".workbuddy"), and getMcpConfigPath() joins the bare
+    # name "mcp.json". A dot-prefixed ".mcp.json" is never read there, so the generic
+    # default would create a file the host ignores and the sync would silently no-op.
+    if ([string]::IsNullOrWhiteSpace($Root)) { return '.mcp.json' }
+    $leaf = Split-Path $Root -Leaf
+    if ($leaf -in @('.workbuddy', '.workbuddy-ai')) { return 'mcp.json' }
+    foreach ($envName in @('WORKBUDDY_CONFIG_DIR', 'CODEBUDDY_CONFIG_DIR')) {
+        $envDir = [Environment]::GetEnvironmentVariable($envName)
+        if ([string]::IsNullOrWhiteSpace($envDir)) { continue }
+        if ((Normalize-OperationPathKey $envDir) -eq (Normalize-OperationPathKey $Root)) { return 'mcp.json' }
+    }
+    return '.mcp.json'
+}
+
 function Get-McpSyncManagedTargetSpecs {
     param(
         $Roots = @(),
@@ -2229,7 +2246,7 @@ function Get-McpSyncManagedTargetSpecs {
     }
 
     foreach ($root in @($flatRoots.ToArray() | Where-Object { -not (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root '.mcp.json') 'generic_json' $root
+        Add-McpTargetSpec (Join-Path $root (Get-McpGenericConfigFileName $root)) 'generic_json' $root
     }
     foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
         Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_settings' $root
