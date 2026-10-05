@@ -1,6 +1,8 @@
 Describe 'reference refresh remote provenance safety' {
     BeforeAll {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+        . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+        Initialize-TestGitIdentity
         $script:refreshScript = Join-Path $repoRoot 'scripts\refresh-reference-repos.ps1'
     }
 
@@ -16,8 +18,6 @@ Describe 'reference refresh remote provenance safety' {
         & git init --bare $declaredRemote | Out-Null
         & git init --bare $attackerRemote | Out-Null
         & git init $repoPath | Out-Null
-        & git -C $repoPath config user.email 'fixture@example.invalid'
-        & git -C $repoPath config user.name 'Fixture'
         Set-Content -LiteralPath (Join-Path $repoPath 'README.md') -Value 'fixture' -Encoding UTF8
         & git -C $repoPath add README.md
         & git -C $repoPath commit -m 'fixture' | Out-Null
@@ -57,8 +57,6 @@ Describe 'reference refresh remote provenance safety' {
         $null = New-Item -ItemType Directory -Path $referencesRoot, $outputDirectory
         & git init --bare $remote | Out-Null
         & git init $repoPath | Out-Null
-        & git -C $repoPath config user.email 'fixture@example.invalid'
-        & git -C $repoPath config user.name 'Fixture'
         Set-Content -LiteralPath (Join-Path $repoPath 'README.md') -Value 'fixture' -Encoding UTF8
         & git -C $repoPath add README.md
         & git -C $repoPath commit -m 'fixture' | Out-Null

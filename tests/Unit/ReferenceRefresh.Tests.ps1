@@ -1,4 +1,6 @@
 BeforeAll {
+    . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
+    Initialize-TestGitIdentity
     function New-ReferenceRefreshFixture {
         param(
             [Parameter(Mandatory = $true)]
@@ -19,8 +21,6 @@ BeforeAll {
 
         & git init --bare --initial-branch=main -q $remote
         & git clone -q $remote $publisher
-        & git -C $publisher config user.name fixture
-        & git -C $publisher config user.email fixture@example.invalid
         Set-Content -LiteralPath (Join-Path $publisher 'README.md') -Value 'one' -Encoding UTF8
         & git -C $publisher add README.md
         & git -C $publisher commit -q -m one

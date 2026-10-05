@@ -1,5 +1,9 @@
 Describe 'Audit snapshot configuration failures' {
-    BeforeAll { . $PSScriptRoot\..\..\skills.ps1 }
+    BeforeAll {
+        . $PSScriptRoot\..\..\skills.ps1
+        . $PSScriptRoot\..\Shared\TestHelpers.ps1
+        Initialize-TestGitIdentity
+    }
     It 'preserves an external configuration <Change> during compensation' -TestCases @(
         @{ Change='edit' }, @{ Change='deletion' }
     ) {
@@ -51,8 +55,6 @@ BeforeAll {
         Push-Location $Path
         try {
             git init --quiet
-            git config user.email "audit-tests@example.com"
-            git config user.name "Audit Tests"
             Set-ContentUtf8 (Join-Path $Path "README.md") "# Audit target"
             git add README.md
             git commit --quiet -m "initial"
