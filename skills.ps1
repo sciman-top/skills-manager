@@ -4010,12 +4010,25 @@ function New-SkillSurfaceView {
             $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared {0} host skill root is missing on this machine: {1}' -f $hostName, $hostRootName) }) | Out-Null
             continue
         }
+        # Host roots may use different default profiles.  Reusing the Codex
+        # selection here marks valid core-ops entries (Antigravity/WorkBuddy)
+        # as stale simply because they are not part of Codex core-lean.
+        try {
+            $hostSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName $hostName
+            $hostManagedIncludes = @((Get-OperationObjectProperty $hostSelection 'included_names') | ForEach-Object { [string]$_ })
+            $hostManagedIncludeAll = [bool](Get-OperationObjectProperty $hostSelection 'include_all')
+        }
+        catch {
+            $findings.Add([pscustomobject]@{ code = 'host_projection_selection_invalid'; severity = 'error'; surface = 'host_skill_roots'; path = $hostRoot; message = $_.Exception.Message }) | Out-Null
+            $hostManagedIncludes = @()
+            $hostManagedIncludeAll = $false
+        }
         foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
             $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
-            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
+            $managedName = $hostManagedIncludeAll -or $hostManagedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
             $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
@@ -20642,10 +20655,22 @@ function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
 }
 
 function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
-    return @(
+    # Several manifest probes ask for the same bounded recursive listing.  Keep
+    # the exact filtered result per target/filter/limit so one scan does not
+    # enumerate the repository once for every language detector.  The cache is
+    # scoped to this scan process; a new scan always observes fresh filesystem
+    # state and no evidence semantics change.
+    $cacheKey = "{0}|{1}|{2}" -f ([System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')), [string]$filter, [int]$limit
+    if ($null -eq $script:AuditRecursiveFilesCache) { $script:AuditRecursiveFilesCache = @{} }
+    if ($script:AuditRecursiveFilesCache.ContainsKey($cacheKey)) {
+        return @($script:AuditRecursiveFilesCache[$cacheKey])
+    }
+    $result = @(
         Get-AuditPrunedFiles $resolvedPath $filter |
             Select-Object -First $limit
     )
+    $script:AuditRecursiveFilesCache[$cacheKey] = $result
+    return @($result)
 }
 
 function Get-AuditSourceFileIndex([string]$resolvedPath) {
@@ -21441,8 +21466,12 @@ function Get-AuditGitInfo([string]$resolvedPath) {
 
 function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
     # A scan is a single consistency window.  Do not reuse a source index from a
-    # prior scan invocation where the target may have changed.
+    # prior scan invocation where the target may have changed.  The recursive-file
+    # cache added for the per-scan speedup is process-scoped, so it has to be reset
+    # here too — otherwise a same-process re-scan (host probes, tests) would keep
+    # enumerating the previous filesystem state.
     $script:AuditSourceFileIndexCache = @{}
+    $script:AuditRecursiveFilesCache = @{}
     $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
     $risks = New-Object System.Collections.Generic.List[string]
     $languages = New-Object System.Collections.Generic.List[string]
@@ -27730,8 +27759,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
-            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
+            { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
+            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             "锁定" { 锁定 }
             { $_ -in @("验证锁定", "verify-lock") } { 验证锁定 }
             { $_ -in @("清理无效映射", "prune-invalid-mappings") } { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
