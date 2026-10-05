@@ -26,6 +26,14 @@ Use this skill for durable Windows automation rather than one-off shell snippets
    does not make the documented consumer correct, and a payload that parses in a
    UTF-8-aware test harness can still fail in the real host. Test cross-process
    JSON through the consumer's actual decode path, never a hand-picked encoding.
+9. Every external process or network call needs a wall-clock bound, and the
+   **output read needs the same bound**. A bare `& <exe>` or a parameterless
+   `WaitForExit()` waits forever; so does an unbounded `$task.Result` /
+   `GetAwaiter().GetResult()` on `StandardOutput.ReadToEndAsync()`, because a
+   grandchild that inherited the pipe keeps that read from ever reaching EOF and
+   therefore silently bypasses the process timeout. Prefer a bounded runner
+   (`WaitForExit(ms)` → `Kill($true)` → bounded read) and `-TimeoutSec` for HTTP,
+   and let callers degrade to a reported observation instead of hanging.
 
 ## Patterns
 

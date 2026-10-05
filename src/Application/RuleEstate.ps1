@@ -2,8 +2,10 @@ function Get-RuleEstateNormalizedPath([string]$Path, [string]$BasePath = '') {
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
     $expanded = [Environment]::ExpandEnvironmentVariables($Path.Trim())
     if ($expanded -eq '~' -or $expanded.StartsWith('~\') -or $expanded.StartsWith('~/')) {
-        $home = [Environment]::GetFolderPath('UserProfile')
-        $expanded = if ($expanded.Length -eq 1) { $home } else { Join-Path $home $expanded.Substring(2) }
+        # $home 是只读自动变量（$HOME）；对其赋值在 EAP=Stop 下会终止整个命令，
+        # 此前仅因 $HOME 恰好等于 UserProfile 而"侥幸"正确。
+        $userHome = [Environment]::GetFolderPath('UserProfile')
+        $expanded = if ($expanded.Length -eq 1) { $userHome } else { Join-Path $userHome $expanded.Substring(2) }
     }
     if (-not [System.IO.Path]::IsPathRooted($expanded)) {
         if ([string]::IsNullOrWhiteSpace($BasePath)) { throw 'Relative paths require an explicit base path.' }

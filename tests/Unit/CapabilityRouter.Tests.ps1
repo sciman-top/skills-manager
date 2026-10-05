@@ -57,7 +57,15 @@ Describe 'Capability router fallback' {
             try {
                 $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
                 $stderrTask = $process.StandardError.ReadToEndAsync()
-                $process.WaitForExit()
+                # Bounded: a wedged router must fail this test with a diagnostic
+                # instead of hanging the whole batch.
+                if (-not $process.WaitForExit(60000)) {
+                    try { $process.Kill($true) } catch { }
+                    throw 'router child process exceeded 60s and was terminated.'
+                }
+                if (-not [Threading.Tasks.Task]::WaitAll(@($copyTask, $stderrTask), 5000)) {
+                    throw 'router child process exited but left an open output pipe.'
+                }
                 $copyTask.GetAwaiter().GetResult()
                 $stderr = $stderrTask.GetAwaiter().GetResult()
                 $bytes = $stdout.ToArray()

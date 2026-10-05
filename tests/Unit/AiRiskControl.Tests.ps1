@@ -5,7 +5,10 @@
 # live diagnostics.
 
 BeforeAll {
-    . (Join-Path $PSScriptRoot '../../src/Commands/AiRiskControl.ps1')
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    # Core.ps1 owns the bounded external-command reader the checks path uses.
+    . (Join-Path $repoRoot 'src/Core.ps1')
+    . (Join-Path $repoRoot 'src/Commands/AiRiskControl.ps1')
 }
 
 Describe 'Parse-AiRiskControlArgs' {

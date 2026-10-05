@@ -26,8 +26,22 @@ function Remove-TestRuntimeTemporaryDirectory([string]$Path, [string]$ExpectedPa
 if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
     $null = New-Item -ItemType Directory -Path $cacheRootPath -Force
     $downloadPath = "$packagePath.$([guid]::NewGuid().ToString('N')).downloading"
+    # This runs on every tests/run.ps1 invocation (the parent and every worker),
+    # so it must never block forever: an unreachable gallery or a stalled proxy
+    # has to fail with a diagnostic instead of hanging the whole test run.
+    # Override with SKILLS_TEST_RUNTIME_DOWNLOAD_TIMEOUT_SECONDS.
+    $downloadTimeoutSeconds = 120
+    $configuredTimeout = 0
+    if ([int]::TryParse([string]$env:SKILLS_TEST_RUNTIME_DOWNLOAD_TIMEOUT_SECONDS, [ref]$configuredTimeout)) {
+        $downloadTimeoutSeconds = [Math]::Clamp($configuredTimeout, 1, 1800)
+    }
     try {
-        Invoke-WebRequest -Uri $packageUri -OutFile $downloadPath -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri $packageUri -OutFile $downloadPath -UseBasicParsing -TimeoutSec $downloadTimeoutSeconds
+        }
+        catch {
+            throw ("test_runtime_download_failed: Pester {0} could not be fetched from {1} within {2}s ({3}). Pre-seed {4} to run without network access. Cause: {5}" -f $version, $packageUri, $downloadTimeoutSeconds, $_.Exception.Message, $packagePath, $_.Exception.Message)
+        }
         $downloadSha256 = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($downloadSha256 -cne $expectedSha256) {
             throw "Pester package hash mismatch: expected=$expectedSha256 actual=$downloadSha256"

@@ -1058,6 +1058,20 @@ function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$
         error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
     }
 }
+function Read-ExternalCommandTaskText($task, [int]$TimeoutMilliseconds = 5000) {
+    # Bounded read. A grandchild that inherited the stdout/stderr pipe keeps
+    # ReadToEndAsync from ever reaching EOF, so an unbounded GetResult() would
+    # silently bypass the process timeout above. Mirrors the remote-query guard
+    # in src/Git.ps1.
+    if ($null -eq $task) { return [pscustomobject]@{ text = ''; timed_out = $false } }
+    try {
+        if (-not $task.Wait($TimeoutMilliseconds)) { return [pscustomobject]@{ text = ''; timed_out = $true } }
+        return [pscustomobject]@{ text = [string]$task.GetAwaiter().GetResult(); timed_out = $false }
+    }
+    catch {
+        return [pscustomobject]@{ text = ''; timed_out = $false }
+    }
+}
 function Invoke-ExternalCommandWithTimeout(
     [string]$command,
     [Alias("args")]
@@ -1107,9 +1121,9 @@ function Invoke-ExternalCommandWithTimeout(
         if (-not $exited) {
             try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
             try { $proc.WaitForExit(2000) | Out-Null } catch {}
-            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+            $outRead = Read-ExternalCommandTaskText $stdoutTask
+            $errRead = Read-ExternalCommandTaskText $stderrTask
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
             return [pscustomobject]@{
                 timed_out = $true
                 exit_code = 124
@@ -1118,16 +1132,22 @@ function Invoke-ExternalCommandWithTimeout(
             }
         }
 
-        try { $proc.WaitForExit() | Out-Null } catch {}
-        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
-        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
-        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
+        # No parameterless WaitForExit() here: the bounded wait above already
+        # returned true, and the output is drained through Read-ExternalCommandTaskText
+        # rather than the async event handlers that overload exists for.
+        $outRead = Read-ExternalCommandTaskText $stdoutTask
+        $errRead = Read-ExternalCommandTaskText $stderrTask
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
+        $errorText = [string]$captured.error
+        if ([bool]$outRead.timed_out -or [bool]$errRead.timed_out) {
+            $errorText = if ([string]::IsNullOrWhiteSpace($errorText)) { 'output_read_timeout' } else { ('output_read_timeout: ' + $errorText) }
+        }
 
         return [pscustomobject]@{
             timed_out = $false
             exit_code = [int]$proc.ExitCode
             output = @($captured.output)
-            error = [string]$captured.error
+            error = $errorText
         }
     }
     catch {
@@ -6529,8 +6549,10 @@ function Get-RuleEstateNormalizedPath([string]$Path, [string]$BasePath = '') {
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
     $expanded = [Environment]::ExpandEnvironmentVariables($Path.Trim())
     if ($expanded -eq '~' -or $expanded.StartsWith('~\') -or $expanded.StartsWith('~/')) {
-        $home = [Environment]::GetFolderPath('UserProfile')
-        $expanded = if ($expanded.Length -eq 1) { $home } else { Join-Path $home $expanded.Substring(2) }
+        # $home 是只读自动变量（$HOME）；对其赋值在 EAP=Stop 下会终止整个命令，
+        # 此前仅因 $HOME 恰好等于 UserProfile 而"侥幸"正确。
+        $userHome = [Environment]::GetFolderPath('UserProfile')
+        $expanded = if ($expanded.Length -eq 1) { $userHome } else { Join-Path $userHome $expanded.Substring(2) }
     }
     if (-not [System.IO.Path]::IsPathRooted($expanded)) {
         if ([string]::IsNullOrWhiteSpace($BasePath)) { throw 'Relative paths require an explicit base path.' }
@@ -8399,13 +8421,16 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
         "User-Agent" = "skills-manager"
         "Accept" = "application/vnd.github+json"
     }
+    # GitHub snapshot fallback runs during `add`/`update`; an unresponsive API or
+    # a stalled proxy must fail with a diagnostic instead of hanging the command.
+    $httpTimeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_HTTP_TIMEOUT_SECONDS' 120 1 600
     $encodedRef = [System.Uri]::EscapeDataString($ref)
     $commitUrl=("https://api.github.com/repos/{0}/{1}/commits/{2}" -f $ownerRepo.owner,$ownerRepo.name,$encodedRef)
-    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop
+    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds
     $commitSha=[string]$commitResp.sha;$treeSha=[string]$commitResp.commit.tree.sha
     Need ($commitSha -match '^[a-fA-F0-9]{40}$' -and $treeSha -match '^[a-fA-F0-9]{40}$') 'GitHub commit response does not provide immutable commit/tree SHA.'
     $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $treeSha)
-    $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop
+    $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds
     Need ($treeResp -and $treeResp.tree) ("GitHub 树接口返回为空：{0}" -f $treeUrl)
     Need (-not [bool]$treeResp.truncated) 'GitHub tree response is truncated; refusing an incomplete snapshot.'
 
@@ -8450,7 +8475,7 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
             EnsureDir (Split-Path $dstPath -Parent)
             $encodedBlobPath = ((@($blobPath -split '/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
             $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $commitSha, $encodedBlobPath)
-            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop -TimeoutSec $httpTimeoutSeconds | Out-Null
             Need ((Get-GitBlobSha1ForFile $dstPath) -eq ([string]$blob.sha).ToLowerInvariant()) ("GitHub blob SHA mismatch: {0}" -f $blobPath)
         }
         Install-StagedDirectoryAtomic $extractDir $path $forceClean
@@ -11937,13 +11962,17 @@ function Invoke-AiRiskControlReadOnlyCheck([string]$Path, [string[]]$Arguments =
         $stderrTask = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
             try { $proc.Kill($true) } catch { }
+            $partial = Read-ExternalCommandTaskText $stdoutTask
             return [pscustomobject][ordered]@{
                 status = 'timeout'; path = $Path; exit_code = $null
-                output = Protect-AiRiskControlOutput (("check exceeded {0}s and was terminated; a timeout is not a risk finding. partial output: {1}" -f $TimeoutSeconds, $stdoutTask.Result))
+                output = Protect-AiRiskControlOutput (("check exceeded {0}s and was terminated; a timeout is not a risk finding. partial output: {1}" -f $TimeoutSeconds, $partial.text))
             }
         }
-        $proc.WaitForExit()
-        $out = @($stdoutTask.Result, $stderrTask.Result) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        # Bounded reads: a grandchild holding the pipe must not bypass the
+        # timeout above (see Read-ExternalCommandTaskText in src/Core.ps1).
+        $outRead = Read-ExternalCommandTaskText $stdoutTask
+        $errRead = Read-ExternalCommandTaskText $stderrTask
+        $out = @($outRead.text, $errRead.text) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         return [pscustomobject][ordered]@{
             status = if ($proc.ExitCode -eq 0) { 'pass' } else { 'findings' }
             path = $Path; exit_code = [int]$proc.ExitCode
@@ -19112,8 +19141,11 @@ function Get-ReleaseUpdateManifest([string]$InstallRoot = $Root) {
 function Invoke-ReleaseUpdateHttpGet([string]$Uri, [string]$OutFile = '') {
     if ($null -ne $script:ReleaseUpdateHttpGet) { return & $script:ReleaseUpdateHttpGet $Uri $OutFile }
     $headers = @{ 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'skills-manager-release-update' }
-    if ([string]::IsNullOrWhiteSpace($OutFile)) { return Invoke-RestMethod -Uri $Uri -Headers $headers -ErrorAction Stop }
-    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile -ErrorAction Stop | Out-Null
+    # Release update fetches assets over the network; bound every request so an
+    # unreachable GitHub or a stalled proxy reports a failure instead of hanging.
+    $timeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_HTTP_TIMEOUT_SECONDS' 120 1 600
+    if ([string]::IsNullOrWhiteSpace($OutFile)) { return Invoke-RestMethod -Uri $Uri -Headers $headers -ErrorAction Stop -TimeoutSec $timeoutSeconds }
+    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile -ErrorAction Stop -TimeoutSec $timeoutSeconds | Out-Null
 }
 
 function ConvertFrom-ReleaseChecksumText([string]$Text, [string]$FileName) {

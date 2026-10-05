@@ -51,8 +51,11 @@ function Get-ReleaseUpdateManifest([string]$InstallRoot = $Root) {
 function Invoke-ReleaseUpdateHttpGet([string]$Uri, [string]$OutFile = '') {
     if ($null -ne $script:ReleaseUpdateHttpGet) { return & $script:ReleaseUpdateHttpGet $Uri $OutFile }
     $headers = @{ 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'skills-manager-release-update' }
-    if ([string]::IsNullOrWhiteSpace($OutFile)) { return Invoke-RestMethod -Uri $Uri -Headers $headers -ErrorAction Stop }
-    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile -ErrorAction Stop | Out-Null
+    # Release update fetches assets over the network; bound every request so an
+    # unreachable GitHub or a stalled proxy reports a failure instead of hanging.
+    $timeoutSeconds = Resolve-TimeoutSecondsFromEnv 'SKILLS_HTTP_TIMEOUT_SECONDS' 120 1 600
+    if ([string]::IsNullOrWhiteSpace($OutFile)) { return Invoke-RestMethod -Uri $Uri -Headers $headers -ErrorAction Stop -TimeoutSec $timeoutSeconds }
+    Invoke-WebRequest -Uri $Uri -Headers $headers -OutFile $OutFile -ErrorAction Stop -TimeoutSec $timeoutSeconds | Out-Null
 }
 
 function ConvertFrom-ReleaseChecksumText([string]$Text, [string]$FileName) {

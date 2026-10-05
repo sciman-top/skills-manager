@@ -261,7 +261,8 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     $containerErrors = [Collections.Generic.List[string]]::new()
     $shardErrors = [Collections.Generic.List[string]]::new()
     foreach ($job in $jobs) {
-        $job.process.WaitForExit()
+        # The poll loop above already observed HasExited on every worker, so
+        # ExitCode is valid here and no parameterless WaitForExit() is needed.
         $exitCode = $job.process.ExitCode
         $job.process.Dispose()
         if (-not (Test-Path -LiteralPath $job.receipt -PathType Leaf)) {
@@ -344,7 +345,7 @@ if (-not $process.WaitForExit($targetedTimeoutSeconds * 1000)) {
     if (-not $process.HasExited) { $process.Kill($true) }
     $null = $process.WaitForExit(5000)
     $process.Dispose()
-    throw ("Targeted tests exceeded {0}s timeout; the worker was killed. Batch: {1}" -f $targetedTimeoutSeconds, (@($paths) -join '; '))
+    throw ("Targeted tests exceeded {0}s timeout; the worker was killed. Batch: {1}. Job: {2}. Receipt: {3}" -f $targetedTimeoutSeconds, (@($paths) -join '; '), $targetedJobPath, $targetedReceiptPath)
 }
 $process.Dispose()
 $targetedTimer.Stop()

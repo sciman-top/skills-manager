@@ -135,7 +135,11 @@ function Write-HookDecision {
 }
 
 try {
-    $raw = [Console]::In.ReadToEnd()
+    # Bounded stdin read: a host that fails to close the hook pipe must not hang
+    # every tool call. Fail open (allow) when no payload arrives in time.
+    $stdinTask = [Console]::In.ReadToEndAsync()
+    if (-not $stdinTask.Wait(15000)) { exit 0 }
+    $raw = $stdinTask.GetAwaiter().GetResult()
     if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
     $inputObject = $raw | ConvertFrom-Json -Depth 60
     $eventName = [string](Get-PropertyValue $inputObject 'hook_event_name')
