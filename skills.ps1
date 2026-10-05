@@ -759,6 +759,28 @@ function Get-ContentUtf8([string]$path) {
     # Strip a leading UTF-8 BOM: ConvertFrom-Json rejects U+FEFF outright.
     return ([System.Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xFEFF)
 }
+function ConvertTo-AsciiJson([string]$Json) {
+    # Every `--json` document leaves this process through stdout, and the documented
+    # consumer is `pwsh ... --json | ConvertFrom-Json`: the parent decodes the child's
+    # stdout with its own console code page (gb2312/GBK on a zh-CN Windows host), not
+    # UTF-8. Values that cross a native/CIM boundary are the fragile ones — measured
+    # 2026-10-05 on this host, `(Get-CimInstance Win32_OperatingSystem).Caption` written
+    # to stdout arrived as mojibake with a byte replaced by '?', which consumed the
+    # closing quote and left `doctor --json` structurally invalid (ConvertFrom-Json
+    # threw at checks.os), while a literal string emitted by the same child survived.
+    # Escaping every non-ASCII UTF-16 code unit as \uXXXX makes the document pure
+    # ASCII: it survives any code page and ConvertFrom-Json rebuilds the original text.
+    # Surrogate pairs are escaped per code unit, which is valid JSON. ASCII documents
+    # pass through byte-identical, so this is safe to apply at every JSON stdout seam.
+    if ([string]::IsNullOrEmpty($Json)) { return $Json }
+    $builder = [Text.StringBuilder]::new($Json.Length + 64)
+    foreach ($ch in $Json.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -gt 127) { [void]$builder.AppendFormat('\u{0:x4}', $code) }
+        else { [void]$builder.Append($ch) }
+    }
+    return $builder.ToString()
+}
 function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
     if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
     if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }
@@ -20864,20 +20886,20 @@ function ConvertTo-AuditRequirementSignalArray($Accumulator) {
     return @($result.ToArray())
 }
 
-function Test-AuditRuleDefinitionLine([string]$Line) {
-    if ([string]::IsNullOrWhiteSpace($Line)) { return $false }
-    # Scanner metadata is not target behaviour.  Excluding these declarations keeps
-    # a repository from self-reporting the vocabulary used by the scanner itself.
-    return [regex]::IsMatch($Line, "(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
-}
-
 function Get-AuditEvidenceLines([string]$Content) {
-    $result = New-Object System.Collections.Generic.List[object]
     if ([string]::IsNullOrWhiteSpace($Content)) { return @() }
-    $lines = @($Content -split "`r?`n")
+    # 逐行解释器循环是扫描热路径的主体：规则定义行探测用预编译实例（静态
+    # IsMatch 在 15-slot 缓存内反复重解析），容量预分配减少 List 扩容。
+    if ($null -eq $script:AuditRuleDefinitionRegex) {
+        $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
+    }
+    $lines = $Content -split "`r?`n"
+    $result = New-Object System.Collections.Generic.List[object] $lines.Count
     for ($index = 0; $index -lt $lines.Count; $index++) {
-        $text = [string]$lines[$index]
-        if ([string]::IsNullOrWhiteSpace($text) -or (Test-AuditRuleDefinitionLine $text)) { continue }
+        $text = $lines[$index]
+        # Scanner metadata is not target behaviour.  Excluding these declarations keeps
+        # a repository from self-reporting the vocabulary used by the scanner itself.
+        if ([string]::IsNullOrWhiteSpace($text) -or $script:AuditRuleDefinitionRegex.IsMatch($text)) { continue }
         $result.Add([pscustomobject]@{ number = $index + 1; text = $text }) | Out-Null
     }
     return @($result.ToArray())
@@ -20905,35 +20927,77 @@ function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
         [regex]::IsMatch($Content, "(?i)\b(?:artifact_capabilities|requirement_signals)\b")
 }
 
+function Get-AuditRequirementSignalTable {
+    # 行级热循环里静态 IsMatch 会与其余 pattern 在 15-slot Regex 缓存中互相
+    # 驱逐而反复重解析；表只建一次，pattern 预编译为实例。
+    if ($null -eq $script:AuditRequirementSignalTable) {
+        $script:AuditRequirementSignalTable = @(
+            [pscustomobject]@{ domain = "interface"; subject = "web_ui"; action = "deliver"; regex = [regex]::new("(?i)\breact\b|\bvue\b|\bsvelte\b|\bnext(?:js)?\b|\bvite\b") },
+            [pscustomobject]@{ domain = "interface"; subject = "desktop_ui"; action = "deliver"; regex = [regex]::new("(?i)usewpf|\bwpf\b|\bwinforms\b|\bavalonia\b|\bdesktop app\b") },
+            [pscustomobject]@{ domain = "integration"; subject = "http_api"; action = "serve"; regex = [regex]::new("(?i)map(get|post|put|delete)|\bcontroller\b|fastapi|flask|express\s*\(|asp\.?net\s*(core)?\s*(api)?") },
+            [pscustomobject]@{ domain = "data"; subject = "persistence"; action = "store"; regex = [regex]::new("(?i)entityframework|\bdbcontext\b|\bpostgres(?:ql)?\b|\bsqlite\b|\bmongodb\b|\bredis\b") },
+            [pscustomobject]@{ domain = "automation"; subject = "browser_automation"; action = "automate"; regex = [regex]::new("(?i)playwright|puppeteer|selenium|browser[_ -]?automation") },
+            [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; regex = [regex]::new("(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])") },
+            [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; regex = [regex]::new("(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr") },
+            [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; regex = [regex]::new("(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计") },
+            [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; regex = [regex]::new("(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*") },
+            [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; regex = [regex]::new("(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b") },
+            [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; regex = [regex]::new("(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test") },
+            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b") }
+        )
+    }
+    return $script:AuditRequirementSignalTable
+}
+
 function Add-AuditRequirementFactsFromText {
     param(
         $Accumulator,
         [string]$Content,
         [string]$Kind,
-        [string]$RelativePath
+        [string]$RelativePath,
+        # 热路径调用方对同一内容先解析一次行集再喂两个提取器；传入时跳过重复解析。
+        $Lines = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
-    $signals = @(
-        [pscustomobject]@{ domain = "interface"; subject = "web_ui"; action = "deliver"; pattern = "(?i)\breact\b|\bvue\b|\bsvelte\b|\bnext(?:js)?\b|\bvite\b" },
-        [pscustomobject]@{ domain = "interface"; subject = "desktop_ui"; action = "deliver"; pattern = "(?i)usewpf|\bwpf\b|\bwinforms\b|\bavalonia\b|\bdesktop app\b" },
-        [pscustomobject]@{ domain = "integration"; subject = "http_api"; action = "serve"; pattern = "(?i)map(get|post|put|delete)|\bcontroller\b|fastapi|flask|express\s*\(|asp\.?net\s*(core)?\s*(api)?" },
-        [pscustomobject]@{ domain = "data"; subject = "persistence"; action = "store"; pattern = "(?i)entityframework|\bdbcontext\b|\bpostgres(?:ql)?\b|\bsqlite\b|\bmongodb\b|\bredis\b" },
-        [pscustomobject]@{ domain = "automation"; subject = "browser_automation"; action = "automate"; pattern = "(?i)playwright|puppeteer|selenium|browser[_ -]?automation" },
-        [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; pattern = "(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])" },
-        [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; pattern = "(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr" },
-        [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; pattern = "(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计" },
-        [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; pattern = "(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*" },
-        [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; pattern = "(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b" },
-        [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; pattern = "(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test" },
-        [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; pattern = "(?i)\bbackup\b|\brestore\b|disaster recovery|\bwinpe\b" }
-    )
-    foreach ($line in @(Get-AuditEvidenceLines $Content)) {
-        foreach ($signal in @($signals)) {
-            if ([regex]::IsMatch([string]$line.text, [string]$signal.pattern)) {
+    # 信号词均不跨行匹配（无 '.'/'\s' 类跨行结构），全内容无命中时任何行
+    # 也不会命中：先做一轮文件级预筛，把必然为空的行循环整个短路掉。
+    # 预筛保持原信号顺序，嵌套序（行外层×信号内层）不变，输出与逐行全表
+    # 匹配严格一致。
+    $candidateSignals = @()
+    foreach ($signal in @(Get-AuditRequirementSignalTable)) {
+        if ($signal.regex.IsMatch($Content)) { $candidateSignals += $signal }
+    }
+    if ($candidateSignals.Count -eq 0) { return }
+    if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
+    foreach ($line in @($Lines)) {
+        foreach ($signal in $candidateSignals) {
+            if ($signal.regex.IsMatch([string]$line.text)) {
                 Add-AuditRequirementEvidence $Accumulator $signal.domain $signal.subject $signal.action $Kind $RelativePath ("{0}:{1}@L{2}" -f $signal.domain, $signal.subject, $line.number)
             }
         }
     }
+}
+
+function Get-AuditArtifactSignalTable {
+    if ($null -eq $script:AuditArtifactSignalTable) {
+        $script:AuditArtifactSignalTable = [pscustomobject]([ordered]@{
+                artifacts = @(
+                    [pscustomobject]@{ artifact = "pdf"; regex = [regex]::new("(?i)(?:\.pdf\b|(?:^|[_\W])pdf(?:$|[_\W])|pdftotext|pdftoppm|pdfreader|pdfwriter|questpdf|pdfsharp|pdfpig|pypdf|pdfplumber|pymupdf|pdfjs)") },
+                    [pscustomobject]@{ artifact = "docx"; regex = [regex]::new("(?i)(?:\.docx\b|(?:^|[_\W])docx(?:$|[_\W])|wordprocessingdocument|openxml.*word|python-docx)") },
+                    [pscustomobject]@{ artifact = "pptx"; regex = [regex]::new("(?i)(?:\.pptx\b|(?:^|[_\W])pptx(?:$|[_\W])|powerpoint|presentationml|pptxgenjs|幻灯片|课件)") },
+                    [pscustomobject]@{ artifact = "xlsx"; regex = [regex]::new("(?i)(?:\.xlsx\b|(?:^|[_\W])xlsx(?:$|[_\W])|\bexcel\b|spreadsheetml|openpyxl|closedxml|epplus)") },
+                    [pscustomobject]@{ artifact = "image"; regex = [regex]::new("(?i)(?:\bimage\b|\bpng\b|\bjpe?g\b|\bsvg\b|\bwebp\b|\bbitmap\b|pillow|imagesharp|skia(?:sharp)?)") }
+                )
+                actions   = @(
+                    [pscustomobject]@{ action = "read"; regex = [regex]::new("(?i)\b(?:parse|extract|import|load|open|ingest)(?:[A-Z][\w]*|_[\w]+|s|ed|ing|er|all|async)?\b|\bread(?:_(?:[\w]+)|(?-i:[A-Z])[\w]*|s|ed|ing|er|all|async)?\b|adapter") },
+                    [pscustomobject]@{ action = "generate"; regex = [regex]::new("(?i)\b(export|generate|create|write|save|output|deliver|produce)\w*\b") },
+                    [pscustomobject]@{ action = "render"; regex = [regex]::new("(?i)\b(render|preview|rasteri[sz]e|thumbnail)\w*\b|pdftoppm") },
+                    [pscustomobject]@{ action = "ocr"; regex = [regex]::new("(?i)\bocr\b|tesseract|rapidocr|paddleocr|easyocr") },
+                    [pscustomobject]@{ action = "edit"; regex = [regex]::new("(?i)\b(edit|modify|transform|resize|crop|compose)\w*\b") }
+                )
+            })
+    }
+    return $script:AuditArtifactSignalTable
 }
 
 function Add-AuditArtifactFactsFromText {
@@ -20941,34 +21005,31 @@ function Add-AuditArtifactFactsFromText {
         $Accumulator,
         [string]$Content,
         [string]$Kind,
-        [string]$RelativePath
+        [string]$RelativePath,
+        # 同 Add-AuditRequirementFactsFromText：调用方可复用同一份行集。
+        $Lines = $null
     )
     if ($null -eq $Accumulator -or [string]::IsNullOrWhiteSpace($Content)) { return }
-    $artifacts = @(
-        [pscustomobject]@{ artifact = "pdf"; pattern = "(?i)(?:\.pdf\b|(?:^|[_\W])pdf(?:$|[_\W])|pdftotext|pdftoppm|pdfreader|pdfwriter|questpdf|pdfsharp|pdfpig|pypdf|pdfplumber|pymupdf|pdfjs)" },
-        [pscustomobject]@{ artifact = "docx"; pattern = "(?i)(?:\.docx\b|(?:^|[_\W])docx(?:$|[_\W])|wordprocessingdocument|openxml.*word|python-docx)" },
-        [pscustomobject]@{ artifact = "pptx"; pattern = "(?i)(?:\.pptx\b|(?:^|[_\W])pptx(?:$|[_\W])|powerpoint|presentationml|pptxgenjs|幻灯片|课件)" },
-        [pscustomobject]@{ artifact = "xlsx"; pattern = "(?i)(?:\.xlsx\b|(?:^|[_\W])xlsx(?:$|[_\W])|\bexcel\b|spreadsheetml|openpyxl|closedxml|epplus)" },
-        [pscustomobject]@{ artifact = "image"; pattern = "(?i)(?:\bimage\b|\bpng\b|\bjpe?g\b|\bsvg\b|\bwebp\b|\bbitmap\b|pillow|imagesharp|skia(?:sharp)?)" }
-    )
-    $actions = @(
-        [pscustomobject]@{ action = "read"; pattern = "(?i)\b(?:parse|extract|import|load|open|ingest)(?:[A-Z][\w]*|_[\w]+|s|ed|ing|er|all|async)?\b|\bread(?:_(?:[\w]+)|(?-i:[A-Z])[\w]*|s|ed|ing|er|all|async)?\b|adapter" },
-        [pscustomobject]@{ action = "generate"; pattern = "(?i)\b(export|generate|create|write|save|output|deliver|produce)\w*\b" },
-        [pscustomobject]@{ action = "render"; pattern = "(?i)\b(render|preview|rasteri[sz]e|thumbnail)\w*\b|pdftoppm" },
-        [pscustomobject]@{ action = "ocr"; pattern = "(?i)\bocr\b|tesseract|rapidocr|paddleocr|easyocr" },
-        [pscustomobject]@{ action = "edit"; pattern = "(?i)\b(edit|modify|transform|resize|crop|compose)\w*\b" }
-    )
-    $lines = @(Get-AuditEvidenceLines $Content)
+    $table = Get-AuditArtifactSignalTable
+    # 与 requirement 同理：artifact 词不跨行，全内容无命中时行级（含 next 行）
+    # 必然全空，预筛保持原相对顺序后整表短路。
+    $candidateArtifacts = @()
+    foreach ($artifact in @($table.artifacts)) {
+        if ($artifact.regex.IsMatch($Content)) { $candidateArtifacts += $artifact }
+    }
+    if ($candidateArtifacts.Count -eq 0) { return }
+    if ($null -eq $Lines) { $Lines = @(Get-AuditEvidenceLines $Content) }
+    $lines = @($Lines)
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $current = $lines[$index]
         $next = if ($index + 1 -lt $lines.Count -and [int]$lines[$index + 1].number -eq [int]$current.number + 1) { $lines[$index + 1] } else { $null }
-        foreach ($artifact in @($artifacts)) {
-            $artifactOnCurrentLine = [regex]::IsMatch([string]$current.text, [string]$artifact.pattern)
-            $artifactOnNextLine = $null -ne $next -and [regex]::IsMatch([string]$next.text, [string]$artifact.pattern)
+        foreach ($artifact in $candidateArtifacts) {
+            $artifactOnCurrentLine = $artifact.regex.IsMatch([string]$current.text)
+            $artifactOnNextLine = $null -ne $next -and $artifact.regex.IsMatch([string]$next.text)
             if (-not $artifactOnCurrentLine -and -not $artifactOnNextLine) { continue }
-            foreach ($action in @($actions)) {
-                $actionOnCurrentLine = [regex]::IsMatch([string]$current.text, [string]$action.pattern)
-                $actionOnNextLine = $null -ne $next -and [regex]::IsMatch([string]$next.text, [string]$action.pattern)
+            foreach ($action in @($table.actions)) {
+                $actionOnCurrentLine = $action.regex.IsMatch([string]$current.text)
+                $actionOnNextLine = $null -ne $next -and $action.regex.IsMatch([string]$next.text)
                 $matched = ($artifactOnCurrentLine -and ($actionOnCurrentLine -or $actionOnNextLine)) -or ($actionOnCurrentLine -and $artifactOnNextLine)
                 if ($matched) {
                     $location = if ($null -ne $next -and ($artifactOnNextLine -or $actionOnNextLine) -and -not ($artifactOnCurrentLine -and $actionOnCurrentLine)) { "L{0}-L{1}" -f $current.number, $next.number } else { "L{0}" -f $current.number }
@@ -21043,12 +21104,18 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
         if ($file.Length -gt 1048576) { $sourceScanLargeFileCount++; continue }
         try {
             $content = Get-ContentUtf8 $file.FullName
-            $contentBytes = [System.Text.Encoding]::UTF8.GetBytes($content)
-            if ($contentBytes.Length -gt 262144) {
-                $sourceScanTextTruncatedCount++
-                $cutLength = 262144
-                while ($cutLength -gt 0 -and (($contentBytes[$cutLength] -band 0xC0) -eq 0x80)) { $cutLength-- }
-                $content = [System.Text.Encoding]::UTF8.GetString($contentBytes, 0, $cutLength)
+            # UTF-8 每字符至多 4 字节：char 数在 256KiB/4 以下时 byte 必然
+            # 不超限，省掉每文件一次的全内容数组分配；超限时 GetByteCount
+            # 与 GetBytes().Length 恒等，判定结果不变。
+            if ($content.Length -gt 65536) {
+                $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($content)
+                if ($byteCount -gt 262144) {
+                    $sourceScanTextTruncatedCount++
+                    $contentBytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+                    $cutLength = 262144
+                    while ($cutLength -gt 0 -and (($contentBytes[$cutLength] -band 0xC0) -eq 0x80)) { $cutLength-- }
+                    $content = [System.Text.Encoding]::UTF8.GetString($contentBytes, 0, $cutLength)
+                }
             }
             if (Test-AuditSelfReferentialAnalysisFile $content) {
                 $sourceScanSelfReferentialCount++
@@ -21061,8 +21128,11 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
-            Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath
-            Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath
+            # 行集只解析一次：两个提取器对同一内容各自解析曾是每仓 ~2 倍的
+            # 逐行解释器开销。
+            $sharedLines = @(Get-AuditEvidenceLines $content)
+            Add-AuditArtifactFactsFromText $Accumulator $content $kind $relativePath $sharedLines
+            Add-AuditRequirementFactsFromText $RequirementAccumulator $content $kind $relativePath $sharedLines
         }
         catch {
             $sourceScanReadFailureCount++
@@ -27659,7 +27729,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "选择" { 选择 }
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
-            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output $result } }
             { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output $result } }
             "锁定" { 锁定 }
@@ -27684,18 +27754,18 @@ if ($MyInvocation.InvocationName -ne '.') {
             }
             { $_ -in @("MCP配置", "mcp-profile") } { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             { $_ -in @("审查目标", "audit-targets") } { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
-            { $_ -in @("能力清单", "capability-inventory") } { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则审查", "rule-audit") } { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则全域审查", "rule-estate-audit") } { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则全域计划", "rule-estate-plan") } { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则全域应用", "rule-estate-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则检查", "global-rules-check") } { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则计划", "global-rules-plan") } { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则应用", "global-rules-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则回滚", "global-rules-rollback") } { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则计划", "rule-plan") } { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则应用", "rule-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("能力清单", "capability-inventory") } { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则审查", "rule-audit") } { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则全域审查", "rule-estate-audit") } { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            { $_ -in @("规则全域计划", "rule-estate-plan") } { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则全域应用", "rule-estate-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则检查", "global-rules-check") } { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则计划", "global-rules-plan") } { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则应用", "global-rules-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("全局规则回滚", "global-rules-rollback") } { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则计划", "rule-plan") } { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("规则应用", "rule-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
@@ -27708,7 +27778,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 if ($RunPlan -and $PSBoundParameters.ContainsKey('RunPlan')) { $riskTokens += '--plan' }
                 $riskTokens += @($args)
                 $riskResult = Invoke-AiRiskControlCommand $riskTokens
-                Write-Output ($riskResult | ConvertTo-Json -Depth 30)
+                Write-Output (ConvertTo-AsciiJson ($riskResult | ConvertTo-Json -Depth 30))
                 if ($riskResult -and $riskResult.PSObject.Properties.Match('exit_code').Count -gt 0 -and [int]$riskResult.exit_code -ne 0) {
                     exit ([int]$riskResult.exit_code)
                 }
@@ -27720,7 +27790,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $doctorResult = Invoke-Doctor $doctorTokens
                 # --json 契约：JSON 必须走 stdout（Write-Host 会被重定向/管道丢弃）。
                 if (@($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--json" }).Count -gt 0) {
-                    Write-Output ($doctorResult | ConvertTo-Json -Depth 30)
+                    Write-Output (ConvertTo-AsciiJson ($doctorResult | ConvertTo-Json -Depth 30))
                 }
                 $strictRequested = @($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
                 if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
