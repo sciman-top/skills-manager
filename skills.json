@@ -190,8 +190,7 @@
           "security-and-hardening",
           "shipping-and-launch",
           "systematic-debugging",
-          "verification-before-completion",
-          "vite"
+          "verification-before-completion"
         ],
         "coding-strict": [
           "systematic-debugging",
@@ -266,7 +265,8 @@
           "tailwind-design-system",
           "ui-animation",
           "vercel-react-best-practices",
-          "web-artifacts-builder"
+          "web-artifacts-builder",
+          "vite"
         ],
         "mcp": [
           "mcp-builder",
