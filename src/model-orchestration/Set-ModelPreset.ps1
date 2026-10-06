@@ -25,6 +25,14 @@ foreach ($id in $policy.presets.Keys) {
     foreach ($entry in $menu) {
         if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max')) { throw "Invalid tuple in preset $id." }
     }
+    # Failure re-selection uses menu indices as effort order.
+    $effortOrder = @('low','medium','high','max')
+    for ($index = 1; $index -lt $menu.Count; $index++) {
+        if ($menu[$index].model -cne $menu[0].model -or
+            [array]::IndexOf($effortOrder, $menu[$index].effort) -le [array]::IndexOf($effortOrder, $menu[$index - 1].effort)) {
+            throw "Preset $id menu must use one model with strictly increasing effort."
+        }
+    }
     $hosts = @($p.hosts)
     if ($hosts.Count -eq 0 -or ($hosts | Where-Object { $_ -cnotin @('codex','claude','zcode') })) { throw "Preset $id has invalid hosts." }
     if (-not $p.slot_map -or @($p.slot_map.Keys).Count -ne $slotNames.Count) { throw "Preset $id slot_map must cover exactly all slots." }
@@ -215,6 +223,20 @@ $configPath = Join-Path $CodexRoot 'config.toml'
 $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
 $config = [IO.File]::ReadAllText($configPath)
 $config = [regex]::Replace($config, '(?ms)^# model-orchestration begin\r?\n.*?^# model-orchestration end\r?\n?', '')
+# Older host edits can leave owned role tables outside the managed markers.
+# Retire only tables pointing into this tool's generated Codex directory.
+$ownedRoleRoot = (Join-Path $PSScriptRoot '.generated/codex').Replace('\','/') + '/'
+$config = [regex]::Replace($config, '(?ms)^\[agents\.[a-z0-9_]+\][^\r\n]*\r?\n(?:(?!^\[).)*', {
+    param($match)
+    $text = $match.Value
+    if ($text -notmatch ('(?m)^config_file = ''' + [regex]::Escape($ownedRoleRoot))) { return $text }
+    $lines = @($text -split '\r?\n')
+    foreach ($line in $lines) {
+        if ($line -notmatch '^\s*(?:$|#|\[agents\.|description\s*=|config_file\s*=)') { throw 'Owned role contains unexpected fields; review before retirement.' }
+    }
+    return (@($lines | Where-Object { $_ -match '^\s*#' -and $_ -notmatch '^# (?:model-orchestration|availability-rules:)' }) -join "`n") + "`n"
+})
+$config = [regex]::Replace($config, '(?m)^# model-orchestration (?:begin|end)\r?\n?', '')
 if (-not $SubagentsOnly) {
     $config = SetScalar $config '' 'model' ('"'+$standard.model+'"')
     $config = SetScalar $config '' 'review_model' ('"'+$standard.model+'"')

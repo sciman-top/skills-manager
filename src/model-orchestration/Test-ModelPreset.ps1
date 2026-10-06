@@ -5,11 +5,10 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
 $expected = @{
-    gpt61_sol_only     = @{ menu = @(@('gpt-6.1-sol','medium'),@('gpt-6.1-sol','low')); map = @{quick_triage=1;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=1;architecture_review=0} }
     gpt6_luna_only     = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    glm53_flash_only    = @{ menu = @(@('glm-5.3-flash','max'),@('glm-5.3-flash','high')); map = @{quick_triage=1;routine_maintenance=0;standard_review=1;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=1;documentation_review=1;architecture_review=0} }
+    glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
-Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three models and multiple slots'
+Assert ($policy.presets.Count -eq 2 -and $slots.Count -gt 3) 'Two max-only models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
 foreach ($id in $expected.Keys) {
     $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $id | ConvertFrom-Json -AsHashtable
@@ -19,25 +18,25 @@ foreach ($id in $expected.Keys) {
     }
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
-Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt61_sol_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 5) 'All three models and five tuples jointly active'
+Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
+Assert ($defaultResolved.active_presets.Count -eq 2 -and $defaultResolved.enabled_routes.Count -eq 2) 'Both models and two max tuples jointly active'
 $reselection = $defaultResolved.reselection
-Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
+Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 2) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'gpt6_luna_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit semantics'
-Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
+Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 2) 'Pool includes distinct model families'
 Assert ('deepseek-flash' -cnotin @($defaultResolved.enabled_routes.model)) 'DeepSeek removed from active pool'
-$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt6_luna_only,gpt61_sol_only | ConvertFrom-Json
-Assert ($selected.preset -eq 'gpt61_sol_only') 'Ordered selection'
-Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 3) 'AvailablePreset retains the whole selected pool'
-$cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt6_luna_only,gpt61_sol_only' -Plan | ConvertFrom-Json
-Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt61_sol_only' -and $cliSelection.effort -eq 'medium' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
+$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt6_luna_only,glm53_flash_only | ConvertFrom-Json
+Assert ($selected.preset -eq 'gpt6_luna_only') 'Ordered selection'
+Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
+$cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'gpt6_luna_only,glm53_flash_only' -Plan | ConvertFrom-Json
+Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'gpt6_luna_only' -and $cliSelection.effort -eq 'max' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
 }
-$legacySelection = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,gpt56_sol_terra | ConvertFrom-Json
-Assert ($legacySelection.preset -ceq 'gpt61_sol_only') 'Legacy available-set aliases'
+$legacySelection = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,glm53_flash_only | ConvertFrom-Json
+Assert ($legacySelection.preset -ceq 'gpt6_luna_only') 'Legacy available-set aliases'
 foreach ($id in @($policy.active_presets)) {
     foreach ($slot in $slots) {
         $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
@@ -54,11 +53,15 @@ foreach ($entry in $defaultResolved.enabled_routes) {
 }
 foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='deepseek-flash';Effort='high'},
+    @{Slot='standard_review';Model='glm-5.3-flash';Effort='high'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='max'},
+    @{Slot='standard_review';Model='gpt-6.1-sol';Effort='low'},
+    @{Slot='standard_review';Model='gpt-6.1-sol';Effort='medium'},
+    @{Slot='standard_review';Preset='gpt61_sol_only'},
     @{Slot='standard_review';Model='gpt-6-luna'},
     @{Slot='unknown_slot'},
     @{Slot='standard_review';Preset='deepseek_flash_only'},
-    @{Slot='standard_review';AvailablePreset=@('gpt61_sol_only');Model='gpt-6-luna';Effort='max'}
+    @{Slot='standard_review';AvailablePreset=@('glm53_flash_only');Model='gpt-6-luna';Effort='max'}
 )) {
     $rejected = $false
     try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') @invalidSelection -Plan | Out-Null } catch { $rejected = $true }
@@ -78,57 +81,28 @@ function global:codex {
     else { '{"type":"turn.completed"}' }
 }
 try {
-    $failedRequest = $false
-    $failureMessage = ''
-    try {
-        & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort low -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null
-    }
-    catch {
-        $failureMessage = $_.Exception.Message
-        $failedRequest = $failureMessage -like '*no replay or preset substitution performed*'
-    }
-    Assert $failedRequest 'Simulated 429 returns control to the caller'
-    $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
-    Assert $jsonMatch.Success 'Failure message embeds the structured slot_failure document'
-    $slotFailure = $jsonMatch.Value | ConvertFrom-Json
-    Assert ($null -ne $slotFailure.slot_failure) 'Failure emits a structured slot_failure document'
-    Assert ($slotFailure.slot_failure.failed_tuple.model -ceq 'gpt-6.1-sol' -and $slotFailure.slot_failure.failed_tuple.effort -ceq 'low') 'slot_failure records the exact failed tuple'
-    $lowerEfforts = @($slotFailure.slot_failure.reselection.within_preset_lower | ForEach-Object { $_.effort })
-    Assert ($lowerEfforts.Count -eq 1 -and $lowerEfforts[0] -ceq 'medium') 'Rate-limit chain starts with nearest lower effort in the same preset'
-    Assert (@($slotFailure.slot_failure.reselection.cross_preset | Where-Object { $_.preset -ceq 'gpt6_luna_only' }).Count -eq 1) 'Rate-limit chain continues cross-preset in active order'
-    Assert (@($slotFailure.slot_failure.reselection.within_preset_higher_overload_only | ForEach-Object { $_.effort }) -cnotcontains 'high') 'The failed effort itself is never listed as a reselection option'
-    Assert ($slotFailure.slot_failure.reselection.prohibition.Contains('429')) 'Prohibition text pins rate-limit semantics'
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 1) 'Failed request does not automatically launch another route'
-    Assert ($global:ModelSlotAcceptanceCalls[0] -ccontains 'model_reasoning_effort="low"') 'Failed request retains its exact effort'
-    $global:ModelSlotAcceptanceExitCode = 0
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort medium -ReadOnly -Prompt 'Explicit remaining read-only work after simulated 429' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 2 -and $global:ModelSlotAcceptanceCalls[1] -ccontains 'model_reasoning_effort="medium"') 'Caller can explicitly select a lower effort after failure'
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work on another supported model after simulated 429' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3 -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model="gpt-6-luna"' -and $global:ModelSlotAcceptanceCalls[2] -ccontains 'model_reasoning_effort="max"') 'Caller can explicitly reselect another supported model after failure'
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6.1-sol -Effort medium -ReadOnly -Prompt 'New independent medium-effort task' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4 -and $global:ModelSlotAcceptanceCalls[3] -ccontains 'model_reasoning_effort="medium"') 'Caller can explicitly select medium effort for new work'
-    foreach ($capturedCall in $global:ModelSlotAcceptanceCalls) {
-        Assert ($capturedCall -ccontains 'read-only' -and $capturedCall -ccontains 'agents.enabled=false') 'Reselection preserves read-only mode and disabled nested delegation'
-    }
-    # Cross-preset fallback follows active order and must not wrap around to
-    # presets that precede the failed one.
-    $global:ModelSlotAcceptanceExitCode = 1
     foreach ($failedRoute in @(
-        @{ model = 'gpt-6-luna'; effort = 'max'; next = @('glm53_flash_only') },
-        @{ model = 'glm-5.3-flash'; effort = 'high'; next = @() }
+        @{ model = 'gpt-6-luna'; next = @('glm53_flash_only') },
+        @{ model = 'glm-5.3-flash'; next = @() }
     )) {
         $failureMessage = ''
-        try {
-            & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -Prompt 'Simulated ordered fallback' | Out-Null
-        }
+        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort max -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null }
         catch { $failureMessage = $_.Exception.Message }
+        Assert ($failureMessage -like '*no replay or preset substitution performed*') 'Failure returns control without replay'
         $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
-        Assert $jsonMatch.Success 'Ordered fallback failure embeds structured slot_failure'
-        $orderedFailure = $jsonMatch.Value | ConvertFrom-Json
-        $cross = @($orderedFailure.slot_failure.reselection.cross_preset | ForEach-Object { $_.preset })
-        Assert (($cross -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-preset fallback does not wrap around active order'
+        Assert $jsonMatch.Success 'Structured failure emitted'
+        $failure = ($jsonMatch.Value | ConvertFrom-Json).slot_failure
+        Assert ($failure.failed_tuple.model -ceq $failedRoute.model -and $failure.failed_tuple.effort -ceq 'max') 'Failed tuple is exact'
+        Assert (@($failure.reselection.within_preset_lower).Count -eq 0 -and @($failure.reselection.within_preset_higher_overload_only).Count -eq 0) 'Fixed max has no effort fallback'
+        Assert ((@($failure.reselection.cross_preset.preset) -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-model fallback never cycles'
     }
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 2) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceExitCode = 0
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work' | Out-Null
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Parent can explicitly select the next supported model'
+    foreach ($call in $global:ModelSlotAcceptanceCalls) {
+        Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and $call -ccontains 'model_reasoning_effort="max"') 'All launches preserve read-only, fixed max and no nested delegation'
+    }
 }
 finally {
     Remove-Item Function:/global:codex
@@ -147,7 +121,7 @@ try {
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('# availability-rules: ')) 'Shared config carries the availability re-selection rules'
-    $profileText = Get-Content -LiteralPath (Join-Path $target 'gpt61-sol-only.config.toml') -Raw
+    $profileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($profileText.Contains('429/quota/rate-limit/auth/billing: nearest lower effort within the same preset')) 'Profile instructions pin the 429 downgrade chain'
     Assert ($profileText.Contains('confirmed service overload/unavailable: nearest lower effort, then nearest higher effort')) 'Profile instructions reserve higher effort for confirmed overload'
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
@@ -166,11 +140,11 @@ try {
     [IO.File]::WriteAllText($cfg, $emptyRoot)
     $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
     $emptyRootResult = Get-Content -LiteralPath $cfg -Raw
-    Assert ($emptyRootResult.StartsWith('model = "gpt-6.1-sol"')) 'Empty root must receive its own model key'
+    Assert ($emptyRootResult.StartsWith('model = "gpt-6-luna"')) 'Empty root must receive its own model key'
     Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $emptyRootReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $emptyRoot) 'Empty-root rollback must restore original content'
-    $parentRoot = '"model" = "gpt-6-luna" # keep parent' + "`r`n" + 'review_model = "gpt-6.1-sol"' + "`r`n" + 'model_reasoning_effort = "max"' + "`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`ndefault_subagent_model = `"old`"`r`ndefault_subagent_reasoning_effort = `"xhigh`"`r`n"
+    $parentRoot = '"model" = "gpt-6-luna" # keep parent' + "`r`n" + 'review_model = "gpt-6-luna"' + "`r`n" + 'model_reasoning_effort = "max"' + "`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`ndefault_subagent_model = `"old`"`r`ndefault_subagent_reasoning_effort = `"xhigh`"`r`n"
     [IO.File]::WriteAllText($cfg, $parentRoot, [Text.UTF8Encoding]::new($true))
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
@@ -178,7 +152,7 @@ try {
     $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
-    Assert ($subagentConfig.Contains('default_subagent_model = "gpt-6.1-sol"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "medium"')) 'Subagent standard defaults'
+    Assert ($subagentConfig.Contains('default_subagent_model = "gpt-6-luna"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "max"')) 'Subagent standard defaults'
     Assert ($subagentConfig.Contains('max_concurrent_threads_per_session = 2') -and $subagentConfig.Contains('enabled = true')) 'Native delegation and concurrency preserved'
     foreach ($entry in $defaultResolved.enabled_routes) {
         Assert ($subagentConfig.Contains("[agents.$($entry.role)]")) 'All tuple roles coexist in the shared config'
@@ -189,6 +163,16 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
+    $ownedFile = (Join-Path $fixture '.generated/codex/pool/sol_low.toml').Replace('\','/')
+    $orphanConfig = $parentRoot + "`n[agents.sol_low]`ndescription = `"retired`"`nconfig_file = '$ownedFile'`n# keep this user comment`n# model-orchestration end`n[agents.user_role]`ndescription = `"unrelated`"`nconfig_file = 'D:/user-role.toml'`n"
+    [IO.File]::WriteAllText($cfg, $orphanConfig)
+    $orphanReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
+    $cleaned = Get-Content -LiteralPath $cfg -Raw
+    Assert (-not $cleaned.Contains('[agents.sol_low]') -and $cleaned.Contains('[agents.user_role]') -and $cleaned.Contains('# keep this user comment')) 'Retire orphan owned roles while preserving unrelated roles and comments'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Orphan cleanup remains idempotent'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $orphanReceipt.receipt | Out-Null
+    Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $orphanConfig) 'Orphan cleanup rollback restores exact original config'
+    [IO.File]::WriteAllText($cfg, $parentRoot)
     $fixturePolicyPath = Join-Path $fixture 'presets.json'
     $expandedPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
     $expandedPolicy.slots += 'custom_task'
@@ -199,6 +183,14 @@ try {
     $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('[agents.custom_task]')) 'Additional configured slot projects to a native role'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
+    $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
+    $descendingPolicy.presets.gpt6_luna_only.menu += @{model='gpt-6-luna';effort='high'}
+    [IO.File]::WriteAllText($fixturePolicyPath, ($descendingPolicy | ConvertTo-Json -Depth 12))
+    $orderRejected = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null }
+    catch { $orderRejected = $_.Exception.Message -like '*strictly increasing effort*' }
+    Assert $orderRejected 'Reject descending menus before they can label escalation as downgrade'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     [IO.File]::WriteAllText($cfg, $original)
     $retryReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
