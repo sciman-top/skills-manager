@@ -166,6 +166,19 @@ Describe 'GitHub CI workflow supply-chain contract' {
         & pwsh -NoProfile -File $scriptPath -EventPath $validPath *> $null
         $LASTEXITCODE | Should -Be 0
 
+        $template = Get-Content -LiteralPath (Join-Path $repoRoot '.github\pull_request_template.md') -Raw
+        $templateAdmissionHeading = [regex]::Match($template, '(?m)^## Charter admission[^\r\n]*').Value
+        $templateAdmissionHeading | Should -Match '^## Charter admission\s+\('
+        $templateStyleEvent = [ordered]@{
+            pull_request = [ordered]@{
+                body = $validEvent.pull_request.body.Replace('## Charter admission', $templateAdmissionHeading)
+            }
+        }
+        $templateStylePath = Join-Path $TestDrive 'template-style-event.json'
+        $templateStyleEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $templateStylePath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $templateStylePath *> $null
+        $LASTEXITCODE | Should -Be 0
+
         $invalidEvent = [ordered]@{
             pull_request = [ordered]@{
                 body = @'

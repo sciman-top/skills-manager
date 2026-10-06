@@ -56,7 +56,7 @@ if (-not $goalMatch.Success) { throw 'PR charter section is missing: ## Goal' }
 Assert-CharterValue 'Goal' $goalMatch.Groups['value'].Value.Trim()
 
 foreach ($section in @('Charter admission', 'Deletion delta', 'Risks and Rollback')) {
-    if (-not [regex]::IsMatch($charterBody, "(?im)^\s*##\s*$([regex]::Escape($section))\s*$")) {
+    if (-not [regex]::IsMatch($charterBody, "(?im)^\s*##\s*$([regex]::Escape($section))(?:\s+\([^\r\n)]*\))?\s*$")) {
         throw "PR charter section is missing: ## $section"
     }
 }
