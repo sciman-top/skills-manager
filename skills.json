@@ -186,6 +186,7 @@
           "custom-powershell-windows-automation",
           "deprecation-and-migration",
           "error-handling-patterns",
+          "sandbox-slow-test-diagnosis",
           "security-and-hardening",
           "shipping-and-launch",
           "systematic-debugging",
