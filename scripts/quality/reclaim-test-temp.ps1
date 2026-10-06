@@ -254,8 +254,8 @@ if (Test-IsCi) {
 }
 else {
     $summary = Invoke-PesterTempReclaim -MinAgeSeconds $MinAgeSeconds -TimeoutSeconds $effectiveTimeout -DeleteBudgetSeconds $DeleteBudgetSeconds
-    Write-ReclaimLog(("scanned={0} parked={1} parked_skipped={2} deleted={3} delete_skipped={4} delete_deferred={5} timed_out={6} seconds={7}" -f `
-                $summary.scanned, $summary.parked, $summary.parked_skipped, $summary.deleted, $summary.delete_skipped, $summary.delete_deferred, $summary.timed_out, $summary.seconds))
+    Write-ReclaimLog(("scanned={0} live_skipped={1} parked={2} parked_skipped={3} deleted={4} delete_skipped={5} delete_deferred={6} timed_out={7} seconds={8}" -f `
+                $summary.scanned, $summary.live_skipped, $summary.parked, $summary.parked_skipped, $summary.deleted, $summary.delete_skipped, $summary.delete_deferred, $summary.timed_out, $summary.seconds))
 }
 
 if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
