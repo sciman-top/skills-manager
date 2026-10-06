@@ -133,6 +133,81 @@ Describe 'GitHub CI workflow supply-chain contract' {
         @([regex]::Matches($script:workflow, '(?m)^\s+contents:\s*write\s*$')).Count | Should -Be 1
     }
 
+    It 'checks the PR charter before selecting the proportional gate' {
+        $scriptPath = Join-Path $repoRoot 'scripts\quality\verify-pr-charter.ps1'
+        Test-Path -LiteralPath $scriptPath -PathType Leaf | Should -BeTrue
+        $script:workflow | Should -Match 'Verify pull request charter'
+        $script:workflow | Should -Match 'verify-pr-charter\.ps1 -EventPath \$env:GITHUB_EVENT_PATH'
+        $script:workflow | Should -Match "if: github\.event_name == 'pull_request'"
+        $script:workflow.IndexOf('Verify pull request charter') | Should -BeLessThan $script:workflow.IndexOf('Select proportional quality gate profile')
+
+        $validEvent = [ordered]@{
+            pull_request = [ordered]@{
+                body = @'
+## Goal
+- Keep the merge contract reviewable.
+
+## Charter admission
+- Current caller: GitHub pull request workflow
+- Replaces / deletes: none; this is the existing PR template contract
+- Minimum proof: focused CI workflow contract test
+
+## Deletion delta
+- Removed: 0
+
+## Risks and Rollback
+- Risk: a malformed PR body is rejected before tests.
+- Rollback: revert the workflow and verifier change.
+'@
+            }
+        }
+        $validPath = Join-Path $TestDrive 'valid-event.json'
+        $validEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $validPath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $validPath *> $null
+        $LASTEXITCODE | Should -Be 0
+
+        $invalidEvent = [ordered]@{
+            pull_request = [ordered]@{
+                body = @'
+## Goal
+- <what this PR changes>
+
+## Charter admission
+- Current caller: <who calls this today; "may be useful later" is not a caller>
+- Replaces / deletes: <what this removes or supersedes; "none" = net-new surface, justify it>
+- Minimum proof: <smallest check that proves the change; does it escalate the gate to full?>
+
+## Deletion delta
+- Removed: <tests/gates/docs removed or merged; write 0 only after checking>
+
+## Risks and Rollback
+- Risk: <risk>
+- Rollback: <rollback>
+'@
+            }
+        }
+        $invalidPath = Join-Path $TestDrive 'invalid-event.json'
+        $invalidEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $invalidPath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $invalidPath *> $null
+        $LASTEXITCODE | Should -Not -Be 0
+
+        $emptyEvent = [ordered]@{ pull_request = [ordered]@{ body = '' } }
+        $emptyPath = Join-Path $TestDrive 'empty-event.json'
+        $emptyEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $emptyPath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $emptyPath *> $null
+        $LASTEXITCODE | Should -Not -Be 0
+
+        $missingSectionEvent = [ordered]@{
+            pull_request = [ordered]@{
+                body = $validEvent.pull_request.body -replace '## Charter admission', '## Admission details'
+            }
+        }
+        $missingSectionPath = Join-Path $TestDrive 'missing-section-event.json'
+        $missingSectionEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $missingSectionPath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $missingSectionPath *> $null
+        $LASTEXITCODE | Should -Not -Be 0
+    }
+
     It 'attests exactly the three release assets with pinned provenance action and minimal tag-job permissions' {
         $script:workflow | Should -Match 'id-token:\s*write'
         $script:workflow | Should -Match 'attestations:\s*write'
