@@ -92,4 +92,15 @@ Describe 'TestDrive leak reclaim' {
         $reclaimText | Should -Match 'GITHUB_ACTIONS'
         $reclaimText | Should -Match 'Test-IsCi'
     }
+
+    It 'leaves trees that a concurrent run is still writing to' {
+        # Age alone cannot separate a leftover from a live TestDrive: a run that
+        # has been executing for longer than MinAgeSeconds is old but still live,
+        # and Pester holds no handle on the TestDrive directory, so parking it
+        # succeeds and silently destroys the other run's fixtures. The reclaim
+        # must therefore drop any candidate whose tree is still being written to.
+        $reclaimText | Should -Match 'Test-TreeTouchedSince'
+        $reclaimText | Should -Match 'GetLastWriteTimeUtc'
+        $reclaimText | Should -Match 'live_skipped'
+    }
 }

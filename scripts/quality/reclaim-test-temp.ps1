@@ -52,10 +52,12 @@ Safety
 Only sibling directories inside the current user's temp directory whose name
 starts with 'Pester_' are considered, and parked trees live under a
 'Pester_reclaim_' sibling so they can never be confused with an active TestDrive.
-A directory is skipped when a live process holds a handle inside it (another
-Pester run may be using it) or when it is too new to be a leftover. The reclaim is
-best-effort: it never throws into the test run, and it is skipped entirely on CI
-where a fresh temp directory needs no help.
+A candidate is skipped when it is too new to be a leftover (younger than
+`MinAgeSeconds`) **or when it is still receiving writes** (see
+`Test-TreeTouchedSince`): a concurrent run that has been executing for longer than
+`MinAgeSeconds` is old but live, and parking it would silently destroy another
+run's fixtures. The reclaim is best-effort: it never throws into the test run, and
+it is skipped entirely on CI where a fresh temp directory needs no help.
 #>
 [CmdletBinding()]
 param(
@@ -117,6 +119,29 @@ function Clear-TreeReadOnly([string]$Path) {
     }
 }
 
+# A leftover tree is completely static; a tree owned by a concurrently running
+# Pester invocation keeps receiving writes (fixtures, receipts, logs) while its
+# tests execute. Creation age alone cannot tell them apart: a run that has been
+# going for longer than MinAgeSeconds looks "old" even though it is still live.
+# `[IO.Directory]::Move` cannot tell them apart either -- Pester holds no handle
+# on the TestDrive directory itself, only on the files inside it, so parking a
+# live tree succeeds and silently destroys another run's fixtures.
+#
+# Enumerate only (never delete) and treat "cannot inspect" as "possibly live",
+# so the failure mode is a skipped reclaim rather than a broken concurrent run.
+function Test-TreeTouchedSince([string]$Path, [datetime]$Since) {
+    try {
+        foreach ($file in [IO.Directory]::EnumerateFiles($Path, '*', [IO.SearchOption]::AllDirectories)) {
+            try {
+                if ([IO.File]::GetLastWriteTimeUtc($file) -ge $Since) { return $true }
+            }
+            catch { return $true }
+        }
+    }
+    catch { return $true }
+    return $false
+}
+
 function Invoke-PesterTempReclaim {
     param(
         [int]$MinAgeSeconds = 120,
@@ -125,6 +150,7 @@ function Invoke-PesterTempReclaim {
     )
     $result = [ordered]@{
         scanned         = 0
+        live_skipped    = 0
         parked          = 0
         parked_skipped  = 0
         deleted         = 0
@@ -146,6 +172,7 @@ function Invoke-PesterTempReclaim {
     }
 
     $cutoff = (Get-Date).AddSeconds(-1 * [Math]::Max(0, $MinAgeSeconds))
+    $cutoffUtc = $cutoff.ToUniversalTime()
     $candidates = @()
     try {
         $candidates = @(
@@ -159,6 +186,15 @@ function Invoke-PesterTempReclaim {
         return [pscustomobject]$result
     }
     $result.scanned = $candidates.Count
+
+    # Age alone is not enough: a concurrent run that has been executing for longer
+    # than MinAgeSeconds is old but still live. Drop any tree that is still being
+    # written to, so a long-running sibling run never has its fixtures parked away.
+    $candidates = @($candidates | Where-Object { -not (Test-TreeTouchedSince $_.FullName $cutoffUtc) })
+    $result.live_skipped = $result.scanned - $candidates.Count
+    if ($result.live_skipped -gt 0) {
+        Write-ReclaimLog("skipped $($result.live_skipped) tree(s) still receiving writes (concurrent run)")
+    }
 
     # Phase 1: park leftovers out of the active temp namespace. Rename is a pure
     # metadata operation and does not depend on the tree's size, so this is where
