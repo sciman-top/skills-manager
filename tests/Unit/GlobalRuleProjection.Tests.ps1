@@ -29,6 +29,28 @@ BeforeAll {
         if (-not [string]::IsNullOrWhiteSpace($Antigravity)) { Set-Content -LiteralPath (Join-Path $Antigravity 'GEMINI.md') -Value '# old antigravity' -Encoding utf8NoBOM -NoNewline }
     }
 
+    # Restore the fixture in place instead of deleting and rebuilding its tree.
+    # The directory layout is identical for every test and only file contents
+    # differ, so re-copying the sources restores the fixture exactly. A recursive
+    # delete is what used to dominate this file: in a sandboxed host deletion is
+    # charged per directory node, and deleting these ten directories costs about
+    # 8-15s per test, i.e. most of the suite's wall clock (see
+    # docs/runbooks/agent-sandbox-instrumentation.md). Re-copying is ~0.1s.
+    # Control files (receipts, backups) are cleared explicitly so a test that
+    # asserts the absence of a receipt still starts clean. Only files are removed
+    # -- removing the directories themselves is the expensive operation this
+    # function exists to avoid, and the host's Remove-Item wrapper does not accept
+    # pipeline input, so each path is passed explicitly.
+    function Reset-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude) {
+        Copy-GlobalRuleFixture $Fixture $Codex $Claude
+        $control = Join-Path $Fixture 'reports\global-rule-projection'
+        if (Test-Path -LiteralPath $control) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $control -File -Recurse -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '', [string]$Antigravity = '', [string]$WorkBuddy = '') {
         $backupRoot=Join-Path $Fixture 'reports\global-rule-projection\backups'
         return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode -AntigravityUserRoot $Antigravity -WorkBuddyUserRoot $WorkBuddy
@@ -38,8 +60,7 @@ BeforeAll {
 Describe 'Global rule source contract' {
     BeforeEach {
         $fixture=Join-Path $TestDrive 'repo';$codex=Join-Path $TestDrive 'codex';$claude=Join-Path $TestDrive 'claude'
-        foreach($path in @($fixture,$codex,$claude)){if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path -Recurse -Force}}
-        Copy-GlobalRuleFixture $fixture $codex $claude
+        Reset-GlobalRuleFixture $fixture $codex $claude
     }
 
     It 'renders all five hosts deterministically without writing in check mode' {
@@ -200,8 +221,7 @@ Describe 'Global rule source contract' {
 Describe 'Global rule schema v2 apply and rollback' {
     BeforeEach {
         $fixture=Join-Path $TestDrive 'repo';$codex=Join-Path $TestDrive 'codex';$claude=Join-Path $TestDrive 'claude';$receiptPath=Join-Path $fixture 'reports\global-rule-projection\receipt.json'
-        foreach($path in @($fixture,$codex,$claude)){if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path -Recurse -Force}}
-        Copy-GlobalRuleFixture $fixture $codex $claude
+        Reset-GlobalRuleFixture $fixture $codex $claude
     }
 
     It 'plans, applies, verifies, and rolls back with operation-specific tokens' {
@@ -366,7 +386,7 @@ Describe 'Global rule schema v2 apply and rollback' {
         $plan=New-GlobalRuleProjectionPlan $fixture $codex $claude;$receipt=Invoke-TestApply $plan $fixture $codex $claude $receiptPath
         $doc=[IO.File]::ReadAllText($receiptPath)|ConvertFrom-Json;$doc.actions[0].target_path=Join-Path $TestDrive 'outside.md';Write-Utf8FileAtomic $receiptPath ($doc|ConvertTo-Json -Depth 20 -Compress)
         {Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports\global-rule-projection\backups')}|Should -Throw '*canonical binding*'
-        foreach($path in @($fixture,$codex,$claude)){Remove-Item -LiteralPath $path -Recurse -Force};Copy-GlobalRuleFixture $fixture $codex $claude;$plan=New-GlobalRuleProjectionPlan $fixture $codex $claude;$receipt=Invoke-TestApply $plan $fixture $codex $claude $receiptPath
+        Reset-GlobalRuleFixture $fixture $codex $claude;$plan=New-GlobalRuleProjectionPlan $fixture $codex $claude;$receipt=Invoke-TestApply $plan $fixture $codex $claude $receiptPath
         $doc=[IO.File]::ReadAllText($receiptPath)|ConvertFrom-Json;$doc.actions[0].backup_path=Join-Path $TestDrive 'outside.bak';Write-Utf8FileAtomic $receiptPath ($doc|ConvertTo-Json -Depth 20 -Compress)
         {Invoke-GlobalRuleProjectionRollback $receiptPath $receipt.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports\global-rule-projection\backups')}|Should -Throw '*receipt_backup_path_invalid*'
     }
@@ -382,8 +402,7 @@ Describe 'Global rule schema v2 apply and rollback' {
 Describe 'Global rule CLI boundaries' {
     BeforeEach {
         $fixture=Join-Path $TestDrive 'repo';$codex=Join-Path $TestDrive 'codex';$claude=Join-Path $TestDrive 'claude'
-        foreach($path in @($fixture,$codex,$claude)){if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path -Recurse -Force}}
-        Copy-GlobalRuleFixture $fixture $codex $claude
+        Reset-GlobalRuleFixture $fixture $codex $claude
     }
 
     It 'uses active Codex and Claude profile roots unless explicit roots override them' {
@@ -446,13 +465,20 @@ Describe 'Global rule CLI boundaries' {
     }
 
     It 'rejects a missing CODEBUDDY_CONFIG_DIR root instead of treating it as disabled' {
-        $old=$env:CODEBUDDY_CONFIG_DIR
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
         try{
+            # WORKBUDDY_CONFIG_DIR takes precedence over the legacy
+            # CODEBUDDY_CONFIG_DIR, so it must be cleared for this case to reach
+            # the legacy variable at all. Without this the test silently depends
+            # on the ambient environment: on a host that sets WORKBUDDY_CONFIG_DIR
+            # (WorkBuddy sessions do) the resolved root stays valid and the
+            # expected throw never happens.
+            $env:WORKBUDDY_CONFIG_DIR=$null
             $env:CODEBUDDY_CONFIG_DIR=Join-Path $TestDrive 'missing-workbuddy-root'
             {
                 Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude)
             } | Should -Throw '*WorkBuddy user root does not exist or is not a directory*'
-        }finally{$env:CODEBUDDY_CONFIG_DIR=$old}
+        }finally{$env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork}
     }
 
     It 'rejects control outputs outside the dedicated reports directory' {
