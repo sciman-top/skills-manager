@@ -10,8 +10,23 @@ Describe 'Portable capability-router cold discovery' {
         $portableRoot = Join-Path $TestDrive 'portable-skills'
         # Pester 6 keeps one TestDrive per file; earlier scenarios in this file
         # drop a neutral .skills-manager catalog that would win the auto-discover
-        # search, so every scenario must start from a clean portable root.
-        if (Test-Path -LiteralPath $portableRoot) { Remove-Item -LiteralPath $portableRoot -Recurse -Force }
+        # search, so every scenario must start from a clean portable root. The
+        # stable fixture directories are reused and their files rewritten below;
+        # only scenario artifacts that do not belong to the fixture are removed.
+        # Deleting the whole root instead costs seconds per scenario in a
+        # sandboxed host, where deletion is charged per directory node (see
+        # docs/runbooks/agent-sandbox-instrumentation.md), while rewriting the
+        # fixture files is effectively free.
+        if (Test-Path -LiteralPath $portableRoot) {
+            foreach ($stale in @([IO.Directory]::GetDirectories($portableRoot, '*', [IO.SearchOption]::TopDirectoryOnly))) {
+                if ([IO.Path]::GetFileName($stale) -notin @('capability-router', 'codebase-design')) {
+                    Remove-Item -LiteralPath $stale -Recurse -Force
+                }
+            }
+            foreach ($staleFile in @([IO.Directory]::GetFiles($portableRoot, '*', [IO.SearchOption]::TopDirectoryOnly))) {
+                Remove-Item -LiteralPath $staleFile -Force
+            }
+        }
         $routerRoot = Join-Path $portableRoot 'capability-router'
         $routerScripts = Join-Path $routerRoot 'scripts'
         $targetRoot = Join-Path $portableRoot 'codebase-design'
