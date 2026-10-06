@@ -40,6 +40,15 @@ Reproduce with: build N dirs, time `Remove-Item -Recurse`; build N flat files,
 time delete; compare `Remove-Item` vs `[IO.Directory]::Delete`. Scripts live
 under `artifacts/work/ai-session-verify/probe-*.ps1` in skills-manager.
 
+- 🔴 **`Get-ChildItem … | Remove-Item -Force` silently does nothing** in the
+  sandbox: the wrapper rejects pipeline input (`Remove-Item: missing path
+  operand`), and `-ErrorAction Ignore` hides it. Always pass
+  `Remove-Item -LiteralPath $_.FullName`, or use `[IO.File]::Delete`. This is
+  how a "restore in place" reset can look correct yet leave stale state behind.
+- 🔴 **Recursive delete also fails on read-only files** (git loose objects are
+  read-only on Windows) with `Access to the path '<40-hex>' is denied`. Clear
+  the read-only attribute across the tree first.
+
 **Teardown is the hidden bulk.** Pester 6 deletes the whole `$TestDrive` once at
 the end, so total cost ≈ (total directories created across the run) × per-dir
 rate. A fixture creating 60 dirs × 37 tests = 2,220 dirs ≈ 5.5 min of pure
@@ -47,14 +56,29 @@ deletion.
 
 ## 3. Levers, in order of value
 
-1. **Cut total directory count** (biggest win). Flatten fixtures; avoid deep
-   nested trees; drop optional subdirectories.
-2. **Replace multi-directory artifacts with single-file equivalents** when the
+1. **Reuse the fixture in place — do not delete and rebuild it per test.** A
+   `BeforeEach` that recursively deletes a fixture and recreates it pays the
+   per-directory delete cost on *every* test, and that is usually the entire
+   wall clock. The directory tree is identical across tests and only file
+   contents differ, so **rewrite the files** (re-copy sources, re-write
+   generated files) and keep the tree. Measured in skills-manager: **14.95s →
+   0.1s per test (~150×)**; one 41-test file went **11 min → 75s**.
+   - The rebuild body must be idempotent (`New-Item -Force`, `Copy-Item -Force`,
+     overwrite) — then re-running it *is* the reset.
+   - Still clear **control files** a test asserts on (receipts, journals) —
+     delete **files only**, never the directories.
+   - Remove only scenario artifacts that do not belong to the fixture, by name
+     or allow-list (e.g. `.skills-manager`, `ghost-cold-skill`).
+   - Guard the delete path too: a fixture restored in place must not silently
+     lose its cleanup when the delete is what fails.
+2. **Cut total directory count.** Flatten fixtures; avoid deep nested trees;
+   drop optional subdirectories.
+3. **Replace multi-directory artifacts with single-file equivalents** when the
    consumer only checks existence. Example: a `.git` *directory tree* can often
    be a one-line `.git` file pointer — **but only if git never runs against it**.
-3. **Prepare once, copy per fixture** instead of re-running `git init` /
+4. **Prepare once, copy per fixture** instead of re-running `git init` /
    `add` / `commit` per test (240 spawns → 10).
-4. Reduce subprocess count in production code paths (e.g. merge multiple
+5. Reduce subprocess count in production code paths (e.g. merge multiple
    `git status`/`git diff` queries).
 
 ## 4. The `.git` fixture trap
@@ -81,7 +105,20 @@ change deterministically instead:
 - Report the boundary honestly: mechanism-proven ≠ end-to-end receipt. Say which
   layer you did not verify and hand the full run to CI.
 
-## 6. Do not
+## 6. A failing test may be environmental, not yours
+
+Before blaming your edit for a failure, re-run the **committed** version of the
+same test (`git show HEAD:<file>` written to a scratch `*.Tests.ps1`). If it
+fails identically, the failure is pre-existing.
+
+Concrete trap seen in WorkBuddy sessions: they set **both** `WORKBUDDY_CONFIG_DIR`
+and `CODEBUDDY_CONFIG_DIR` (both to `~/.workbuddy-ai`), and the resolver gives
+`WORKBUDDY_CONFIG_DIR` **precedence**. A test that overrides only
+`CODEBUDDY_CONFIG_DIR` never reaches the legacy branch and fails with
+"no exception was thrown". Hermetic tests must save/clear/restore **every** env
+var the resolver consults — not just the one under test.
+
+## 7. Do not
 
 - Do not disable/bypass the shim to "get a clean run" — change the execution
   location instead.
