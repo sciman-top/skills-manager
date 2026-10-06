@@ -77,7 +77,9 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $module = Join-Path $repo 'src/model-orchestration'
         New-Item -ItemType Directory -Path $module | Out-Null
         Set-Content -LiteralPath (Join-Path $module 'README.md') -Value '# docs'
-        (Invoke-Resolver $repo).result.profile | Should -Be 'docs'
+        $docs = (Invoke-Resolver $repo).result
+        $docs.profile | Should -Be 'docs'
+        $docs.requires_build | Should -BeFalse
         Set-Content -LiteralPath (Join-Path $module 'presets.json') -Value '{}'
         Add-Content -LiteralPath (Join-Path $repo 'src/Core.ps1') -Value '# changed'
         $r = (Invoke-Resolver $repo).result
@@ -276,6 +278,17 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         foreach ($fixed in @('tests/Unit/Core.Tests.ps1', 'tests/Unit/InfrastructureSeam.Tests.ps1', 'tests/Unit/ReadOnlyCli.Tests.ps1')) {
             $r.result.focused_test_paths | Should -Contain $fixed
         }
+        $r.result.requires_build | Should -BeTrue
+    }
+
+    It 'marks test-only focused changes as build-free' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Add-Content -LiteralPath (Join-Path $repo 'tests\Unit\Core.Tests.ps1') -Value '# test-only change'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'focused'
+        $r.result.focused_test_paths | Should -Contain 'tests/Unit/Core.Tests.ps1'
+        $r.result.requires_build | Should -BeFalse
     }
 
     It 'selects migration behavior tests even when the tests were not edited' {
@@ -507,10 +520,10 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
     }
 
     It 'uses exact behavior coverage for known gate scripts in local and CI modes' -TestCases @(
-        @{ Source = 'scripts/quality/resolve-gate-profile.ps1'; Expected = @('CiWorkflow', 'QualityGateAuto', 'ResolveGateProfile') }
-        @{ Source = 'tests/run.ps1'; Expected = @('TestRunner') }
+        @{ Source = 'scripts/quality/resolve-gate-profile.ps1'; Expected = @('CiWorkflow', 'QualityGateAuto', 'ResolveGateProfile'); ExpectedBuild = $true }
+        @{ Source = 'tests/run.ps1'; Expected = @('TestRunner'); ExpectedBuild = $false }
     ) {
-        param($Source, $Expected)
+        param($Source, $Expected, $ExpectedBuild)
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()
         Set-Content -LiteralPath (Join-Path $repo $Source) -Value '# behavior change'
@@ -523,6 +536,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             $r.result.profile | Should -Be 'focused'
             @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
             $r.result.requires_locked_sources | Should -BeFalse
+            $r.result.requires_build | Should -Be $ExpectedBuild
         }
         Add-Content -LiteralPath (Join-Path $repo 'scripts/quality/x.ps1') -Value '# independent unmapped risk'
         $mixed = Invoke-Resolver $repo @{ BaseSha = $base }

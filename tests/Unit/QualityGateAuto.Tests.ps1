@@ -58,6 +58,30 @@ $global:LASTEXITCODE = 0
         { Invoke-TempGate $repo @{ Profile = 'focused'; TestPath = @('tests/Unit/ModelPreset.Tests.ps1') } *> $null } | Should -Throw '*exit=9*'
     }
 
+    It 'skips the build for an auto-classified test-only change' {
+        $repo = New-AutoGateFixture
+        New-Item -ItemType Directory -Path (Join-Path $repo 'tests\Unit') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'build.ps1') -Value "Set-Content -LiteralPath (Join-Path `$PSScriptRoot 'build-ran.txt') -Value 'ran'; throw 'build should be skipped'"
+        Set-Content -LiteralPath (Join-Path $repo 'tests\run.ps1') -Value @'
+param([string[]]$TestPath)
+if ($TestPath -notcontains 'tests/Unit/Core.Tests.ps1') { throw 'Wrong focused path' }
+Set-Content -LiteralPath (Join-Path $PSScriptRoot 'tests-ran.txt') -Value 'ran'
+$global:LASTEXITCODE = 0
+'@
+        & git -C $repo add .
+        & git -C $repo commit -m 'runner fixture' *> $null
+        Add-Content -LiteralPath (Join-Path $repo 'tests\Unit\Core.Tests.ps1') -Value '# test-only change'
+
+        Push-Location $repo
+        try {
+            $out = Invoke-TempGate $repo @{ Profile = 'auto' }
+            ($out | Out-String) | Should -Not -Match '== build =='
+            Test-Path -LiteralPath (Join-Path $repo 'tests\tests-ran.txt') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $repo 'build-ran.txt') | Should -BeFalse
+        }
+        finally { Pop-Location }
+    }
+
     It 'rejects invalid resolver output before resolve-only success: <case>' -ForEach @(
         @{ case = 'missing profile'; resolverText = "'{}'; exit 0" }
         @{ case = 'unknown profile'; resolverText = "'{`"profile`":`"skip`"}'; exit 0" }

@@ -157,15 +157,15 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 9 项（`core-lean` 7 项加两份风控技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 10 项（`core-lean` 7 项加两份风控技能和一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
 | 宿主 | 默认 profile | `full-compatible` 的宿主适配 |
 | --- | --- | --- |
 | ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
 | Claude | `core-lean`：7 个默认技能 | 全量受管技能 |
 | ZCode | `core-lean`：7 个默认技能 | 排除原生 `documents`/`presentations`/`spreadsheets` 插件已覆盖的 `docx`、`pptx`、`xlsx`，以及 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
-| Antigravity | `core-ops`：9 个技能 | 全量受管技能；当前未配置宿主排除项 |
-| WorkBuddy | `core-ops`：9 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| Antigravity | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| WorkBuddy | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
 
 表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
 
@@ -293,7 +293,7 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile doc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
-本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
+本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；纯测试运行器/测试夹具变更只运行 focused 测试，不重建未被使用的 CLI bundle；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto

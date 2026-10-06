@@ -7,9 +7,8 @@ param(
     [string[]]$Tag = @(),
     [string[]]$ExcludeTag = @(),
     # Unfiltered full-suite runs are split across isolated shard processes.
-    # Targeted runs (explicit -TestPath/-TestName) run in one isolated worker
-    # process so the parent's output contract is a start line (batch, wall-clock
-    # bound, receipt path) followed by one summary line.
+    # Targeted runs normally use one isolated worker; WorkBuddy instrumented
+    # hosts switch to in-process execution below to avoid cold-start stalls.
     [ValidateRange(1, 16)][int]$MaxParallel = [Math]::Max(1, [Math]::Min(4, [Environment]::ProcessorCount)),
     [ValidateRange(1, 7200)][int]$ShardTimeoutSeconds = 3600,
     # Bounds the isolated worker that runs an explicit targeted selection
@@ -20,6 +19,10 @@ param(
     # this runner has a wall-clock bound: a wedged test file must fail with a
     # diagnostic, not hang forever.
     [ValidateRange(0, 7200)][int]$TargetedTimeoutSeconds = 900,
+    # WorkBuddy's instrumented host can pause a newly-created pwsh for minutes.
+    # In-process execution avoids paying that host cost for every focused run;
+    # ordinary terminals retain the isolated-worker timeout boundary.
+    [switch]$InProcess,
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
     # Internal: set only by the parent process when spawning a shard worker.
     [string]$ShardJobPath = '',
@@ -30,6 +33,28 @@ param(
 $ErrorActionPreference = 'Stop'
 $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1'
 $manifest = & $bootstrap
+
+# Reclaim TestDrive trees leaked by previously interrupted runs before doing any
+# real work. Pester removes a TestDrive only on a normal exit, so a killed or
+# timed-out worker leaves its whole tree (one run can create thousands of
+# directories) in %TEMP% forever; in a sandboxed host every leftover directory
+# makes later deletions and cleanups more expensive, which is why the slowness
+# keeps coming back. The reclaim is best-effort and must never fail the run.
+# Workers are skipped: the parent process has already reclaimed before spawning.
+if ([string]::IsNullOrWhiteSpace($ShardJobPath) -and [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
+    try {
+        $reclaimPath = Join-Path $PSScriptRoot '..\scripts\quality\reclaim-test-temp.ps1'
+        if (Test-Path -LiteralPath $reclaimPath -PathType Leaf) {
+            # Capture the best-effort summary so it cannot add a third line to
+            # the runner's stable start/summary output contract.
+            $null = & $reclaimPath
+        }
+    }
+    catch {
+        # Reclaim is auxiliary maintenance; keep its failure silent so a
+        # diagnostic cannot corrupt the machine-readable runner contract.
+    }
+}
 
 function Stop-TestRunnerProcess([Diagnostics.Process]$Process) {
     if ($null -eq $Process) { return }
@@ -208,6 +233,59 @@ foreach ($path in $paths) {
     if ($testFiles.Count -eq 0) {
         throw ("Test discovery returned zero files: {0}" -f $path)
     }
+}
+
+# The WorkBuddy safe-delete/sandbox markers are inherited by child processes
+# and are the only local signal that has correlated with the cold pwsh stalls
+# documented in docs/runbooks/agent-sandbox-instrumentation.md.  Do not infer
+# this mode from a generic proxy or from the host name.
+$instrumentedHost = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or
+    $env:CODEBUDDY_SAFE_DELETE_SANDBOX -or
+    -not [string]::IsNullOrWhiteSpace($env:SANDBOX_CENTER_IPC_ADDRESS) -or
+    (([string]$env:NODE_OPTIONS) -match 'shim') -or
+    (([string]$env:PYTHONPATH) -match 'shim'))
+$targetedSelection = $TestPath.Count -gt 0 -or $TestName.Count -gt 0 -or $Tag.Count -gt 0 -or $ExcludeTag.Count -gt 0
+
+if ($targetedSelection -and ($InProcess -or $instrumentedHost)) {
+    $runId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $runRoot = Join-Path $ShardReportRoot ('in-process-{0}' -f $runId)
+    $null = New-Item -ItemType Directory -Path $runRoot -Force
+    $receiptPath = Join-Path $runRoot 'targeted.receipt.json'
+    $environment = Get-TestEnvironmentRecord -Mode 'targeted'
+    $environment.Record.execution = 'in-process'
+    [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environment.Record | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host ("Targeted run started: batch=[{0}] timeout={1}s receipt={2} mode=in-process" -f (@($paths) -join '; '), $TargetedTimeoutSeconds, $receiptPath)
+    $receipt = [ordered]@{
+        schema_version = 1; status = 'error'; total_count = 0; passed_count = 0
+        failed_count = 0; skipped_count = 0; duration_seconds = 0.0
+        failures = @(); container_failures = @(); container_failure_details = @(); error = ''
+    }
+    try {
+        $run = Invoke-RepositoryPester -Paths @($paths) -Names @($TestName) -Tags @($Tag) -ExcludeTags @($ExcludeTag)
+        $result = $run.result
+        if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
+        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
+        $receipt.duration_seconds = [Math]::Round([double]$run.seconds, 3)
+        $receipt.total_count = [int]$result.TotalCount
+        $receipt.passed_count = [int]$result.PassedCount
+        $receipt.failed_count = [int]$result.FailedCount
+        $receipt.skipped_count = [int]$result.SkippedCount
+        $receipt.failures = @(Get-FailedTestDetail $result)
+        $receipt.container_failures = @($result.FailedContainers | ForEach-Object { [string]$_.Item })
+        $receipt.container_failure_details = @($result.FailedContainers | ForEach-Object {
+                [pscustomobject]@{ container = [string]$_.Item; error = if ($_.ErrorRecord) { [string]$_.ErrorRecord } else { '' } }
+            })
+    }
+    catch { $receipt.error = $_.Exception.Message }
+    [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    if ($receipt.status -eq 'error') { throw [string]$receipt.error }
+    Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f $receipt.total_count, $receipt.passed_count, $receipt.failed_count, $receipt.skipped_count, $receipt.duration_seconds)
+    foreach ($test in @($receipt.failures)) { Write-Host ("FAILED: {0}" -f [string]$test.name); if ($test.message) { Write-Host ([string]$test.message) } }
+    if ($receipt.container_failures.Count -gt 0) { throw ("Pester container failures: {0}" -f $receipt.container_failures.Count) }
+    if ($receipt.failed_count -gt 0) { throw ("Pester failures: {0}" -f $receipt.failed_count) }
+    if ($receipt.passed_count -eq 0) { throw 'No tests executed successfully; check filters and skipped tests.' }
+    $global:LASTEXITCODE = 0
+    return
 }
 
 # Sharding applies only to the unfiltered full-suite invocation, and only when

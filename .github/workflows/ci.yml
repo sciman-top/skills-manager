@@ -21,6 +21,11 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Verify pull request charter
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: .\scripts\quality\verify-pr-charter.ps1 -EventPath $env:GITHUB_EVENT_PATH
+
       - name: Select proportional quality gate profile
         shell: pwsh
         run: |
