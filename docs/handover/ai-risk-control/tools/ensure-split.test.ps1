@@ -17,6 +17,7 @@ $TARGET = Join-Path $HERE 'ensure-split.ps1'
 $PWSH   = if ($env:AG_SPLIT_TEST_PWSH) { $env:AG_SPLIT_TEST_PWSH } else { (Get-Process -Id $PID).Path }
 if (-not (Test-Path -LiteralPath $PWSH)) { $PWSH = 'C:\Program Files\PowerShell\7\pwsh.exe' }
 $TMP    = Join-Path $env:TEMP ('nova-agsplit-test-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+$REG_PREFIX = '_nova_agsplit_test_' + [Guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Force -Path $TMP | Out-Null
 
 $script:PASS = 0
@@ -36,7 +37,10 @@ function New-Fixture {
     Set-Content -Path (Join-Path $d 'fake-core.exe') -Value 'stub' -Encoding ASCII
     Set-Content -Path (Join-Path $d 'config.json')   -Value '{}'    -Encoding ASCII
 
-    $rk = "HKCU:\Software\_nova_agsplit_test_$Name"
+    # The acceptance fixture runs in parallel with the repository's sharded
+    # test workers.  Keep the registry namespace unique per invocation so one
+    # worker's cleanup cannot remove another worker's live fixture.
+    $rk = "HKCU:\Software\${REG_PREFIX}_$Name"
     Remove-Item -Path $rk -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -Path $rk -Force | Out-Null
     New-ItemProperty -Path $rk -Name ProxyEnable   -Value $ProxyEnable  -PropertyType DWord  -Force | Out-Null
