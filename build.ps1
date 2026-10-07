@@ -15,6 +15,7 @@ $Files = @(
     "Core.ps1",
     "Application/HostRegistry.ps1",
     "Application/SkillSupply.ps1",
+    "Application/AgentBuild.ps1",
     "Domain/OperationPlan.ps1",
     "Domain/ExecutionAdmission.ps1",
     "Domain/SkillCatalog.ps1",

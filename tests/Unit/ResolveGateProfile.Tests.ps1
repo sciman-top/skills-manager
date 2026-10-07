@@ -480,6 +480,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         # explicit. A new src file that is neither fails here instead of
         # silently costing a full gate.
         $conservative = @(
+            'src/Application/AgentBuild.ps1'
             'src/Application/GlobalRuleProjection.ps1'
             'src/Application/NativeAgentBridge.ps1'
             'src/Application/NativeSkillProjection.ps1'
