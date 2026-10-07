@@ -3,6 +3,14 @@
 # This file is used to assemble the final script.
 # It includes the main dispatch logic.
 
+function Write-CommandResult($Result) {
+    # 分发层统一输出协议：JSON 走 stdout（ASCII 转义，可重定向），非 JSON
+    # 走控制台；非零 exit_code 转为进程退出码。
+    if ($Result.json) { Write-Output (ConvertTo-AsciiJson $Result.output) }
+    else { Write-Host $Result.output }
+    if ($Result.exit_code -ne 0) { exit $Result.exit_code }
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         # Command-specific parsers own all remaining tokens, including --long-options.
@@ -44,7 +52,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "选择" { 选择 }
             "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
-            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "check-updates" { Write-CommandResult (Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             "锁定" { 锁定 }
@@ -70,18 +78,30 @@ if ($MyInvocation.InvocationName -ne '.') {
             { $_ -in @("MCP配置", "mcp-profile") } { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             { $_ -in @("审查目标", "audit-targets") } { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             { $_ -in @("ai-coding", "AI编码") } { $result = Invoke-AiCodingCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Output $result.output } }
-            { $_ -in @("能力清单", "capability-inventory") } { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则审查", "rule-audit") } { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则全域审查", "rule-estate-audit") } { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
-            { $_ -in @("规则全域计划", "rule-estate-plan") } { $result=Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则全域应用", "rule-estate-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则检查", "global-rules-check") } { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则计划", "global-rules-plan") } { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则应用", "global-rules-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("全局规则回滚", "global-rules-rollback") } { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则计划", "rule-plan") } { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            { $_ -in @("规则应用", "rule-apply") } { $tokens=Merge-FilterAndArgs $Filter $args;if($RunPlan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output (ConvertTo-AsciiJson $result.output)}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            { $_ -in @("能力清单", "capability-inventory") } { Write-CommandResult (Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则审查", "rule-audit") } { Write-CommandResult (Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则全域审查", "rule-estate-audit") } { Write-CommandResult (Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则全域计划", "rule-estate-plan") } { Write-CommandResult (Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则全域应用", "rule-estate-apply") } {
+                $tokens = Merge-FilterAndArgs $Filter $args
+                if ($RunPlan) { $tokens = @('--plan') + @($tokens) }
+                Write-CommandResult (Invoke-RuleEstateApplyCommand $tokens)
+            }
+            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { Write-CommandResult (Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("全局规则检查", "global-rules-check") } { Write-CommandResult (Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("全局规则计划", "global-rules-plan") } { Write-CommandResult (Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("全局规则应用", "global-rules-apply") } {
+                $tokens = Merge-FilterAndArgs $Filter $args
+                if ($RunPlan) { $tokens = @('--plan') + @($tokens) }
+                Write-CommandResult (Invoke-GlobalRuleCommand apply $tokens)
+            }
+            { $_ -in @("全局规则回滚", "global-rules-rollback") } { Write-CommandResult (Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则计划", "rule-plan") } { Write-CommandResult (Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args)) }
+            { $_ -in @("规则应用", "rule-apply") } {
+                $tokens = Merge-FilterAndArgs $Filter $args
+                if ($RunPlan) { $tokens = @('--plan') + @($tokens) }
+                Write-CommandResult (Invoke-RuleApplyCommand $tokens)
+            }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }

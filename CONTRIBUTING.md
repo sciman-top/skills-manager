@@ -6,10 +6,11 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 
 ## Sources of truth
 
-- Edit `src/`, then run `build.ps1` to regenerate `skills.ps1`.
+- Edit `src/`, then run `build.ps1` to regenerate the thin `skills.ps1` entry and the `skills.lib/` libraries; commit them together.
 - Edit `skills.json` for sources, mappings, targets, MCP, and projection.
 - Put local skills in `overrides/{custom,patches,resources}`; do not patch `vendor/`, `imports/`, generated `agent/`, or runtime `reports/` directly.
 - Change audit prompt defaults in `src/Commands/AuditTargets*.ps1` or `overrides/audit-outer-ai-prompt.md`, never in a generated run directory.
+- Adding a CLI command or a managed host follows the mechanical touchpoint map in [docs/product/skills-manager-vnext-architecture.md](docs/product/skills-manager-vnext-architecture.md) (§2 CLI shell).
 
 ## Development loop
 
