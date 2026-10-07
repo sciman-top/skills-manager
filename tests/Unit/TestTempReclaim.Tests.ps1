@@ -93,6 +93,36 @@ Describe 'TestDrive leak reclaim' {
         $reclaimText | Should -Match 'Test-IsCi'
     }
 
+    It 'keeps the CI no-op summary shape-identical to the reclaim result' {
+        # The CI no-op summary and Invoke-PesterTempReclaim's result are one
+        # summary contract: every field must exist in both constructors, or the
+        # object's shape depends on which environment ran it.
+        $resultBlock = [regex]::Match($reclaimText, '(?s)\$result\s*=\s*\[ordered\]@\{(.*?)\}').Groups[1].Value
+        $ciBlock = [regex]::Match($reclaimText, '(?s)\$summary\s*=\s*\[pscustomobject\]\[ordered\]@\{(.*?)\}').Groups[1].Value
+        $keys = {
+            param([string]$Block)
+            @($Block -split "[`r`n;]" | ForEach-Object { if ($_ -match '^\s*(\w+)\s*=') { $Matches[1].Trim() } })
+        }
+        $resultKeys = & $keys $resultBlock
+        $ciKeys = & $keys $ciBlock
+        ($ciKeys -join ',') | Should -Be ($resultKeys -join ',')
+        $ciKeys | Should -Contain 'live_skipped'
+        # Execute the CI branch for real: it must return the object above with
+        # the reclaim fully skipped (no temp scanning side effects).
+        $prevCi = $env:CI
+        try {
+            $env:CI = 'true'
+            $summary = & $reclaimPath
+            @($summary.PSObject.Properties.Name).Count | Should -Be $resultKeys.Count
+            [int]$summary.live_skipped | Should -Be 0
+            [int]$summary.scanned | Should -Be 0
+        }
+        finally {
+            if ([string]::IsNullOrEmpty($prevCi)) { Remove-Item Env:\CI -ErrorAction SilentlyContinue }
+            else { $env:CI = $prevCi }
+        }
+    }
+
     It 'leaves trees that a concurrent run is still writing to' {
         # Age alone cannot separate a leftover from a live TestDrive: a run that
         # has been executing for longer than MinAgeSeconds is old but still live,
