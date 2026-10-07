@@ -41,6 +41,7 @@ Describe 'PowerShell 7-only runtime contract' {
         $cmd = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.cmd') -Raw
         $core = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Core.ps1') -Raw
         $mcp = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Commands\Mcp.ps1') -Raw
+        $mcpAdapters = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Commands\Mcp.HostAdapters.ps1') -Raw
 
         $installer | Should -Match '(?m)^#requires -Version 7\.0\s*$'
         $installer | Should -Match 'Assert-PowerShell7'
@@ -50,7 +51,8 @@ Describe 'PowerShell 7-only runtime contract' {
         $core | Should -Not -Match 'CODEX_ALLOW_WINDOWS_POWERSHELL'
         $core | Should -Not -Match 'Get-Command powershell'
         $mcp | Should -Not -Match '"powershell\.exe"'
-        $mcp | Should -Match '"pwsh\.exe"'
+        $mcpAdapters | Should -Not -Match '"powershell\.exe"'
+        $mcpAdapters | Should -Match '"pwsh\.exe"'
     }
 
     It 'passes the PowerShell 7 runtime floor and generated bundle parse' {

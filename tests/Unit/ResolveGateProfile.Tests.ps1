@@ -490,6 +490,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Commands/AuditTargets.Apply.ps1'
             'src/Commands/GlobalRules.ps1'
             'src/Commands/Install.ps1'
+            'src/Commands/Mcp.HostAdapters.ps1'
             'src/Commands/Mcp.ProfileAndSafety.ps1'
             'src/Commands/Mcp.ps1'
             'src/Commands/RuleEstate.ps1'
