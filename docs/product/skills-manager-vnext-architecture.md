@@ -18,9 +18,30 @@
 - Source：`src/Version.ps1`、`src/Main.ps1`、`src/Commands/*`
 - Responsibility：参数分派、用户交互、exit code 与 JSON 输出
 
-`build.ps1` 按固定顺序拼接 source，生成根 `skills.ps1`。生成 bundle 是发布物，不是编辑 seam。
+`build.ps1` 按 `$Files` 清单从 `src/` 生成根 `skills.ps1`（薄入口：参数面 + 惰性加载器 + Main 分发）与 `skills.lib/`（与源文件 1:1 的库文件；base 常载，命令包按函数闭包惰性加载）。生成物是发布物，不是编辑 seam；清单外的 `src/**/*.ps1` 会被 build 守卫拒绝。
 
 帮助与菜单只展示 canonical commands。仍需兼容的少量历史名称集中在 CLI shell 的 compatibility map，调用时输出 deprecation warning；已无调用价值的 `一键/workflow` 与 `自动更新设置` 不保留 compatibility 路由。
+
+扩展触点地图（增/删功能的机械清单，缺一即被守卫或测试拦下）：
+
+新增一个顶层命令：
+
+1. `src/Commands/<Name>.ps1`：命令实现与入口函数
+2. `build.ps1` `$Files`：登记（清单完整性守卫强制）
+3. `src/Version.ps1`：`$Cmd` 的 ValidateSet 加命令名
+4. `src/Main.ps1`：switch 加分支，统一经 `Write-CommandResult` 收敛 JSON/退出码协议
+5. `src/Commands/Utils.ps1`：`帮助` 文本与菜单
+6. 测试与门禁映射：`tests/Unit/<Name>.Tests.ps1`，并在 `scripts/quality/resolve-gate-profile.ps1` 登记行为映射或 conservative 清单
+
+随后 `build.ps1` 重新生成，连同 `skills.ps1`/`skills.lib/` 一起提交。
+
+新增/退役一个宿主（以注册表为锚）：
+
+1. `src/Application/HostRegistry.ps1`：增删 fact；`tests/Unit/HostRegistry.Tests.ps1` 强制其与 `rules/` 树及各宿主参数 ValidateSet 全等
+2. `rules/global/<host>/<规则文件>` 与 `rules/global/platforms/<host>.md`：规则源
+3. `skills.json`：targets / skill_projection / mcp_targets 数据
+4. 适配器：全局规则投影与 RuleEstate 全域比对随注册表自动扩展（finding 文案按需补充）；`src/Commands/Mcp.HostAdapters.ps1` 配置形状；`src/Application/SkillProjection.ps1` 投影根
+5. 文档：宿主组合描述（本文件与根 `AGENTS.md` 视情况）
 
 ### Config and source materialization
 
