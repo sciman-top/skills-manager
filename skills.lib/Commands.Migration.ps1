@@ -390,7 +390,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
-            source_directories = if ($options.mode -ne 'rescan') { @('src','config','tests','scripts','docs','rules','overrides','vendor','imports','agent','references','.github') } else { @() }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','skills.lib','config','tests','scripts','docs','rules','overrides','vendor','imports','agent','references','.github') } else { @() }
             credential_file = $credentialFileName
             apply = if ($options.mode -eq 'rescan') {
                 @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP')
@@ -407,11 +407,11 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         if ($options.mode -ne 'rescan') {
             $migrationCfg = New-MigrationConfig $cfg $options.mode $skillNames $mcpNames
             $migrationCfg | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $packageRoot 'skills.json') -Encoding utf8
-            foreach ($name in @('skills.lock.json','setup.cmd','install.ps1','build.ps1','skills.cmd','skills.ps1','LICENSE','README.md','README.en.md','AGENTS.md','CODE_OF_CONDUCT.md','CONTRIBUTING.md','SECURITY.md','.gitignore')) {
+            foreach ($name in @('skills.lock.json','setup.cmd','install.ps1','build.ps1','skills.cmd','skills.ps1','LICENSE','README.md','README.en.md','AGENTS.md','CLAUDE.md','GEMINI.md','CODE_OF_CONDUCT.md','CONTRIBUTING.md','SECURITY.md','.gitignore')) {
                 $source = Join-Path $Root $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
-            foreach ($directory in @('src','config','tests','scripts','docs','rules','references','.github')) {
+            foreach ($directory in @('src','skills.lib','config','tests','scripts','docs','rules','references','.github')) {
                 $source = Join-Path $Root $directory
                 # The independent preset tool stores host-config backups under src/.
                 $excluded = if ($directory -eq 'src') { @('model-orchestration/.state', 'model-orchestration/.generated') } else { @() }
@@ -439,7 +439,8 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
         [ordered]@{ schema_version = 1; files = @($contentEntries) } |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $packageRoot 'MIGRATION-CONTENT.json') -Encoding utf8
         Assert-MigrationContentIntegrity $packageRoot $manifest | Out-Null
-        if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
+        # The archive writer verifies a temporary candidate before replacing
+        # the destination; keep the previous snapshot until that succeeds.
         $archive = New-VerifiedPackageArchive $packageRoot $outPath
         $result = [pscustomobject]@{ mode = $options.mode; path = $archive.path; size = $archive.size; sha256 = $archive.sha256; skills = @($skillNames); mcp_servers = @($mcpNames) }
         if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }

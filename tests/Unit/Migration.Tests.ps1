@@ -40,6 +40,11 @@ Describe 'Migration bundles' {
             New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'rules\global') -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $fixtureAgent 'demo-skill\SKILL.md') -Value '# demo'
             Set-Content -LiteralPath (Join-Path $fixtureRoot 'rules\global\AGENTS.md') -Value '# fixture rules'
+            Copy-Item -LiteralPath (Join-Path $repoRoot 'skills.ps1') -Destination $fixtureRoot
+            Copy-Item -LiteralPath (Join-Path $repoRoot 'skills.lib') -Destination $fixtureRoot -Recurse
+            foreach ($adapter in @('CLAUDE.md', 'GEMINI.md')) {
+                Copy-Item -LiteralPath (Join-Path $repoRoot $adapter) -Destination $fixtureRoot
+            }
             foreach ($relative in @('src/model-orchestration/.state/run/backup.json', 'src/model-orchestration/.generated/codex/role.toml', 'src/model-orchestration/presets.json')) {
                 $path = Join-Path $fixtureRoot $relative
                 New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
@@ -82,6 +87,16 @@ Describe 'Migration bundles' {
         Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/presets.json') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/.state') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $packageRoot 'src/model-orchestration/.generated') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $packageRoot 'skills.lib/Core.ps1') | Should -BeTrue
+        foreach ($adapter in @('CLAUDE.md', 'GEMINI.md')) {
+            Get-Content -LiteralPath (Join-Path $packageRoot $adapter) -Raw | Should -Be (Get-Content -LiteralPath (Join-Path $repoRoot $adapter) -Raw)
+        }
+        Assert-MigrationContentIntegrity $packageRoot $manifest | Should -BeTrue
+        # Use the extracted entry from a different CWD; a file-list checksum
+        # alone cannot prove that the thin CLI carries its runtime payload.
+        $output = & pwsh -NoProfile -File (Join-Path $packageRoot 'skills.ps1') ai-coding --json
+        $LASTEXITCODE | Should -Be 0
+        ($output | ConvertFrom-Json).command | Should -Be 'ai-coding'
     }
 
     It 'requires a version number for a default delivery path' {
@@ -95,6 +110,15 @@ Describe 'Migration bundles' {
         $root = Join-Path $TestDrive 'rescan-extract\skills-manager-migration-rescan'
         Test-Path -LiteralPath (Join-Path $root 'agent') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $root 'skills.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $root 'skills.lib') | Should -BeFalse
+    }
+
+    It 'preserves the previous migration archive when forced replacement fails' {
+        $out = Join-Path $TestDrive 'previous-rescan.zip'
+        [IO.File]::WriteAllText($out, 'previous snapshot')
+        Mock New-VerifiedPackageArchive { throw 'archive verification failed' }
+        { Invoke-MigrationCommand @('--mode', 'rescan', '--out', $out, '--force') } | Should -Throw '*archive verification failed*'
+        [IO.File]::ReadAllText($out) | Should -Be 'previous snapshot'
     }
 }
 
