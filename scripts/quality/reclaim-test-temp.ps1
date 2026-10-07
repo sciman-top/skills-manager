@@ -250,7 +250,10 @@ $effectiveTimeout = [Math]::Max(1, $TimeoutSeconds)
 $summary = $null
 if (Test-IsCi) {
     Write-ReclaimLog('ci detected; reclaim skipped (fresh temp needs no help)')
-    $summary = [pscustomobject][ordered]@{ scanned = 0; parked = 0; parked_skipped = 0; deleted = 0; delete_skipped = 0; delete_deferred = 0; timed_out = $false; seconds = 0.0 }
+    # Shape must stay identical to Invoke-PesterTempReclaim's result: the two
+    # constructors are one summary contract, and a field present in only one
+    # makes the object's shape depend on the environment it ran in.
+    $summary = [pscustomobject][ordered]@{ scanned = 0; live_skipped = 0; parked = 0; parked_skipped = 0; deleted = 0; delete_skipped = 0; delete_deferred = 0; timed_out = $false; seconds = 0.0 }
 }
 else {
     $summary = Invoke-PesterTempReclaim -MinAgeSeconds $MinAgeSeconds -TimeoutSeconds $effectiveTimeout -DeleteBudgetSeconds $DeleteBudgetSeconds
