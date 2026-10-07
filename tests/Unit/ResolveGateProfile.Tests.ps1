@@ -503,6 +503,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Domain/RuleResponsibility.ps1'
             'src/Domain/SkillCatalog.ps1'
             'src/Git.ps1'
+            'src/Lock.ps1'
         )
         $classifierText = [IO.File]::ReadAllText((Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1'))
         $mapped = @([regex]::Matches($classifierText, "(?m)^\s*'((?:src|tests|docs|scripts|config)/[^']+)'\s*=\s*@\(") |

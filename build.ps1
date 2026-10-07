@@ -41,6 +41,7 @@ $Files = @(
     "Application/RulePatchExecutor.ps1",
     "Git.ps1",
     "Config.ps1",
+    "Lock.ps1",
     "Commands/Doctor.ps1",
     "Commands/AiCoding.ps1",
     "Commands/AiRiskControl.ps1",
