@@ -2,7 +2,10 @@
 # root) resolves it from $PSScriptRoot so shims work from any CWD. When this
 # file is dot-sourced directly (verify-skills-config.ps1), $PSScriptRoot is
 # src/ and the original CWD-based fallback keeps those consumers working.
-$Root = if ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf)) { $PSScriptRoot } else { (Resolve-Path ".").Path }
+# Walk up to skills.json so the same file also works from skills.lib/.
+$Root = $PSScriptRoot
+while ($Root -and -not (Test-Path -LiteralPath (Join-Path $Root 'skills.json') -PathType Leaf) -and $Root -ne [IO.Path]::GetPathRoot($Root)) { $Root = Split-Path -Parent $Root }
+if (-not $Root -or -not (Test-Path -LiteralPath (Join-Path $Root 'skills.json') -PathType Leaf)) { $Root = (Resolve-Path ".").Path }
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
 $VendorDir = Join-Path $Root "vendor"

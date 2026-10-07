@@ -1,4 +1,6 @@
-$skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$skillCatalogCompilerRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $skillCatalogCompilerRepoRoot 'skills.json') -PathType Leaf) -and $skillCatalogCompilerRepoRoot -ne [IO.Path]::GetPathRoot($skillCatalogCompilerRepoRoot)) { $skillCatalogCompilerRepoRoot = Split-Path -Parent $skillCatalogCompilerRepoRoot }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillMetadata.ps1') }

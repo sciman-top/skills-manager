@@ -1,4 +1,6 @@
-$skillProjectionPlanningRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$skillProjectionPlanningRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $skillProjectionPlanningRepoRoot 'skills.json') -PathType Leaf) -and $skillProjectionPlanningRepoRoot -ne [IO.Path]::GetPathRoot($skillProjectionPlanningRepoRoot)) { $skillProjectionPlanningRepoRoot = Split-Path -Parent $skillProjectionPlanningRepoRoot }
 if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionPlanningRepoRoot 'src\Infrastructure\CodexCli.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionPlanningRepoRoot 'src\Domain\SkillMetadata.ps1') }
 if ($null -eq (Get-Command Need -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionPlanningRepoRoot 'src\Core.ps1') }

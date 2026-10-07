@@ -1,0 +1,922 @@
+﻿function Ensure-AuditArrayProperty($obj, [string]$name) {
+    if (-not $obj.PSObject.Properties.Match($name).Count -or $null -eq $obj.$name) {
+        $obj | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
+    }
+    elseif (-not (Assert-IsArray $obj.$name)) {
+        $obj.$name = @($obj.$name)
+    }
+}
+
+function Assert-AuditUsageObservations($rec) {
+    Ensure-AuditArrayProperty $rec "usage_observations"
+    foreach ($observation in @($rec.usage_observations)) {
+        Need ($null -ne $observation -and (Test-AuditObjectLike $observation)) "usage_observations 条目必须是对象"
+        foreach ($field in @('name', 'task', 'source', 'observed_at')) {
+            Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $observation $field))) ("usage_observations 缺少 {0}" -f $field)
+        }
+        Need ([string]$observation.kind -in @('skill', 'mcp')) "usage_observations.kind 必须为 skill/mcp"
+        Need ([string]$observation.stage -in @('discovery', 'load', 'execution', 'acceptance')) "usage_observations.stage 无效"
+        Need ([string]$observation.result -in @('succeeded', 'failed', 'unknown')) "usage_observations.result 无效"
+        Need ([string]$observation.provenance -in @('host_observed', 'user_reported', 'controlled_replay')) "usage_observations.provenance 无效"
+        $observedAt = [datetimeoffset]::MinValue
+        Need ([datetimeoffset]::TryParse([string]$observation.observed_at, [ref]$observedAt)) "usage_observations.observed_at 必须为有效时间"
+    }
+}
+
+function Normalize-AuditStringArray($value) {
+    if ($null -eq $value) { return @() }
+    $items = if (Assert-IsArray $value) { @($value) } else { @($value) }
+    $normalized = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $items) {
+        if ($null -eq $item) { continue }
+        $text = ([string]$item).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($seen.Add($text)) {
+            $normalized.Add($text) | Out-Null
+        }
+    }
+    return @($normalized)
+}
+
+function Get-AuditRecommendationChangeItemCount($rec) {
+    return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
+}
+
+function Get-AuditRecommendationSourceCoverage($rec) {
+    $allSources = New-Object System.Collections.Generic.List[string]
+    $observedSources = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $observationCount = 0
+    Ensure-AuditArrayProperty $rec "source_observations"
+    foreach ($observation in @($rec.source_observations)) {
+        Need ($null -ne $observation -and (Test-AuditObjectLike $observation)) "source_observations 条目必须是对象"
+        $source = ([string]$observation.source).Trim()
+        $summary = ([string]$observation.summary).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($source)) "source_observations 条目缺少 source"
+        Need (-not [string]::IsNullOrWhiteSpace($summary)) "source_observations 条目缺少 summary"
+        $observedSources.Add($source) | Out-Null
+        $observationCount++
+    }
+
+    $itemsMissingObservation = New-Object System.Collections.Generic.List[string]
+    $itemsWithObservation = 0
+    foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
+        foreach ($item in @($collection)) {
+            $itemSources = @(Normalize-AuditStringArray $item.sources)
+            $hasObservation = $false
+            foreach ($source in $itemSources) {
+                $allSources.Add($source) | Out-Null
+                if ($observedSources.Contains($source)) { $hasObservation = $true }
+            }
+            if ($hasObservation) { $itemsWithObservation++ }
+            else { $itemsMissingObservation.Add(('{0}:{1}' -f [string]$item.name, ($itemSources -join '|'))) | Out-Null }
+        }
+    }
+    $uniqueSources = @(Normalize-AuditStringArray $allSources)
+    return [pscustomobject]([ordered]@{
+        total_change_items = Get-AuditRecommendationChangeItemCount $rec
+        unique_sources = @($uniqueSources)
+        unique_source_count = @($uniqueSources).Count
+        http_source_count = @($uniqueSources | Where-Object { $_ -match '^https?://' }).Count
+        source_observation_count = $observationCount
+        items_with_source_observation = $itemsWithObservation
+        change_items_missing_source_observation = @($itemsMissingObservation)
+    })
+}
+
+function Normalize-AuditSources($item, [string]$kind) {
+    Ensure-AuditArrayProperty $item "sources"
+    $normalized = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($source in @($item.sources)) {
+        if ($null -eq $source) { continue }
+        $text = ([string]$source).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($seen.Add($text)) {
+            $normalized.Add($text) | Out-Null
+        }
+    }
+    $item.sources = @($normalized)
+    Need (@($item.sources).Count -gt 0) ("{0} 至少需要一个非空 source：{1}" -f $kind, [string]$item.name)
+}
+
+function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
+    Need ($value -is [bool]) ("{0} 必须是布尔值 true" -f $fieldName)
+    Need ([bool]$value) ("{0} 必须为 true" -f $fieldName)
+}
+
+function Assert-AuditReasonPair($item, [string]$name) {
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_profile)) ("{0} 缺少 reason_target_profile：{1}" -f $name, [string]$item.name)
+    Normalize-AuditSources $item $name
+}
+
+function Assert-AuditOverlapFinding($item) {
+    Need ($null -ne $item) "重叠发现不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "重叠发现缺少 name"
+    Assert-AuditReasonPair $item "重叠发现"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.note)) ("重叠发现缺少 note：{0}" -f [string]$item.name)
+    if ($item.PSObject.Properties.Match("source_preference").Count -gt 0 -and $null -ne $item.source_preference) {
+        Need (Test-AuditObjectLike $item.source_preference) ("重叠发现 source_preference 必须是对象：{0}" -f [string]$item.name)
+        foreach ($field in @("plugin_installed", "standalone_duplicate", "native_source_preferred")) {
+            Need ($item.source_preference.PSObject.Properties.Match($field).Count -gt 0 -and $item.source_preference.$field -is [bool]) ("重叠发现 source_preference.{0} 必须是布尔值：{1}" -f $field, [string]$item.name)
+        }
+        Need ([bool]$item.source_preference.plugin_installed) ("重叠发现 source_preference.plugin_installed 必须为 true：{0}" -f [string]$item.name)
+        Need ([bool]$item.source_preference.native_source_preferred) ("重叠发现 source_preference.native_source_preferred 必须为 true：{0}" -f [string]$item.name)
+        Need ([string]$item.source_preference.action -eq "report_only_do_not_import_duplicate") ("重叠发现 source_preference.action 无效：{0}" -f [string]$item.name)
+    }
+    if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
+
+    Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
+    $decisionOwner = if ($item.routing.PSObject.Properties.Match("decision_owner").Count -gt 0) { ([string]$item.routing.decision_owner).Trim().ToLowerInvariant() } else { "" }
+    if (-not [string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need ($decisionOwner -eq "host_ai") ("重叠发现 routing.decision_owner 仅支持 host_ai：{0}/{1}" -f [string]$item.name, $decisionOwner)
+        $item.routing.decision_owner = $decisionOwner
+    }
+    $router = if ($item.routing.PSObject.Properties.Match("router").Count -gt 0) { ([string]$item.routing.router).Trim() } else { "" }
+    $fallbackRouter = if ($item.routing.PSObject.Properties.Match("fallback_router").Count -gt 0) { ([string]$item.routing.fallback_router).Trim() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need (-not [string]::IsNullOrWhiteSpace($router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    }
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.selection_policy)) ("重叠发现 routing 缺少 selection_policy：{0}" -f [string]$item.name)
+    Need ($item.routing.PSObject.Properties.Match("members").Count -gt 0 -and (Assert-IsArray $item.routing.members)) ("重叠发现 routing.members 必须是数组：{0}" -f [string]$item.name)
+    Need (@($item.routing.members).Count -ge 2) ("重叠发现 routing.members 至少需要两个成员：{0}" -f [string]$item.name)
+    $allowedRoles = @("router", "executor", "validator", "operator", "workflow", "reference")
+    $seenMembers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $memberRoles = @{}
+    foreach ($member in @($item.routing.members)) {
+        Need ($null -ne $member) ("重叠发现 routing.member 不能为空：{0}" -f [string]$item.name)
+        $memberName = ([string]$member.name).Trim()
+        $role = ([string]$member.role).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($memberName)) ("重叠发现 routing.member 缺少 name：{0}" -f [string]$item.name)
+        Need ($allowedRoles -contains $role) ("重叠发现 routing.member role 不支持：{0}/{1}" -f [string]$item.name, $role)
+        Need ($seenMembers.Add($memberName)) ("重叠发现 routing.member 重复：{0}/{1}" -f [string]$item.name, $memberName)
+        $member.role = $role
+        $memberRoles[$memberName] = $role
+    }
+    if (-not [string]::IsNullOrWhiteSpace($router)) {
+        Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
+        Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fallbackRouter)) {
+        Need ($seenMembers.Contains($fallbackRouter)) ("重叠发现 routing.fallback_router 必须出现在 members：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+        Need ([string]$memberRoles[$fallbackRouter] -eq "router") ("重叠发现 routing.fallback_router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+    }
+}
+
+function Add-AuditExactJsonValueReferences($value, [string]$needle, [string]$jsonPath, [string]$file, $references) {
+    if ($null -eq $value) { return }
+    if ($value -is [string]) {
+        if ([string]::Equals([string]$value, $needle, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $references.Add([pscustomobject]([ordered]@{ file = $file; path = $jsonPath })) | Out-Null
+        }
+        return
+    }
+    if ($value -is [System.Collections.IDictionary]) {
+        foreach ($key in $value.Keys) {
+            Add-AuditExactJsonValueReferences $value[$key] $needle ("{0}.{1}" -f $jsonPath, [string]$key) $file $references
+        }
+        return
+    }
+    if ((Assert-IsArray $value) -or ($value -is [System.Collections.IList])) {
+        $index = 0
+        foreach ($entry in @($value)) {
+            Add-AuditExactJsonValueReferences $entry $needle ("{0}[{1}]" -f $jsonPath, $index) $file $references
+            $index++
+        }
+        return
+    }
+    if (Test-AuditObjectLike $value) {
+        foreach ($property in $value.PSObject.Properties) {
+            Add-AuditExactJsonValueReferences $property.Value $needle ("{0}.{1}" -f $jsonPath, [string]$property.Name) $file $references
+        }
+    }
+}
+
+function Normalize-AuditRemovalSourcePart([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return "" }
+    return $value.Trim().Replace('/', '\\').TrimStart('\\').ToLowerInvariant()
+}
+
+function Test-AuditRemovalSourceIdentity([string]$leftVendor, [string]$leftFrom, [string]$rightVendor, [string]$rightFrom) {
+    if ([string]::IsNullOrWhiteSpace($leftVendor) -or [string]::IsNullOrWhiteSpace($leftFrom)) { return $false }
+    return ([string]$leftVendor).Trim().Equals(([string]$rightVendor).Trim(), [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Normalize-AuditRemovalSourcePart $leftFrom).Equals((Normalize-AuditRemovalSourcePart $rightFrom), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-AuditRemovalAlternativeSources {
+    param(
+        $Config,
+        $Candidate,
+        [string]$RepositoryRoot
+    )
+    $name = ([string]$Candidate.name).Trim()
+    $installed = if ($Candidate.PSObject.Properties.Match("installed").Count -gt 0) { $Candidate.installed } else { $null }
+    $candidateVendor = if ($null -ne $installed) { [string]$installed.vendor } else { "" }
+    $candidateFrom = if ($null -ne $installed) { [string]$installed.from } else { "" }
+    $sources = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $Config -and $Config.PSObject.Properties.Match("mappings").Count -gt 0) {
+        foreach ($mapping in @($Config.mappings)) {
+            if ($null -eq $mapping -or -not ([string]$mapping.to).Trim().Equals($name, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+            $vendor = [string]$mapping.vendor
+            $from = [string]$mapping.from
+            if (Test-AuditRemovalSourceIdentity $candidateVendor $candidateFrom $vendor $from) { continue }
+            $sources.Add([pscustomobject]([ordered]@{ kind = "mapping"; vendor = $vendor; from = $from; path = "skills.json" })) | Out-Null
+        }
+    }
+    if (-not ([string]$candidateVendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($relativePath in @("overrides\patches\$name\SKILL.md", "overrides\custom\$name\SKILL.md")) {
+            $fullPath = Join-Path $RepositoryRoot $relativePath
+            if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+                $sources.Add([pscustomobject]([ordered]@{ kind = "override"; vendor = "overrides"; from = $name; path = ($relativePath -replace '\\', '/') })) | Out-Null
+            }
+        }
+    }
+    return @($sources.ToArray())
+}
+
+function Add-AuditDependencySourceIdentityReferences {
+    param(
+        $DependencyConfig,
+        [string]$Vendor,
+        [string]$From,
+        [System.Collections.Generic.List[object]]$References
+    )
+    if ($null -eq $DependencyConfig -or [string]::IsNullOrWhiteSpace($Vendor) -or [string]::IsNullOrWhiteSpace($From)) { return }
+    $dependencies = if ($DependencyConfig.PSObject.Properties.Match("dependencies").Count -gt 0) { @($DependencyConfig.dependencies) } else { @() }
+    for ($dependencyIndex = 0; $dependencyIndex -lt $dependencies.Count; $dependencyIndex++) {
+        $requirements = if ($null -ne $dependencies[$dependencyIndex] -and $dependencies[$dependencyIndex].PSObject.Properties.Match("requires").Count -gt 0) { @($dependencies[$dependencyIndex].requires) } else { @() }
+        for ($requirementIndex = 0; $requirementIndex -lt $requirements.Count; $requirementIndex++) {
+            $requirement = $requirements[$requirementIndex]
+            $isMatch = $false
+            if ($null -ne $requirement -and $requirement -isnot [string] -and $requirement.PSObject.Properties.Match("vendor").Count -gt 0 -and $requirement.PSObject.Properties.Match("from").Count -gt 0) {
+                $isMatch = Test-AuditRemovalSourceIdentity $Vendor $From ([string]$requirement.vendor) ([string]$requirement.from)
+            }
+            elseif ($requirement -is [string]) {
+                $isMatch = ([string]$requirement).Trim().Equals(("{0}|{1}" -f $Vendor, $From), [System.StringComparison]::OrdinalIgnoreCase)
+            }
+            if ($isMatch) {
+                $References.Add([pscustomobject]([ordered]@{ file = "config/skill-dependency-closure.json"; path = ("$.dependencies[{0}].requires[{1}]" -f $dependencyIndex, $requirementIndex); reference_kind = "source_identity" })) | Out-Null
+            }
+        }
+    }
+}
+
+function Test-AuditRemovalDependencyClosure {
+    param(
+        $Config,
+        $RemovalCandidates,
+        [string]$RepositoryRoot = $Root
+    )
+    $blocked = New-Object System.Collections.Generic.List[object]
+    $satisfied = New-Object System.Collections.Generic.List[object]
+    $issues = New-Object System.Collections.Generic.List[string]
+    $checkedFiles = @(
+        "skills.json",
+        "config/skill-dependency-closure.json",
+        "overrides/patches/provenance.json"
+    )
+    $candidateIndex = 0
+    foreach ($candidate in @($RemovalCandidates)) {
+        $candidateIndex++
+        $name = ([string]$candidate.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $installed = if ($candidate.PSObject.Properties.Match("installed").Count -gt 0) { $candidate.installed } else { $null }
+        $vendor = if ($null -ne $installed) { [string]$installed.vendor } else { "" }
+        $from = if ($null -ne $installed) { [string]$installed.from } else { "" }
+        $logicalReferences = New-Object System.Collections.Generic.List[object]
+        $sourceIdentityReferences = New-Object System.Collections.Generic.List[object]
+        $alternativeSources = @(Get-AuditRemovalAlternativeSources $Config $candidate $RepositoryRoot)
+        if ($null -ne $Config -and $Config.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $Config.skill_projection) {
+            $projection = $Config.skill_projection
+            if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
+                Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $logicalReferences
+            }
+        }
+        $dependencyPath = Join-Path $RepositoryRoot "config/skill-dependency-closure.json"
+        if (Test-Path -LiteralPath $dependencyPath -PathType Leaf) {
+            try {
+                $dependencyJson = Get-ContentUtf8 $dependencyPath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $dependencyJson $name '$' "config/skill-dependency-closure.json" $logicalReferences
+                Add-AuditDependencySourceIdentityReferences $dependencyJson $vendor $from $sourceIdentityReferences
+            }
+            catch {
+                $sourceIdentityReferences.Add([pscustomobject]([ordered]@{ file = "config/skill-dependency-closure.json"; path = '$'; error = "json_parse_failed: $($_.Exception.Message)"; reference_kind = "parse_error" })) | Out-Null
+            }
+        }
+        $provenancePath = Join-Path $RepositoryRoot "overrides/patches/provenance.json"
+        if (([string]$vendor).Trim().Equals("overrides", [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+            try {
+                $provenanceJson = Get-ContentUtf8 $provenancePath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $provenanceJson $name '$.patches' "overrides/patches/provenance.json" $sourceIdentityReferences
+            }
+            catch {
+                $sourceIdentityReferences.Add([pscustomobject]([ordered]@{ file = "overrides/patches/provenance.json"; path = '$'; error = "json_parse_failed: $($_.Exception.Message)"; reference_kind = "parse_error" })) | Out-Null
+            }
+        }
+        $references = New-Object System.Collections.Generic.List[object]
+        foreach ($reference in @($sourceIdentityReferences.ToArray())) { $references.Add($reference) | Out-Null }
+        $logicalNeedsAlternative = ($logicalReferences.Count -gt 0 -and $alternativeSources.Count -eq 0)
+        if ($logicalNeedsAlternative) {
+            foreach ($reference in @($logicalReferences.ToArray())) { $references.Add($reference) | Out-Null }
+        }
+        $originalIndex = if ($candidate.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$candidate.original_index } else { $candidateIndex }
+        if ($references.Count -gt 0) {
+            $entry = [pscustomobject]([ordered]@{
+                    original_index = $originalIndex
+                    name = $name
+                    installed = [pscustomobject]@{ vendor = $vendor; from = $from }
+                    references = $references.ToArray()
+                })
+            $blocked.Add($entry) | Out-Null
+            $referenceText = ($references.ToArray() | ForEach-Object { "{0}{1}" -f [string]$_.file, [string]$_.path }) -join ", "
+            $issues.Add(("removal_dependency_blocked：{0}) {1} [{2}|{3}] <- {4}" -f $originalIndex, $name, $vendor, $from, $referenceText)) | Out-Null
+        }
+        elseif ($logicalReferences.Count -gt 0) {
+            $satisfied.Add([pscustomobject]([ordered]@{
+                        original_index = $originalIndex
+                        name = $name
+                        logical_references = @($logicalReferences.ToArray())
+                        preserved_sources = @($alternativeSources)
+                    })) | Out-Null
+        }
+    }
+    return [pscustomobject]([ordered]@{
+            ok = ($blocked.Count -eq 0)
+            checked_files = $checkedFiles
+            blocked = @($blocked.ToArray())
+            satisfied = @($satisfied.ToArray())
+            issues = @($issues.ToArray())
+        })
+}
+
+function Assert-AuditRecommendationItem($item) {
+    Need ($null -ne $item) "推荐项不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "推荐项缺少 name"
+    Assert-AuditReasonPair $item "推荐项"
+    Need ($item.PSObject.Properties.Match("install").Count -gt 0 -and $null -ne $item.install) ("推荐项缺少 install：{0}" -f [string]$item.name)
+
+    $install = $item.install
+    Need (-not [string]::IsNullOrWhiteSpace([string]$install.repo)) ("推荐项缺少 install.repo：{0}" -f [string]$item.name)
+    Need (Looks-LikeRepoInput ([string]$install.repo)) ("install.repo 不是有效仓库输入：{0}" -f [string]$install.repo)
+
+    Need ($install.PSObject.Properties.Match("skill").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.skill)) ("推荐项缺少 install.skill：{0}" -f [string]$item.name)
+    $skillPath = [string]$install.skill
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("install.skill 路径非法：{0}" -f $skillPath)
+    $install.skill = $normalizedSkill
+
+    Need ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) ("推荐项缺少 install.mode：{0}" -f [string]$item.name)
+    $mode = [string]$install.mode
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") ("install.mode 仅支持 manual 或 vendor：{0}" -f $mode)
+    $install.mode = $mode
+
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
+}
+
+function Assert-AuditRemovalCandidate($item) {
+    Need ($null -ne $item) "卸载建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "卸载建议缺少 name"
+    Assert-AuditReasonPair $item "卸载建议"
+    Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("卸载建议缺少 installed：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.vendor)) ("卸载建议缺少 installed.vendor：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.from)) ("卸载建议缺少 installed.from：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "卸载建议"
+}
+
+function Assert-AuditSemanticRetirementReview($item, [string]$kind) {
+    Need ($item.PSObject.Properties.Match("semantic_review").Count -gt 0 -and $null -ne $item.semantic_review) ("{0} 缺少 semantic_review：{1}" -f $kind, [string]$item.name)
+    $review = $item.semantic_review
+    Need (Test-AuditObjectLike $review) ("{0} semantic_review 必须是对象：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.decision_owner).Trim().ToLowerInvariant() -eq "host_ai") ("{0} semantic_review.decision_owner 必须为 host_ai：{1}" -f $kind, [string]$item.name)
+    Need (([string]$review.verdict).Trim().ToLowerInvariant() -eq "removal_candidate") ("{0} semantic_review.verdict 必须为 removal_candidate：{1}" -f $kind, [string]$item.name)
+    $capabilityClass = ([string]$review.capability_class).Trim().ToLowerInvariant()
+    Need ($capabilityClass -in @("general", "specialized")) ("{0} semantic_review.capability_class 仅支持 general/specialized：{1}" -f $kind, [string]$item.name)
+    Need ($review.independent_of_target_profile -is [bool] -and [bool]$review.independent_of_target_profile) ("{0} semantic_review.independent_of_target_profile 必须为 true：画像未命中不能单独推出退役：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.installed_capability)) ("{0} semantic_review 缺少 installed_capability：{1}" -f $kind, [string]$item.name)
+    $retirementBasis = ([string]$review.retirement_basis).Trim().ToLowerInvariant()
+    Need ($retirementBasis -in @("semantic_replacement", "obsolete_or_unsupported")) ("{0} semantic_review.retirement_basis 仅支持 semantic_replacement/obsolete_or_unsupported：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("usage_evidence").Count -gt 0 -and (Test-AuditObjectLike $review.usage_evidence)) ("{0} semantic_review 缺少 usage_evidence：{1}" -f $kind, [string]$item.name)
+    $usageState = ([string]$review.usage_evidence.state).Trim().ToLowerInvariant()
+    Need ($usageState -in @("observed_used", "observed_unused", "unknown")) ("{0} semantic_review.usage_evidence.state 仅支持 observed_used/observed_unused/unknown：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.usage_evidence.evidence)) ("{0} semantic_review.usage_evidence 缺少 evidence：{1}" -f $kind, [string]$item.name)
+    Need ($review.requires_user_confirmation -is [bool] -and [bool]$review.requires_user_confirmation) ("{0} semantic_review.requires_user_confirmation 必须为 true：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("replacement").Count -gt 0 -and (Test-AuditObjectLike $review.replacement)) ("{0} semantic_review 缺少 replacement：{1}" -f $kind, [string]$item.name)
+    $replacement = $review.replacement
+    $replacementKind = ([string]$replacement.kind).Trim().ToLowerInvariant()
+    if ($retirementBasis -eq "semantic_replacement") {
+        Need ($replacementKind -in @("skill", "mcp", "host_native")) ("{0} semantic_replacement 必须指定 skill/mcp/host_native 替代项：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.name)) ("{0} semantic_replacement 缺少 replacement.name：{1}" -f $kind, [string]$item.name)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.coverage)) ("{0} semantic_replacement 缺少 replacement.coverage：{1}" -f $kind, [string]$item.name)
+    }
+    else {
+        Need ($replacementKind -eq "none") ("{0} obsolete_or_unsupported 必须声明 replacement.kind=none：{1}" -f $kind, [string]$item.name)
+    }
+    Need (-not [string]::IsNullOrWhiteSpace([string]$replacement.limitations)) ("{0} semantic_review 缺少 replacement.limitations：{1}" -f $kind, [string]$item.name)
+    Need ($review.PSObject.Properties.Match("migration").Count -gt 0 -and (Test-AuditObjectLike $review.migration)) ("{0} semantic_review 缺少 migration：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.plan)) ("{0} semantic_review.migration 缺少 plan：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.migration.rollback)) ("{0} semantic_review.migration 缺少 rollback：{1}" -f $kind, [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$review.uncertainty)) ("{0} semantic_review 缺少 uncertainty：{1}" -f $kind, [string]$item.name)
+    $review.decision_owner = "host_ai"
+    $review.verdict = "removal_candidate"
+    $review.capability_class = $capabilityClass
+    $review.retirement_basis = $retirementBasis
+    $review.usage_evidence.state = $usageState
+    $replacement.kind = $replacementKind
+}
+
+function Assert-AuditMcpServerPayload($server, [string]$itemName) {
+    Need ($null -ne $server) ("MCP 新增建议缺少 server：{0}" -f $itemName)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$server.name)) ("MCP 新增建议缺少 server.name：{0}" -f $itemName)
+    $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.transport)) {
+        ([string]$server.transport).Trim().ToLowerInvariant()
+    }
+    else {
+        "stdio"
+    }
+    Need ($transport -eq "stdio" -or $transport -eq "http") ("MCP transport 仅支持 stdio/http；旧 SSE 已弃用：{0}" -f $transport)
+    $server.transport = $transport
+    if ($transport -eq "stdio") {
+        Need ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) ("MCP stdio 缺少 command：{0}" -f $itemName)
+        if ($server.PSObject.Properties.Match("args").Count -eq 0 -or $null -eq $server.args) {
+            $server | Add-Member -NotePropertyName args -NotePropertyValue @() -Force
+        }
+        elseif (-not (Assert-IsArray $server.args)) {
+            $server.args = @($server.args)
+        }
+    }
+    else {
+        Need ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) ("MCP {0} 缺少 url：{1}" -f $transport, $itemName)
+    }
+}
+
+function Assert-AuditMcpNewServer($item) {
+    Need ($null -ne $item) "MCP 新增建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 新增建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 新增建议"
+    Need ($item.PSObject.Properties.Match("server").Count -gt 0) ("MCP 新增建议缺少 server：{0}" -f [string]$item.name)
+    Assert-AuditMcpServerPayload $item.server ([string]$item.name)
+    Need ([string]$item.server.name -eq [string]$item.name) ("MCP 新增建议 name 与 server.name 不一致：{0}" -f [string]$item.name)
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("MCP confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("扫描画像：{0}" -f [string]$item.reason_target_profile) -Force
+}
+
+function Assert-AuditMcpRemovalCandidate($item) {
+    Need ($null -ne $item) "MCP 卸载建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 卸载建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 卸载建议"
+    Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("MCP 卸载建议缺少 installed：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.name)) ("MCP 卸载建议缺少 installed.name：{0}" -f [string]$item.name)
+    Assert-AuditSemanticRetirementReview $item "MCP 卸载建议"
+}
+
+function Load-AuditRecommendations([string]$path) {
+    Need (-not [string]::IsNullOrWhiteSpace($path)) "--recommendations 缺少值"
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("recommendations 文件不存在：{0}" -f $path)
+    try {
+        $raw = Get-ContentUtf8 $path
+        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("recommendations 文件为空：{0}" -f $path)
+        $rec = $raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("recommendations JSON 解析失败：{0}" -f $_.Exception.Message)
+    }
+
+    Need ([int]$rec.schema_version -eq 3) "recommendations.schema_version 仅支持 3"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.run_id)) "recommendations 缺少 run_id"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.target)) "recommendations 缺少 target"
+    Need ($rec.PSObject.Properties.Match("decision_basis").Count -gt 0 -and $null -ne $rec.decision_basis) "recommendations 缺少 decision_basis"
+    Need (Test-AuditJsonProperty $rec.decision_basis "target_profile_used") "decision_basis 缺少 target_profile_used"
+    Need (Test-AuditJsonProperty $rec.decision_basis "target_scan_used") "decision_basis 缺少 target_scan_used"
+    Need (Test-AuditJsonProperty $rec.decision_basis "source_strategy_used") "decision_basis 缺少 source_strategy_used"
+    $recommendationMode = "target-repo"
+    if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
+        $recommendationMode = ([string]$rec.recommendation_mode).ToLowerInvariant()
+    }
+    Need ($recommendationMode -eq "target-repo") ("recommendation_mode 仅支持 target-repo：{0}" -f $recommendationMode)
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_profile_used "decision_basis.target_profile_used"
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
+    Assert-AuditRequiredBooleanTrue $rec.decision_basis.source_strategy_used "decision_basis.source_strategy_used"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.decision_basis.summary)) "decision_basis.summary 不能为空"
+    Ensure-AuditArrayProperty $rec "new_skills"
+    Ensure-AuditArrayProperty $rec "overlap_findings"
+    Ensure-AuditArrayProperty $rec "removal_candidates"
+    Ensure-AuditArrayProperty $rec "do_not_install"
+    Ensure-AuditArrayProperty $rec "mcp_new_servers"
+    Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
+    Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
+    Ensure-AuditArrayProperty $rec "source_observations"
+    Assert-AuditUsageObservations $rec
+    $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.overlap_findings)) {
+        Assert-AuditOverlapFinding $item
+        Need ($seenOverlapFindings.Add(([string]$item.name).Trim())) ("重复重叠发现：{0}" -f [string]$item.name)
+    }
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.new_skills)) {
+        Assert-AuditRecommendationItem $item
+        $install = $item.install
+        $key = "{0}|{1}|{2}" -f (Normalize-RepoUrl ([string]$install.repo)), (Normalize-SkillPath ([string]$install.skill)), ([string]$install.mode)
+        Need ($seen.Add($key)) ("重复推荐安装项：{0}" -f $key)
+    }
+
+    $seenRemovals = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.removal_candidates)) {
+        Assert-AuditRemovalCandidate $item
+        $key = "{0}|{1}" -f [string]$item.installed.vendor, [string]$item.installed.from
+        Need ($seenRemovals.Add($key)) ("重复卸载建议：{0}" -f $key)
+    }
+
+    $seenMcpAdds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_new_servers)) {
+        Assert-AuditMcpNewServer $item
+        $key = [string]$item.server.name
+        Need ($seenMcpAdds.Add($key)) ("重复 MCP 新增建议：{0}" -f $key)
+    }
+
+    $seenMcpRemovals = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_removal_candidates)) {
+        Assert-AuditMcpRemovalCandidate $item
+        $key = [string]$item.installed.name
+        Need ($seenMcpRemovals.Add($key)) ("重复 MCP 卸载建议：{0}" -f $key)
+    }
+
+    $changeItemCount = Get-AuditRecommendationChangeItemCount $rec
+    $emptyReasonCodes = @(Normalize-AuditStringArray $rec.empty_recommendation_reasons)
+    if ($changeItemCount -eq 0 -and $emptyReasonCodes.Count -eq 0) {
+        $emptyReasonCodes = @("insufficient_reliable_evidence")
+    }
+    $rec.empty_recommendation_reasons = @($emptyReasonCodes)
+
+    return $rec
+}
+
+function New-AuditInstallPlan($recommendations, $cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $installedFacts = @(Get-InstalledSkillFacts $cfg)
+    $installedMcpServers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $installedMcpServers = @($cfg.mcp_servers)
+    }
+    $items = @()
+    $originalIndex = 0
+    foreach ($item in @($recommendations.new_skills)) {
+        $originalIndex++
+        $install = $item.install
+        $tokens = @([string]$install.repo, "--skill", [string]$install.skill)
+        if ($install.PSObject.Properties.Match("ref").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.ref)) {
+            $tokens += @("--ref", [string]$install.ref)
+        }
+        if ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) {
+            $tokens += @("--mode", [string]$install.mode)
+        }
+        $items += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            reason = [string]$item.reason
+            reason_target_profile = [string]$item.reason_target_profile
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            tokens = @($tokens)
+            status = "planned"
+        })
+    }
+
+    $removals = @()
+    $originalIndex = 0
+    foreach ($item in @($recommendations.removal_candidates)) {
+        $originalIndex++
+        $match = @($installedFacts | Where-Object { $_.vendor -eq [string]$item.installed.vendor -and $_.from -eq [string]$item.installed.from })
+        $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
+        $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
+        $removals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            vendor = [string]$item.installed.vendor
+            from = [string]$item.installed.from
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+            matched_skill = $matched
+            status = $status
+        })
+    }
+    $mcpItems = @()
+    $originalIndex = 0
+    foreach ($item in @($recommendations.mcp_new_servers)) {
+        $originalIndex++
+        $server = $item.server
+        $existing = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$server.name })
+        $status = if ($existing.Count -eq 0) {
+            "planned"
+        }
+        elseif ($existing.Count -eq 1 -and (Test-McpServerEquivalent $existing[0] $server)) {
+            "already_present"
+        }
+        else {
+            "planned"
+        }
+        $mcpItems += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            reason = [string]$item.reason
+            reason_target_profile = [string]$item.reason_target_profile
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            server = $server
+            status = $status
+        })
+    }
+
+    $mcpRemovals = @()
+    $originalIndex = 0
+    foreach ($item in @($recommendations.mcp_removal_candidates)) {
+        $originalIndex++
+        $match = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$item.installed.name })
+        $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
+        $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
+        $mcpRemovals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            installed_name = [string]$item.installed.name
+            reason = ("扫描画像：{0}" -f [string]$item.reason_target_profile)
+            reason_target_profile = [string]$item.reason_target_profile
+            sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
+            semantic_review = $item.semantic_review
+            matched_server = $matched
+            status = $status
+        })
+    }
+    return [pscustomobject]([ordered]@{
+        schema_version = 2
+        run_id = [string]$recommendations.run_id
+        target = [string]$recommendations.target
+        decision_basis = $recommendations.decision_basis
+        usage_observations = @(Convert-AuditObjectArray (Get-CfgObjectProperty $recommendations 'usage_observations'))
+        source_observations = @(ConvertTo-AuditJsonArray $recommendations.source_observations)
+        items = @($items)
+        overlap_findings = @($recommendations.overlap_findings)
+        removal_candidates = @($removals)
+        do_not_install = @($recommendations.do_not_install)
+        mcp_items = @($mcpItems)
+        mcp_removal_candidates = @($mcpRemovals)
+        empty_recommendation_reasons = ConvertTo-AuditJsonArray $recommendations.empty_recommendation_reasons
+    })
+}
+
+function Get-AuditItemsStatusCount($items, [string]$status) {
+    return @($items | Where-Object { [string]$_.status -eq $status }).Count
+}
+
+function New-AuditChangedCounts($items, $removals, $mcpItems = @(), $mcpRemovals = @()) {
+    return [pscustomobject]([ordered]@{
+        add_total = @($items).Count
+        add_planned = Get-AuditItemsStatusCount $items "planned"
+        add_installed = Get-AuditItemsStatusCount $items "installed"
+        add_failed = Get-AuditItemsStatusCount $items "failed"
+        remove_total = @($removals).Count
+        remove_planned = Get-AuditItemsStatusCount $removals "planned"
+        remove_removed = Get-AuditItemsStatusCount $removals "removed"
+        remove_not_found = Get-AuditItemsStatusCount $removals "not_found"
+        remove_ambiguous = Get-AuditItemsStatusCount $removals "ambiguous"
+        mcp_add_total = @($mcpItems).Count
+        mcp_add_planned = Get-AuditItemsStatusCount $mcpItems "planned"
+        mcp_add_added = Get-AuditItemsStatusCount $mcpItems "added"
+        mcp_add_updated = Get-AuditItemsStatusCount $mcpItems "updated"
+        mcp_add_already_present = Get-AuditItemsStatusCount $mcpItems "already_present"
+        mcp_add_failed = Get-AuditItemsStatusCount $mcpItems "failed"
+        mcp_remove_total = @($mcpRemovals).Count
+        mcp_remove_planned = Get-AuditItemsStatusCount $mcpRemovals "planned"
+        mcp_remove_removed = Get-AuditItemsStatusCount $mcpRemovals "removed"
+        mcp_remove_not_found = Get-AuditItemsStatusCount $mcpRemovals "not_found"
+        mcp_remove_ambiguous = Get-AuditItemsStatusCount $mcpRemovals "ambiguous"
+        mcp_remove_failed = Get-AuditItemsStatusCount $mcpRemovals "failed"
+    })
+}
+
+function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveState = $null) {
+    Write-Host ""
+    Write-Host "=== 审查建议摘要 ==="
+    Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
+    if ($null -ne $snapshotState -and $null -ne $liveState) {
+        $liveSupplyCount = if ($liveState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$liveState.configured_supply_skill_count } else { $null }
+        $snapshotSupplyCount = if ($snapshotState.PSObject.Properties.Match('configured_supply_skill_count').Count -gt 0) { [int]$snapshotState.configured_supply_skill_count } else { $null }
+        if ($null -ne $liveSupplyCount -or $null -ne $snapshotSupplyCount) {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}; configured_supply_live={2}, snapshot={3}（供给不等于当前可调用或已调用）" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count, $liveSupplyCount, $snapshotSupplyCount)
+        }
+        else {
+            Write-Host ("技能口径: current_profile_live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        }
+        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
+            $liveMcpCount = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            $snapshotMcpCount = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
+            Write-Host ("MCP 口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f $liveMcpCount, $snapshotMcpCount)
+        }
+    }
+    Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
+    $overlapFindings = @($plan.overlap_findings)
+    Write-Host ""
+    Write-Host ("重叠/保留观察: {0} 项" -f $overlapFindings.Count)
+    if ($overlapFindings.Count -eq 0) {
+        Write-Host "无已核实重叠：未发现需要单独路由的同名或原生/仓库来源重合。"
+    }
+    else {
+        foreach ($finding in $overlapFindings) {
+            Write-Host ("- {0} [report_only]" -f [string]$finding.name)
+            Write-Host ("  原因: {0}" -f [string]$finding.reason_target_profile)
+            Write-Host ("  处理: {0}" -f [string]$finding.note)
+        }
+    }
+    $totalChanges = @($plan.items).Count + @($plan.removal_candidates).Count + @($plan.mcp_items).Count + @($plan.mcp_removal_candidates).Count
+    if ($totalChanges -eq 0 -and $plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0 -and @($plan.empty_recommendation_reasons).Count -gt 0) {
+        Write-Host ("空建议原因码: {0}" -f ((@($plan.empty_recommendation_reasons) | ForEach-Object { [string]$_ }) -join ", "))
+    }
+    Write-Host ""
+    Write-Host ("新增建议: {0} 项" -f @($plan.items).Count)
+    if (@($plan.items).Count -eq 0) {
+        Write-Host "无新增建议：当前输入证据未形成可执行新增项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.items)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1}" -f $itemIndex, [string]$item.name)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("卸载建议: {0} 项" -f @($plan.removal_candidates).Count)
+    if (@($plan.removal_candidates).Count -eq 0) {
+        Write-Host "无卸载建议：当前输入证据未形成可执行卸载项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.removal_candidates)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $itemIndex, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 新增建议: {0} 项" -f @($plan.mcp_items).Count)
+    if (@($plan.mcp_items).Count -eq 0) {
+        Write-Host "无 MCP 新增建议：当前输入证据未形成可执行 MCP 新增项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_items)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
+            Write-Host ("{0}) {1} transport={2} status={3}" -f $itemIndex, [string]$item.name, $transport, [string]$item.status)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 卸载建议: {0} 项" -f @($plan.mcp_removal_candidates).Count)
+    if (@($plan.mcp_removal_candidates).Count -eq 0) {
+        Write-Host "无 MCP 卸载建议：当前输入证据未形成可执行 MCP 卸载项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_removal_candidates)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [name={2}] status={3}" -f $itemIndex, [string]$item.name, [string]$item.installed_name, [string]$item.status)
+            Write-Host ("   扫描画像: {0}" -f [string]$item.reason_target_profile)
+            $index++
+        }
+    }
+}
+
+function Resolve-AuditSelection([string]$selectionText, $items, [string]$prompt, [string]$invalidMsg) {
+    $items = @($items)
+    if ($items.Count -eq 0) { return [pscustomobject]@{ items = @(); canceled = $false } }
+    if ([string]::IsNullOrWhiteSpace($selectionText)) {
+        Write-SelectionHint
+        $selection = Read-SelectionIndices $prompt $items.Count $invalidMsg
+        if ($selection.canceled) { return [pscustomobject]@{ items = @(); canceled = $true } }
+        $idx = @($selection.indices)
+    }
+    else {
+        $idx = @(Parse-IndexSelection $selectionText $items.Count)
+        if ($idx.Count -eq 0 -and $selectionText.Trim().ToLowerInvariant() -eq "0") {
+            return [pscustomobject]@{ items = @(); canceled = $true }
+        }
+        if ($idx.Count -eq 0) { throw $invalidMsg }
+    }
+    $selected = @()
+    foreach ($n in $idx) { $selected += $items[$n - 1] }
+    return [pscustomobject]@{ items = @($selected); canceled = $false }
+}
+
+function Remove-AuditSelectedInstalledSkills($selectedItems) {
+    $cfg = LoadCfg
+    $removedMappings = 0
+    $removedVendorImports = 0
+    $deletedManualImports = 0
+    $deletedLegacyManualDirs = 0
+    $deletedOverrides = 0
+    $backedOverrides = 0
+    $overrideBackupPaths = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($selectedItems)) {
+        $vendor = [string]$item.vendor
+        $from = [string]$item.from
+        if ($vendor -eq "manual") {
+            $before = @($cfg.imports).Count
+            $cfg.imports = @($cfg.imports | Where-Object {
+                    if ($null -eq $_) { return $true }
+                    $importMode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                    -not ($importMode -eq "manual" -and $_.name -eq $from)
+                })
+            $deletedManualImports += ($before - @($cfg.imports).Count)
+
+            $legacyPath = Join-Path $ManualDir $from
+            if (Test-Path $legacyPath) {
+                Invoke-RemoveItem $legacyPath -Recurse
+                $deletedLegacyManualDirs++
+            }
+            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$from") })
+        }
+        elseif ($vendor -eq "overrides") {
+            $bak = Backup-OverrideDir $from
+            if ($bak) { $backedOverrides++; $overrideBackupPaths.Add([string]$bak) }
+            $deletedOverrides++
+        }
+        else {
+            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$vendor|$from") })
+            $removedMappings++
+
+            $skillPath = Normalize-SkillPath $from
+            $hasSameMapping = @($cfg.mappings | Where-Object { $_.vendor -eq $vendor -and $_.from -eq $skillPath }).Count -gt 0
+            if (-not $hasSameMapping) {
+                $beforeImports = @($cfg.imports).Count
+                $cfg.imports = @($cfg.imports | Where-Object {
+                        $mode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                        if ($mode -ne "vendor") { return $true }
+                        if ([string]$_.name -ne $vendor) { return $true }
+                        $importSkill = Normalize-SkillPath ([string]$_.skill)
+                        return ($importSkill -ne $skillPath)
+                    })
+                $removedVendorImports += ($beforeImports - @($cfg.imports).Count)
+            }
+        }
+        $item.status = "removed"
+    }
+    SaveCfg $cfg
+    if (@($selectedItems).Count -gt 0) {
+        Clear-SkillsCache
+    }
+    return [pscustomobject]@{
+        removed_mappings = $removedMappings
+        removed_vendor_imports = $removedVendorImports
+        deleted_manual_imports = $deletedManualImports
+        deleted_legacy_manual_dirs = $deletedLegacyManualDirs
+        deleted_overrides = $deletedOverrides
+        backed_overrides = $backedOverrides
+        override_backup_paths = @($overrideBackupPaths.ToArray())
+    }
+}
+
+function Ensure-AuditNewManualImportsMapped($beforeCfg) {
+    $before = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($i in @($beforeCfg.imports)) {
+        if ($null -eq $i) { continue }
+        $before.Add([string]$i.name) | Out-Null
+    }
+
+    $cfg = LoadCfg
+    $existingMappings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        $existingMappings.Add(("{0}|{1}" -f [string]$m.vendor, [string]$m.from)) | Out-Null
+    }
+
+    $changed = $false
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i) { continue }
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($mode -ne "manual") { continue }
+        $name = [string]$i.name
+        if ($before.Contains($name)) { continue }
+        $key = "manual|{0}" -f $name
+        if ($existingMappings.Contains($key)) { continue }
+        $cfg.mappings += @{ vendor = "manual"; from = $name; to = $name }
+        $existingMappings.Add($key) | Out-Null
+        $changed = $true
+    }
+    if ($changed) { SaveCfg $cfg }
+    return $changed
+}

@@ -1,4 +1,6 @@
-$skillEligibilityPolicyRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$skillEligibilityPolicyRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $skillEligibilityPolicyRepoRoot 'skills.json') -PathType Leaf) -and $skillEligibilityPolicyRepoRoot -ne [IO.Path]::GetPathRoot($skillEligibilityPolicyRepoRoot)) { $skillEligibilityPolicyRepoRoot = Split-Path -Parent $skillEligibilityPolicyRepoRoot }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillEligibilityPolicyRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command Get-SkillCatalogStringArray -ErrorAction SilentlyContinue)) { . (Join-Path $skillEligibilityPolicyRepoRoot 'src\Domain\SkillCatalog.ps1') }
 

@@ -1,0 +1,639 @@
+﻿function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
+    if ($null -eq $mapping) { return "" }
+    $vendor = [string]$mapping.vendor
+    $from = [string]$mapping.from
+    if ($vendor -eq "manual") {
+        $imp = @($cfg.imports | Where-Object { $_.name -eq $from } | Select-Object -First 1)
+        if ($imp.Count -eq 0) { return (Join-Path $script:ImportDir $from) }
+        $skillPath = Normalize-SkillPath ([string]$imp[0].skill)
+        if ([string]::IsNullOrWhiteSpace($skillPath) -or $skillPath -eq ".") {
+            return (Join-Path $script:ImportDir $from)
+        }
+        return (Join-Path (Join-Path $script:ImportDir $from) $skillPath)
+    }
+    if ($vendor -eq "overrides") {
+        $override = Resolve-OverrideDir $from
+        if ($null -ne $override -and @($override).Count -gt 0) {
+            return [string]$override[0].FullName
+        }
+        return (Join-Path $script:OverridesDir $from)
+    }
+    return (Join-Path (VendorPath $vendor) $from)
+}
+
+function Get-InstalledSkillFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @()
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        if (-not (Should-SyncMappingToAgent $m)) { continue }
+        $vendor = [string]$m.vendor
+        $from = [string]$m.from
+        $to = [string]$m.to
+        if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
+        $localPath = Resolve-InstalledSkillLocalPath $cfg $m
+        $skillFile = Join-Path $localPath "SKILL.md"
+        $meta = Read-SkillMetadata $skillFile -Observation
+        $contentHash = [string](Get-FileContentHash $skillFile)
+
+        $repo = ""
+        $ref = ""
+        $skillPath = $from
+        if ($vendor -eq "manual") {
+            $imp = @($cfg.imports | Where-Object { $_.name -eq $from } | Select-Object -First 1)
+            if ($imp.Count -gt 0) {
+                $repo = [string]$imp[0].repo
+                $ref = [string]$imp[0].ref
+                $skillPath = [string]$imp[0].skill
+            }
+        }
+        elseif ($vendor -ne "overrides") {
+            $v = @($cfg.vendors | Where-Object { $_.name -eq $vendor } | Select-Object -First 1)
+            if ($v.Count -gt 0) {
+                $repo = [string]$v[0].repo
+                $ref = [string]$v[0].ref
+            }
+        }
+
+        $facts += [pscustomobject]([ordered]@{
+            name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $to } else { $meta.declared_name }
+            source_kind = $vendor
+            vendor = $vendor
+            from = $from
+            to = $to
+            repo = $repo
+            ref = $ref
+            skill_path = $skillPath
+            declared_name = $meta.declared_name
+            description = $meta.description
+            trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
+            local_path = $localPath
+        })
+    }
+    foreach ($override in @(收集OverridesSkills)) {
+        if ($null -eq $override) { continue }
+        $from = [string]$override.from
+        if ([string]::IsNullOrWhiteSpace($from)) { continue }
+        if (-not $seen.Add(("overrides|{0}" -f $from))) { continue }
+        $localPath = [string]$override.full
+        $skillFile = Join-Path $localPath "SKILL.md"
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
+        $meta = Read-SkillMetadata $skillFile -Observation
+        $contentHash = [string](Get-FileContentHash $skillFile)
+        $facts += [pscustomobject]([ordered]@{
+            name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
+            source_kind = "overrides"
+            vendor = "overrides"
+            from = $from
+            to = $from
+            repo = ""
+            ref = ""
+            skill_path = $from
+            declared_name = $meta.declared_name
+            description = $meta.description
+            trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
+            local_path = $localPath
+        })
+    }
+    return @($facts)
+}
+
+function Get-AuditCurrentProfileSkillState($cfg, $configuredSupplySkills = $null) {
+    # A mapping/import is a recoverable supply fact, not proof that the current
+    # Codex profile exposes the skill.  Keep both facts, but only pass the
+    # profile-selected subset to audit reasoning.
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match('skill_projection').Count -eq 0 -or $null -eq $cfg.skill_projection) {
+        return [pscustomobject]([ordered]@{
+                status = 'not_configured'
+                selection = $null
+                selected_skills = @()
+                selected_skill_count = 0
+                unresolved_selected_names = @()
+                fingerprint = (Get-AuditFingerprintFromVendorFromPairs @('profile_selection=not_configured') $true)
+            })
+    }
+    if ($null -eq $configuredSupplySkills) { $configuredSupplySkills = @(Get-InstalledSkillFacts $cfg) }
+
+    try {
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName 'codex'
+        $managedRoot = Resolve-SkillProjectionPath ([string]$cfg.skill_projection.managed_source_path)
+        if (-not (Test-Path -LiteralPath $managedRoot -PathType Container)) { throw ("managed skill root is unavailable: {0}" -f $managedRoot) }
+        $includedNames = @($selection.included_names | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $excludedNames = @($selection.excluded_names | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $effectiveNames = if ([bool]$selection.include_all) {
+            @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object {
+                    $_.Name -ne '.system' -and $_.Name -notin $excludedNames -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf)
+                } | ForEach-Object Name | Sort-Object -Unique)
+        }
+        else {
+            @($includedNames | Where-Object { $_ -notin $excludedNames } | Sort-Object -Unique)
+        }
+        $selected = New-Object System.Collections.Generic.List[object]
+        $matchedNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($outputName in @($effectiveNames)) {
+            $effectiveSkillFile = Join-Path (Join-Path $managedRoot $outputName) 'SKILL.md'
+            if (-not (Test-Path -LiteralPath $effectiveSkillFile -PathType Leaf)) { continue }
+            $effectiveHash = [string](Get-FileContentHash $effectiveSkillFile)
+            $effectiveMeta = Read-SkillMetadata $effectiveSkillFile -Observation
+            $sourceCandidates = @($configuredSupplySkills | Where-Object {
+                    if ($null -eq $_) { $false }
+                    else {
+                        $candidateName = ([string]$_.to).Trim()
+                        if ([string]::IsNullOrWhiteSpace($candidateName)) { $candidateName = ([string]$_.name).Trim() }
+                        $candidateName.Equals($outputName, [System.StringComparison]::OrdinalIgnoreCase)
+                    }
+                })
+            $sourceFact = @($sourceCandidates | Where-Object { ([string]$_.content_hash).Equals($effectiveHash, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -Last 1)
+            if ($sourceFact.Count -eq 0) { $sourceFact = @($sourceCandidates | Select-Object -Last 1) }
+            $selectedFact = if ($sourceFact.Count -gt 0) { $sourceFact[0].PSObject.Copy() } else {
+                [pscustomobject]([ordered]@{ name = $outputName; source_kind = 'generated'; vendor = ''; from = ''; to = $outputName; repo = ''; ref = ''; skill_path = $outputName; declared_name = ''; description = ''; trigger_summary = ''; content_hash = ''; local_path = '' })
+            }
+            $selectedFact.name = if ([string]::IsNullOrWhiteSpace([string]$effectiveMeta.declared_name)) { $outputName } else { [string]$effectiveMeta.declared_name }
+            $selectedFact.to = $outputName
+            $selectedFact.declared_name = [string]$effectiveMeta.declared_name
+            $selectedFact.description = [string]$effectiveMeta.description
+            $selectedFact.trigger_summary = [string]$effectiveMeta.trigger_summary
+            $selectedFact.content_hash = $effectiveHash
+            $selectedFact | Add-Member -NotePropertyName source_local_path -NotePropertyValue ([string]$selectedFact.local_path) -Force
+            $selectedFact.local_path = Split-Path -Parent $effectiveSkillFile
+            $selectedFact | Add-Member -NotePropertyName configured_source_candidates -NotePropertyValue @($sourceCandidates | ForEach-Object { [pscustomobject]@{ vendor = [string]$_.vendor; from = [string]$_.from } }) -Force
+            $selectedFact | Add-Member -NotePropertyName inventory_scope -NotePropertyValue 'current_profile_selected_effective' -Force
+            $selectedFact | Add-Member -NotePropertyName selection_host -NotePropertyValue ([string]$selection.host) -Force
+            $selectedFact | Add-Member -NotePropertyName selection_profile -NotePropertyValue ([string]$selection.profile) -Force
+            $selected.Add($selectedFact) | Out-Null
+            $matchedNames.Add($outputName) | Out-Null
+        }
+        $unresolved = if ([bool]$selection.include_all) { @() } else { @($effectiveNames | Where-Object { -not $matchedNames.Contains($_) } | Sort-Object -Unique) }
+        $selectionRecord = [ordered]@{
+            host = [string]$selection.host
+            profile = [string]$selection.profile
+            include_all = [bool]$selection.include_all
+            included_names = @($includedNames | Sort-Object -Unique)
+            excluded_names = @($excludedNames | Sort-Object -Unique)
+        }
+        $fingerprint = Get-AuditFingerprintFromVendorFromPairs @(
+            (($selectionRecord | ConvertTo-Json -Compress -Depth 8)),
+            (Get-AuditFingerprintFromSkillFacts @($selected.ToArray()))
+        ) $true
+        return [pscustomobject]([ordered]@{
+                status = if ($unresolved.Count -eq 0) { 'available' } else { 'selection_unresolved' }
+                selection = [pscustomobject]$selectionRecord
+                selected_skills = @($selected.ToArray())
+                selected_skill_count = $selected.Count
+                unresolved_selected_names = @($unresolved)
+                fingerprint = $fingerprint
+            })
+    }
+    catch {
+        return [pscustomobject]([ordered]@{
+                status = 'unavailable'
+                selection = $null
+                selected_skills = @()
+                selected_skill_count = 0
+                unresolved_selected_names = @()
+                fingerprint = ''
+            })
+    }
+}
+
+function Get-AuditExternalSkillFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    if ($cfg.PSObject.Properties.Match('skill_projection').Count -eq 0 -or $null -eq $cfg.skill_projection) { return @() }
+    $facts = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $projection = $cfg.skill_projection
+    $userSkillRootRaw = if ($projection.PSObject.Properties.Match('user_skill_root').Count -gt 0) { [string]$projection.user_skill_root } else { '~/.agents/skills' }
+    $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
+    foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
+        $skillFile = [string]$item.file
+        $meta = Read-SkillMetadata $skillFile -Observation
+        $name = [string]$meta.declared_name
+        if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add(('system::{0}' -f $name))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'system'
+                    name = $name
+                    qualified_name = $name
+                    description = [string]$meta.description
+                    trigger_summary = [string]$meta.trigger_summary
+                    content_hash = [string](Get-FileContentHash $skillFile)
+                    local_path = Split-Path -Parent $skillFile
+                    plugin_id = ''
+                })) | Out-Null
+    }
+
+    $inventory = Get-CodexExternalSkillInventory $projection
+    foreach ($item in @($inventory.skills)) {
+        $qualifiedName = [string]$item.qualified_name
+        if ([string]::IsNullOrWhiteSpace($qualifiedName) -or -not $seen.Add(('plugin::{0}' -f $qualifiedName))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'plugin'
+                    name = [string]$item.name
+                    qualified_name = $qualifiedName
+                    description = [string]$item.description
+                    trigger_summary = [string]$item.description
+                    content_hash = [string](Get-FileContentHash ([string]$item.path))
+                    local_path = Split-Path -Parent ([string]$item.path)
+                    plugin_id = [string]$item.plugin_id
+                })) | Out-Null
+    }
+    return @($facts.ToArray() | Sort-Object source_kind, qualified_name)
+}
+
+function Get-AuditMcpValueSignature($value) {
+    # A one-way digest of sorted name=value pairs.  Keeps secret material out of
+    # snapshots while letting the MCP fingerprint detect value-only changes that
+    # key-only (env_keys/header_keys) facts cannot see.
+    if ($null -eq $value) { return "" }
+    $pairs = @()
+    if ($value -is [hashtable] -or $value -is [System.Collections.IDictionary]) {
+        foreach ($k in @($value.Keys | Sort-Object)) {
+            $pairs += ("{0}={1}" -f [string]$k, ($value[$k] | ConvertTo-Json -Compress -Depth 10))
+        }
+    }
+    elseif (Test-AuditObjectLike $value) {
+        foreach ($p in @($value.PSObject.Properties | Sort-Object Name)) {
+            $pairs += ("{0}={1}" -f [string]$p.Name, ($p.Value | ConvertTo-Json -Compress -Depth 10))
+        }
+    }
+    else {
+        return ""
+    }
+    if ($pairs.Count -eq 0) { return "" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($pairs -join "`n")))
+        return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant().Substring(0, 16)
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-AuditMcpServerFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @()
+    $servers = @(Resolve-McpProfileServers $cfg)
+    foreach ($s in $servers) {
+        if ($null -eq $s) { continue }
+        $name = [string]$s.name
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $transport = if ($s.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.transport)) {
+            ([string]$s.transport).Trim().ToLowerInvariant()
+        }
+        else {
+            "stdio"
+        }
+        $row = [ordered]@{
+            name = $name
+            transport = $transport
+            enabled = $true
+        }
+        if ($s.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($s.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f $name)
+            $row.enabled = [bool]$s.enabled
+        }
+        if ($s.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $s.enabled_tools) {
+            $enabledTools = @()
+            foreach ($rawTool in @($s.enabled_tools)) {
+                $tool = ([string]$rawTool).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($tool)) ("mcp_server.enabled_tools 不得包含空值：{0}" -f $name)
+                if ($enabledTools -notcontains $tool) { $enabledTools += $tool }
+            }
+            $row.enabled_tools = @($enabledTools | Sort-Object)
+        }
+        if ($transport -eq "stdio") {
+            $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
+            $row.args = if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $s.args) { @($s.args) } else { @() }
+            $envKeys = @()
+            $envSignature = ""
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $s.env) {
+                if ($s.env -is [hashtable] -or $s.env -is [System.Collections.IDictionary]) {
+                    $envKeys = @($s.env.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $envKeys = @($s.env.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                $envSignature = Get-AuditMcpValueSignature $s.env
+            }
+            $row.env_keys = @($envKeys)
+            if (-not [string]::IsNullOrWhiteSpace($envSignature)) { $row.env_signature = $envSignature }
+        }
+        else {
+            $row.url = if ($s.PSObject.Properties.Match("url").Count -gt 0) { [string]$s.url } else { "" }
+            $headerKeys = @()
+            $headerSignature = ""
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $s.headers) {
+                if ($s.headers -is [hashtable] -or $s.headers -is [System.Collections.IDictionary]) {
+                    $headerKeys = @($s.headers.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $headerKeys = @($s.headers.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                $headerSignature = Get-AuditMcpValueSignature $s.headers
+            }
+            $row.header_keys = @($headerKeys)
+            if (-not [string]::IsNullOrWhiteSpace($headerSignature)) { $row.header_signature = $headerSignature }
+            $row.bearer_token_env_var = if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0) { [string]$s.bearer_token_env_var } else { "" }
+        }
+        $facts += [pscustomobject]$row
+    }
+    return @($facts)
+}
+
+function Get-AuditFingerprintFromMcpServers($servers) {
+    $pairs = @()
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        $name = ""
+        if ($server.PSObject.Properties.Match("name").Count -gt 0) {
+            $name = ([string]$server.name).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $sig = Get-McpServerSignature $server
+        if ([string]::IsNullOrWhiteSpace($sig)) { continue }
+        $pairs += ("{0}|{1}" -f $name, $sig)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+}
+
+function Get-AuditFingerprintFromVendorFromPairs($pairs, [bool]$caseSensitive = $false) {
+    $comparer = if ($caseSensitive) { [System.StringComparer]::Ordinal } else { [System.StringComparer]::OrdinalIgnoreCase }
+    $normalized = New-Object System.Collections.Generic.HashSet[string]($comparer)
+    foreach ($pair in @($pairs)) {
+        if ($null -eq $pair) { continue }
+        $text = ([string]$pair).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if (-not $caseSensitive) { $text = $text.ToLowerInvariant() }
+        $normalized.Add($text) | Out-Null
+    }
+    [string[]]$ordered = @($normalized)
+    [System.Array]::Sort($ordered, [System.StringComparer]::Ordinal)
+    $payload = ($ordered -join "`n")
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        $hashBytes = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-AuditFingerprintFromSkillFacts($facts) {
+    $rows = @()
+    $fields = @(
+        "vendor",
+        "from",
+        "to",
+        "repo",
+        "ref",
+        "skill_path",
+        "declared_name",
+        "description",
+        "trigger_summary",
+        "content_hash"
+    )
+    foreach ($item in @($facts)) {
+        if ($null -eq $item) { continue }
+        $vendor = ""
+        $from = ""
+        if ($item.PSObject.Properties.Match("vendor").Count -gt 0) { $vendor = [string]$item.vendor }
+        if ($item.PSObject.Properties.Match("from").Count -gt 0) { $from = [string]$item.from }
+        if ([string]::IsNullOrWhiteSpace($vendor) -or [string]::IsNullOrWhiteSpace($from)) { continue }
+
+        $row = [ordered]@{}
+        foreach ($field in $fields) {
+            $value = ""
+            if ($item.PSObject.Properties.Match($field).Count -gt 0 -and $null -ne $item.$field) {
+                $value = [string]$item.$field
+            }
+            $row[$field] = $value
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
+}
+
+function Get-AuditFingerprintFromExternalSkillFacts($facts) {
+    $rows = @()
+    foreach ($item in @($facts)) {
+        if ($null -eq $item) { continue }
+        $row = [ordered]@{
+            source_kind = [string]$item.source_kind
+            name = [string]$item.name
+            qualified_name = [string]$item.qualified_name
+            description = [string]$item.description
+            trigger_summary = [string]$item.trigger_summary
+            content_hash = [string]$item.content_hash
+            plugin_id = [string]$item.plugin_id
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
+}
+
+function Get-AuditHostProjectionState($cfg) {
+    $projection = if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
+    if ($null -eq $projection -or $projection.PSObject.Properties.Match('managed_source_path').Count -eq 0 -or $projection.PSObject.Properties.Match('user_skill_root').Count -eq 0) {
+        return [pscustomobject]([ordered]@{ status = 'not_provided'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' })
+    }
+    try {
+        $managedRoot = Resolve-SkillProjectionPath ([string]$projection.managed_source_path)
+        $userRoot = Resolve-SkillProjectionPath ([string]$projection.user_skill_root)
+        if (-not (Test-Path -LiteralPath $managedRoot -PathType Container) -or -not (Test-Path -LiteralPath $userRoot -PathType Container)) {
+            return [pscustomobject]([ordered]@{ status = 'unavailable'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' })
+        }
+        $excluded = @($projection.managed_link_excludes | ForEach-Object { [string]$_ })
+        $hasManagedLinkIncludes = $projection.PSObject.Properties.Match('managed_link_includes').Count -gt 0
+        $included = if ($hasManagedLinkIncludes) { @($projection.managed_link_includes | ForEach-Object { [string]$_ }) } else { @() }
+        if ($projection.PSObject.Properties.Match('projection_profiles').Count -gt 0 -and $null -ne $projection.projection_profiles) {
+            $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName 'codex'
+            $excluded = @($selection.excluded_names | ForEach-Object { [string]$_ })
+            $hasManagedLinkIncludes = -not [bool]$selection.include_all
+            $included = if ($hasManagedLinkIncludes) { @($selection.included_names | ForEach-Object { [string]$_ }) } else { @() }
+        }
+        $expected = @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object {
+                $_.Name -ne '.system' -and
+                $_.Name -notin $excluded -and
+                (-not $hasManagedLinkIncludes -or $_.Name -in $included) -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf)
+            } | ForEach-Object Name)
+        $rows = @(); $managedCount = 0; $brokenCount = 0; $staleCount = 0
+        foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
+            if (-not (Is-ReparsePoint $entry.FullName)) { continue }
+            $target = Get-ReparsePointTargetFullPath $entry.FullName
+            if ([string]::IsNullOrWhiteSpace($target)) { $brokenCount++; continue }
+            $managedPrefix = $managedRoot.TrimEnd('\') + '\'
+            if ($target.StartsWith($managedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $managedCount++
+                if ($entry.Name -notin $expected -or -not (Test-Path -LiteralPath $target -PathType Container)) { $staleCount++ }
+                $rows += (([ordered]@{ name = $entry.Name; target = $target }) | ConvertTo-Json -Compress)
+            }
+        }
+        foreach ($name in $expected) { if (-not (Test-Path -LiteralPath (Join-Path $userRoot $name))) { $staleCount++ } }
+        return [pscustomobject]([ordered]@{ status = 'available'; managed_count = $managedCount; broken_count = $brokenCount; stale_count = $staleCount; fingerprint = (Get-AuditFingerprintFromVendorFromPairs $rows $true) })
+    } catch { return [pscustomobject]([ordered]@{ status = 'unavailable'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' }) }
+}
+
+function Get-AuditLiveInstalledState($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $configuredSupplySkills = @(Get-InstalledSkillFacts $cfg)
+    $profileState = Get-AuditCurrentProfileSkillState $cfg $configuredSupplySkills
+    $facts = @($profileState.selected_skills)
+    $externalFacts = @(Get-AuditExternalSkillFacts $cfg)
+    $mcpServers = @(Get-AuditMcpServerFacts $cfg)
+    return [pscustomobject]([ordered]@{
+        source_of_truth = "live_configuration_and_profile_selection"
+        captured_at = (Get-Date).ToString("o")
+        skill_count = @($facts).Count
+        fingerprint = [string]$profileState.fingerprint
+        configured_supply_skill_count = @($configuredSupplySkills).Count
+        configured_supply_fingerprint = (Get-AuditFingerprintFromSkillFacts $configuredSupplySkills)
+        profile_selection = $profileState.selection
+        profile_selection_status = [string]$profileState.status
+        profile_selection_unresolved_names = @($profileState.unresolved_selected_names)
+        configured_supply_skills = @($configuredSupplySkills)
+        profile_selected_skills = @($facts)
+        external_skill_count = @($externalFacts).Count
+        external_skill_fingerprint = (Get-AuditFingerprintFromExternalSkillFacts $externalFacts)
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
+        host_projection = (Get-AuditHostProjectionState $cfg)
+        invocation_evidence = [pscustomobject]([ordered]@{
+                state = 'not_observed'
+                scope = 'audit_scanner'
+                evidence = 'This workflow does not have a host invocation ledger. Configuration, projected files, and read-only host observations cannot establish a successful skill or MCP invocation.'
+                retirement_gate = 'A user statement of no successful use is a risk signal, not removal proof; validate profile reachability or task-route matching before proposing retirement.'
+            })
+    })
+}
+
+function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
+    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "snapshot 路径不能为空"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
+    try {
+        $raw = Get-ContentUtf8 $snapshotPath
+        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("snapshot.json 为空：{0}" -f $snapshotPath)
+        $data = $raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message)
+    }
+    Need (Test-AuditJsonProperty $data "installed_state") ("snapshot.json 缺少 installed_state：{0}" -f $snapshotPath)
+    $data = $data.installed_state
+    Need (Test-AuditJsonProperty $data "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $snapshotPath)
+    Need (Assert-IsArray $data.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $snapshotPath)
+    $skills = @($data.skills)
+    $configuredSupplySkills = @()
+    if (Test-AuditJsonProperty $data 'configured_supply_skills' -and $null -ne $data.configured_supply_skills) {
+        Need (Assert-IsArray $data.configured_supply_skills) ("snapshot.installed_state.configured_supply_skills 必须为数组：{0}" -f $snapshotPath)
+        $configuredSupplySkills = @($data.configured_supply_skills)
+    }
+    $externalSkills = @()
+    if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
+        Need (Assert-IsArray $data.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $snapshotPath)
+        $externalSkills = @($data.external_skills)
+    }
+    $mcpServers = @()
+    if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
+        Need (Assert-IsArray $data.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $snapshotPath)
+        $mcpServers = @($data.mcp_servers)
+    }
+    $fingerprint = ""
+    if (Test-AuditJsonProperty $data "live_fingerprint") {
+        $fingerprint = ([string]$data.live_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+        $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $configuredSupplyFingerprint = ''
+    if (Test-AuditJsonProperty $data 'live_configured_supply_fingerprint') {
+        $configuredSupplyFingerprint = ([string]$data.live_configured_supply_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($configuredSupplyFingerprint) -and $configuredSupplySkills.Count -gt 0) {
+        $configuredSupplyFingerprint = Get-AuditFingerprintFromSkillFacts $configuredSupplySkills
+    }
+    $externalSkillFingerprint = ''
+    if (Test-AuditJsonProperty $data 'live_external_skill_fingerprint') {
+        $externalSkillFingerprint = ([string]$data.live_external_skill_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($externalSkillFingerprint) -and $externalSkills.Count -gt 0) {
+        $externalSkillFingerprint = Get-AuditFingerprintFromExternalSkillFacts $externalSkills
+    }
+    $mcpFingerprint = ""
+    if (Test-AuditJsonProperty $data "live_mcp_fingerprint") {
+        $mcpFingerprint = ([string]$data.live_mcp_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
+        $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
+    }
+    $profileSelectionStatus = ""
+    if (Test-AuditJsonProperty $data 'profile_selection_status') { $profileSelectionStatus = [string]$data.profile_selection_status }
+    $hostProjection = if (Test-AuditJsonProperty $data 'host_projection') { $data.host_projection } else { $null }
+    $capturedAt = ""
+    if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
+    $snapshotKind = ""
+    if (Test-AuditJsonProperty $data "snapshot_kind") { $snapshotKind = [string]$data.snapshot_kind }
+    return [pscustomobject]([ordered]@{
+        path = $snapshotPath
+        snapshot_kind = $snapshotKind
+        captured_at = $capturedAt
+        skill_count = $skills.Count
+        fingerprint = $fingerprint
+        configured_supply_skill_count = $configuredSupplySkills.Count
+        configured_supply_fingerprint = $configuredSupplyFingerprint
+        external_skill_count = $externalSkills.Count
+        external_skill_fingerprint = $externalSkillFingerprint
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = $mcpFingerprint
+        profile_selection_status = $profileSelectionStatus
+        host_projection = $hostProjection
+    })
+}
+
+function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
+    $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    # fail closed：当前契约的快照必须显式携带三类指纹；缺失/空值按 stale 处理，
+    # 否则被剥离指纹的异常快照会让对应分量永远判不 stale。
+    $configuredSupplyStale = $true
+    if ($snapshotState.PSObject.Properties.Match('configured_supply_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.configured_supply_fingerprint)) {
+        $configuredSupplyStale = ([string]$snapshotState.configured_supply_fingerprint -ne [string]$liveState.configured_supply_fingerprint)
+    }
+    $mcpStale = $true
+    if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $externalSkillStale = $true
+    if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
+        $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
+    }
+    $hostStale = $false
+    if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
+        $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
+        if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
+            # A pre-existing projection health issue is reportable state, not evidence that the audit input drifted.
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint)
+        }
+    }
+    # fail closed：'unavailable'（取证异常回退）或旧快照缺失状态时指纹为空/不可信，
+    # 空对空相等会让 profile selection 永远判不 stale，preflight 会基于安装状态
+    # 未知的空快照放行。'available'/'selection_unresolved'/'not_configured' 的
+    # 指纹有确定性语义，仍按指纹比较。
+    $profileSelectionStatus = ""
+    if ($snapshotState.PSObject.Properties.Match('profile_selection_status').Count -gt 0) { $profileSelectionStatus = [string]$snapshotState.profile_selection_status }
+    $profileSelectionStale = ($profileSelectionStatus -eq 'unavailable' -or [string]::IsNullOrWhiteSpace($profileSelectionStatus))
+    if (-not $profileSelectionStale) { $profileSelectionStale = $skillStale }
+    return [pscustomobject]([ordered]@{
+            is_stale = ($skillStale -or $configuredSupplyStale -or $mcpStale -or $externalSkillStale -or $profileSelectionStale -or $hostStale)
+            skill_stale = $skillStale
+            configured_supply_stale = $configuredSupplyStale
+            profile_selection_stale = $profileSelectionStale
+            mcp_stale = $mcpStale
+            external_skill_stale = $externalSkillStale
+            host_projection_stale = $hostStale
+        })
+}

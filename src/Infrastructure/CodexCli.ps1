@@ -58,7 +58,9 @@ function Get-CodexPluginSkillInventory {
                     if (Test-Path -LiteralPath $candidate -PathType Leaf) { Get-Item -LiteralPath $candidate }
                 } | Sort-Object FullName)) {
             if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) {
-                $repoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json')) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+                # Walk up to skills.json: covers repo root, skills.lib/, and src/ depths.
+                $repoRoot = $PSScriptRoot
+                while (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'skills.json')) -and $repoRoot -ne [IO.Path]::GetPathRoot($repoRoot)) { $repoRoot = Split-Path -Parent $repoRoot }
                 . (Join-Path $repoRoot 'src\Domain\SkillMetadata.ps1')
             }
             $metadata = Read-SkillMetadata $skillFile.FullName -Observation

@@ -1,0 +1,1674 @@
+﻿# Root is the repository root: the generated entry (skills.ps1 at the repo
+# root) resolves it from $PSScriptRoot so shims work from any CWD. When this
+# file is dot-sourced directly (verify-skills-config.ps1), $PSScriptRoot is
+# src/ and the original CWD-based fallback keeps those consumers working.
+# Walk up to skills.json so the same file also works from skills.lib/.
+$Root = $PSScriptRoot
+while ($Root -and -not (Test-Path -LiteralPath (Join-Path $Root 'skills.json') -PathType Leaf) -and $Root -ne [IO.Path]::GetPathRoot($Root)) { $Root = Split-Path -Parent $Root }
+if (-not $Root -or -not (Test-Path -LiteralPath (Join-Path $Root 'skills.json') -PathType Leaf)) { $Root = (Resolve-Path ".").Path }
+$CfgPath = Join-Path $Root "skills.json"
+$LogPath = Join-Path $Root "build.log"
+$VendorDir = Join-Path $Root "vendor"
+$AgentDir = Join-Path $Root "agent"
+$OverridesDir = Join-Path $Root "overrides"
+$ManualDir = Join-Path $Root "manual"
+$ImportDir = Join-Path $Root "imports"
+$script:ActiveLogPath = $null
+$script:LogPathFallbackWarned = $false
+$script:LogWriteCount = 0
+
+function Resolve-ActiveLogPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:ActiveLogPath)) { return $script:ActiveLogPath }
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $candidates += $LogPath }
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
+    if (-not [string]::IsNullOrWhiteSpace($tempRoot)) {
+        $candidates += (Join-Path $tempRoot "skills-manager-build.log")
+    }
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        try {
+            $parent = Split-Path -Parent $candidate
+            if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
+                New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            }
+            [System.IO.File]::AppendAllText($candidate, "")
+            $script:ActiveLogPath = $candidate
+            return $script:ActiveLogPath
+        }
+        catch {}
+    }
+    return $null
+}
+
+function Get-LogRotateMaxBytes {
+    $v = $null
+    $scriptVar = Get-Variable -Name LogMaxBytes -Scope Script -ErrorAction SilentlyContinue
+    $globalVar = Get-Variable -Name LogMaxBytes -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $scriptVar) { $v = $scriptVar.Value }
+    elseif ($null -ne $globalVar) { $v = $globalVar.Value }
+    try {
+        $n = [int64]$v
+        if ($n -gt 0) { return $n }
+    }
+    catch {}
+    return 1048576
+}
+function Get-LogMaxBackups {
+    $v = $null
+    $scriptVar = Get-Variable -Name LogMaxBackups -Scope Script -ErrorAction SilentlyContinue
+    $globalVar = Get-Variable -Name LogMaxBackups -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $scriptVar) { $v = $scriptVar.Value }
+    elseif ($null -ne $globalVar) { $v = $globalVar.Value }
+    try {
+        $n = [int]$v
+        if ($n -gt 0) { return $n }
+    }
+    catch {}
+    return 5
+}
+function Rotate-LogIfNeeded([string]$TargetPath) {
+    if ([string]::IsNullOrWhiteSpace($TargetPath)) { return }
+    if (-not (Test-Path -LiteralPath $TargetPath)) { return }
+    $maxBytes = Get-LogRotateMaxBytes
+    $maxBackups = Get-LogMaxBackups
+    try {
+        $size = (Get-Item -LiteralPath $TargetPath -ErrorAction Stop).Length
+        if ($size -lt $maxBytes) { return }
+        for ($i = $maxBackups; $i -ge 1; $i--) {
+            $src = if ($i -eq 1) { $TargetPath } else { "{0}.{1}" -f $TargetPath, ($i - 1) }
+            $dst = "{0}.{1}" -f $TargetPath, $i
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
+            Move-Item -LiteralPath $src -Destination $dst -Force
+        }
+    }
+    catch {}
+}
+function Protect-SensitiveText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $environmentReferences = [System.Collections.Generic.List[string]]::new()
+    $masked = [regex]::Replace($Text, '\$\{[A-Za-z_][A-Za-z0-9_]*\}', {
+        param($match)
+        $index = $environmentReferences.Count
+        $environmentReferences.Add($match.Value) | Out-Null
+        return "__SKILLS_ENV_REFERENCE_${index}__"
+    })
+
+    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
+    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&#\s]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\bbearer\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
+
+    for ($i = 0; $i -lt $environmentReferences.Count; $i++) {
+        $masked = $masked.Replace("__SKILLS_ENV_REFERENCE_${i}__", $environmentReferences[$i])
+    }
+    return $masked
+}
+function Protect-SensitiveLogValue([object]$Value, [string]$KeyName = '') {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        $text = [string]$Value
+        $sensitiveKey = $KeyName -match '(?i)(?:authorization|credential|password|passwd|secret|token|api[-_]?key)'
+        $environmentKey = $KeyName -match '(?i)(?:env(?:ironment)?(?:_var)?|_env_var)$'
+        $environmentReference = $text -match '^\$\{[A-Za-z_][A-Za-z0-9_]*\}$' -or
+            ($environmentKey -and $text -match '^[A-Za-z_][A-Za-z0-9_]*$')
+        if ($sensitiveKey -and -not $environmentReference) { return '<redacted>' }
+        return (Protect-SensitiveText $text)
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $keyText = [string]$key
+            $copy[$keyText] = Protect-SensitiveLogValue $Value[$key] $keyText
+        }
+        return $copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $copy[$property.Name] = Protect-SensitiveLogValue $property.Value $property.Name
+        }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Protect-SensitiveLogValue $_ $KeyName })
+    }
+    return $Value
+}
+function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
+    if ($DryRun) { return }
+    $targetPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
+    # 轮转检查按写入计数门控（每 64 条一次），避免每条日志一次 Get-Item。
+    $script:LogWriteCount++
+    if (($script:LogWriteCount % 64) -eq 1) { Rotate-LogIfNeeded $targetPath }
+    $safeMessage = Protect-SensitiveText $Message
+    $safeData = Protect-SensitiveLogValue $Data
+    $record = [ordered]@{
+        ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        level = $Level.ToUpperInvariant()
+        msg   = $safeMessage
+    }
+    if ($null -ne $safeData) { $record.data = $safeData }
+    $json = ($record | ConvertTo-Json -Depth 20 -Compress)
+    try {
+        $json | Out-File -FilePath $targetPath -Append -Encoding UTF8
+        return
+    }
+    catch {}
+    if ($targetPath -ne $LogPath) { return }
+
+    # 主日志路径不可写时，自动回退到 TEMP，避免日志故障中断主流程
+    $script:ActiveLogPath = $null
+    $fallbackPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($fallbackPath) -or $fallbackPath -eq $targetPath) { return }
+    try {
+        $json | Out-File -FilePath $fallbackPath -Append -Encoding UTF8
+        if (-not $script:LogPathFallbackWarned) {
+            Write-Host ("[WARN] 日志路径不可写，已切换到：{0}" -f $fallbackPath) -ForegroundColor Yellow
+            $script:LogPathFallbackWarned = $true
+        }
+    }
+    catch {}
+}
+function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
+    if ($script:SuppressAllLogging) { return }
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $lvl = $Level.ToUpperInvariant()
+    $safeMessage = Protect-SensitiveText $msg
+    $safeData = Protect-SensitiveLogValue $Data
+    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $safeMessage
+    if (-not $NoHost) {
+        switch ($lvl) {
+            "WARN" { Write-Host $line -ForegroundColor Yellow }
+            "ERROR" { Write-Host $line -ForegroundColor Red }
+            "DEBUG" { Write-Host $line -ForegroundColor DarkGray }
+            default { Write-Host $line }
+        }
+    }
+    Write-LogRecord $lvl $safeMessage $safeData
+}
+function Invoke-RemoveItem([string]$path, [switch]$Recurse) {
+    if (-not (Test-PathEntry $path)) { return }
+    $recurseFlag = if ($Recurse) { "-Recurse " } else { "" }
+    Log ("Remove-Item {0}{1}" -f $recurseFlag, $path)
+    if (-not $DryRun) {
+        if ($Recurse) { Remove-Item -LiteralPath $path -Recurse -Force }
+        else { Remove-Item -LiteralPath $path -Force }
+    }
+}
+function Invoke-RemoveItemWithRetry(
+    [string]$path,
+    [switch]$Recurse,
+    [int]$MaxAttempts = 4,
+    [int]$DelayMs = 250,
+    [switch]$IgnoreFailure,
+    [switch]$SilentIgnore
+) {
+    if (-not (Test-PathEntry $path)) { return $true }
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Invoke-RemoveItem $path -Recurse:$Recurse
+            return $true
+        }
+        catch {
+            if ($attempt -ge $MaxAttempts) {
+                if ($IgnoreFailure) {
+                    if (-not $SilentIgnore) {
+                        Log ("清理失败（已忽略）：{0}；原因：{1}" -f $path, $_.Exception.Message) "WARN"
+                    }
+                    return $false
+                }
+                throw
+            }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+    return $false
+}
+function Invoke-MoveItem([string]$src, [string]$dst) {
+    Log ("Move-Item {0} -> {1}" -f $src, $dst)
+    if (-not $DryRun) { Move-Item -LiteralPath $src -Destination $dst -Force }
+}
+function Invoke-StartProcess([string]$file, [string]$args) {
+    Log ("Start-Process {0} {1}" -f $file, $args)
+    if (-not $DryRun) {
+        if ([string]::IsNullOrWhiteSpace($args)) {
+            Start-Process -FilePath $file
+        }
+        else {
+            Start-Process -FilePath $file -ArgumentList $args
+        }
+    }
+}
+function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
+    Log ("New-Item -ItemType Junction `"{0}`" -> `"{1}`"" -f $linkPath, $targetPath)
+    if ($DryRun) { return }
+    New-Item -ItemType Junction -Path $linkPath -Value $targetPath -ErrorAction Stop | Out-Null
+}
+function EnsureDir([string]$p) {
+    if ($DryRun) { return }
+    if ([string]::IsNullOrWhiteSpace($p)) { return }
+    if (-not (Test-Path -LiteralPath $p -PathType Container)) {
+        [System.IO.Directory]::CreateDirectory($p) | Out-Null
+    }
+}
+function Set-ContentUtf8([string]$path, [string]$content) {
+    if ($DryRun) { return }
+    Write-Utf8FileAtomic -Path $path -Content $content
+}
+function Get-ContentUtf8([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    # Strip a leading UTF-8 BOM: ConvertFrom-Json rejects U+FEFF outright.
+    return ([System.Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xFEFF)
+}
+function ConvertTo-AsciiJson([string]$Json) {
+    # Every `--json` document leaves this process through stdout, and the documented
+    # consumer is `pwsh ... --json | ConvertFrom-Json`: the parent decodes the child's
+    # stdout with its own console code page (gb2312/GBK on a zh-CN Windows host), not
+    # UTF-8. Values that cross a native/CIM boundary are the fragile ones — measured
+    # 2026-10-05 on this host, `(Get-CimInstance Win32_OperatingSystem).Caption` written
+    # to stdout arrived as mojibake with a byte replaced by '?', which consumed the
+    # closing quote and left `doctor --json` structurally invalid (ConvertFrom-Json
+    # threw at checks.os), while a literal string emitted by the same child survived.
+    # Escaping every non-ASCII UTF-16 code unit as \uXXXX makes the document pure
+    # ASCII: it survives any code page and ConvertFrom-Json rebuilds the original text.
+    # Surrogate pairs are escaped per code unit, which is valid JSON. ASCII documents
+    # pass through byte-identical, so this is safe to apply at every JSON stdout seam.
+    if ([string]::IsNullOrEmpty($Json)) { return $Json }
+    $builder = [Text.StringBuilder]::new($Json.Length + 64)
+    foreach ($ch in $Json.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -gt 127) { [void]$builder.AppendFormat('\u{0:x4}', $code) }
+        else { [void]$builder.Append($ch) }
+    }
+    return $builder.ToString()
+}
+function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
+    if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return $null }
+
+    $raw = Get-ContentUtf8 $skillFile
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+    $lines = @($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -ne 1) { return $null }
+
+    $relative = $lines[0].Trim()
+    if ([string]::IsNullOrWhiteSpace($relative)) { return $null }
+    if ([System.IO.Path]::IsPathRooted($relative)) { return $null }
+    if (-not ($relative -match "\.md$")) { return $null }
+
+    $baseDir = Split-Path -Parent $skillFile
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $baseDir $relative))
+    $rootFull = [System.IO.Path]::GetFullPath($rootPath)
+    $selfFull = [System.IO.Path]::GetFullPath($skillFile)
+    if ($candidate -eq $selfFull) { return $null }
+    if (-not (Is-PathInsideOrEqual $candidate $rootFull)) { return $null }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+
+    $targetRaw = Get-ContentUtf8 $candidate
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
+    $targetNormalized = $targetRaw.TrimStart([char]0xFEFF).TrimStart()
+    if ($targetNormalized -notmatch "^---(\r?\n|$)") { return $null }
+    return $candidate
+}
+function Expand-RelativeSkillPlaceholders([string]$rootPath) {
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return 0 }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return 0 }
+
+    $count = 0
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        $target = Resolve-RelativeSkillPlaceholderTarget $skillFile.FullName $rootPath
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        $content = Get-ContentUtf8 $target
+        Set-ContentUtf8 $skillFile.FullName $content
+        $count++
+    }
+    return $count
+}
+# 构建 agent/ 的 SKILL.md 单遍修复：枚举一次、每文件读一次，同时完成
+# BOM 归一化与无效 frontmatter 清理（原先两遍独立枚举+各读一遍）。
+# 空文件/无 frontmatter 文件按原 Test-YamlFrontmatterSkillFile 语义删除；
+# frontmatter 判定先剥离 BOM，与原两遍顺序（先归一化后清理）终态等价。
+function Repair-AgentSkillMarkdownFiles([string]$rootPath) {
+    $result = [ordered]@{
+        normalized = 0
+        failed = 0
+        removed = 0
+        normalized_paths = @()
+        failed_paths = @()
+        removed_paths = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
+
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $raw = Get-ContentUtf8 $skillFile.FullName
+            $normalized = "$raw".TrimStart([char]0xFEFF)
+            if (-not ($normalized -match "^---(\r?\n|$)")) {
+                $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
+                if ($ok) {
+                    $result.removed++
+                    $result.removed_paths += $skillFile.FullName
+                }
+                else {
+                    $result.failed++
+                    $result.failed_paths += $skillFile.FullName
+                }
+                continue
+            }
+            if (-not [string]::Equals($normalized, $raw, [System.StringComparison]::Ordinal)) {
+                Set-ContentUtf8 $skillFile.FullName $normalized
+                $result.normalized++
+                $result.normalized_paths += $skillFile.FullName
+            }
+        }
+        catch {
+            $result.failed++
+            $result.failed_paths += $skillFile.FullName
+        }
+    }
+    return [pscustomobject]$result
+}
+function Get-FileContentHash([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($path)
+        try {
+            $hash = $sha.ComputeHash($stream)
+            return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+        }
+        finally {
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $options = [System.IO.EnumerationOptions]::new()
+    $options.RecurseSubdirectories = $true
+    $options.IgnoreInaccessible = $true
+    $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+    $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
+    [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    $first = $true
+    foreach ($file in $files) {
+        $info = [System.IO.FileInfo]::new($file)
+        $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        if (-not $first) { [void]$parts.Append("`n") }
+        [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
+        $first = $false
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Get-DirectoryFingerprint([string]$dir) {
+    $dirItem = Get-ExistingFileSystemItem $dir
+    if ($null -eq $dirItem) { return "missing" }
+    Need $dirItem.PSIsContainer ("目录指纹目标不是目录：{0}" -f $dir)
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $files = [System.Collections.Generic.List[string]]::new()
+    $pending = [System.Collections.Generic.Stack[string]]::new()
+    $pending.Push($baseDir)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in [System.IO.Directory]::GetFileSystemEntries($current)) {
+            $attributes = [System.IO.File]::GetAttributes($entry)
+            Need (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) ("目录指纹拒绝 reparse entry：{0}" -f $entry)
+            if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+                $pending.Push($entry)
+            }
+            else {
+                $files.Add($entry) | Out-Null
+            }
+        }
+    }
+    $orderedFiles = @($files.ToArray())
+    [array]::Sort($orderedFiles, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    foreach ($file in $orderedFiles) {
+        $info = [System.IO.FileInfo]::new($file)
+        $relativePath = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        $relativePath = $relativePath.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
+        $contentHash = Get-FileContentHash $file
+        Need (-not [string]::IsNullOrWhiteSpace($contentHash)) ("目录指纹无法读取文件：{0}" -f $file)
+        [void]$parts.Append($relativePath)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append([string]$info.Length)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append($contentHash)
+        [void]$parts.Append("`n")
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Need($cond, [string]$msg) { if (-not $cond) { throw $msg } }
+function Resolve-PowerShellExecutable {
+    $programFilesPwsh = if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"
+    } else {
+        $null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($programFilesPwsh) -and (Test-Path -LiteralPath $programFilesPwsh)) {
+        return $programFilesPwsh
+    }
+
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) { return [string]$pwsh.Source }
+
+    $bundledPwsh = Join-Path $PSHOME ($(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }))
+    if (Test-Path -LiteralPath $bundledPwsh -PathType Leaf) { return $bundledPwsh }
+
+    throw "未找到 PowerShell 7 (pwsh)。本项目不支持 Windows PowerShell 5.1，请先安装 PowerShell 7。"
+}
+function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    if ([IO.Path]::GetExtension($command).ToLowerInvariant() -eq '.ps1' -and (Test-Path -LiteralPath $command -PathType Leaf)) {
+        return [pscustomobject]@{
+            file = Resolve-PowerShellExecutable
+            args = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', [IO.Path]::GetFullPath($command)) + @($commandArgs)
+        }
+    }
+    $resolved = @(Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($resolved.Count -gt 0 -and $null -ne $resolved[0]) {
+        # Get-Command normally exposes Path, while lightweight callers and
+        # test doubles may only provide Source. Treat both as the executable
+        # location so PowerShell scripts are launched through pwsh reliably.
+        $resolvedPath = [string]$resolved[0].Path
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) { $resolvedPath = [string]$resolved[0].Source }
+        if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+            $ext = [System.IO.Path]::GetExtension($resolvedPath).ToLowerInvariant()
+            if ($ext -eq ".ps1") {
+                return [pscustomobject]@{
+                    file = Resolve-PowerShellExecutable
+                    args = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $resolvedPath) + @($commandArgs)
+                }
+            }
+            return [pscustomobject]@{
+                file = $resolvedPath
+                args = @($commandArgs)
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        file = $command
+        args = @($commandArgs)
+    }
+}
+function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$errText) {
+    $combined = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
+        if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
+    }
+    return [pscustomobject]@{
+        output = @($combined)
+        error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
+    }
+}
+function Read-ExternalCommandTaskText($task, [int]$TimeoutMilliseconds = 5000) {
+    # Bounded read. A grandchild that inherited the stdout/stderr pipe keeps
+    # ReadToEndAsync from ever reaching EOF, so an unbounded GetResult() would
+    # silently bypass the process timeout above. Mirrors the remote-query guard
+    # in src/Git.ps1.
+    if ($null -eq $task) { return [pscustomobject]@{ text = ''; timed_out = $false } }
+    try {
+        if (-not $task.Wait($TimeoutMilliseconds)) { return [pscustomobject]@{ text = ''; timed_out = $true } }
+        return [pscustomobject]@{ text = [string]$task.GetAwaiter().GetResult(); timed_out = $false }
+    }
+    catch {
+        return [pscustomobject]@{ text = ''; timed_out = $false }
+    }
+}
+function Invoke-ExternalCommandWithTimeout(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [string]$workingDir = $null,
+    [int]$timeoutSeconds = 30,
+    [hashtable]$EnvironmentOverrides = $null
+) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
+
+    $proc = $null
+    $stdoutTask = $null
+    $stderrTask = $null
+    try {
+        $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
+        $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
+        $argList = @($invocation.args | ForEach-Object { [string]$_ })
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = [string]$invocation.file
+        $startInfo.WorkingDirectory = $effectiveWorkingDir
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        if ($EnvironmentOverrides -ne $null) {
+            foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
+                $key = [string]$entry.Key
+                if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                if ($null -eq $entry.Value) {
+                    [void]$startInfo.Environment.Remove($key)
+                    continue
+                }
+                $startInfo.Environment[$key] = [string]$entry.Value
+            }
+        }
+        foreach ($arg in $argList) {
+            [void]$startInfo.ArgumentList.Add([string]$arg)
+        }
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $startInfo
+        [void]$proc.Start()
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        $exited = $proc.WaitForExit($timeoutSeconds * 1000)
+        if (-not $exited) {
+            try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
+            try { $proc.WaitForExit(2000) | Out-Null } catch {}
+            $outRead = Read-ExternalCommandTaskText $stdoutTask
+            $errRead = Read-ExternalCommandTaskText $stderrTask
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
+            return [pscustomobject]@{
+                timed_out = $true
+                exit_code = 124
+                output = @($captured.output)
+                error = if ([string]::IsNullOrWhiteSpace([string]$captured.error)) { ("timeout_after_{0}s" -f $timeoutSeconds) } else { ("timeout_after_{0}s: {1}" -f $timeoutSeconds, [string]$captured.error) }
+            }
+        }
+
+        # No parameterless WaitForExit() here: the bounded wait above already
+        # returned true, and the output is drained through Read-ExternalCommandTaskText
+        # rather than the async event handlers that overload exists for.
+        $outRead = Read-ExternalCommandTaskText $stdoutTask
+        $errRead = Read-ExternalCommandTaskText $stderrTask
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outRead.text $errRead.text
+        $errorText = [string]$captured.error
+        if ([bool]$outRead.timed_out -or [bool]$errRead.timed_out) {
+            $errorText = if ([string]::IsNullOrWhiteSpace($errorText)) { 'output_read_timeout' } else { ('output_read_timeout: ' + $errorText) }
+        }
+
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = [int]$proc.ExitCode
+            output = @($captured.output)
+            error = $errorText
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = 1
+            output = @()
+            error = $_.Exception.Message
+        }
+    }
+    finally {
+        if ($null -ne $proc) { $proc.Dispose() }
+    }
+}
+function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [int]$minSeconds = 1, [int]$maxSeconds = 600) {
+    $value = $defaultSeconds
+    if ([string]::IsNullOrWhiteSpace($envName)) { return $value }
+
+    $raw = [System.Environment]::GetEnvironmentVariable($envName)
+    $parsed = 0
+    if ([int]::TryParse([string]$raw, [ref]$parsed)) {
+        $value = $parsed
+    }
+
+    if ($value -lt $minSeconds) { $value = $minSeconds }
+    if ($value -gt $maxSeconds) { $value = $maxSeconds }
+    return $value
+}
+function Invoke-ExternalCommandCapture(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [int]$timeoutSeconds = 120,
+    [hashtable]$EnvironmentOverrides = $null,
+    [string]$workingDir = $null
+) {
+    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $workingDir $timeoutSeconds $EnvironmentOverrides
+    return [pscustomobject]@{
+        command = $command
+        args = @($CommandArgs)
+        exit_code = [int]$result.exit_code
+        timed_out = [bool]$result.timed_out
+        error = [string]$result.error
+        output = @($result.output)
+    }
+}
+function Read-HostSafe([string]$prompt) {
+    $value = Read-Host $prompt
+    if ($null -eq $value) { return "" }
+    return $value.Trim()
+}
+function Read-MenuChoice([string]$prompt = "请选择") {
+    $choice = Read-HostSafe $prompt
+    if ([string]::IsNullOrWhiteSpace($choice)) { return "0" }
+    return $choice
+}
+function Is-Yes([string]$answer) {
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $false }
+    $v = $answer.Trim().ToLowerInvariant()
+    return ($v -eq "y" -or $v -eq "yes")
+}
+function Confirm-Action([string]$prompt, [string]$token = "Y", [switch]$DefaultNo) {
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = "Y" }
+    $suffix = if ($DefaultNo) { " (默认=N)" } else { "" }
+    $userInput = Read-HostSafe ("{0}，输入 {1} 继续{2}" -f $prompt, $token, $suffix)
+    if ($token -eq "Y") { return (Is-Yes $userInput) }
+    if ([string]::IsNullOrWhiteSpace($userInput)) { return $false }
+    return ($userInput.Equals($token, [System.StringComparison]::OrdinalIgnoreCase))
+}
+function Print-PreviewList([string]$title, [string[]]$items, [int]$maxShow = 20) {
+    Write-Host $title
+    if ($items.Count -eq 0) {
+        Write-Host "- 无"
+        return
+    }
+    $shown = 0
+    foreach ($p in ($items | Sort-Object)) {
+        Write-Host ("- {0}" -f $p)
+        $shown++
+        if ($shown -ge $maxShow) { break }
+    }
+    if ($items.Count -gt $maxShow) {
+        Write-Host ("... 另有 {0} 项未显示" -f ($items.Count - $maxShow))
+    }
+}
+function Print-ActionSummary([string]$title, [string[]]$items) {
+    $count = if ($null -eq $items) { 0 } else { $items.Count }
+    Write-Host ("{0}（{1} 项）" -f $title, $count)
+    Print-PreviewList "预览（部分）：" $items
+}
+function Confirm-WithSummary([string]$title, [string[]]$items, [string]$confirmPrompt, [string]$token = "Y") {
+    Print-ActionSummary $title $items
+    return (Confirm-Action $confirmPrompt $token -DefaultNo)
+}
+function Skip-IfDryRun([string]$action) {
+    if (-not $DryRun) { return $false }
+    Write-Host ("DRYRUN：{0} 已跳过执行。" -f $action)
+    return $true
+}
+function Start-DryRunMirrorCollect {
+    if (-not $DryRun) { return }
+    $script:CollectDryRunMirror = $true
+    $script:DryRunMirrorCommands = New-Object System.Collections.Generic.List[string]
+}
+function Stop-DryRunMirrorCollect {
+    $script:CollectDryRunMirror = $false
+}
+function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [int]$maxShow = 20) {
+    if (-not $DryRun) { return }
+    if (-not (Get-Variable -Name DryRunMirrorCommands -Scope Script -ErrorAction SilentlyContinue)) { return }
+    if ($null -eq $script:DryRunMirrorCommands) { return }
+    $count = $script:DryRunMirrorCommands.Count
+    if ($count -eq 0) { return }
+    Write-Host ("{0}：共 {1} 条" -f $title, $count)
+    $shown = 0
+    foreach ($cmd in $script:DryRunMirrorCommands) {
+        Write-Host $cmd
+        $shown++
+        if ($shown -ge $maxShow) { break }
+    }
+    if ($count -gt $maxShow) {
+        Write-Host ("... 另有 {0} 条未显示" -f ($count - $maxShow))
+    }
+}
+function Get-BuildSummary($cfg) {
+    $manualCount = @(收集ManualSkills $cfg).Count
+    $overrideCount = @(Get-OverridesDirs).Count
+    return ("构建摘要：mappings={0}，imports(manual)={1}，overrides={2}，targets={3}，sync_mode={4}" -f $cfg.mappings.Count, $manualCount, $overrideCount, $cfg.targets.Count, $cfg.sync_mode)
+}
+function Write-BuildSummary($cfg = $null) {
+    try {
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        Write-Host (Get-BuildSummary $cfg)
+    }
+    catch {}
+}
+function Format-VendorPreview($vendors) {
+    return ($vendors | ForEach-Object { "$($_.name) :: $($_.repo)" })
+}
+function Get-DisplayVendor($item) {
+    if ($null -eq $item) { return "" }
+    if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0) {
+        $display = [string]$item.display_vendor
+        if (-not [string]::IsNullOrWhiteSpace($display)) { return $display }
+    }
+    return [string]$item.vendor
+}
+function Format-MappingPreview($items, [string]$targetPrefix = "") {
+    $prefix = if ([string]::IsNullOrWhiteSpace($targetPrefix)) { "" } else { ($targetPrefix + " ") }
+    return ($items | ForEach-Object { "$prefix$(Get-DisplayVendor $_) :: $($_.from) -> $($_.to)" })
+}
+function Format-SkillPreview($items) {
+    return ($items | ForEach-Object { "$(Get-DisplayVendor $_) :: $($_.from)" })
+}
+function Preflight {
+    Need (Get-Command git -ErrorAction SilentlyContinue) "未找到 git，请先安装 Git 并确保在 PATH 中。"
+    Need (Get-Command robocopy -ErrorAction SilentlyContinue) "未找到 robocopy，请确保在 PATH 中（Windows 默认包含）。"
+    EnsureDir $VendorDir
+    EnsureDir $AgentDir
+    EnsureDir $OverridesDir
+    EnsureDir $ImportDir
+}
+function RoboMirror([string]$src, [string]$dst) {
+    EnsureDir $dst
+    $cmd = "robocopy `"$src`" `"$dst`" /MIR /NFL /NDL /NJH /NJS /NP"
+    if ($DryRun) {
+        if ($script:CollectDryRunMirror) {
+            if (-not $script:DryRunMirrorCommands) {
+                $script:DryRunMirrorCommands = New-Object System.Collections.Generic.List[string]
+            }
+            $script:DryRunMirrorCommands.Add($cmd) | Out-Null
+        }
+        else {
+            Write-Host $cmd
+        }
+        return
+    }
+    & robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1 |
+    Where-Object { $_ -and ([string]$_).Trim() } |
+    Out-Host
+    if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
+}
+function Get-ExistingFileSystemItem([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        return Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        # Only a genuine missing path is an acceptable null result. Access,
+        # provider, and malformed-path failures must remain visible to callers
+        # that are deciding whether a write or cleanup boundary is safe.
+        if ($_.Exception -is [System.Management.Automation.ItemNotFoundException] -or
+            [string]$_.CategoryInfo.Category -eq 'ObjectNotFound') {
+            return $null
+        }
+        throw
+    }
+}
+
+function Test-PathEntry([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        Get-Item -LiteralPath $path -Force -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+function Is-ReparsePoint([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    }
+    catch {
+        return $false
+    }
+}
+function Test-AncestorChainHasReparse([string]$path) {
+    # Walks from $path up to the filesystem root. Lexical containment
+    # (Is-PathInsideOrEqual) cannot see a junction above a managed root, so
+    # write-boundary callers must also reject a reparse anywhere in the
+    # physical ancestor chain. Segments that do not exist yet cannot be
+    # reparse points and are skipped.
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try { $cursor = [IO.Path]::GetFullPath($path) }
+    catch { return $true }
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        try {
+            $item = Get-ExistingFileSystemItem $cursor
+            if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        catch {
+            # A path that exists but cannot be inspected is not a safe write
+            # boundary.  Get-ExistingFileSystemItem 已把真正“不存在”的段折叠为
+            # $null 返回（循环内跳过），走到 catch 的一律是无法检查的状态，
+            # 必须按不安全处理；.NET Exists 对 access-denied 同样返回 false，
+            # 不能用它在这里做二次判别。
+            return $true
+        }
+        $parent = [IO.Directory]::GetParent($cursor)
+        $cursor = if ($null -ne $parent) { $parent.FullName } else { $null }
+    }
+    return $false
+}
+function Is-PathUnder([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    $rootNorm = $root.TrimEnd("\")
+    return $path.StartsWith(($rootNorm + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+function Is-PathInsideOrEqual([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    try {
+        $pathNorm = [System.IO.Path]::GetFullPath($path).TrimEnd("\")
+        $rootNorm = [System.IO.Path]::GetFullPath($root).TrimEnd("\")
+    }
+    catch {
+        return $false
+    }
+    if ($pathNorm.Equals($rootNorm, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $pathNorm.StartsWith(($rootNorm + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+function Is-DriveRoot([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        $full = [System.IO.Path]::GetFullPath($path).TrimEnd("\")
+    }
+    catch {
+        return $false
+    }
+    return ($full -match "^[A-Za-z]:$")
+}
+function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $p = $path.Trim().Replace("/", "\")
+    if ([System.IO.Path]::IsPathRooted($p)) { return $false }
+    if ($p -match "^[A-Za-z]:") { return $false }
+    $parts = $p.Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($part in $parts) {
+        # Win32 打开路径时剥掉每段尾部的点与空格：'.. ' 会被归一成 '..' 触发穿越。
+        if ($part -cmatch '^[\s.]*\.\.[\s.]*$') { return $false }
+    }
+    if (-not $AllowDot -and $p -eq ".") { return $false }
+    return $true
+}
+function Assert-SafeTargetDir([string]$targetPath, [switch]$AllowManagedWholeRootJunction) {
+    Need (-not [string]::IsNullOrWhiteSpace($targetPath)) "target path 不能为空"
+    Need (-not (Is-DriveRoot $targetPath)) ("target path 不能是盘符根目录：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $Root $targetPath)) ("target path 不能是仓库根或其父级：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $AgentDir $targetPath)) ("target path 不能是 agent/ 或其父级：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $targetPath $AgentDir)) ("target path 不能位于 agent/ 内部：{0}" -f $targetPath)
+
+    $fullTarget = [IO.Path]::GetFullPath($targetPath).TrimEnd('\', '/')
+    $targetItem = Get-ExistingFileSystemItem $fullTarget
+    if ($null -ne $targetItem) {
+        Need $targetItem.PSIsContainer ("target path 必须是目录：{0}" -f $targetPath)
+        $targetIsReparse = ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        if ($targetIsReparse) {
+            $managedWholeRoot = $false
+            if ($AllowManagedWholeRootJunction) {
+                $currentTarget = Get-ReparsePointTargetFullPath $fullTarget
+                $managedWholeRoot = [string]::Equals([string]$currentTarget, [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+            }
+            Need $managedWholeRoot ("target path 不允许是 reparse point：{0}" -f $targetPath)
+        }
+    }
+
+    $parent = [IO.Directory]::GetParent($fullTarget)
+    Need ($null -ne $parent -and -not (Test-AncestorChainHasReparse $parent.FullName)) ("target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
+}
+function Is-ExcludedPath([string]$path, [string[]]$roots) {
+    foreach ($r in $roots) {
+        if (Is-PathUnder $path $r) { return $true }
+    }
+    return $false
+}
+function Backup-DirIfNeeded([string]$path) {
+    if (-not (Test-PathEntry $path)) { return $null }
+    if (Is-ReparsePoint $path) { return $null }
+    $parent = Split-Path $path -Parent
+    $leaf = Split-Path $path -Leaf
+    $bak = Join-Path $parent ("{0}.bak.{1}-{2}" -f $leaf, (Get-Date -Format "yyyyMMdd-HHmmss"), [guid]::NewGuid().ToString('N'))
+    Invoke-MoveItem $path $bak
+    return $bak
+}
+function Backup-OverrideDir([string]$overrideName) {
+    $override = Resolve-OverrideDir $overrideName
+    if ($null -eq $override -or @($override).Count -eq 0) { return $null }
+    $src = [string]$override[0].FullName
+    if (-not (Test-PathEntry $src)) { return $null }
+    $category = [string]$override[0].override_category
+    if ([string]::IsNullOrWhiteSpace($category)) { $category = "legacy" }
+    $bakRoot = Join-Path (Join-Path $OverridesDir ".bak") $category
+    EnsureDir $bakRoot
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $bakName = "{0}.bak.{1}-{2}" -f $overrideName, $stamp, [guid]::NewGuid().ToString('N')
+    $bakPath = Join-Path $bakRoot $bakName
+    Invoke-MoveItem $src $bakPath
+    return $bakPath
+}
+function New-Junction([string]$linkPath, [string]$targetPath, [switch]$QuietIfUnchanged) {
+    $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
+    Need (-not (Test-AncestorChainHasReparse $targetFullPath)) ("junction target path 的物理祖先链不允许存在 reparse point：{0}" -f $targetPath)
+    $linkParent = Split-Path $linkPath -Parent
+    Need (-not (Test-AncestorChainHasReparse $linkParent)) ("junction link path 的物理父级链不允许存在 reparse point：{0}" -f $linkPath)
+    EnsureDir $targetPath
+    EnsureDir $linkParent
+
+    if (Test-PathEntry $linkPath) {
+        if (Is-ReparsePoint $linkPath) {
+            $currentTargetPath = Get-ReparsePointTargetFullPath $linkPath
+            if (-not [string]::IsNullOrWhiteSpace($currentTargetPath) -and $currentTargetPath.Equals($targetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                if (-not $QuietIfUnchanged) {
+                    Log ("Junction 已存在且目标一致，跳过重建：{0}" -f $linkPath)
+                }
+                return
+            }
+            Invoke-RemoveItem $linkPath -Recurse
+        }
+        else {
+            Backup-DirIfNeeded $linkPath | Out-Null
+        }
+    }
+
+    # mklink /J: 不需要管理员权限（Junction）
+    Invoke-MklinkJunction $linkPath $targetPath
+}
+function Get-ReparsePointTargetFullPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+    $targetProp = $item.PSObject.Properties["Target"]
+    if ($null -eq $targetProp) { return $null }
+    $targetValue = $targetProp.Value
+    if ($targetValue -is [array]) {
+        if ($targetValue.Count -le 0) { return $null }
+        $targetValue = $targetValue[0]
+    }
+    $targetRaw = [string]$targetValue
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
+    try {
+        return [System.IO.Path]::GetFullPath($targetRaw).TrimEnd("\")
+    }
+    catch {
+        return $null
+    }
+}
+function Find-LatestBackup([string]$path) {
+    $parent = Split-Path $path -Parent
+    $leaf = Split-Path $path -Leaf
+    # -Filter/-Path 会把叶名中的 [ ] 当通配符集，特殊目录名会静默丢备份发现：
+    # 枚举用 -LiteralPath，匹配用客户端前缀比较。
+    $bakPrefix = "{0}.bak." -f $leaf
+    Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name.StartsWith($bakPrefix, [StringComparison]::Ordinal) } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+}
+function Remove-JunctionAndRestore([string]$linkPath) {
+    if (Is-ReparsePoint $linkPath) {
+        Invoke-RemoveItem $linkPath -Recurse
+        $bak = Find-LatestBackup $linkPath
+        if ($bak) {
+            Invoke-MoveItem $bak.FullName $linkPath
+        }
+    }
+    else {
+        $bak = Find-LatestBackup $linkPath
+        if ($bak) {
+            if (Confirm-Action ("检测到备份：{0}，是否恢复？" -f $bak.Name) "Y" -DefaultNo) {
+                if (Test-Path -LiteralPath $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
+                Invoke-MoveItem $bak.FullName $linkPath
+            }
+            else {
+                Write-Host ("已保留备份未恢复：{0}" -f $bak.FullName)
+            }
+        }
+        else {
+            Write-Host "当前不是链接目录：$linkPath"
+        }
+    }
+}
+function VendorPath([string]$vendorName) {
+    return (Join-Path $VendorDir $vendorName)
+}
+function Normalize-Name([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+    $n = $name.Trim()
+    $n = $n -replace "[\\/]", "-"
+    $n = $n -replace "[^A-Za-z0-9_-]", "-"
+    $n = $n -replace "_", "-"
+    $n = $n -replace "-{2,}", "-"
+    $n = $n.Trim("-")
+    $n = $n.ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($n)) { return $null }
+    return $n
+}
+function Normalize-CompactName([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+    $n = $name.ToLowerInvariant()
+    $n = $n -replace "[^a-z0-9]", ""
+    if ([string]::IsNullOrWhiteSpace($n)) { return $null }
+    return $n
+}
+function Get-SkillCandidatesByRelevance([object[]]$items, [string]$query) {
+    $ordered = @($items | Sort-Object rel)
+    if ($ordered.Count -le 1 -or [string]::IsNullOrWhiteSpace($query)) { return $ordered }
+
+    $qLeaf = Split-Path $query -Leaf
+    $qNorm = Normalize-Name $qLeaf
+    $qCompact = Normalize-CompactName $qLeaf
+
+    $scored = @()
+    foreach ($item in $ordered) {
+        $leaf = [string]$item.leaf
+        $rel = [string]$item.rel
+        $leafNorm = Normalize-Name $leaf
+        $leafCompact = Normalize-CompactName $leaf
+        $score = 0
+
+        if (-not [string]::IsNullOrWhiteSpace($qNorm) -and -not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            if ($qNorm -eq $leafNorm) { $score += 1000 }
+            elseif ($qNorm.EndsWith("-$leafNorm") -or $leafNorm.EndsWith("-$qNorm")) { $score += 700 }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($qCompact) -and -not [string]::IsNullOrWhiteSpace($leafCompact)) {
+            if ($qCompact -eq $leafCompact) { $score += 900 }
+            elseif ($qCompact.Contains($leafCompact) -or $leafCompact.Contains($qCompact)) { $score += 500 }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($qNorm) -and -not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            if ($qNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+                if ($leafNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+                    $score += 650
+                }
+            }
+        }
+
+        $relGit = ($rel -replace "\\", "/")
+        if ($relGit -match '^(\.claude/skills|skills)(/|$)') { $score += 20 }
+
+        $scored += [pscustomobject]@{
+            item  = $item
+            score = $score
+        }
+    }
+
+    return @($scored | Sort-Object @{Expression = "score"; Descending = $true }, @{Expression = { $_.item.rel } } | ForEach-Object { $_.item })
+}
+function Normalize-NameWithNotice([string]$name, [string]$label = "名称") {
+    $norm = Normalize-Name $name
+    Need (-not [string]::IsNullOrWhiteSpace($norm)) ("{0} 无法规范化，请更换名称：{1}" -f $label, $name)
+    if ($name -ne $norm) {
+        Write-Host ("{0} 已自动规范化：{1} -> {2}" -f $label, $name, $norm) -ForegroundColor Yellow
+    }
+    return $norm
+}
+function Normalize-SkillPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "." }
+    $p = $path.Trim()
+    $p = $p -replace "/", "\"
+    $p = $p.Trim("\")
+    if ([string]::IsNullOrWhiteSpace($p)) { return "." }
+    return $p
+}
+function To-GitPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "." }
+    $p = $path -replace "\\", "/"
+    if ($p -eq ".") { return "." }
+    return $p
+}
+function Clear-SkillsCache {
+    $script:SkillCandidatesCache = @{}
+    $script:SkillListCache = @{}
+}
+function Test-IsSkillDir([string]$path) {
+    if (-not (Test-Path $path)) { return $false }
+    $markers = @("SKILL.md", "AGENTS.md", "GEMINI.md", "CLAUDE.md")
+    foreach ($m in $markers) {
+        if (Test-Path (Join-Path $path $m)) { return $true }
+    }
+    return $false
+}
+function Get-SkillCandidates([string]$base) {
+    if (-not (Get-Variable -Name SkillCandidatesCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillCandidatesCache = @{} }
+    if ($null -eq $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
+    if ($script:SkillCandidatesCache.ContainsKey($base)) {
+        return ,@($script:SkillCandidatesCache[$base])
+    }
+    $items = [Collections.Generic.List[object]]::new()
+    if (-not (Test-Path $base)) { return ,@() }
+
+    # Find all potential marker files
+    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
+
+    $seenDirs = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($f in $found) {
+        $dir = $f.Directory.FullName
+        if (-not $seenDirs.Add($dir)) { continue }
+
+        $rel = $dir.Substring($base.Length).TrimStart("\\")
+        if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
+        $items.Add([pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }) | Out-Null
+    }
+    # Keep array shape for single-item results; callers rely on .Count.
+    $items = @($items.ToArray() | Sort-Object rel)
+    $script:SkillCandidatesCache[$base] = $items
+    return ,$items
+}
+function Format-SkillCandidates([object[]]$items, [string]$base, [string]$query = $null) {
+    if ($items.Count -eq 0) { return "" }
+    $ranked = Get-SkillCandidatesByRelevance $items $query
+    $lines = @()
+    $lines += ("可选路径（共 {0}）：" -f $ranked.Count)
+    foreach ($i in ($ranked | Select-Object -First 20)) {
+        $lines += ("- {0}" -f $i.rel)
+    }
+    if ($ranked.Count -gt 20) {
+        $lines += ("... 另有 {0} 项未显示" -f ($ranked.Count - 20))
+    }
+    $lines += ("提示：仓库内未发现 SKILL.md，但已搜索 AGENTS.md, GEMINI.md, CLAUDE.md 等入口文件。")
+    return ($lines -join [Environment]::NewLine)
+}
+function Resolve-SkillPath([string]$base, [string]$skillPath) {
+    $src = if ($skillPath -eq ".") { $base } else { Join-Path $base $skillPath }
+    if (Test-IsSkillDir $src) { return $skillPath }
+
+    # Common shorthand: allow "--skill foo" to resolve to "skills/foo".
+    if ($skillPath -ne "." -and $skillPath -notmatch "[\\/]") {
+        $prefixed = Join-Path "skills" $skillPath
+        $prefixedSrc = Join-Path $base $prefixed
+        if (Test-IsSkillDir $prefixedSrc) {
+            Write-Host ("未找到指定路径，已自动补全为：{0}" -f $prefixed)
+            return $prefixed
+        }
+    }
+
+    $candidates = Get-SkillCandidates $base
+    Need ($candidates.Count -gt 0) "仓库内未发现任何有效的技能标记文件（SKILL.md, AGENTS.md, GEMINI.md, CLAUDE.md）"
+
+    if ($skillPath -ne ".") {
+        $leaf = Split-Path $skillPath -Leaf
+        $matches = $candidates | Where-Object { $_.leaf -eq $leaf }
+        if ($matches.Count -eq 1) {
+            Write-Host ("未找到指定路径，已按同名目录自动修正为：{0}" -f $matches[0].rel)
+            return $matches[0].rel
+        }
+        if ($matches.Count -gt 1) {
+            $msg = "未找到技能入口文件：{0}。提示：同名候选过多，请用 --skill 指定准确路径。" -f $src
+            $msg += [Environment]::NewLine + (Format-SkillCandidates $matches $base $skillPath)
+            throw $msg
+        }
+
+        $leafNorm = Normalize-Name $leaf
+        $leafCompact = Normalize-CompactName $leaf
+        if (-not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            $fuzzyMatches = @($candidates | Where-Object {
+                    $candNorm = Normalize-Name $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candNorm)) { return $false }
+                    return ($leafNorm -eq $candNorm) -or ($leafNorm.EndsWith("-$candNorm"))
+                })
+            if ($fuzzyMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按后缀匹配自动修正为：{0}" -f $fuzzyMatches[0].rel)
+                return $fuzzyMatches[0].rel
+            }
+            if ($fuzzyMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：后缀匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $fuzzyMatches $base $skillPath)
+                throw $msg
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($leafCompact)) {
+            $compactMatches = @($candidates | Where-Object {
+                    $candCompact = Normalize-CompactName $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candCompact)) { return $false }
+                    return ($leafCompact -eq $candCompact) -or ($leafCompact.Contains($candCompact)) -or ($candCompact.Contains($leafCompact))
+                })
+            if ($compactMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按紧凑匹配自动修正为：{0}" -f $compactMatches[0].rel)
+                return $compactMatches[0].rel
+            }
+            if ($compactMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：紧凑匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $compactMatches $base $skillPath)
+                throw $msg
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($leafNorm) -and $leafNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+            $semanticMatches = @($candidates | Where-Object {
+                    $candNorm = Normalize-Name $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candNorm)) { return $false }
+                    return ($candNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)")
+                })
+            if ($semanticMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按语义匹配自动修正为：{0}" -f $semanticMatches[0].rel)
+                return $semanticMatches[0].rel
+            }
+            if ($semanticMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：语义匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $semanticMatches $base $skillPath)
+                throw $msg
+            }
+        }
+
+        if ($candidates.Count -eq 1) {
+            Write-Host ("未找到指定路径，仓库仅有一个技能入口目录，已自动使用：{0}" -f $candidates[0].rel)
+            return $candidates[0].rel
+        }
+    }
+
+    if ($skillPath -eq "." -and $candidates.Count -eq 1) {
+        Write-Host ("仓库仅有一个技能入口目录，已自动使用：{0}" -f $candidates[0].rel)
+        return $candidates[0].rel
+    }
+
+    $msg = "未找到技能入口文件：{0}。提示：请用 --skill 指定子目录（常见前缀：skills/、plugins/<plugin>/skills/）。" -f $src
+    $msg += [Environment]::NewLine + (Format-SkillCandidates $candidates $base $skillPath)
+    throw $msg
+}
+function Split-Args([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return @() }
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object System.Text.StringBuilder
+    $inSingle = $false
+    $inDouble = $false
+    $everQuoted = $false
+    $chars = $line.ToCharArray()
+    for ($i = 0; $i -lt $chars.Length; $i++) {
+        $ch = $chars[$i]
+        if ($inDouble -and $ch -eq "\") {
+            if ($i + 1 -lt $chars.Length -and ($chars[$i + 1] -eq '"' -or $chars[$i + 1] -eq "\")) {
+                $i++
+                $null = $sb.Append($chars[$i])
+                continue
+            }
+        }
+        if ($ch -eq "'" -and -not $inDouble) {
+            $inSingle = -not $inSingle
+            $everQuoted = $true
+            continue
+        }
+        if ($ch -eq '"' -and -not $inSingle) {
+            $inDouble = -not $inDouble
+            $everQuoted = $true
+            continue
+        }
+        if ([char]::IsWhiteSpace($ch) -and -not $inSingle -and -not $inDouble) {
+            if ($sb.Length -gt 0 -or $everQuoted) {
+                $tokens.Add($sb.ToString()) | Out-Null
+                $sb.Clear() | Out-Null
+                $everQuoted = $false
+            }
+            continue
+        }
+        $null = $sb.Append($ch)
+    }
+    if ($inSingle -or $inDouble) {
+        throw "参数解析失败：存在未闭合的引号。"
+    }
+    if ($sb.Length -gt 0 -or $everQuoted) { $tokens.Add($sb.ToString()) | Out-Null }
+    return $tokens.ToArray()
+}
+function Split-RepoSkillSuffix([string]$repoToken) {
+    if ([string]::IsNullOrWhiteSpace($repoToken)) { return $null }
+    $token = $repoToken.Trim()
+    if ($token -notmatch "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") { return $null }
+    $parts = $token.Split("@", 2)
+    if ($parts.Count -ne 2) { return $null }
+    if ([string]::IsNullOrWhiteSpace($parts[0]) -or [string]::IsNullOrWhiteSpace($parts[1])) { return $null }
+    return [pscustomobject]@{
+        repo = $parts[0]
+        skill = $parts[1]
+    }
+}
+function Looks-LikeRepoInput([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $v = $value.Trim().Trim("'`"")
+    if (Test-LocalZipRepoInput $v) { return $true }
+    if ($v -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") { return $true }
+    if ($v -match "^(git@github\.com:|ssh://git@github\.com/|https?://github\.com/|github\.com/)") { return $true }
+    return $false
+}
+function Extract-SkillFromGitHubTreeUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    $v = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($v -notmatch "^https?://github\.com/[^/]+/[^/]+/tree/[^/]+/(.+)$") { return $null }
+    return $Matches[1]
+}
+function Convert-GitHubTreeUrlToAddTokens([string]$value) {
+    $skill = Extract-SkillFromGitHubTreeUrl $value
+    if ([string]::IsNullOrWhiteSpace($skill)) { return $null }
+    $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
+    $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
+    return ,@($repo, "--skill", $skill, "--sparse")
+}
+function Get-InstallScriptMappings() {
+    if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }
+    return @()
+}
+function Resolve-InstallScriptMapping([string]$url) {
+    if ([string]::IsNullOrWhiteSpace($url)) { return $null }
+    foreach ($entry in @(Get-InstallScriptMappings)) {
+        $match = [string]$entry.match
+        if ([string]::IsNullOrWhiteSpace($match)) { continue }
+        $isMatch = if ($entry.PSObject.Properties.Match("regex").Count -gt 0 -and [bool]$entry.regex) {
+            $url -match $match
+        }
+        else {
+            $url.Contains($match)
+        }
+        if (-not $isMatch) { continue }
+        $repo = [string]$entry.repo
+        if ([string]::IsNullOrWhiteSpace($repo)) { continue }
+        $tokens = @((Normalize-RepoUrl $repo))
+        $skill = $null
+        if ($entry.PSObject.Properties.Match("skill").Count -gt 0) { $skill = [string]$entry.skill }
+        if (-not [string]::IsNullOrWhiteSpace($skill)) { $tokens += @("--skill", $skill) }
+        return $tokens
+    }
+    return $null
+}
+function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
+    if (-not $tokens -or $tokens.Count -eq 0) { return $null }
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -eq 0) { return $null }
+    $first = ([string]$items[0]).Trim()
+
+    if ($first -eq "/plugin") {
+        if ($items.Count -ge 4 -and ([string]$items[1]).ToLowerInvariant() -eq "marketplace" -and ([string]$items[2]).ToLowerInvariant() -eq "add") {
+            return ,@($items[3..($items.Count - 1)])
+        }
+        if ($items.Count -ge 3 -and ([string]$items[1]).ToLowerInvariant() -eq "install") {
+            $target = [string]$items[2]
+            if ($target -notmatch "/") { $target = "thedotmack/$target" }
+            $rest = @($items | Select-Object -Skip 3)
+            return ,@(@($target) + $rest)
+        }
+    }
+
+    if ($first -eq '$skill-installer') {
+        $rest = @($items | Select-Object -Skip 1)
+        if ($rest.Count -gt 0 -and ([string]$rest[0]).ToLowerInvariant() -eq "install") {
+            $rest = @($rest | Select-Object -Skip 1)
+        }
+        if ($rest.Count -eq 0) { return $null }
+        $target = [string]$rest[0]
+        $targetTokens = Convert-GitHubTreeUrlToAddTokens $target
+        if ($targetTokens) { return ,@(@($targetTokens) + @($rest | Select-Object -Skip 1)) }
+        if ($target -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+            return ,@(@($target) + @($rest | Select-Object -Skip 1))
+        }
+        throw '$skill-installer 的 bare skill name 已退役；请提供 owner/repo 或完整 GitHub tree URL，以便锁定真实来源。'
+    }
+
+    $treeTokens = Convert-GitHubTreeUrlToAddTokens $first
+    if ($items.Count -eq 1 -and $treeTokens) { return ,@($treeTokens) }
+
+    if ($first -eq "npm" -and $items.Count -ge 4) {
+        $verb = ([string]$items[1]).ToLowerInvariant()
+        $flag = ([string]$items[2]).ToLowerInvariant()
+        $pkg = [string]$items[3]
+        if (($verb -eq "install" -or $verb -eq "i") -and $flag -eq "-g") {
+            if ($pkg -match "^@([^/]+)/([^/]+)$") { return ,@("{0}/{1}" -f $Matches[1], $Matches[2]) }
+            throw "npm install -g 仅支持 scoped package（例如 @owner/repo）。"
+        }
+    }
+
+    if ($first -eq "curl" -or $first -eq "Invoke-RestMethod") {
+        $url = $null
+        foreach ($item in $items) {
+            $candidate = [string]$item
+            if ($candidate -match "^https?://") { $url = $candidate; break }
+        }
+        $mapped = Resolve-InstallScriptMapping $url
+        if ($mapped) { return ,@($mapped) }
+        throw ("暂不支持直接解析 {0} 安装脚本，请先定位其对应仓库。" -f $first)
+    }
+
+    return $null
+}
+function Resolve-UniqueVendorName($cfg, [string]$vendorName, [string]$repo, [bool]$AllowExistingSameRepo = $false) {
+    $baseName = Normalize-NameWithNotice $vendorName "vendor 名称"
+    $identityKey = Get-RepoIdentityKey $repo
+    $existing = @($cfg.vendors | Where-Object { $_.name -eq $baseName })
+    if ($existing.Count -eq 0) { return $baseName }
+    foreach ($item in $existing) {
+        if (Is-SameRepository ([string]$item.repo) $repo) {
+            if ($AllowExistingSameRepo) { return $baseName }
+            throw ("同一技能库已存在，禁止重复占用 vendor 名称：{0}；identityKey={1}" -f $baseName, $identityKey)
+        }
+    }
+    $suffix = 2
+    while ($true) {
+        $candidate = "{0}-{1}" -f $baseName, $suffix
+        if ((@($cfg.vendors | Where-Object { $_.name -eq $candidate }).Count) -eq 0) { return $candidate }
+        $suffix++
+    }
+}
+function Parse-AddArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        repo = $null
+        skills = @()
+        ref = $null
+        mode = "manual"
+        sparse = $false
+        name = $null
+        skillSpecified = $false
+        modeSpecified = $false
+    }
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = $tokens[$i]
+        if ($t -match "^-") {
+            $key = $t.ToLowerInvariant()
+            if ($key -eq "--sparse") { $result.sparse = $true; continue }
+            if ($key -match "^--skill=") {
+                $val = $t.Substring(8)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--skill" }
+                $result.skills += $val
+                $result.skillSpecified = $true
+                continue
+            }
+            if ($key -match "^--ref=") {
+                $val = $t.Substring(6)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--ref" }
+                if (Test-LooksLikeRepoUrl $val) {
+                    throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                }
+                $result.ref = $val
+                continue
+            }
+            if ($key -match "^--mode=") {
+                $val = $t.Substring(7)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--mode" }
+                $result.mode = $val
+                $result.modeSpecified = $true
+                continue
+            }
+            if ($key -match "^--name=") {
+                $val = $t.Substring(7)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--name" }
+                $result.name = $val
+                continue
+            }
+      
+            if ($key -eq "--skill" -or $key -eq "--ref" -or $key -eq "--mode" -or $key -eq "--name") {
+                if ($i + 1 -ge $tokens.Count) { throw "参数缺少值：$t" }
+                $val = $tokens[++$i]
+                if ($val -match "^-") { throw "参数缺少值：$t" }
+                if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
+                switch ($key) {
+                    "--skill" {
+                        $result.skills += $val
+                        $result.skillSpecified = $true
+                    }
+                    "--ref" {
+                        if (Test-LooksLikeRepoUrl $val) {
+                            throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                        }
+                        $result.ref = $val
+                    }
+                    "--mode" {
+                        $result.mode = $val
+                        $result.modeSpecified = $true
+                    }
+                    "--name" { $result.name = $val }
+                }
+                continue
+            }
+      
+            # Handle flags that take a value but we want to ignore (like --agent, -a)
+            if ($key -eq "--agent" -or $key -eq "-a") {
+                if ($i + 1 -lt $tokens.Count) { $i++ }
+                continue
+            }
+      
+            # Handle boolean flags we want to ignore
+            if ($key -eq "-g" -or $key -eq "--global" -or $key -eq "-y" -or $key -eq "--yes") {
+                continue
+            }
+
+            Log ("未知参数：$t，已跳过。") "WARN"
+        }
+        else {
+            if (-not $result.repo) { $result.repo = $t }
+        }
+    }
+    $repoSkill = Split-RepoSkillSuffix $result.repo
+    if ($repoSkill) {
+        if ($result.skills.Count -gt 0) {
+            throw ("repo@skill 写法不能同时传 --skill：repo={0} suffixSkill={1}" -f $repoSkill.repo, $repoSkill.skill)
+        }
+        $result.repo = $repoSkill.repo
+        $result.skills += $repoSkill.skill
+        $result.skillSpecified = $true
+        Write-Host ("检测到 repo@skill 写法，已自动转换为：repo={0} --skill {1}" -f $repoSkill.repo, $repoSkill.skill) -ForegroundColor Yellow
+    }
+    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> [--skill <name>]"
+    Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
+    if ($result.skills.Count -eq 0) { $result.skills += "." }
+    foreach ($skill in $result.skills) {
+        if ([string]::IsNullOrWhiteSpace([string]$skill)) { throw "参数值不能为空：--skill" }
+        $normalizedSkill = Normalize-SkillPath ([string]$skill)
+        Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("skill 路径非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $skill)
+    }
+    return $result
+}
+function Get-AddTokensFromNpx([string[]]$tokens) {
+    if ($tokens.Count -eq 1) { $tokens = Split-Args $tokens[0] }
+    if ($tokens.Count -eq 0) { throw "npx 参数为空。" }
+    $first = $tokens[0].ToLowerInvariant()
+    if ($first -eq "npx" -or $first -eq "npx.cmd") {
+        if ($tokens.Count -eq 1) { throw "npx 参数为空。" }
+        $tokens = $tokens[1..($tokens.Count - 1)]
+    }
+    if ($tokens.Count -ge 2 -and $tokens[0].ToLowerInvariant() -eq "skills" -and $tokens[1].ToLowerInvariant() -eq "add") {
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
+        return ,@($tokens[2..($tokens.Count - 1)])
+    }
+    if ($tokens[0].ToLowerInvariant() -eq "add-skill") {
+        if ($tokens.Count -ge 2) { return ,@($tokens[1..($tokens.Count - 1)]) }
+        throw "缺少 repo 参数。示例：add <repo> [--skill <name>]"
+    }
+    throw "不支持的 npx 子命令。仅支持：skills add / add-skill"
+}
+function Get-AddTokensFromCommandLineTokens([string[]]$tokens) {
+    if (-not $tokens -or $tokens.Count -eq 0) { return @() }
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($t in $tokens) {
+        if ([string]::IsNullOrWhiteSpace($t)) { continue }
+        $normalized.Add($t)
+    }
+    if ($normalized.Count -eq 0) { return @() }
+    $tokens = $normalized.ToArray()
+
+    $head = $tokens[0].Trim().Trim("'`"")
+    $headNorm = ($head -replace "/", "\").ToLowerInvariant()
+    if ($headNorm -match "(^|\\)skills\.(ps1|cmd)$") {
+        if ($tokens.Count -eq 1) { throw "缺少子命令。示例：add <repo> [--skill <name>]" }
+        $tokens = $tokens[1..($tokens.Count - 1)]
+        if ($tokens.Count -eq 0) { throw "缺少子命令。示例：add <repo> [--skill <name>]" }
+        $headNorm = ($tokens[0].Trim().Trim("'`"") -replace "/", "\").ToLowerInvariant()
+    }
+
+    if ($headNorm -eq "npx" -or $headNorm -eq "npx.cmd") {
+        return Get-AddTokensFromNpx $tokens
+    }
+    if ($headNorm -eq "skills") {
+        if ($tokens.Count -eq 1) { throw "缺少子命令。仅支持：skills add <repo> [--skill <name>]" }
+        $sub = $tokens[1].ToLowerInvariant()
+        if ($sub -ne "add") { throw "不支持的 skills 子命令。仅支持：skills add" }
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
+        return ,@($tokens[2..($tokens.Count - 1)])
+    }
+    if ($headNorm -eq "add") {
+        if ($tokens.Count -eq 1) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
+        return ,@($tokens[1..($tokens.Count - 1)])
+    }
+    return ,@($tokens)
+}
+function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
+    $merged = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($filter)) {
+        $merged.Add($filter) | Out-Null
+    }
+    if ($tokens) {
+        foreach ($t in $tokens) {
+            if ($null -eq $t) { continue }
+            $merged.Add([string]$t) | Out-Null
+        }
+    }
+    # Unary comma keeps the empty array from being unrolled to $null by the
+    # function output pipeline; bare command invocations rely on this.
+    return ,($merged.ToArray())
+}

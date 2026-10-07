@@ -7,3 +7,4 @@ AGENTS.md text eol=lf
 CLAUDE.md text eol=lf
 GEMINI.md text eol=lf
 skills.ps1 text eol=crlf
+skills.lib/*.ps1 text eol=crlf
