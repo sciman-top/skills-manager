@@ -13,6 +13,7 @@ $Files = @(
     "Infrastructure/CodexCli.ps1",
     "Domain/SkillMetadata.ps1",
     "Core.ps1",
+    "Application/HostRegistry.ps1",
     "Application/SkillSupply.ps1",
     "Domain/OperationPlan.ps1",
     "Domain/ExecutionAdmission.ps1",
@@ -305,6 +306,7 @@ if (@($parseErrors).Count -gt 0) {
 }
 
 . (Join-Path $Src 'Infrastructure/AtomicFile.ps1')
+. (Join-Path $Src 'Application/HostRegistry.ps1')
 . (Join-Path $Src 'Application/GlobalRuleProjection.ps1')
 Sync-GlobalRuleGeneratedFiles -RepoRoot $Root -Check:$Check
 

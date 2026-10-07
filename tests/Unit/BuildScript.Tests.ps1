@@ -29,7 +29,7 @@ Describe "Build script" {
         for ($i = 0; $i -lt $files.Count; $i++) {
             $relativePath = $files[$i]
             $content = "# chunk-$i${Newline}chunk-$i"
-            if ($relativePath -in @('Infrastructure/AtomicFile.ps1', 'Application/GlobalRuleProjection.ps1')) {
+            if ($relativePath -in @('Infrastructure/AtomicFile.ps1', 'Application/HostRegistry.ps1', 'Application/GlobalRuleProjection.ps1')) {
                 $content = [IO.File]::ReadAllText((Join-Path $repoRoot "src/$relativePath")).Replace("`r`n", "`n").Replace("`n", $Newline)
             }
             $contents[$relativePath] = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")

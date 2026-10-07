@@ -40,6 +40,9 @@ $sourceTests = @{
     'src/Application/RuleDiscovery.ps1' = @('RuleDiscovery', 'RuleAudit', 'RuleEstate', 'ReadOnlyCli')
     'src/Application/RuleAudit.ps1' = @('RuleAudit', 'RuleEstate', 'ReadOnlyCli')
     'src/Application/RuleEstate.ps1' = @('RuleEstate')
+    # 宿主事实注册表：本体断言 + 三个直接消费方（规则投影/全域比对/发现）的
+    # 行为套件共同证明。
+    'src/Application/HostRegistry.ps1' = @('HostRegistry', 'GlobalRuleProjection', 'RuleEstate', 'RuleDiscovery')
     'src/Application/SkillCatalogCompiler.ps1' = @('SkillCatalogCompiler')
     'src/Application/SkillEligibilityPolicy.ps1' = @('SkillEligibilityPolicy')
     'src/Application/SkillProjectionPlanning.ps1' = @('SkillProjection', 'SkillProjectionProfiles')

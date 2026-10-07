@@ -254,7 +254,7 @@ function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsP
 function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName) {
     if ([string]::IsNullOrWhiteSpace($UserRoot)) { return $null }
     $root = Get-RuleEstateNormalizedPath $UserRoot
-    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') { @('GEMINI.md') } elseif ($HostName -eq 'workbuddy') { @('CODEBUDDY.md', 'CODEBUDDY.mdc') } else { @('CLAUDE.md') }
+    $names = @((Get-AgentHostFact $HostName).discovery_files)
     foreach ($name in $names) {
         $path = Join-Path $root $name
         if ([System.IO.File]::Exists($path)) {
@@ -267,88 +267,113 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
 }
 
 function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '', [string]$WorkBuddyUserRoot = '') {
-    $codex = Get-RuleEstateGlobalDocument $CodexUserRoot codex
-    $claude = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
-    $zcodeRoot = ''
-    $zcodeConfigured = $false
-    if (-not [string]::IsNullOrWhiteSpace($ZCodeUserRoot)) {
-        $zcodeRoot = Get-RuleEstateNormalizedPath $ZCodeUserRoot
-        $zcodeConfigured = [System.IO.Directory]::Exists($zcodeRoot)
-    }
-    $zcode = if ($zcodeConfigured) { Get-RuleEstateGlobalDocument $zcodeRoot zcode } else { $null }
-    $antigravityRoot = ''
-    $antigravityConfigured = $false
-    if (-not [string]::IsNullOrWhiteSpace($AntigravityUserRoot)) {
-        $antigravityRoot = Get-RuleEstateNormalizedPath $AntigravityUserRoot
-        $antigravityConfigured = [System.IO.Directory]::Exists($antigravityRoot)
-    }
-    $antigravity = if ($antigravityConfigured) { Get-RuleEstateGlobalDocument $antigravityRoot antigravity } else { $null }
-    $workbuddyRoot = if ([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)) { '' } else { Get-RuleEstateNormalizedPath $WorkBuddyUserRoot }
-    $workbuddyConfigured = -not [string]::IsNullOrWhiteSpace($workbuddyRoot) -and [IO.Directory]::Exists($workbuddyRoot)
-    $workbuddy = if ($workbuddyConfigured) { Get-RuleEstateGlobalDocument $workbuddyRoot workbuddy } else { $null }
+    # 比对按注册表顺序驱动：codex/claude 是必选根，其余宿主提供根且存在才
+    # 参与。delta 两两覆盖由前缀循环结构保证（宿主 j 只与更早宿主比较），
+    # 新宿主登记一条 fact 即进入全量比对。输出字段与 finding 文案是既有
+    # JSON 契约，逐字保留——含 releases 对象不含 workbuddy 字段的历史形状。
     $sections = New-Object System.Collections.Generic.List[object]
     $findings = New-Object System.Collections.Generic.List[object]
-    $documents = @(
-        [pscustomobject]@{ host = 'codex'; value = $codex },
-        [pscustomobject]@{ host = 'claude'; value = $claude }
-    )
-    if ($zcodeConfigured) { $documents += [pscustomobject]@{ host = 'zcode'; value = $zcode } }
-    if ($antigravityConfigured) { $documents += [pscustomobject]@{ host = 'antigravity'; value = $antigravity } }
-    if ($workbuddyConfigured) { $documents += [pscustomobject]@{ host = 'workbuddy'; value = $workbuddy } }
-    foreach ($document in $documents) {
-        $text = if ($null -eq $document.value) { '' } else { [string]$document.value.text }
-        if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $text '1'))) {
-            $findings.Add([pscustomobject][ordered]@{ code = 'global_contract_section_missing'; severity = 'error'; host = [string]$document.host; section = '1'; path = if ($null -eq $document.value) { '' } else { [string]$document.value.path }; disposition = 'adapt'; message = 'Global rule contract section 1 is missing.' }) | Out-Null
+    $globalRuleMissingMessages = @{
+        zcode = 'Configured ZCode user root has no non-empty AGENTS.md global rule.'
+        antigravity = 'Configured Antigravity user root has no non-empty GEMINI.md global rule.'
+        workbuddy = 'Configured WorkBuddy user root has no non-empty CODEBUDDY.md or CODEBUDDY.mdc rule.'
+    }
+    $deltaNotDistinctMessages = @{
+        codex = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.'
+        zcode = 'ZCode platform delta is identical to Codex or Claude; preserve host-specific loading and enforcement facts.'
+        antigravity = 'Antigravity platform delta is identical to another host; preserve host-specific loading and enforcement facts.'
+        workbuddy = 'WorkBuddy platform delta is identical to another host.'
+    }
+    $rootInputs = @{ codex = $CodexUserRoot; claude = $ClaudeUserRoot; zcode = $ZCodeUserRoot; antigravity = $AntigravityUserRoot; workbuddy = $WorkBuddyUserRoot }
+    $hostIds = @(Get-AgentHostIds)
+    $mandatoryIds = @('codex', 'claude')
+
+    $documents = @{}
+    $roots = @{}
+    $configured = @{}
+    foreach ($id in $hostIds) {
+        if ($id -in $mandatoryIds) {
+            $configured[$id] = $true
+            $documents[$id] = Get-RuleEstateGlobalDocument ([string]$rootInputs[$id]) $id
+        }
+        else {
+            $rootValue = [string]$rootInputs[$id]
+            $configured[$id] = -not [string]::IsNullOrWhiteSpace($rootValue) -and [System.IO.Directory]::Exists((Get-RuleEstateNormalizedPath $rootValue))
+            $roots[$id] = if ($configured[$id]) { Get-RuleEstateNormalizedPath $rootValue } else { '' }
+            $documents[$id] = if ($configured[$id]) { Get-RuleEstateGlobalDocument $roots[$id] $id } else { $null }
         }
     }
+
+    foreach ($id in @($hostIds | Where-Object { $_ -in $mandatoryIds -or $configured[$_] })) {
+        $document = $documents[$id]
+        $text = if ($null -eq $document) { '' } else { [string]$document.text }
+        if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $text '1'))) {
+            $findings.Add([pscustomobject][ordered]@{ code = 'global_contract_section_missing'; severity = 'error'; host = $id; section = '1'; path = if ($null -eq $document) { '' } else { [string]$document.path }; disposition = 'adapt'; message = 'Global rule contract section 1 is missing.' }) | Out-Null
+        }
+    }
+
     foreach ($name in @('1', 'A', 'C', 'D')) {
-        $codexText = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) $name }
-        $claudeText = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) $name }
-        $zcodeText = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) $name }
-        $antigravityText = if ($null -eq $antigravity) { '' } else { Get-RuleEstateMarkdownSection ([string]$antigravity.text) $name }
-        $workbuddyText = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateMarkdownSection ([string]$workbuddy.text) $name }
-        $aligned = -not [string]::IsNullOrWhiteSpace($codexText) -and $codexText -ceq $claudeText
-        if ($zcodeConfigured) { $aligned = $aligned -and $codexText -ceq $zcodeText }
-        if ($antigravityConfigured) { $aligned = $aligned -and $codexText -ceq $antigravityText }
-        if ($workbuddyConfigured) { $aligned = $aligned -and $codexText -ceq $workbuddyText }
-        $sections.Add([pscustomobject][ordered]@{
-            section = $name
-            aligned = $aligned
-            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-OperationSha256 $codexText }
-            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-OperationSha256 $claudeText }
-            zcode_hash = if ([string]::IsNullOrWhiteSpace($zcodeText)) { '' } else { Get-OperationSha256 $zcodeText }
-            antigravity_hash = if ([string]::IsNullOrWhiteSpace($antigravityText)) { '' } else { Get-OperationSha256 $antigravityText }
-            workbuddy_hash = if ([string]::IsNullOrWhiteSpace($workbuddyText)) { '' } else { Get-OperationSha256 $workbuddyText }
-        }) | Out-Null
+        $sectionText = @{}
+        foreach ($id in $hostIds) {
+            $document = $documents[$id]
+            $sectionText[$id] = if ($null -eq $document) { '' } else { Get-RuleEstateMarkdownSection ([string]$document.text) $name }
+        }
+        $aligned = -not [string]::IsNullOrWhiteSpace($sectionText['codex']) -and $sectionText['codex'] -ceq $sectionText['claude']
+        foreach ($id in @($hostIds | Where-Object { $_ -notin $mandatoryIds })) {
+            if ($configured[$id]) { $aligned = $aligned -and $sectionText['codex'] -ceq $sectionText[$id] }
+        }
+        $sectionEntry = [ordered]@{ section = $name; aligned = $aligned }
+        foreach ($id in $hostIds) {
+            $sectionEntry["{0}_hash" -f $id] = if ([string]::IsNullOrWhiteSpace($sectionText[$id])) { '' } else { Get-OperationSha256 $sectionText[$id] }
+        }
+        $sections.Add([pscustomobject]$sectionEntry) | Out-Null
         if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Global common section {0} is absent or different across configured hosts.' -f $name) }) | Out-Null }
-        if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
-            $tokens = @([regex]::Matches($codexText, '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
+        if ($name -eq 'A' -and $sectionText['codex'] -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
+            $tokens = @([regex]::Matches($sectionText['codex'], '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
             $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'error'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
         }
     }
-    $codexDelta = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) 'B' }
-    $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
-    $zcodeDelta = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) 'B' }
-    $antigravityDelta = if ($null -eq $antigravity) { '' } else { Get-RuleEstateMarkdownSection ([string]$antigravity.text) 'B' }
-    $workbuddyDelta = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateMarkdownSection ([string]$workbuddy.text) 'B' }
-    if ($workbuddyConfigured -and $null -eq $workbuddy) { $findings.Add([pscustomobject]@{ code = 'workbuddy_global_rule_missing'; severity = 'error'; path = (Join-Path $workbuddyRoot 'CODEBUDDY.md'); disposition = 'adapt'; message = 'Configured WorkBuddy user root has no non-empty CODEBUDDY.md or CODEBUDDY.mdc rule.' }) | Out-Null }
-    if ($workbuddyConfigured -and [string]::IsNullOrWhiteSpace($workbuddyDelta)) { $findings.Add([pscustomobject]@{ code = 'workbuddy_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'WorkBuddy global platform delta section B is missing.' }) | Out-Null }
-    $workbuddyDeltaDistinct = (-not $workbuddyConfigured) -or (-not [string]::IsNullOrWhiteSpace($workbuddyDelta) -and $workbuddyDelta -cne $codexDelta -and $workbuddyDelta -cne $claudeDelta -and $workbuddyDelta -cne $zcodeDelta -and $workbuddyDelta -cne $antigravityDelta)
-    if ($workbuddyConfigured -and -not [string]::IsNullOrWhiteSpace($workbuddyDelta) -and -not $workbuddyDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'WorkBuddy platform delta is identical to another host.' }) | Out-Null }
-    if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
-    if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
-    if ($zcodeConfigured -and $null -eq $zcode) { $findings.Add([pscustomobject]@{ code = 'zcode_global_rule_missing'; severity = 'error'; path = (Join-Path $zcodeRoot 'AGENTS.md'); disposition = 'adapt'; message = 'Configured ZCode user root has no non-empty AGENTS.md global rule.' }) | Out-Null }
-    if ($zcodeConfigured -and [string]::IsNullOrWhiteSpace($zcodeDelta)) { $findings.Add([pscustomobject]@{ code = 'zcode_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'ZCode global platform delta section B is missing.' }) | Out-Null }
-    if ($antigravityConfigured -and $null -eq $antigravity) { $findings.Add([pscustomobject]@{ code = 'antigravity_global_rule_missing'; severity = 'error'; path = (Join-Path $antigravityRoot 'GEMINI.md'); disposition = 'adapt'; message = 'Configured Antigravity user root has no non-empty GEMINI.md global rule.' }) | Out-Null }
-    if ($antigravityConfigured -and [string]::IsNullOrWhiteSpace($antigravityDelta)) { $findings.Add([pscustomobject]@{ code = 'antigravity_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Antigravity global platform delta section B is missing.' }) | Out-Null }
-    if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
-    $zcodeDeltaDistinct = (-not $zcodeConfigured) -or (-not [string]::IsNullOrWhiteSpace($zcodeDelta) -and $zcodeDelta -cne $codexDelta -and $zcodeDelta -cne $claudeDelta)
-    if ($zcodeConfigured -and -not [string]::IsNullOrWhiteSpace($zcodeDelta) -and -not $zcodeDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'ZCode platform delta is identical to Codex or Claude; preserve host-specific loading and enforcement facts.' }) | Out-Null }
-    $antigravityDeltaDistinct = (-not $antigravityConfigured) -or (-not [string]::IsNullOrWhiteSpace($antigravityDelta) -and $antigravityDelta -cne $codexDelta -and $antigravityDelta -cne $claudeDelta -and $antigravityDelta -cne $zcodeDelta)
-    if ($antigravityConfigured -and -not [string]::IsNullOrWhiteSpace($antigravityDelta) -and -not $antigravityDeltaDistinct) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Antigravity platform delta is identical to another host; preserve host-specific loading and enforcement facts.' }) | Out-Null }
+
+    $delta = @{}
+    foreach ($id in $hostIds) {
+        $document = $documents[$id]
+        $delta[$id] = if ($null -eq $document) { '' } else { Get-RuleEstateMarkdownSection ([string]$document.text) 'B' }
+    }
+    foreach ($id in $hostIds) {
+        $fact = Get-AgentHostFact $id
+        $deltaMissingApplies = if ($id -in $mandatoryIds) { $true } else { $configured[$id] }
+        if ($deltaMissingApplies -and [string]::IsNullOrWhiteSpace($delta[$id])) {
+            $findings.Add([pscustomobject]@{ code = ('{0}_platform_delta_missing' -f $id); severity = 'error'; section = 'B'; disposition = 'adapt'; message = ('{0} global platform delta section B is missing.' -f $fact.display) }) | Out-Null
+        }
+        if ($id -notin $mandatoryIds -and $configured[$id] -and $null -eq $documents[$id]) {
+            $findings.Add([pscustomobject]@{ code = ('{0}_global_rule_missing' -f $id); severity = 'error'; path = (Join-Path $roots[$id] $fact.file); disposition = 'adapt'; message = $globalRuleMissingMessages[$id] }) | Out-Null
+        }
+    }
+    $deltaDistinct = @{}
+    for ($j = 0; $j -lt $hostIds.Count; $j++) {
+        $id = $hostIds[$j]
+        $distinct = -not [string]::IsNullOrWhiteSpace($delta[$id])
+        for ($i = 0; $i -lt $j; $i++) {
+            $other = $hostIds[$i]
+            if ((-not [string]::IsNullOrWhiteSpace($delta[$other])) -and $delta[$id] -ceq $delta[$other]) { $distinct = $false }
+        }
+        if (-not $configured[$id]) { $distinct = $true }
+        $deltaDistinct[$id] = $distinct
+    }
+    if (-not [string]::IsNullOrWhiteSpace($delta['codex']) -and $delta['codex'] -ceq $delta['claude']) {
+        $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = $deltaNotDistinctMessages['codex'] }) | Out-Null
+    }
+    foreach ($id in @($hostIds | Where-Object { $_ -notin $mandatoryIds })) {
+        if ($configured[$id] -and -not [string]::IsNullOrWhiteSpace($delta[$id]) -and -not $deltaDistinct[$id]) {
+            $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = $deltaNotDistinctMessages[$id] }) | Out-Null
+        }
+    }
+    $platformDeltasDistinct = $true
+    foreach ($id in $hostIds) { $platformDeltasDistinct = $platformDeltasDistinct -and [bool]$deltaDistinct[$id] }
 
     $budgets = New-Object System.Collections.Generic.List[object]
-    foreach ($document in @($codex, $claude, $zcode, $antigravity, $workbuddy)) {
+    foreach ($id in $hostIds) {
+        $document = $documents[$id]
         if ($null -eq $document) { continue }
         $text = [string]$document.text
         $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($text)
@@ -358,7 +383,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         $budgetRatio = [math]::Max(($byteCount / 16384), ($lineCount / 130))
         $budgetState = if (-not $withinBudget) { 'exceeded' } elseif ($budgetRatio -ge 0.95) { 'addition_blocked' } elseif ($budgetRatio -ge 0.85) { 'warning' } else { 'healthy' }
         $lowHeadroom = $budgetState -in @('warning', 'addition_blocked')
-        $budgets.Add([pscustomobject][ordered]@{ host = [string]$document.host; path = [string]$document.path; bytes = $byteCount; lines = $lineCount; max_bytes = 16384; max_lines = 130; byte_headroom = $byteHeadroom; line_headroom = $lineHeadroom; ratio = [math]::Round($budgetRatio, 4); state = $budgetState; within_budget = $withinBudget; low_headroom = $lowHeadroom }) | Out-Null
+        $budgets.Add([pscustomobject][ordered]@{ host = $id; path = [string]$document.path; bytes = $byteCount; lines = $lineCount; max_bytes = 16384; max_lines = 130; byte_headroom = $byteHeadroom; line_headroom = $lineHeadroom; ratio = [math]::Round($budgetRatio, 4); state = $budgetState; within_budget = $withinBudget; low_headroom = $lowHeadroom }) | Out-Null
         if (-not $withinBudget) { $findings.Add([pscustomobject]@{ code = 'global_rule_budget_exceeded'; severity = 'error'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule uses {0} bytes/{1} lines; profile budget is 16384 bytes/130 lines.' -f $byteCount, $lineCount) }) | Out-Null }
         elseif ($lowHeadroom) {
             $stateCode = if ($budgetState -eq 'addition_blocked') { 'global_rule_budget_addition_blocked' } else { 'global_rule_budget_warning' }
@@ -367,37 +392,39 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         }
     }
 
-    $codexRelease = if ($null -eq $codex) { '' } else { Get-RuleEstateRelease ([string]$codex.text) global }
-    $claudeRelease = if ($null -eq $claude) { '' } else { Get-RuleEstateRelease ([string]$claude.text) global }
-    $zcodeRelease = if ($null -eq $zcode) { '' } else { Get-RuleEstateRelease ([string]$zcode.text) global }
-    $antigravityRelease = if ($null -eq $antigravity) { '' } else { Get-RuleEstateRelease ([string]$antigravity.text) global }
-    $workbuddyRelease = if ($null -eq $workbuddy) { '' } else { Get-RuleEstateRelease ([string]$workbuddy.text) global }
-    $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease -and ((-not $zcodeConfigured) -or $codexRelease -eq $zcodeRelease) -and ((-not $antigravityConfigured) -or $codexRelease -eq $antigravityRelease)
-    $releaseAligned = $releaseAligned -and ((-not $workbuddyConfigured) -or $codexRelease -eq $workbuddyRelease)
-    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $codexRelease; observed = [pscustomobject]@{ claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; antigravity = $antigravityRelease; antigravity_configured = $antigravityConfigured }; message = 'Codex, Claude, and configured ZCode/Antigravity global rule releases are absent or different.' }) | Out-Null }
+    $release = @{}
+    foreach ($id in $hostIds) {
+        $document = $documents[$id]
+        $release[$id] = if ($null -eq $document) { '' } else { Get-RuleEstateRelease ([string]$document.text) global }
+    }
+    $releaseAligned = -not [string]::IsNullOrWhiteSpace($release['codex']) -and $release['codex'] -eq $release['claude']
+    foreach ($id in @($hostIds | Where-Object { $_ -notin $mandatoryIds })) {
+        if ($configured[$id]) { $releaseAligned = $releaseAligned -and ($release['codex'] -eq $release[$id]) }
+    }
+    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $release['codex']; observed = [pscustomobject]@{ claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity'] }; message = 'Codex, Claude, and configured ZCode/Antigravity global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
-        codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
-        claude_path = if ($null -eq $claude) { '' } else { [string]$claude.path }
-        zcode_path = if ($null -eq $zcode) { if ($zcodeConfigured) { Join-Path $zcodeRoot 'AGENTS.md' } else { '' } } else { [string]$zcode.path }
-        antigravity_path = if ($null -eq $antigravity) { if ($antigravityConfigured) { Join-Path $antigravityRoot 'GEMINI.md' } else { '' } } else { [string]$antigravity.path }
-        zcode_configured = $zcodeConfigured
-        zcode_global_rule_present = ($null -ne $zcode)
-        antigravity_configured = $antigravityConfigured
-        antigravity_global_rule_present = ($null -ne $antigravity)
-        workbuddy_path = if ($null -eq $workbuddy) { if ($workbuddyConfigured) { Join-Path $workbuddyRoot 'CODEBUDDY.md' } else { '' } } else { [string]$workbuddy.path }
-        workbuddy_configured = $workbuddyConfigured
-        workbuddy_global_rule_present = ($null -ne $workbuddy)
-        workbuddy_delta_present = -not [string]::IsNullOrWhiteSpace($workbuddyDelta)
-        workbuddy_release = $workbuddyRelease
+        codex_path = if ($null -eq $documents['codex']) { '' } else { [string]$documents['codex'].path }
+        claude_path = if ($null -eq $documents['claude']) { '' } else { [string]$documents['claude'].path }
+        zcode_path = if ($null -eq $documents['zcode']) { if ($configured['zcode']) { Join-Path $roots['zcode'] (Get-AgentHostFact 'zcode').file } else { '' } } else { [string]$documents['zcode'].path }
+        antigravity_path = if ($null -eq $documents['antigravity']) { if ($configured['antigravity']) { Join-Path $roots['antigravity'] (Get-AgentHostFact 'antigravity').file } else { '' } } else { [string]$documents['antigravity'].path }
+        zcode_configured = $configured['zcode']
+        zcode_global_rule_present = ($null -ne $documents['zcode'])
+        antigravity_configured = $configured['antigravity']
+        antigravity_global_rule_present = ($null -ne $documents['antigravity'])
+        workbuddy_path = if ($null -eq $documents['workbuddy']) { if ($configured['workbuddy']) { Join-Path $roots['workbuddy'] (Get-AgentHostFact 'workbuddy').file } else { '' } } else { [string]$documents['workbuddy'].path }
+        workbuddy_configured = $configured['workbuddy']
+        workbuddy_global_rule_present = ($null -ne $documents['workbuddy'])
+        workbuddy_delta_present = -not [string]::IsNullOrWhiteSpace($delta['workbuddy'])
+        workbuddy_release = $release['workbuddy']
         workbuddy_selection = 'first_non_empty_candidate_parse_not_verified'
         common_sections = @($sections.ToArray())
         common_aligned = (@($sections | Where-Object { -not $_.aligned }).Count -eq 0)
-        codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
-        claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
-        zcode_delta_present = -not [string]::IsNullOrWhiteSpace($zcodeDelta)
-        antigravity_delta_present = -not [string]::IsNullOrWhiteSpace($antigravityDelta)
-        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta -and $zcodeDeltaDistinct -and $antigravityDeltaDistinct -and $workbuddyDeltaDistinct)
-        releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; antigravity = $antigravityRelease; antigravity_configured = $antigravityConfigured; aligned = $releaseAligned }
+        codex_delta_present = -not [string]::IsNullOrWhiteSpace($delta['codex'])
+        claude_delta_present = -not [string]::IsNullOrWhiteSpace($delta['claude'])
+        zcode_delta_present = -not [string]::IsNullOrWhiteSpace($delta['zcode'])
+        antigravity_delta_present = -not [string]::IsNullOrWhiteSpace($delta['antigravity'])
+        platform_deltas_distinct = $platformDeltasDistinct
+        releases = [pscustomobject][ordered]@{ codex = $release['codex']; claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity']; aligned = $releaseAligned }
         budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
     }
