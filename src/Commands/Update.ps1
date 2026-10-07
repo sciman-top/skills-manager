@@ -742,3 +742,15 @@ function 更新 {
         }
     }
 }
+
+function 验证锁定 {
+    $cfg = LoadCfg
+    $lock = Ensure-LockedState $cfg
+    Write-Host ("锁定状态验证通过：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
+}
+function 锁定 {
+    $cfg = LoadCfg
+    $lock = Save-LockData $cfg
+    Write-Host ("已写入锁文件：{0}" -f (Get-LockPath))
+    Write-Host ("锁定摘要：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
+}
