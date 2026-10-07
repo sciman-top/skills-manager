@@ -9,7 +9,7 @@
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
 
 ## A. 仓库真值与领域不变量
-- `build.ps1` 从 `src/` 生成根 `skills.ps1`，并从 `rules/global/common.md` 与 `platforms/*.md` 生成五份全局宿主规则；`-Check` 只读核对漂移。`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
+- `build.ps1` 从 `src/` 生成根 `skills.ps1`（薄入口）与 `skills.lib/`（按源文件 1:1 的库文件；base 常载，命令包按分发闭包惰性加载），并从 `rules/global/common.md` 与 `platforms/*.md` 生成五份全局宿主规则；`-Check` 只读核对全部生成物漂移。`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
 - 交付物目录契约固定为：`artifacts/deliveries/<version>/{standard-install,portable,source,private-snapshot}/` 是同版本四类交付物；前三项公共包不含 skills/MCP，私用快照仅限可信私有介质；`rescan/<run-id>/` 只是辅助清单，`artifacts/history/<kind>/<version-or-date>/` 是人工历史留存，`artifacts/work/<kind>/<run-id>/` 是临时构建/验证/evidence；`artifacts/` 根层不得放生成文件，正式公共下载以 GitHub Release 为准。
 - AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。

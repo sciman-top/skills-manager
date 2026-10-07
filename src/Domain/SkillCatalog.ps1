@@ -1,5 +1,8 @@
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
-    $operationPlanPath = Join-Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path 'src\Domain\OperationPlan.ps1'
+    # Walk up to skills.json: covers repo root, skills.lib/, and src/ depths.
+    $skillCatalogRoot = $PSScriptRoot
+    while (-not (Test-Path -LiteralPath (Join-Path $skillCatalogRoot 'skills.json') -PathType Leaf) -and $skillCatalogRoot -ne [IO.Path]::GetPathRoot($skillCatalogRoot)) { $skillCatalogRoot = Split-Path -Parent $skillCatalogRoot }
+    $operationPlanPath = Join-Path $skillCatalogRoot 'src\Domain\OperationPlan.ps1'
     . $operationPlanPath
 }
 

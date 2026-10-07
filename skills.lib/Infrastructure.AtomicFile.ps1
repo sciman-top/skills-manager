@@ -1,0 +1,109 @@
+﻿function Clear-AtomicFileWriteBlockAttributes([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $blocked = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+        if (($item.Attributes -band $blocked) -ne 0) {
+            $item.Attributes = $item.Attributes -band (-bnot $blocked)
+        }
+    }
+    catch {}
+}
+
+function Remove-AtomicFileTransactionPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(1, 10)][int]$MaxAttempts = 3,
+        [ValidateRange(0, 1000)][int]$DelayMs = 50
+    )
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        }
+        catch {
+            if ($attempt -eq ($MaxAttempts - 1)) { break }
+        }
+        if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        Write-Warning ("Atomic file transaction cleanup pending: {0}" -f $Path)
+        return $false
+    }
+    return $true
+}
+
+function Write-BytesAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes,
+        [ValidateRange(1, 100)][int]$MaxAttempts = 4,
+        [ValidateRange(0, 60000)][int]$DelayMs = 200
+    )
+
+    # Audit compensation must recognize intended config bytes even if the
+    # writer throws after replacement. The caller-scoped snapshot expires
+    # with that apply call; ordinary writes have no transaction to record.
+    $auditConfigTransaction = Get-Variable -Name AuditApplyConfigSnapshot -ValueOnly -ErrorAction Ignore
+    if ($null -ne $auditConfigTransaction -and [IO.Path]::GetFullPath($Path) -eq [string]$auditConfigTransaction.config_path) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { [void]$auditConfigTransaction.config_write_hashes.Add([Convert]::ToHexString($sha.ComputeHash($Bytes)).ToLowerInvariant()) }
+        finally { $sha.Dispose() }
+    }
+
+    $parent = Split-Path $Path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+
+    $tempPath = "{0}.tmp-{1}" -f $Path, ([System.Guid]::NewGuid().ToString('N'))
+    $backupPath = "{0}.bak-{1}" -f $Path, ([System.Guid]::NewGuid().ToString('N'))
+
+    for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
+        try {
+            Clear-AtomicFileWriteBlockAttributes $Path
+            [System.IO.File]::WriteAllBytes($tempPath, $Bytes)
+            # Crash 边界：WriteAllBytes/Replace 未 flush-to-disk，进程崩溃可见 temp+Replace 原子性，
+            # 但掉电场景不保证持久化（可能留下旧内容或空文件）；本仓接受该边界，未启用 WriteThrough。
+            if (Test-Path -LiteralPath $Path -PathType Leaf) {
+                [System.IO.File]::Replace($tempPath, $Path, $backupPath, $true)
+                Remove-AtomicFileTransactionPath -Path $backupPath | Out-Null
+            }
+            else {
+                [System.IO.File]::Move($tempPath, $Path)
+            }
+            Clear-AtomicFileWriteBlockAttributes $Path
+            return
+        }
+        catch {
+            $baseException = $_.Exception
+            if ($baseException -is [System.Management.Automation.MethodInvocationException] -and $baseException.InnerException) {
+                $baseException = $baseException.InnerException
+            }
+
+            foreach ($transactionPath in @($tempPath, $backupPath)) {
+                Remove-AtomicFileTransactionPath -Path $transactionPath | Out-Null
+            }
+            Clear-AtomicFileWriteBlockAttributes $Path
+
+            $retryable = $baseException -is [System.UnauthorizedAccessException] -or $baseException -is [System.IO.IOException]
+            if (-not $retryable -or $attempt -ge ($MaxAttempts - 1)) { throw $baseException }
+            if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+        }
+    }
+}
+
+function Write-Utf8FileAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content,
+        [ValidateRange(1, 100)][int]$MaxAttempts = 4,
+        [ValidateRange(0, 60000)][int]$DelayMs = 200
+    )
+
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Content)
+    Write-BytesAtomic -Path $Path -Bytes $bytes -MaxAttempts $MaxAttempts -DelayMs $DelayMs
+}

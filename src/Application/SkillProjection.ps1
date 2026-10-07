@@ -1,4 +1,6 @@
-$skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$skillProjectionApplicationRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $skillProjectionApplicationRepoRoot 'skills.json') -PathType Leaf) -and $skillProjectionApplicationRepoRoot -ne [IO.Path]::GetPathRoot($skillProjectionApplicationRepoRoot)) { $skillProjectionApplicationRepoRoot = Split-Path -Parent $skillProjectionApplicationRepoRoot }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command Get-NativeSkillProjectionProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
 if ($null -eq (Get-Command Get-ExistingFileSystemItem -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Core.ps1') }

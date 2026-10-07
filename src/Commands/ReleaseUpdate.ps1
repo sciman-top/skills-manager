@@ -156,6 +156,8 @@ function Test-ReleaseUpdatePackage([string]$PackageRoot, [string]$ExpectedVersio
     foreach ($required in @('install.ps1','build.ps1','skills.ps1','skills.json','LICENSE')) {
         Need (Test-Path -LiteralPath (Join-Path $PackageRoot $required) -PathType Leaf) ("下载的 Release 包缺少：{0}" -f $required)
     }
+    # 薄入口只是分发器；skills.lib/ 是运行时载荷，缺失会让入口 fail-closed。
+    Need (Test-Path -LiteralPath (Join-Path $PackageRoot 'skills.lib') -PathType Container) '下载的 Release 包缺少：skills.lib'
     # Manifest↔payload closure: the package must contain exactly the manifest
     # file set plus the manifest itself, so unmanifested payload cannot ride
     # along inside the release ZIP and reach the install directory.

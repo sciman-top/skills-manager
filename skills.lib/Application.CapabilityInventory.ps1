@@ -1,0 +1,305 @@
+﻿# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$capabilityInventoryRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $capabilityInventoryRepoRoot 'skills.json') -PathType Leaf) -and $capabilityInventoryRepoRoot -ne [IO.Path]::GetPathRoot($capabilityInventoryRepoRoot)) { $capabilityInventoryRepoRoot = Split-Path -Parent $capabilityInventoryRepoRoot }
+if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Infrastructure\CodexCli.ps1') }
+if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Domain\SkillMetadata.ps1') }
+if ($null -eq (Get-Command Get-SkillProjectionEffectiveSelection -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Application\SkillProjection.ps1') }
+if ($null -eq (Get-Command Test-SkillProjectionManifestCurrent -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Application\SkillProjectionPlanning.ps1') }
+
+function Get-CapabilitySurfaceFileHash([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if ($value.StartsWith('~/') -or $value.StartsWith('~\')) { $value = Join-Path $HOME $value.Substring(2) }
+    if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $RepoRoot $value }
+    return [IO.Path]::GetFullPath($value)
+}
+
+function Resolve-CapabilitySurfaceLinkTarget($Directory) {
+    if ($null -eq $Directory -or -not [bool]($Directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+    $targetProperty = $Directory.PSObject.Properties['Target']
+    if ($null -eq $targetProperty) { return '' }
+    $target = @($targetProperty.Value | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($target.Count -eq 0) { return '' }
+    $value = [string]$target[0]
+    if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $Directory.Parent.FullName $value }
+    return [IO.Path]::GetFullPath($value).TrimEnd('\', '/')
+}
+
+function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
+    $metadata = Read-SkillMetadata $SkillPath -Observation
+    $text = [string]$metadata.text
+    $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
+    $description = [string]$metadata.description
+    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-OperationSha256 $description } else { $null }; description_chars = $description.Length; entrypoint_bytes = [Text.Encoding]::UTF8.GetByteCount($text); owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+}
+
+# Additive metadata-budget observation for the retirement policy's budget
+# trigger.  Rows are raw measurements only: no host budget model, no threshold
+# and no pass impact live here; interpretation stays with the documented
+# policy (docs/product/ai-coding-playbook.md).
+function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
+    $measured = @($Items | Where-Object { $null -ne $_ -and $null -ne $_.PSObject.Properties['description_chars'] })
+    $descriptionChars = @($measured | ForEach-Object { [int]$_.description_chars })
+    $entrypointBytes = @($measured | ForEach-Object { [int]$_.entrypoint_bytes })
+    return [pscustomobject][ordered]@{
+        surface = $Surface
+        skill_count = @($Items).Count
+        measured_count = $measured.Count
+        description_chars_total = $(if ($descriptionChars.Count) { ($descriptionChars | Measure-Object -Sum).Sum } else { 0 })
+        description_chars_max = $(if ($descriptionChars.Count) { ($descriptionChars | Measure-Object -Maximum).Maximum } else { 0 })
+        entrypoint_bytes_total = $(if ($entrypointBytes.Count) { ($entrypointBytes | Measure-Object -Sum).Sum } else { 0 })
+        entrypoint_bytes_max = $(if ($entrypointBytes.Count) { ($entrypointBytes | Measure-Object -Maximum).Maximum } else { 0 })
+    }
+}
+
+function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
+    $ordered = @($Items | Sort-Object name, path)
+    $canonical = @($ordered | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.name, $_.entrypoint_hash, $_.description_hash, $_.owner, $_.projection_state }) -join "`n"
+    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-OperationSha256 $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
+}
+
+function Get-CapabilityNativeReplacementCandidates {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SourcePreferences
+    )
+
+    # A same-name plugin is only a replacement candidate.  Repository supply
+    # remains available for other hosts and cold discovery until a separately
+    # authorized lifecycle change removes it.
+    try { $fullCompatible = Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName codex -RequestedProfile 'full-compatible' }
+    catch { return @() }
+    if (-not [bool]$fullCompatible.include_all) { return @() }
+
+    $candidates = [Collections.Generic.List[object]]::new()
+    foreach ($preference in @($SourcePreferences | Where-Object {
+                [bool]$_.standalone_duplicate -and
+                [string]$_.duplicate_surface -eq 'repo_supply' -and
+                [bool]$_.plugin_installed -and
+                [bool]$_.native_source_preferred
+            })) {
+        $name = ([string]$preference.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $alreadyExcluded = $name -in @($fullCompatible.excluded_names)
+        $candidates.Add([pscustomobject][ordered]@{
+                kind = 'skill'
+                name = $name
+                operation = 'exclude_from_host_profile'
+                status = $(if ($alreadyExcluded) { 'already_excluded_from_host_profile' } else { 'candidate_requires_replacement_validation_and_user_confirmation' })
+                actionable = -not $alreadyExcluded
+                target_host = 'codex'
+                profile = 'full-compatible'
+                config_path = 'skill_projection.projection_profiles.hosts.codex.exclude'
+                proposed_value = $name
+                evidence = @('enabled_plugin_same_name', 'repository_supply_duplicate', 'full_compatible_includes_all')
+                preserves = @('repository_supply', 'cold_catalog', 'claude_projection', 'zcode_projection')
+                does_not_prove = @('host_loaded', 'successful_invocation', 'replacement_task_coverage')
+                plugin_path = [string]$preference.plugin_path
+                duplicate_path = [string]$preference.duplicate_path
+            }) | Out-Null
+    }
+    return @($candidates.ToArray() | Sort-Object name)
+}
+
+function New-SkillSurfaceView {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [switch]$HostProbe, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
+    $root = [IO.Path]::GetFullPath($RepoRoot)
+    $projection = $Config.skill_projection
+    $surfaces = [Collections.Generic.List[object]]::new()
+    $findings = [Collections.Generic.List[object]]::new()
+
+    $repoSupplyRoot = Join-Path $root 'agent'
+    $repoItems = if (Test-Path -LiteralPath $repoSupplyRoot) { @(Get-ChildItem -LiteralPath $repoSupplyRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'repo_generated' 'repo_supply' $false }) } else { @() }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'repo_supply' 'repository_generated_supply' $repoSupplyRoot 'fresh' $(if ($repoItems.Count) { 'complete' } else { 'not_materialized' }) $repoItems)) | Out-Null
+
+    $projectionPath = Resolve-CapabilitySurfacePath ([string]$projection.manifest_path) $root
+    $manifest = $null
+    $projectionItems = @(); $projectionFreshness = 'unknown'; $projectionCoverage = 'not_observed'
+    if ($projectionPath -and (Test-Path -LiteralPath $projectionPath -PathType Leaf)) {
+        try {
+            $manifest = [IO.File]::ReadAllText($projectionPath) | ConvertFrom-Json
+            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $root
+            $projectionFreshness = [string]$validation.freshness
+            $projectionCoverage = [string]$validation.coverage
+            foreach ($finding in @($validation.findings)) {
+                $findings.Add([pscustomobject]@{ code = [string]$finding.code; severity = [string]$finding.severity; surface = 'canonical_projection'; path = [string]$finding.path; message = [string]$finding.message }) | Out-Null
+            }
+            if ($projectionCoverage -ne 'invalid') {
+                $sourceRoots = @($projection.sources | ForEach-Object { Resolve-SkillProjectionPath ([string]$_.path) $root })
+                $projectionItems = @($manifest.canonical | ForEach-Object {
+                        $entry = Resolve-CapabilitySurfacePath ([string]$_.path) $root
+                        $authorized = $entry -and @($sourceRoots | Where-Object { Test-SkillProjectionPathWithinRoot $entry $_ }).Count -gt 0
+                        if ($authorized -and (Test-Path -LiteralPath $entry -PathType Leaf)) { Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false }
+                    })
+            }
+        }
+        catch {
+            $projectionFreshness = 'invalid'; $projectionCoverage = 'invalid'
+            $findings.Add([pscustomobject]@{ code = 'projection_manifest_parse_invalid'; severity = 'error'; surface = 'canonical_projection'; path = $projectionPath; message = $_.Exception.Message }) | Out-Null
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'canonical_projection' 'projection_manifest' $projectionPath $projectionFreshness $projectionCoverage $projectionItems)) | Out-Null
+
+    $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
+    $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
+    $requestedProfile = ''
+    if ($null -ne $manifest -and (Test-OperationObjectProperty $manifest 'projection_selection')) {
+        $requestedProfile = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $manifest 'projection_selection') 'profile')
+    }
+    try {
+        $managedSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile $requestedProfile
+    }
+    catch {
+        $managedSelection = Get-SkillProjectionEffectiveSelection $projection 'codex'
+        $findings.Add([pscustomobject]@{ code = 'user_projection_selection_invalid'; severity = 'error'; surface = 'user_skill_root'; path = $projectionPath; message = $_.Exception.Message }) | Out-Null
+    }
+    $managedIncludes = @((Get-OperationObjectProperty $managedSelection 'included_names') | ForEach-Object { [string]$_ })
+    $managedIncludeAll = [bool](Get-OperationObjectProperty $managedSelection 'include_all')
+    $userItems = [Collections.Generic.List[object]]::new()
+    $userRootExists = $userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)
+    if ($userRootExists) {
+        foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
+            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
+            $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'managed_link_ownership_drift'; severity = 'error'; surface = 'user_skill_root'; path = $directory.FullName; message = 'Managed skill name is not a junction to its expected managed source directory.' }) | Out-Null
+            }
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
+
+    # Projection targets are the source of truth for host roots.  Preserve the
+    # compatibility declaration as an additive input, but do not require it to
+    # duplicate every managed-link target.
+    $hostRootDeclarations = @(Get-SkillProjectionHostRootDeclarations $Config)
+    $hostRootLabels = [Collections.Generic.List[string]]::new()
+    $hostRootItems = [Collections.Generic.List[object]]::new()
+    $seenHostRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($declaration in $hostRootDeclarations) {
+        $hostRootName = ([string]$declaration.path).Trim()
+        $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
+        $label = if ([string]::IsNullOrWhiteSpace($hostName)) { $hostRootName } else { '{0}:{1}' -f $hostName, $hostRootName }
+        $hostRootLabels.Add($label) | Out-Null
+        $hostRoot = Resolve-CapabilitySurfacePath $hostRootName $root
+        $deduplicationKey = if ([string]::IsNullOrWhiteSpace($hostRoot)) { $label } else { $hostRoot }
+        if (-not $seenHostRoots.Add($deduplicationKey)) { continue }
+        $hostRootExists = $hostRoot -and (Test-Path -LiteralPath $hostRoot -PathType Container)
+        if (-not $hostRootExists) {
+            $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared {0} host skill root is missing on this machine: {1}' -f $hostName, $hostRootName) }) | Out-Null
+            continue
+        }
+        # Host roots may use different default profiles.  Reusing the Codex
+        # selection here marks valid core-ops entries (Antigravity/WorkBuddy)
+        # as stale simply because they are not part of Codex core-lean.
+        try {
+            $hostSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName $hostName
+            $hostManagedIncludes = @((Get-OperationObjectProperty $hostSelection 'included_names') | ForEach-Object { [string]$_ })
+            $hostManagedIncludeAll = [bool](Get-OperationObjectProperty $hostSelection 'include_all')
+        }
+        catch {
+            $findings.Add([pscustomobject]@{ code = 'host_projection_selection_invalid'; severity = 'error'; surface = 'host_skill_roots'; path = $hostRoot; message = $_.Exception.Message }) | Out-Null
+            $hostManagedIncludes = @()
+            $hostManagedIncludeAll = $false
+        }
+        foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
+            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $hostManagedIncludeAll -or $hostManagedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
+            $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'host_root_link_ownership_drift'; severity = 'warning'; surface = 'host_skill_roots'; path = $directory.FullName; message = ('Declared host root entry {0} is not a junction to its expected managed source directory.' -f $directory.Name) }) | Out-Null
+            }
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootLabels.Count) { $hostRootLabels -join ', ' } else { 'managed_link targets / skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootLabels.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootLabels.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
+
+    $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
+    $systemRoot = Join-Path $codexHome 'skills\.system'
+    $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
+
+    $pluginInventory = Get-CodexPluginSkillInventory -SkipProbe:(!$HostProbe)
+    $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
+    $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
+    foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
+    $sourcePreferences = [Collections.Generic.List[object]]::new()
+    foreach ($pluginItem in $pluginItems) {
+        foreach ($surface in @($surfaces | Where-Object { $_.name -in @('repo_supply', 'canonical_projection', 'user_skill_root', 'system') })) {
+            foreach ($duplicate in @($surface.items | Where-Object { [string]::Equals([string]$_.name, [string]$pluginItem.name, [StringComparison]::OrdinalIgnoreCase) })) {
+                $preference = [pscustomobject][ordered]@{
+                    name = [string]$pluginItem.name
+                    plugin_installed = $true
+                    standalone_duplicate = ([string]$surface.name -ne 'system')
+                    system_duplicate = ([string]$surface.name -eq 'system')
+                    native_source_preferred = $true
+                    duplicate_surface = [string]$surface.name
+                    plugin_path = [string]$pluginItem.path
+                    duplicate_path = [string]$duplicate.path
+                    action = 'report_only_do_not_import_duplicate'
+                }
+                $sourcePreferences.Add($preference) | Out-Null
+                $findings.Add([pscustomobject]@{
+                    code = 'plugin_native_source_preferred'
+                    severity = 'warning'
+                    surface = [string]$surface.name
+                    path = [string]$duplicate.path
+                    message = ('Enabled plugin skill already provides {0}; prefer the native plugin source and do not import another standalone copy automatically.' -f [string]$pluginItem.name)
+                    plugin_installed = $true
+                    standalone_duplicate = [bool]$preference.standalone_duplicate
+                    native_source_preferred = $true
+                }) | Out-Null
+            }
+        }
+    }
+    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers) -SkipProbe:(!$HostProbe)
+    foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
+
+    $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
+    if ($HostSnapshotPath) {
+        if (-not (Test-Path -LiteralPath $hostSource -PathType Leaf)) { throw ('Host snapshot not found: {0}' -f $hostSource) }
+        $snapshot = [IO.File]::ReadAllText($hostSource) | ConvertFrom-Json
+        $snapshotSkills = if ($null -ne $snapshot.skills) { @($snapshot.skills) } elseif ($null -ne $snapshot.visible_skills) { @($snapshot.visible_skills) } elseif ($null -ne $snapshot.data.skills) { @($snapshot.data.skills) } else { @() }
+        $hostItems = @($snapshotSkills | ForEach-Object { [pscustomobject][ordered]@{ name = [string]$_.name; path = [string]$_.path; entrypoint_hash = [string]$_.entrypoint_hash; description_hash = [string]$_.description_hash; owner = 'host_snapshot'; resident = $true; projection_state = 'host_visible' } })
+        $captured = [datetimeoffset]::MinValue
+        $hostFreshness = if ([datetimeoffset]::TryParse([string]$snapshot.captured_at, [ref]$captured) -and ([datetimeoffset]::UtcNow - $captured).TotalHours -ge 0 -and ([datetimeoffset]::UtcNow - $captured).TotalHours -le 24) { 'fresh' } else { 'stale' }
+        $hostCoverage = if ([string]$snapshot.coverage) { [string]$snapshot.coverage } else { 'partial' }
+        foreach ($item in $hostItems) { if ([string]::IsNullOrWhiteSpace($item.name) -or [string]::IsNullOrWhiteSpace($item.entrypoint_hash) -or [string]::IsNullOrWhiteSpace($item.description_hash)) { $findings.Add([pscustomobject]@{ code = 'host_skill_identity_incomplete'; severity = 'error'; surface = 'host_visible'; path = $item.path; message = 'Host-visible skills require name and entrypoint/description fingerprints.' }) | Out-Null } }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_visible' 'host_snapshot' $hostSource $hostFreshness $hostCoverage $hostItems)) | Out-Null
+    foreach ($surface in $surfaces) {
+        foreach ($field in @('authority', 'source', 'fingerprint', 'freshness', 'coverage')) { if ([string]::IsNullOrWhiteSpace([string]$surface.$field)) { $findings.Add([pscustomobject]@{ code = 'surface_field_missing'; severity = 'error'; surface = $surface.name; path = $field; message = 'Skill surface identity is incomplete.' }) | Out-Null } }
+        foreach ($item in @($surface.items)) {
+            $identityValid = -not [string]::IsNullOrWhiteSpace([string]$item.name) -and -not [string]::IsNullOrWhiteSpace([string]$item.path) -and [string]$item.entrypoint_hash -match '^[a-f0-9]{64}$' -and [string]$item.description_hash -match '^[a-f0-9]{64}$' -and -not [string]::IsNullOrWhiteSpace([string]$item.owner) -and -not [string]::IsNullOrWhiteSpace([string]$item.projection_state) -and $item.resident -is [bool]
+            if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
+        }
+    }
+    $retirementCandidates = Get-CapabilityNativeReplacementCandidates -ProjectionConfig $projection -SourcePreferences $sourcePreferences.ToArray()
+    $metadataBudget = @(
+        New-SkillMetadataBudgetRecord 'repo_supply' $repoItems
+        New-SkillMetadataBudgetRecord 'canonical_projection' $projectionItems
+        New-SkillMetadataBudgetRecord 'user_skill_root' $userItems.ToArray()
+        New-SkillMetadataBudgetRecord 'host_skill_roots' $hostRootItems.ToArray()
+        New-SkillMetadataBudgetRecord 'system' $systemItems
+        New-SkillMetadataBudgetRecord 'plugins' $pluginItems
+        New-SkillMetadataBudgetRecord 'host_visible' $hostItems
+    )
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); retirement_candidates = $retirementCandidates; metadata_budget = $metadataBudget; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+}

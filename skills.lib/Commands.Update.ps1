@@ -1,0 +1,744 @@
+﻿function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$name) {
+    if ($null -eq $cfg -or -not $cfg.update_force) { return $false }
+    if ($null -eq $SkipForceClean) { return $true }
+    $key = "{0}|{1}" -f $kind, $name
+    return (-not $SkipForceClean.ContainsKey($key))
+}
+
+function Get-UpdateRepoCount($cfg) {
+    if ($null -eq $cfg) { return 0 }
+    $keys = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in @($cfg.vendors)) {
+        if ($null -eq $v) { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$v.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i -or $i.mode -ne "manual") { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$i.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    return $keys.Count
+}
+
+function Get-UpdateParallelism($cfg) {
+    $n = $null
+    $hasConfigured = ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0)
+    if ($hasConfigured) {
+        try { $n = [int]$cfg.update_parallelism } catch { $n = 1 }
+    }
+    else {
+        $repoCount = Get-UpdateRepoCount $cfg
+        if ($repoCount -le 1) { return 1 }
+        $cpu = 2
+        try { $cpu = [Environment]::ProcessorCount } catch {}
+        if ($cpu -lt 2) { $cpu = 2 }
+        $n = [Math]::Min(8, $cpu)
+        if ($n -gt $repoCount) { $n = $repoCount }
+    }
+    if ($n -lt 1) { $n = 1 }
+    return $n
+}
+
+function Test-WindowsInvalidPathIssue([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+    if ($message -notmatch "invalid path") { return $false }
+    return ($message -match "git\s+(pull|checkout|reset)")
+}
+
+function Get-UpdatePrefetchTimeoutSeconds {
+    $defaultSeconds = 120
+    $raw = [Environment]::GetEnvironmentVariable("SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS")
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $defaultSeconds }
+    try {
+        $n = [int]$raw
+    }
+    catch {
+        return $defaultSeconds
+    }
+    if ($n -lt 1) { return 1 }
+    if ($n -gt 1800) { return 1800 }
+    return $n
+}
+
+function Invoke-ImportArchiveFallback(
+    [string]$cache,
+    [string]$repo,
+    [string]$ref,
+    [string]$skillPath,
+    [bool]$forceClean,
+    [string]$archiveSuccessMessage,
+    [string]$snapshotSuccessMessage,
+    [string]$failurePrefix,
+    [string]$failureDetailPrefix = ""
+) {
+    try {
+        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $forceClean | Out-Null
+        Log $archiveSuccessMessage "WARN"
+        return
+    }
+    catch {
+        $archiveError = $_.Exception.Message
+        try {
+            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $forceClean | Out-Null
+            Log $snapshotSuccessMessage "WARN"
+            return
+        }
+        catch {
+            $snapshotError = $_.Exception.Message
+            throw ("{0}{1}archive={2} | snapshot={3}" -f $failurePrefix, $failureDetailPrefix, $archiveError, $snapshotError)
+        }
+    }
+}
+
+function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
+    if ($DryRun) { return $false }
+    if ($Parallelism -le 1) { return $false }
+    if (-not (Get-Command Start-Job -ErrorAction SilentlyContinue)) { return $false }
+    if ($null -eq $cfg) { return $false }
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($v in @($cfg.vendors)) {
+        $p = VendorPath $v.name
+        if (Test-Path $p) { $paths.Add($p) | Out-Null }
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -ne "manual") { continue }
+        $p = Join-Path $ImportDir $i.name
+        if (Test-Path $p) { $paths.Add($p) | Out-Null }
+    }
+    $paths = @($paths | Select-Object -Unique | Where-Object { Test-IsGitRepoRoot ([string]$_) })
+    if ($paths.Count -eq 0) { return $false }
+
+    $running = @()
+    $errors = New-Object System.Collections.Generic.List[string]
+    $timeoutSeconds = Get-UpdatePrefetchTimeoutSeconds
+    $nextPath = 0
+    try {
+        while ($nextPath -lt $paths.Count -or $running.Count -gt 0) {
+            while ($nextPath -lt $paths.Count -and $running.Count -lt $Parallelism) {
+                $job = Start-Job -ScriptBlock {
+                    param($repoPath)
+                    try {
+                        $ErrorActionPreference = 'Continue'
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        & git -C $repoPath fetch --all --tags 2>$null | Out-Null
+                        if ($LASTEXITCODE -ne 0) {
+                            return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
+                        }
+                        return [pscustomobject]@{ ok = $true; msg = '' }
+                    }
+                    catch {
+                        return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
+                    }
+                } -ArgumentList $paths[$nextPath]
+                $running += $job
+                $nextPath++
+            }
+            $runningIds = @($running | ForEach-Object { [int]$_.Id })
+            $done = Wait-Job -Id $runningIds -Any -Timeout $timeoutSeconds
+            if ($null -eq $done) {
+                $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
+                break
+            }
+            if ([string]$done.State -ne 'Completed') {
+                $errors.Add(("prefetch job did not complete: id={0}, state={1}" -f [int]$done.Id, [string]$done.State)) | Out-Null
+            }
+            else {
+                $output = @(Receive-Job -Id ([int]$done.Id) -ErrorAction Stop)
+                if ($output.Count -ne 1 -or $output[0].ok -isnot [bool] -or -not $output[0].ok) {
+                    $errors.Add(("prefetch result unsuccessful or invalid: id={0}" -f [int]$done.Id)) | Out-Null
+                }
+            }
+            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
+            $running = @($running | Where-Object { $_.Id -ne $done.Id })
+        }
+    }
+    catch {
+        $errors.Add(("prefetch exception: {0}" -f $_.Exception.Message)) | Out-Null
+    }
+    finally {
+        # Only jobs owned by this invocation are stopped, including startup/receive failures.
+        foreach ($job in @($running)) {
+            Stop-Job -Id ([int]$job.Id) -ErrorAction SilentlyContinue
+            Remove-Job -Id ([int]$job.Id) -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($errors.Count -gt 0) {
+        Log ("并行预取完成（部分失败 {0} 项，后续将按原流程继续）。" -f $errors.Count) "WARN"
+        return $false
+    }
+    else {
+        Log ("并行预取完成：{0} 个仓库路径（并发={1}）。" -f $paths.Count, $Parallelism)
+        return $true
+    }
+}
+
+function Get-CurrentRepoCommit([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path $path)) { return $null }
+    if (-not (Test-IsGitRepoRoot $path)) {
+        return (Get-ImportSourceMetadataCommit $path)
+    }
+    Push-Location $path
+    try {
+        return (Invoke-GitCapture @("rev-parse", "HEAD"))
+    }
+    finally { Pop-Location }
+}
+
+function Get-ImportSourceMetadataPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    return (Join-Path $path ".skills-manager-source.json")
+}
+
+function Get-ImportSourceMetadataCommit([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { return $null }
+    try {
+        $data = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        $commit = [string]$data.commit
+        if ([string]::IsNullOrWhiteSpace($commit)) { return $null }
+        return $commit
+    }
+    catch {
+        return $null
+    }
+}
+
+function Write-ImportSourceMetadata([string]$path, [string]$repo, [string]$ref, [string]$commit, [string]$sourceKind) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($commit)) { return }
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    $payload = [ordered]@{
+        schema_version = 1
+        source_kind = if ([string]::IsNullOrWhiteSpace($sourceKind)) { "archive" } else { $sourceKind }
+        repo = $repo
+        ref = $ref
+        commit = $commit
+        updated_at = (Get-Date).ToString("o")
+    }
+    Set-ContentUtf8 $metadataPath ($payload | ConvertTo-Json -Depth 6)
+}
+
+function Remove-ImportSourceMetadata([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return }
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        Remove-Item -LiteralPath $metadataPath -Force
+    }
+}
+
+function Resolve-RemoteCommit([string]$repo, [string]$ref) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    if (Test-LocalZipRepoInput $repo) {
+        return ("zip:{0}" -f (Get-FileContentHash $repo))
+    }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
+    if ($targetRef -match "^[0-9a-fA-F]{40}$") { return $targetRef }
+    if ($targetRef -eq "HEAD" -or $targetRef -match "^refs/") {
+        $candidates = @($targetRef)
+    }
+    else {
+        $candidates = @(
+            ("refs/heads/{0}" -f $targetRef),
+            ("refs/tags/{0}^{{}}" -f $targetRef),
+            ("refs/tags/{0}" -f $targetRef),
+            $targetRef
+        )
+    }
+    foreach ($candidate in $candidates) {
+        $line = Invoke-GitCapture @("ls-remote", $repo, $candidate) -RemoteQuery
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -match "^[0-9a-fA-F]{40}") {
+            return (($line -split "\s+")[0]).Trim()
+        }
+    }
+    return $null
+}
+
+function Resolve-RemoteCommitCached([string]$repo, [string]$ref, [hashtable]$cache = $null) {
+    if ($null -eq $cache) {
+        return (Resolve-RemoteCommit $repo $ref)
+    }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
+    $cacheKey = ("{0}|{1}" -f (Get-RepoIdentityKey $repo), $targetRef).ToLowerInvariant()
+    if ($cache.ContainsKey($cacheKey)) {
+        if ($cache[$cacheKey] -is [Exception]) { throw $cache[$cacheKey] }
+        return $cache[$cacheKey]
+    }
+    try { $resolved = Resolve-RemoteCommit $repo $targetRef }
+    catch { $cache[$cacheKey] = $_.Exception; throw }
+    $cache[$cacheKey] = $resolved
+    return $resolved
+}
+
+function Resolve-LocalRemoteCommit([string]$path, [string]$ref) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-IsGitRepoRoot $path)) { return $null }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
+    $candidates = @()
+    if ($targetRef -match "^[0-9a-fA-F]{40}$") { return $targetRef }
+    if ($targetRef -match "^refs/heads/(.+)$") {
+        $branch = $Matches[1]
+        $candidates += @("refs/remotes/origin/$branch", "origin/$branch")
+    }
+    elseif ($targetRef -match "^refs/tags/(.+)$") {
+        $tag = $Matches[1]
+        $candidates += @("refs/tags/$tag^{}", "refs/tags/$tag")
+    }
+    elseif ($targetRef -match "^refs/") {
+        $candidates += $targetRef
+    }
+    else {
+        $candidates += @("refs/remotes/origin/$targetRef", "origin/$targetRef", "refs/tags/$targetRef^{}", "refs/tags/$targetRef", $targetRef)
+    }
+
+    Push-Location $path
+    try {
+        foreach ($candidate in $candidates) {
+            try {
+                $value = Invoke-GitCapture @("rev-parse", "--verify", $candidate)
+                if ($value -match "^[0-9a-fA-F]{40}$") { return $value.Trim() }
+            }
+            catch {}
+        }
+    }
+    finally { Pop-Location }
+    return $null
+}
+
+function Resolve-UpdatePlanTargetCommit([string]$path, [string]$repo, [string]$ref, [hashtable]$remoteCommitCache, [bool]$PreferLocalRefs) {
+    if ($PreferLocalRefs) {
+        $localRemote = Resolve-LocalRemoteCommit $path $ref
+        if (-not [string]::IsNullOrWhiteSpace($localRemote)) { return $localRemote }
+    }
+    return (Resolve-RemoteCommitCached $repo $ref $remoteCommitCache)
+}
+
+function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
+    $items = @()
+    $remoteCommitCache = @{}
+    foreach ($v in @($cfg.vendors)) {
+        $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
+        $path = VendorPath $v.name
+        $current = Get-CurrentRepoCommit $path
+        $remote = $null; $reason = ''
+        try { $remote = Resolve-UpdatePlanTargetCommit $path ([string]$v.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs) }
+        catch { $reason = if ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'query_failed' } }
+        if (-not $remote -and -not $reason) { $reason = 'ref_not_found' }
+        $items += [pscustomobject]@{
+            type = "vendor"
+            reason = $reason
+            name = [string]$v.name
+            source = [string]$v.repo
+            ref = $ref
+            current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
+            target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
+            changed = (-not [string]::IsNullOrWhiteSpace($remote)) -and ($remote -ne $current)
+        }
+    }
+
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -eq "vendor") { continue }
+        $name = [string]$i.name
+        $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
+        $path = Join-Path $ImportDir $name
+        $current = Get-CurrentRepoCommit $path
+        $remote = $null; $reason = ''
+        try { $remote = Resolve-UpdatePlanTargetCommit $path ([string]$i.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs) }
+        catch { $reason = if ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'query_failed' } }
+        if (-not $remote -and -not $reason) { $reason = 'ref_not_found' }
+        $items += [pscustomobject]@{
+            type = "import"
+            reason = $reason
+            name = $name
+            source = [string]$i.repo
+            ref = $ref
+            current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
+            target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
+            changed = (-not [string]::IsNullOrWhiteSpace($remote)) -and ($remote -ne $current)
+        }
+    }
+    return @($items)
+}
+
+function Test-UpdateCacheCleanForPlanItem($item, $cfg) {
+    if ($null -eq $item) { return $false }
+    if ([string]$item.current -eq "missing" -or [string]$item.target -eq "unknown") { return $false }
+    if ([bool]$item.changed) { return $false }
+
+    $path = $null
+    if ([string]$item.type -eq "vendor") {
+        $path = VendorPath ([string]$item.name)
+    }
+    elseif ([string]$item.type -eq "import") {
+        $path = Join-Path $ImportDir ([string]$item.name)
+    }
+    else {
+        return $false
+    }
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+
+    if (Test-IsGitRepoRoot $path) {
+        Push-Location $path
+        try {
+            $statusOk = $false
+            $statusLines = Invoke-GitCaptureCore @("status", "--porcelain", "--ignored") ([ref]$statusOk)
+            if (-not $statusOk) { return $false }
+            return (@($statusLines).Count -eq 0)
+        }
+        finally { Pop-Location }
+    }
+
+    if ([string]$item.type -ne "import") { return $false }
+    $import = @($cfg.imports | Where-Object { [string]$_.name -eq [string]$item.name } | Select-Object -First 1)
+    if ($null -eq $import -or $import.Count -eq 0) { return $false }
+    $skillPath = Normalize-SkillPath ([string]$import[0].skill)
+    $src = if ($skillPath -eq ".") { $path } else { Join-Path $path $skillPath }
+    return (Test-IsSkillDir $src)
+}
+
+function Test-UpdateCanFastNoop($cfg, $items) {
+    $itemsArray = @($items)
+    if ($itemsArray.Count -eq 0) { return $false }
+    foreach ($item in $itemsArray) {
+        if (-not (Test-UpdateCacheCleanForPlanItem $item $cfg)) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Show-UpdatePlan($cfg) {
+    Write-Host "=== 更新预览（--plan）==="
+    $items = Get-UpdatePlanItems $cfg
+    if ($items.Count -eq 0) {
+        Write-Host "未发现可规划项（vendors/imports 为空）。"
+        return @()
+    }
+    $changed = @($items | Where-Object { $_.changed })
+    foreach ($it in $items) {
+        $mark = if ($it.target -eq 'unknown') { 'UNKNOWN' } elseif ($it.changed) { "UPGRADE" } else { "UNCHANGED" }
+        Write-Host ("[{0}] {1}/{2} ref={3}" -f $mark, $it.type, $it.name, $it.ref)
+        Write-Host ("  current: {0}" -f $it.current)
+        Write-Host ("  target : {0}" -f $it.target)
+    }
+    Write-Host ("计划摘要：total={0}, upgrade={1}, unchanged={2}" -f $items.Count, $changed.Count, ($items.Count - $changed.Count))
+    return $items
+}
+
+function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
+    $json = $false
+    foreach ($arg in @($Tokens)) {
+        $token = ([string]$arg).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($token -eq "--json") { $json = $true; continue }
+        throw ("check-updates 不支持参数：{0}" -f $arg)
+    }
+
+    $previousSuppressAllLogging = $script:SuppressAllLogging
+    $script:SuppressAllLogging = $true
+    try {
+        Preflight
+        $items = @(Get-UpdatePlanItems (LoadCfg))
+        $report = [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "check-updates"
+        read_only = $true
+        complete = @($items | Where-Object { $_.target -eq 'unknown' }).Count -eq 0
+        failed = @($items | Where-Object { $_.target -eq 'unknown' }).Count
+        total = $items.Count
+        changed = @($items | Where-Object { [bool]$_.changed }).Count
+        items = @($items | ForEach-Object {
+            [pscustomobject][ordered]@{
+                type = [string]$_.type
+                name = [string]$_.name
+                source = [string]$_.source
+                ref = [string]$_.ref
+                current = [string]$_.current
+                target = [string]$_.target
+                changed = [bool]$_.changed
+                reason = [string](Get-CfgObjectProperty $_ 'reason')
+            }
+        })
+        }
+        if ($json) {
+            # exit_code 供分派层透传：查询失败（failed>0）时调用方不能把
+            # 零退出码误读成“无更新”。
+            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
+        }
+
+        $lines = [Collections.Generic.List[string]]::new()
+        $lines.Add(("更新检查：total={0}, changed={1}" -f $report.total, $report.changed)) | Out-Null
+        foreach ($item in @($report.items)) {
+            $lines.Add(("[{0}] {1}/{2} source={3} reason={4}" -f $(if ($item.target -eq 'unknown') { 'UNKNOWN' } elseif ($item.changed) { "UPDATE" } else { "CURRENT" }), $item.type, $item.name, $item.source, $item.reason)) | Out-Null
+            $lines.Add(("  current={0}" -f $item.current)) | Out-Null
+            $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
+        }
+        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report; exit_code = $(if ($report.complete) { 0 } else { 1 }) }
+    }
+    finally {
+        $script:SuppressAllLogging = $previousSuppressAllLogging
+    }
+}
+
+function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
+    return (& {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        $failures = New-Object System.Collections.Generic.List[string]
+
+        foreach ($v in $cfg.vendors) {
+            try {
+                $path = VendorPath $v.name
+                if (-not (Test-Path $path)) {
+                    $message = ("未找到 vendor/{0}" -f $v.name)
+                    Write-Host ("❌ {0}" -f $message) -ForegroundColor Red
+                    $failures.Add(("vendor:{0} => {1}" -f $v.name, $message)) | Out-Null
+                    continue
+                }
+                if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
+
+                Push-Location $path
+                try {
+                    $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "vendor" $v.name
+                    Git-HardResetClean $forceClean
+                    if (-not $SkipFetch) {
+                        Invoke-Git @("fetch", "--all", "--tags")
+                    }
+                    $sparsePaths = @()
+                    foreach ($i in $cfg.imports) {
+                        if ($i.mode -ne "vendor") { continue }
+                        if ($i.name -ne $v.name) { continue }
+                        if (-not $i.sparse) { continue }
+                        $p = To-GitPath (Normalize-SkillPath $i.skill)
+                        if ($p -and $p -ne ".") { $sparsePaths += $p }
+                    }
+                    foreach ($m in $cfg.mappings) {
+                        if ($m.vendor -ne $v.name) { continue }
+                        $p = To-GitPath (Normalize-SkillPath $m.from)
+                        if ($p -and $p -ne ".") { $sparsePaths += $p }
+                    }
+                    $sparsePaths = $sparsePaths | Select-Object -Unique
+                    Set-GitSparseCheckout $sparsePaths
+                    Invoke-Git @("checkout", $v.ref)
+                    # fetch already happened above (unless SkipFetch), so prefer local fast-forward.
+                    Update-CurrentBranchFromUpstream $false
+                }
+                finally {
+                    Pop-Location
+                }
+            }
+            catch {
+                Write-Host ("❌ 更新失败 [{0}]: {1}" -f $v.name, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("vendor:{0} => {1}" -f $v.name, $_.Exception.Message)) | Out-Null
+            }
+        }
+        if ($failures.Count -eq 0) {
+            Write-Host "上游仓库更新完成。"
+        }
+        else {
+            Write-Host ("上游仓库更新完成（部分失败：{0} 项）。" -f $failures.Count) -ForegroundColor Yellow
+        }
+        Clear-SkillsCache
+        return $failures.ToArray()
+    })
+}
+
+function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
+    return (& {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        $cfgRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
+        $cfgChanged = $false
+
+        # Optimization/Migration before update
+        Optimize-Imports $cfg
+
+        if ($cfg.imports.Count -eq 0) { return @() }
+        $failures = New-Object System.Collections.Generic.List[string]
+        foreach ($i in $cfg.imports) {
+            if ($i.mode -ne "manual") { continue }
+            try {
+                $name = $i.name
+                $repo = Normalize-RepoUrl $i.repo
+                $ref = $i.ref
+                if ([string]::IsNullOrWhiteSpace($ref)) { $ref = "main" }
+                $skillPath = Normalize-SkillPath $i.skill
+                $gitSkillPath = To-GitPath $skillPath
+                $sparse = [bool]$i.sparse
+                if ($gitSkillPath -eq "." -and $sparse) { $sparse = $false }
+                $sparsePath = $null
+                if ($sparse) { $sparsePath = $gitSkillPath }
+                $cache = Join-Path $ImportDir $name
+
+                $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "import" $i.name
+                try {
+                    $null = Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
+                }
+                catch {
+                    if ((Test-WindowsInvalidPathIssue $_.Exception.Message) -and $gitSkillPath -ne ".") {
+                        $invalidPathForceClean = $forceClean
+                        if (-not $invalidPathForceClean -and (Test-Path -LiteralPath $cache)) {
+                            $expectedSrc = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            if (-not (Test-IsSkillDir $expectedSrc)) {
+                                $invalidPathForceClean = $true
+                                Log ("导入缓存已不可用，非法路径回退临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                            }
+                        }
+                        $fallbackDone = $false
+                        $sparseFallbackError = $null
+                        if (-not $sparse) {
+                            try {
+                                $fallbackSparsePath = $gitSkillPath
+                                Log ("导入更新检测到 Windows 非法路径，先回退为 sparse checkout：{0} [{1}] -> {2}" -f $name, $repo, $fallbackSparsePath) "WARN"
+                                $null = Ensure-Repo $cache $repo $ref $fallbackSparsePath $invalidPathForceClean $false (-not $SkipFetch)
+                                $sparse = $true
+                                $sparsePath = $fallbackSparsePath
+                                if (-not [bool]$i.sparse) {
+                                    $i.sparse = $true
+                                    $cfgChanged = $true
+                                }
+                                $fallbackDone = $true
+                            }
+                            catch {
+                                $sparseFallbackError = $_.Exception.Message
+                                Log ("sparse checkout 回退失败，改用归档回退：{0} [{1}]；原因：{2}" -f $name, $repo, $sparseFallbackError) "WARN"
+                            }
+                        }
+                        if (-not $fallbackDone) {
+                            $prefix = if ([string]::IsNullOrWhiteSpace($sparseFallbackError)) { "" } else { ("sparse={0} | " -f $sparseFallbackError) }
+                            Invoke-ImportArchiveFallback $cache $repo $ref $skillPath $invalidPathForceClean `
+                                ("导入更新已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                                ("导入更新已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                                "Windows 非法路径回退失败：" `
+                                $prefix
+                            $fallbackDone = $true
+                        }
+                        if (-not $fallbackDone) { throw }
+                    }
+                    else {
+                        $lockPath = Join-Path $cache ".git\index.lock"
+                        $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
+                        $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
+                        if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
+                            Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
+                            if ($fallbackSkillPath -ne $skillPath) {
+                                $i.skill = $fallbackSkillPath
+                                $cfgChanged = $true
+                                $skillPath = $fallbackSkillPath
+                            }
+                        }
+                        else {
+                            throw
+                        }
+                    }
+                }
+                $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                if (-not (Test-IsSkillDir $src)) {
+                    $resolvedSkillPath = Resolve-SkillPath $cache $skillPath
+                    if ($resolvedSkillPath -ne $skillPath) {
+                        $i.skill = $resolvedSkillPath
+                        $cfgChanged = $true
+                        $skillPath = $resolvedSkillPath
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
+                    }
+                }
+                if (-not (Test-IsSkillDir $src) -and $gitSkillPath -ne ".") {
+                    $missingSkillForceClean = $forceClean
+                    if (-not $missingSkillForceClean -and (Test-Path -LiteralPath $cache)) {
+                        $missingSkillForceClean = $true
+                        Log ("导入缓存缺少目标技能，回退归档时临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                    }
+                    Invoke-ImportArchiveFallback $cache $repo $ref $skillPath $missingSkillForceClean `
+                        ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                        ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                        "导入缓存缺少目标技能，归档回退失败："
+                    $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                }
+                Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+                if (Test-IsGitRepoRoot $cache) {
+                    Remove-ImportSourceMetadata $cache
+                }
+                else {
+                    $sourceCommit = Resolve-RemoteCommit $repo $ref
+                    Write-ImportSourceMetadata $cache $repo $ref $sourceCommit "archive"
+                }
+                Write-Host ("已更新导入技能缓存：{0}" -f $name)
+            }
+            catch {
+                Write-Host ("❌ 导入更新失败 [{0}]: {1}" -f $i.name, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("import:{0} => {1}" -f $i.name, $_.Exception.Message)) | Out-Null
+            }
+        }
+        if ($cfgChanged) {
+            SaveCfgSafe $cfg $cfgRaw
+        }
+        Clear-SkillsCache
+        return $failures.ToArray()
+    })
+}
+
+function 更新 {
+    & {
+        $cfg = LoadCfg
+        # `$Plan` was the former top-level switch name.  Keep only its boolean
+        # form for direct function callers; an execution-plan object assigned
+        # by a dot-sourcing caller must never be reinterpreted as this CLI flag.
+        $legacyPlanRequested = $Plan -is [bool] -and [bool]$Plan
+        if ($Locked -and ($RunPlan -or $legacyPlanRequested -or $Upgrade)) {
+            throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
+        }
+        if ($RunPlan -or $legacyPlanRequested) {
+            Preflight
+            Show-UpdatePlan $cfg | Out-Null
+            return
+        }
+        if ($Locked) {
+            $lock = Load-LockData
+            Assert-LockMatchesCfg $cfg $lock
+            Apply-LockToWorkspace $cfg $lock
+            构建生效 -SkipHostProjection:$SkipHostProjection
+            Write-Host "已按锁文件固定版本完成更新与构建。"
+            return
+        }
+        $skipForceClean = @{}
+        if (-not (Confirm-UpdateForce $cfg ([ref]$skipForceClean))) { return }
+        if (Skip-IfDryRun "更新") { return }
+        Preflight
+        $parallelism = Get-UpdateParallelism $cfg
+        $prefetchOk = $false
+        if ($parallelism -gt 1) {
+            $prefetchOk = [bool](Invoke-ParallelGitPrefetch $cfg $parallelism)
+        }
+        $planItems = @(Get-UpdatePlanItems $cfg -PreferLocalRefs:$prefetchOk)
+        if (Test-UpdateCanFastNoop $cfg $planItems) {
+            Log ("更新快路径：{0} 个缓存源均已是目标版本，跳过 fetch/reset，仅验证构建生效。" -f $planItems.Count)
+            构建生效 -SkipHostProjection:$SkipHostProjection
+            Write-Host "更新完成：所有技能源已是最新版本。"
+            return
+        }
+        $failures = @()
+        $importFailures = 更新Imports $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
+        if ($importFailures) { $failures += $importFailures }
+        $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
+        if ($vendorFailures) { $failures += $vendorFailures }
+        构建生效 -SkipHostProjection:$SkipHostProjection
+        if ($Upgrade -and $failures.Count -eq 0) {
+            Save-LockData $cfg | Out-Null
+            Write-Host ("已刷新锁文件：{0}" -f (Get-LockPath))
+        }
+        if ($failures.Count -gt 0) {
+            Write-FailureSummary "更新部分失败" $failures "请查看上方错误并重试。"
+            throw ("更新失败（{0} 项）；成功项已完成构建，锁文件未刷新。" -f $failures.Count)
+        }
+        else {
+            Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"
+        }
+    }
+}

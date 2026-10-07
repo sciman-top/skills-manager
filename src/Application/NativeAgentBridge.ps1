@@ -1,4 +1,6 @@
-$nativeAgentBridgeRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+# 向上遍历定位仓库根（skills.json），兼容仓库根 / skills.lib/ / src/ 三种加载深度
+$nativeAgentBridgeRepoRoot = $PSScriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $nativeAgentBridgeRepoRoot 'skills.json') -PathType Leaf) -and $nativeAgentBridgeRepoRoot -ne [IO.Path]::GetPathRoot($nativeAgentBridgeRepoRoot)) { $nativeAgentBridgeRepoRoot = Split-Path -Parent $nativeAgentBridgeRepoRoot }
 
 function Get-NativeAgentBridgeValue($Object, [string]$Name) {
     if ($null -eq $Object) { return $null }

@@ -147,7 +147,8 @@ function Assert-MenuRouting {
 
     It "keeps help text aligned with the configured default projection profile" {
         $sourceHelp = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\src\Commands\Utils.ps1") -Raw
-        $generatedHelp = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\skills.ps1") -Raw
+        # 生成物侧对应 skills.lib/Commands.Utils.ps1（薄入口不再内联 Utils）。
+        $generatedHelp = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\skills.lib\Commands.Utils.ps1") -Raw
 
         $sourceHelp | Should -Match "默认 profile=core-lean"
         $sourceHelp | Should -Not -Match "默认 profile=core（"

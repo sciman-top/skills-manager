@@ -300,6 +300,15 @@ function New-ReleasePackage([string]$Kind) {
     foreach ($file in @($rootFiles) + @(Get-TrackedReleaseFiles $Kind)) {
         Copy-ReleaseFile $file $packageRoot
     }
+    # The thin entry is only a dispatcher; skills.lib/ is its runtime payload
+    # and must travel inside every package next to skills.ps1.
+    $libSource = Join-Path $repoRoot 'skills.lib'
+    if (-not (Test-Path -LiteralPath $libSource -PathType Container)) { throw 'Release requires a built skills.lib. Run build.ps1 first.' }
+    $libDestination = Join-Path $packageRoot 'skills.lib'
+    New-Item -ItemType Directory -Path $libDestination -Force | Out-Null
+    foreach ($libFile in @(Get-ChildItem -LiteralPath $libSource -File -Filter '*.ps1' | Sort-Object Name)) {
+        Copy-Item -LiteralPath $libFile.FullName -Destination (Join-Path $libDestination $libFile.Name) -Force
+    }
     Write-PublicReleaseConfig $packageRoot
 
     # Public packages deliberately exclude skills, MCP declarations, and other
