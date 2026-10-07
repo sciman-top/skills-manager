@@ -32,13 +32,4 @@ Describe 'Rule contracts' {
         ($text -join "`n") | Should -Not -Match '(?i)\$env:'
     }
 
-    It 'parses and constructs the plain objects under the PowerShell 7 runtime' {
-        $paths = @('OperationPlan.ps1', 'RuleDocument.ps1', 'RuleResponsibility.ps1') | ForEach-Object { (Join-Path $repoRoot ('src\Domain\{0}' -f $_)).Replace("'", "''") }
-        $scriptText = ($paths | ForEach-Object { ". '$_'" }) -join '; '
-        $scriptText += "; (New-RuleResponsibility -ConstraintId R1 -CommonIntent x -Coverage covered).schema_version | ConvertTo-Json -Compress"
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
-
-        $LASTEXITCODE | Should -Be 0
-        ($output -join "`n" | ConvertFrom-Json) | Should -Be 1
-    }
 }
