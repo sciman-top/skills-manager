@@ -1157,25 +1157,25 @@ function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
 
 function Get-AuditRequirementSignalTable {
     # 行级热循环里静态 IsMatch 会与其余 pattern 在 15-slot Regex 缓存中互相
-    # 驱逐而反复重解析；表只建一次，pattern 预编译为实例。
+    # 驱逐而反复重解析；固定表只建一次并编译执行，降低全文预筛开销。
     if ($null -eq $script:AuditRequirementSignalTable) {
         $script:AuditRequirementSignalTable = @(
-            [pscustomobject]@{ domain = "interface"; subject = "web_ui"; action = "deliver"; regex = [regex]::new("(?i)\breact\b|\bvue\b|\bsvelte\b|\bnext(?:js)?\b|\bvite\b") },
-            [pscustomobject]@{ domain = "interface"; subject = "desktop_ui"; action = "deliver"; regex = [regex]::new("(?i)usewpf|\bwpf\b|\bwinforms\b|\bavalonia\b|\bdesktop app\b") },
-            [pscustomobject]@{ domain = "integration"; subject = "http_api"; action = "serve"; regex = [regex]::new("(?i)map(get|post|put|delete)|\bcontroller\b|fastapi|flask|express\s*\(|asp\.?net\s*(core)?\s*(api)?") },
-            [pscustomobject]@{ domain = "data"; subject = "persistence"; action = "store"; regex = [regex]::new("(?i)entityframework|\bdbcontext\b|\bpostgres(?:ql)?\b|\bsqlite\b|\bmongodb\b|\bredis\b") },
-            [pscustomobject]@{ domain = "automation"; subject = "browser_automation"; action = "automate"; regex = [regex]::new("(?i)playwright|puppeteer|selenium|browser[_ -]?automation") },
-            [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; regex = [regex]::new("(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])") },
-            [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; regex = [regex]::new("(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr") },
-            [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; regex = [regex]::new("(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计") },
-            [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; regex = [regex]::new("(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*") },
-            [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; regex = [regex]::new("(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b") },
-            [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; regex = [regex]::new("(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test") },
+            [pscustomobject]@{ domain = "interface"; subject = "web_ui"; action = "deliver"; regex = [regex]::new("(?i)\breact\b|\bvue\b|\bsvelte\b|\bnext(?:js)?\b|\bvite\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "interface"; subject = "desktop_ui"; action = "deliver"; regex = [regex]::new("(?i)usewpf|\bwpf\b|\bwinforms\b|\bavalonia\b|\bdesktop app\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "integration"; subject = "http_api"; action = "serve"; regex = [regex]::new("(?i)map(get|post|put|delete)|\bcontroller\b|fastapi|flask|express\s*\(|asp\.?net\s*(core)?\s*(api)?", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "data"; subject = "persistence"; action = "store"; regex = [regex]::new("(?i)entityframework|\bdbcontext\b|\bpostgres(?:ql)?\b|\bsqlite\b|\bmongodb\b|\bredis\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "automation"; subject = "browser_automation"; action = "automate"; regex = [regex]::new("(?i)playwright|puppeteer|selenium|browser[_ -]?automation", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "workflow"; subject = "document_processing"; action = "process"; regex = [regex]::new("(?i)docling|document ai|document[_ -]?(import|extract|process)|openxml|(?:^|[_\W])docx(?:$|[_\W])|(?:^|[_\W])pdf(?:$|[_\W])", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "workflow"; subject = "ocr"; action = "recognize"; regex = [regex]::new("(?i)\bocr\b|rapidocr|paddleocr|tesseract|easyocr", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "workflow"; subject = "analytics"; action = "analyze"; regex = [regex]::new("(?i)assessment analytics|question stats|\banalytics\b|\bctt\b|试题统计", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "ai"; subject = "content_generation"; action = "generate"; regex = [regex]::new("(?i)images api|image generation|\b(?:generate|create|produce)_(?:image|content|article|poster|courseware)\w*\b|\b(?:image|content|article|poster|courseware)_(?:generate|create|produce)\w*\b|(?:generate|produce)\w*[^\r\n]{0,80}\b(?:image|content|article|poster|courseware)\b|\b(?:image|content|article|poster|courseware)\b[^\r\n]{0,80}(?:generate|produce)\w*", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "ai"; subject = "model_integration"; action = "integrate"; regex = [regex]::new("(?i)\bopenai\b|\banthropic\b|\bllm\b|\bmodel provider\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+            [pscustomobject]@{ domain = "quality"; subject = "automated_testing"; action = "validate"; regex = [regex]::new("(?i)\bpytest\b|\bpester\b|\bdotnet test\b|\bjest\b|\bvitest\b|\bplaywright test\b|\bunit test", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
             # backup/recovery 只在有真实数据/状态恢复语义时才算需求。裸
             # \bbackup\b/\brestore\b 会把包管理器的 NuGet/dotnet restore、
             # 构建 `--no-restore`、以及 `backup/pre-sync` 这类分支名误判为
             # 备份能力（实测 9/9 目标仓被误报）。这里要求更明确的搭配。
-            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)|(?:(?:备份|还原|恢复)(?:数据库|数据|系统|配置|状态))") }
+            [pscustomobject]@{ domain = "operations"; subject = "backup_recovery"; action = "recover"; regex = [regex]::new("(?i)\bback(?:up|ing)[_ -]?(?:and|/|_)?[ _-]?(?:restore|recovery|snapshot|archive|rotation)|(?:^|[_\W])(?:database|db|data|config|state|site|vm|volume|disk|file|storage|registry)[_ -]?(?:backup|snapshot|restore|recovery|restoration)|(?:^|[_\W])(?:backup|restore|recovery|restoration)[_ -]?(?:plan|strategy|policy|point|job|task|script|tool|service|rotation)|\bdisaster recovery\b|\bwinpe\b|(?:数据|系统|配置|库)?(?:备份|还原|恢复)(?:点|策略|方案|任务|脚本|工具|服务|计划)|(?:(?:备份|还原|恢复)(?:数据库|数据|系统|配置|状态))", [System.Text.RegularExpressions.RegexOptions]::Compiled) }
         )
     }
     return $script:AuditRequirementSignalTable
@@ -1232,18 +1232,18 @@ function Get-AuditArtifactSignalTable {
     if ($null -eq $script:AuditArtifactSignalTable) {
         $script:AuditArtifactSignalTable = [pscustomobject]([ordered]@{
                 artifacts = @(
-                    [pscustomobject]@{ artifact = "pdf"; regex = [regex]::new("(?i)(?:\.pdf\b|(?:^|[_\W])pdf(?:$|[_\W])|pdftotext|pdftoppm|pdfreader|pdfwriter|questpdf|pdfsharp|pdfpig|pypdf|pdfplumber|pymupdf|pdfjs)") },
-                    [pscustomobject]@{ artifact = "docx"; regex = [regex]::new("(?i)(?:\.docx\b|(?:^|[_\W])docx(?:$|[_\W])|wordprocessingdocument|openxml.*word|python-docx)") },
-                    [pscustomobject]@{ artifact = "pptx"; regex = [regex]::new("(?i)(?:\.pptx\b|(?:^|[_\W])pptx(?:$|[_\W])|powerpoint|presentationml|pptxgenjs|幻灯片|课件)") },
-                    [pscustomobject]@{ artifact = "xlsx"; regex = [regex]::new("(?i)(?:\.xlsx\b|(?:^|[_\W])xlsx(?:$|[_\W])|\bexcel\b|spreadsheetml|openpyxl|closedxml|epplus)") },
-                    [pscustomobject]@{ artifact = "image"; regex = [regex]::new("(?i)(?:\bimage\b|\bpng\b|\bjpe?g\b|\bsvg\b|\bwebp\b|\bbitmap\b|pillow|imagesharp|skia(?:sharp)?)") }
+                    [pscustomobject]@{ artifact = "pdf"; regex = [regex]::new("(?i)(?:\.pdf\b|(?:^|[_\W])pdf(?:$|[_\W])|pdftotext|pdftoppm|pdfreader|pdfwriter|questpdf|pdfsharp|pdfpig|pypdf|pdfplumber|pymupdf|pdfjs)", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ artifact = "docx"; regex = [regex]::new("(?i)(?:\.docx\b|(?:^|[_\W])docx(?:$|[_\W])|wordprocessingdocument|openxml.*word|python-docx)", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ artifact = "pptx"; regex = [regex]::new("(?i)(?:\.pptx\b|(?:^|[_\W])pptx(?:$|[_\W])|powerpoint|presentationml|pptxgenjs|幻灯片|课件)", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ artifact = "xlsx"; regex = [regex]::new("(?i)(?:\.xlsx\b|(?:^|[_\W])xlsx(?:$|[_\W])|\bexcel\b|spreadsheetml|openpyxl|closedxml|epplus)", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ artifact = "image"; regex = [regex]::new("(?i)(?:\bimage\b|\bpng\b|\bjpe?g\b|\bsvg\b|\bwebp\b|\bbitmap\b|pillow|imagesharp|skia(?:sharp)?)", [System.Text.RegularExpressions.RegexOptions]::Compiled) }
                 )
                 actions   = @(
-                    [pscustomobject]@{ action = "read"; regex = [regex]::new("(?i)\b(?:parse|extract|import|load|open|ingest)(?:[A-Z][\w]*|_[\w]+|s|ed|ing|er|all|async)?\b|\bread(?:_(?:[\w]+)|(?-i:[A-Z])[\w]*|s|ed|ing|er|all|async)?\b|adapter") },
-                    [pscustomobject]@{ action = "generate"; regex = [regex]::new("(?i)\b(export|generate|create|write|save|output|deliver|produce)\w*\b") },
-                    [pscustomobject]@{ action = "render"; regex = [regex]::new("(?i)\b(render|preview|rasteri[sz]e|thumbnail)\w*\b|pdftoppm") },
-                    [pscustomobject]@{ action = "ocr"; regex = [regex]::new("(?i)\bocr\b|tesseract|rapidocr|paddleocr|easyocr") },
-                    [pscustomobject]@{ action = "edit"; regex = [regex]::new("(?i)\b(edit|modify|transform|resize|crop|compose)\w*\b") }
+                    [pscustomobject]@{ action = "read"; regex = [regex]::new("(?i)\b(?:parse|extract|import|load|open|ingest)(?:[A-Z][\w]*|_[\w]+|s|ed|ing|er|all|async)?\b|\bread(?:_(?:[\w]+)|(?-i:[A-Z])[\w]*|s|ed|ing|er|all|async)?\b|adapter", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ action = "generate"; regex = [regex]::new("(?i)\b(export|generate|create|write|save|output|deliver|produce)\w*\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ action = "render"; regex = [regex]::new("(?i)\b(render|preview|rasteri[sz]e|thumbnail)\w*\b|pdftoppm", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ action = "ocr"; regex = [regex]::new("(?i)\bocr\b|tesseract|rapidocr|paddleocr|easyocr", [System.Text.RegularExpressions.RegexOptions]::Compiled) },
+                    [pscustomobject]@{ action = "edit"; regex = [regex]::new("(?i)\b(edit|modify|transform|resize|crop|compose)\w*\b", [System.Text.RegularExpressions.RegexOptions]::Compiled) }
                 )
             })
     }
