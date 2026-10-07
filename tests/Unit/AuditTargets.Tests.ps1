@@ -1094,6 +1094,8 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             Set-ContentUtf8 (Join-Path $repo "src\http.cs") 'var content = JsonContent.Create(payload);'
             Set-ContentUtf8 (Join-Path $repo "tools\provider_diagnostic.py") 'provider = "OpenAI" # model provider diagnostic'
             Set-ContentUtf8 (Join-Path $repo ".artifacts\release\generated.py") 'def generate_image_poster(topic): return create_image(topic)'
+            New-Item -ItemType Directory -Path (Join-Path $repo 'skills.lib') -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo 'skills.lib/Commands.Demo.ps1') 'function Generate-ImagePoster { create_image $topic }'
 
             $scan = New-AuditRepoScan "ai-intent" $repo "..\target-repo-ai-intent-roles"
             $profile = New-AuditTargetProfile @($scan)
@@ -1108,6 +1110,8 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $modelIntegration[0].evidence_coverage.supporting_code_target_count | Should -Be 1
             $modelIntegration[0].limitations | Should -Contain "supporting_code_not_direct_product_journey"
             @($scan.detected.requirement_signals | ForEach-Object { @($_.evidence | Where-Object { $_.path -match '\.artifacts\\' }) }).Count | Should -Be 0
+            @(Get-AuditSourceFileIndex $repo | Where-Object { $_.FullName -match '[\\/]skills\.lib[\\/]' }).Count | Should -Be 0
+            @($scan.detected.requirement_signals | ForEach-Object { @($_.evidence | Where-Object { $_.path -match '^skills\.lib[\\/]' }) }).Count | Should -Be 0
         }
 
         It "Anchors artifact evidence locally, excludes scanner metadata, and does not promote test-only coverage" {
