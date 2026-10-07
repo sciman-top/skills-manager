@@ -5,6 +5,7 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
     . (Join-Path $repoRoot 'src\Domain\RuleResponsibility.ps1')
     . (Join-Path $repoRoot 'src\Domain\RulePatchPlan.ps1')
+    . (Join-Path $repoRoot 'src\Application\HostRegistry.ps1')
     . (Join-Path $repoRoot 'src\Application\RuleDiscovery.ps1')
     . (Join-Path $repoRoot 'src\Application\RuleDiagnostics.ps1')
     . (Join-Path $repoRoot 'src\Application\RuleAdvisor.ps1')

@@ -18,13 +18,7 @@
     if (-not $heading.Success -or $heading.Groups[1].Value -cne $version.Groups[1].Value) {
         throw 'Global common source heading version must match the metadata version.'
     }
-    $hosts = @(
-        @{ id = 'codex'; file = 'AGENTS.md'; label = 'OpenAI ChatGPT Work / Codex App / Codex CLI' }
-        @{ id = 'claude'; file = 'CLAUDE.md'; label = 'Claude Code' }
-        @{ id = 'zcode'; file = 'AGENTS.md'; label = 'ZCode / GLM' }
-        @{ id = 'antigravity'; file = 'GEMINI.md'; label = 'Antigravity / Gemini' }
-        @{ id = 'workbuddy'; file = 'CODEBUDDY.md'; label = 'WorkBuddy / CodeBuddy' }
-    )
+    $hosts = @(Get-AgentHostFacts)
     foreach ($hostEntry in $hosts) {
         $platformPath = Join-Path $repo ("rules/global/platforms/{0}.md" -f $hostEntry.id)
         $platform = & $readInput $platformPath
@@ -96,22 +90,14 @@ function Get-GlobalRuleProjectionEntries {
         [string]$WorkBuddyUserRoot = ''
     )
     $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository'
-    $codex=Assert-GlobalRuleProjectionRoot $CodexUserRoot 'Codex user'
-    $claude=Assert-GlobalRuleProjectionRoot $ClaudeUserRoot 'Claude user'
     $entries = New-Object Collections.Generic.List[object]
-    $entries.Add([pscustomobject][ordered]@{id='codex';source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md');target_path=(Join-Path $codex 'AGENTS.md');root=$codex})|Out-Null
-    $entries.Add([pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md');target_path=(Join-Path $claude 'CLAUDE.md');root=$claude})|Out-Null
-    if (-not [string]::IsNullOrWhiteSpace($ZCodeUserRoot)) {
-        $zcode=Assert-GlobalRuleProjectionRoot $ZCodeUserRoot 'ZCode user'
-        $entries.Add([pscustomobject][ordered]@{id='zcode';source_path=(Join-Path $repo 'rules\global\zcode\AGENTS.md');target_path=(Join-Path $zcode 'AGENTS.md');root=$zcode})|Out-Null
-    }
-    if (-not [string]::IsNullOrWhiteSpace($AntigravityUserRoot)) {
-        $antigravity=Assert-GlobalRuleProjectionRoot $AntigravityUserRoot 'Antigravity user'
-        $entries.Add([pscustomobject][ordered]@{id='antigravity';source_path=(Join-Path $repo 'rules\global\antigravity\GEMINI.md');target_path=(Join-Path $antigravity 'GEMINI.md');root=$antigravity})|Out-Null
-    }
-    if (-not [string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)) {
-        $workbuddy=Assert-GlobalRuleProjectionRoot $WorkBuddyUserRoot 'WorkBuddy user'
-        $entries.Add([pscustomobject][ordered]@{id='workbuddy';source_path=(Join-Path $repo 'rules\global\workbuddy\CODEBUDDY.md');target_path=(Join-Path $workbuddy 'CODEBUDDY.md');root=$workbuddy})|Out-Null
+    $rootInputs = @{ codex = $CodexUserRoot; claude = $ClaudeUserRoot; zcode = $ZCodeUserRoot; antigravity = $AntigravityUserRoot; workbuddy = $WorkBuddyUserRoot }
+    foreach ($fact in (Get-AgentHostFacts)) {
+        $rootValue = [string]$rootInputs[$fact.id]
+        # codex/claude 是必选投影根；其余宿主提供根目录才生成投影条目。
+        if ($fact.id -notin @('codex', 'claude') -and [string]::IsNullOrWhiteSpace($rootValue)) { continue }
+        $root = Assert-GlobalRuleProjectionRoot $rootValue ('{0} user' -f $fact.display)
+        $entries.Add([pscustomobject][ordered]@{id=$fact.id;source_path=(Join-Path $repo ('rules\global\{0}\{1}' -f $fact.id, $fact.file));target_path=(Join-Path $root $fact.file);root=$root})|Out-Null
     }
     return @($entries.ToArray())
 }
@@ -120,11 +106,9 @@ function Get-GlobalRuleSourceEntries {
     param([Parameter(Mandatory=$true)][string]$RepoRoot)
     $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository'
     return @(
-        [pscustomobject][ordered]@{id='codex';source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md')}
-        [pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md')}
-        [pscustomobject][ordered]@{id='zcode';source_path=(Join-Path $repo 'rules\global\zcode\AGENTS.md')}
-        [pscustomobject][ordered]@{id='antigravity';source_path=(Join-Path $repo 'rules\global\antigravity\GEMINI.md')}
-        [pscustomobject][ordered]@{id='workbuddy';source_path=(Join-Path $repo 'rules\global\workbuddy\CODEBUDDY.md')}
+        foreach ($fact in (Get-AgentHostFacts)) {
+            [pscustomobject][ordered]@{id=$fact.id;source_path=(Join-Path $repo ('rules\global\{0}\{1}' -f $fact.id, $fact.file))}
+        }
     )
 }
 
@@ -184,7 +168,7 @@ function Test-GlobalRuleSourceFamily {
         if($null-eq$sections[$entry.id]){$findings.Add((New-GlobalRuleFinding 'source_structure_invalid' $entry.source_path 'Global rules require exactly one ordered 1/A/B/C/D section family.'))|Out-Null}
     }
     foreach($entry in $entries){if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add((New-GlobalRuleFinding 'target_reparse_forbidden' $entry.target_path 'Global rule targets must be ordinary files below the user root.'))|Out-Null}}
-    $sourceFamilyIds=@('codex','claude','zcode','antigravity','workbuddy')
+    $sourceFamilyIds=@(Get-AgentHostIds)
     $sourceFamilyPresent=@($sourceFamilyIds|Where-Object{$facts.ContainsKey($_)-and$facts[$_].exists})
     if($sourceFamilyPresent.Count-eq$sourceFamilyIds.Count){
         $sourceVersions=@($sourceFamilyIds|ForEach-Object{[string]$facts[$_].version}|Sort-Object -Unique)

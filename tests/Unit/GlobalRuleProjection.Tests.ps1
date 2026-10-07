@@ -3,6 +3,7 @@ BeforeAll {
     $script:Root=$repoRoot
     . (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1')
     . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+    . (Join-Path $repoRoot 'src\Application\HostRegistry.ps1')
     . (Join-Path $repoRoot 'src\Application\GlobalRuleProjection.ps1')
     . (Join-Path $repoRoot 'src\Commands\GlobalRules.ps1')
     $script:globalRuleOriginalWriteBytes = ${function:Write-BytesAtomic}

@@ -117,7 +117,7 @@ function Get-RuleDiscovery {
     $precedence = 0
     if (-not [string]::IsNullOrWhiteSpace($UserRuleRoot)) {
         $user = [System.IO.Path]::GetFullPath($UserRuleRoot)
-        $globalNames = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') { @('GEMINI.md') } else { @('CLAUDE.md') }
+        $globalNames = @((Get-AgentHostFact $HostName).discovery_files)
         foreach ($name in $globalNames) {
             $path = Join-Path $user $name
             $exists = [System.IO.File]::Exists($path)

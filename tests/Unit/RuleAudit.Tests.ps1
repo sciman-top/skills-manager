@@ -1,6 +1,7 @@
 BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+    . (Join-Path $repoRoot 'src\Application\HostRegistry.ps1')
     . (Join-Path $repoRoot 'src\Application\RuleDiscovery.ps1')
     . (Join-Path $repoRoot 'src\Application\RuleAudit.ps1')
 
