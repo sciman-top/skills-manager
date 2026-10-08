@@ -1539,6 +1539,9 @@ exit 3
                     Path = "C:\tools\demo.ps1"
                 }
             } -ParameterFilter { $Name -eq "demo" }
+            # MSI-less machines (MSIX/Store pwsh) fall through to Get-Command
+            # inside Resolve-PowerShellExecutable; keep that probe contained.
+            Mock Get-Command { $null } -ParameterFilter { $Name -eq "pwsh" }
 
             $invocation = Resolve-ExternalCommandInvocation "demo" @("mcp", "list")
             Split-Path -Leaf $invocation.file | Should -Match "^(pwsh|powershell)(\.exe)?$"
