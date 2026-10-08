@@ -118,6 +118,11 @@ pwsh -NoProfile -File .\skills.ps1 ai-coding --template review --json
 `checklist`。模板只是输入辅助；真实写入、测试和宿主验收仍按当前任务
 合同、项目规则和现有入口执行。
 
+模板正文真源为 [`src/Commands/AiCoding.ps1`](../../src/Commands/AiCoding.ps1)，
+由 `build.ps1` 生成运行库；日常使用以上命令取得当前模板。实现模板包含
+自主验证闭环、实际行为验收与两次失败整理；交接模板保留原授权约束、
+失败尝试和验收条件。以下示例展示字段用法，不替代 CLI 的当前正文。
+
 以下模板是输入辅助，不是新的规则或授权层。把占位内容换成当前任务事实；
 跨宿主交接时传递任务胶囊，不复制整段历史对话。
 
@@ -148,13 +153,17 @@ repo_verified / filesystem_projected / host_loaded / live_accepted，
 Task capsule:
 Goal: <目标>
 Current status/evidence: <仓库路径、分支、commit、未提交修改与归属、关键证据>
+Constraints: <原授权、兼容性、秘密、不得触碰范围和外部副作用边界>
 Decisions already made: <已确定的接口、行为和取舍>
+Failed attempts/open questions: <已尝试的假设、失败证据和未决问题；没有则填无>
 Exact write set: <精确写集>
 Remaining work: <尚未完成的实现、验证或阻塞>
 Minimum proof: <最低验证>
+Done when: <用户操作、输入和期望结果>
 Stop: <停止条件>
 
 请重新读取当前仓库状态与相关改动，再在上述写集内推进剩余工作。
+复用未失效证据；保留原授权与验收，不把一次切片通过当作整体完成。
 不要根据模型名称猜测 API、provider、权限或宿主能力；不要扩大写集。
 如果发现契约冲突或真实失败与胶囊不符，先停下并报告证据。
 ```
