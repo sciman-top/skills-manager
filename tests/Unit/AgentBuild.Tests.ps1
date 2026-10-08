@@ -3,6 +3,91 @@ BeforeAll {
 
 }
 Describe "Agent build" {
+    It 'does not clear the only agent copy when its transaction backup failed' {
+        $oldAgent = $AgentDir
+        try {
+            $AgentDir = Join-Path $TestDrive 'backup-failed-agent'
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'only copy'
+            Mock Log {}
+            Mock 清空Agent目录 {}
+            Mock 收集ManualSkills { @() }
+            Mock Get-OverridesDirs { @() }
+            Mock Remove-VendorRootMappingOutputsFromAgent { 0 }
+            Mock Repair-AgentSkillMarkdownFiles { [pscustomobject]@{ normalized = 0; removed = 0; failed = 0 } }
+            $txn = [pscustomobject]@{ backup_error = 'fixture move failure'; agent_after_fingerprint = ''; agent_after_fingerprint_error = '' }
+            $cfg = [pscustomobject]@{ mappings = @(); imports = @() }
+
+            $failures = @(构建Agent $cfg -SkipPreflight -SkipLock -Txn $txn)
+
+            $failures -join ';' | Should -Match 'build-txn:agent-backup'
+            Should -Invoke 清空Agent目录 -Times 0 -Exactly
+            Get-ContentUtf8 (Join-Path $AgentDir 'old.txt') | Should -Be 'only copy'
+        }
+        finally { $AgentDir = $oldAgent }
+    }
+
+    It 'blocks import optimization and building when transaction backup failed' {
+        Mock Preflight {}
+        Mock LoadCfg { [pscustomobject]@{ imports = @(); mappings = @() } }
+        Mock Start-BuildTransaction { [pscustomobject]@{ path = 'fixture-retained'; backup_error = 'fixture move failure' } }
+        Mock Optimize-Imports {}
+        Mock SaveCfg {}
+        Mock Get-CfgChangeSummaryLines { @() }
+        Mock Write-BuildSummary {}
+        Mock New-SkillDiscoveryCatalogTransaction { $null }
+        Mock Sync-SkillDiscoveryCatalog { [pscustomobject]@{ enabled = $false } }
+        Mock Complete-BuildTransaction {}
+        Mock 构建Agent { @() }
+        Mock Rollback-BuildTransaction { $false }
+        Mock Log {}
+
+        { 构建生效 -SkipHostProjection -SkipLock } | Should -Throw '*构建生效失败*'
+
+        Should -Invoke Optimize-Imports -Times 0 -Exactly
+        Should -Invoke 构建Agent -Times 0 -Exactly
+    }
+
+    It 'reports partial mapping loss even when another skill was built' -ForEach @(
+        @{ Failure = 'missing' }, @{ Failure = 'invalid-marker' }
+    ) {
+        $oldAgent = $AgentDir
+        try {
+            $AgentDir = Join-Path $TestDrive ('partial-' + $Failure)
+            Mock Log {}
+            Mock Resolve-AgentMappingForAgent {
+                param($cfg, $mapping, $context)
+                [pscustomobject]@{
+                    sync = $true; source_valid = ($mapping.to -eq 'healthy' -or $Failure -eq 'invalid-marker')
+                    vendor = 'fixture'; from = $mapping.to; to = $mapping.to
+                    src_full = Join-Path $TestDrive $mapping.to; containment_root = $TestDrive
+                    dst = Join-Path $AgentDir $mapping.to; reason = 'source missing'
+                }
+            }
+            Mock Test-ResolvedAgentMappingSkillDir { param($resolved, $context) $resolved.to -eq 'healthy' }
+            Mock Get-ResolvedAgentMappingInvalidReason { 'invalid marker' }
+            Mock Assert-SkillPackageSafe {}
+            Mock RoboMirror {
+                param($src, $dst)
+                New-Item -ItemType Directory -Path $dst -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $dst 'SKILL.md') "---`nname: healthy`ndescription: fixture`n---"
+            }
+            Mock 收集ManualSkills { @() }
+            Mock Get-OverridesDirs { @() }
+            Mock Remove-VendorRootMappingOutputsFromAgent { 0 }
+            $cfg = [pscustomobject]@{ mappings = @(
+                [pscustomobject]@{ vendor = 'fixture'; from = 'healthy'; to = 'healthy' }
+                [pscustomobject]@{ vendor = 'fixture'; from = 'broken'; to = 'broken' }
+            ); imports = @() }
+
+            $failures = @(构建Agent $cfg -SkipPreflight -SkipLock)
+
+            Test-Path -LiteralPath (Join-Path $AgentDir 'healthy/SKILL.md') | Should -BeTrue
+            $failures -join ';' | Should -Match 'build-agent-invalid-mappings'
+        }
+        finally { $AgentDir = $oldAgent }
+    }
+
     It "resolves UTF-8 relative-path SKILL placeholders" {
         $root = Join-Path $TestDrive "placeholder"
         $targetDir = Join-Path $root "plugin\skills\plan"

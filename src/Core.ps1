@@ -582,7 +582,8 @@ function Invoke-ExternalCommandWithTimeout(
     [string[]]$CommandArgs = @(),
     [string]$workingDir = $null,
     [int]$timeoutSeconds = 30,
-    [hashtable]$EnvironmentOverrides = $null
+    [hashtable]$EnvironmentOverrides = $null,
+    [System.Text.Encoding]$OutputEncoding = $null
 ) {
     Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
     if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
@@ -600,6 +601,10 @@ function Invoke-ExternalCommandWithTimeout(
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
+        if ($null -ne $OutputEncoding) {
+            $startInfo.StandardOutputEncoding = $OutputEncoding
+            $startInfo.StandardErrorEncoding = $OutputEncoding
+        }
         $startInfo.CreateNoWindow = $true
         if ($EnvironmentOverrides -ne $null) {
             foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
@@ -761,7 +766,7 @@ function Preflight {
 }
 function RoboMirror([string]$src, [string]$dst) {
     EnsureDir $dst
-    $cmd = "robocopy `"$src`" `"$dst`" /MIR /NFL /NDL /NJH /NJS /NP"
+    $cmd = "robocopy `"$src`" `"$dst`" /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1"
     if ($DryRun) {
         if ($script:CollectDryRunMirror) {
             if (-not $script:DryRunMirrorCommands) {
@@ -774,10 +779,17 @@ function RoboMirror([string]$src, [string]$dst) {
         }
         return
     }
-    & robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1 |
+    # 默认百万次重试会让锁定文件占住构建；整体执行与输出读取也必须有界。
+    $result = Invoke-ExternalCommandWithTimeout -command 'robocopy' `
+        -CommandArgs @($src, $dst, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/R:2', '/W:1') `
+        -timeoutSeconds 300 -OutputEncoding ([System.Text.Encoding]::GetEncoding([Globalization.CultureInfo]::InstalledUICulture.TextInfo.OEMCodePage))
+    @($result.output) |
     Where-Object { $_ -and ([string]$_).Trim() } |
     Out-Host
-    if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
+    if ($result.timed_out -or $result.exit_code -lt 0 -or $result.exit_code -ge 8 -or
+        -not [string]::IsNullOrWhiteSpace([string]$result.error)) {
+        throw ("robocopy 失败（exit={0}）：{1} -> {2}；{3}" -f $result.exit_code, $src, $dst, $result.error)
+    }
 }
 function Get-ExistingFileSystemItem([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
