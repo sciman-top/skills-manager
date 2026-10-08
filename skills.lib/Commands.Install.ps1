@@ -2071,8 +2071,13 @@ function 构建生效(
             $txn | Add-Member -NotePropertyName manual_migrations -NotePropertyValue $migrationRecords -Force
         }
         $catalogTransaction = $null
+        $failures = @()
         Start-DryRunMirrorCollect
         try {
+            if ($null -ne $txn -and $txn.PSObject.Properties.Match('backup_error').Count -gt 0 -and
+                -not [string]::IsNullOrWhiteSpace([string]$txn.backup_error)) {
+                throw ("build-txn:agent-backup => {0}" -f $txn.backup_error)
+            }
             Optimize-Imports $cfg $migrationRoot $migrationRecords
             $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
             if (@($optChanges).Count -gt 0) {
@@ -2093,7 +2098,6 @@ function 构建生效(
                     $txn | Add-Member -NotePropertyName catalog_transaction -NotePropertyValue $catalogTransaction -Force
                 }
             }
-            $failures = @()
             $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
             if ($buildFailures -and @($buildFailures).Count -gt 0) {

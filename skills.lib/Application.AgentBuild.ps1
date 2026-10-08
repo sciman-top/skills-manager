@@ -462,6 +462,11 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
+        # 备份失败时旧目录可能仍是唯一副本；必须在清空或覆盖之前停止。
+        if ($null -ne $Txn -and $Txn.PSObject.Properties.Match('backup_error').Count -gt 0 -and
+            -not [string]::IsNullOrWhiteSpace([string]$Txn.backup_error)) {
+            return @("build-txn:agent-backup => $($Txn.backup_error)")
+        }
         Log "开始构建 Agent..."
         $reusedExistingAgent = $false
         $cleanAgentError = $null
@@ -476,9 +481,6 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
         }
         $failures = New-Object System.Collections.Generic.List[string]
         $invalidMappings = New-Object System.Collections.Generic.List[object]
-        if ($null -ne $Txn -and $Txn.PSObject.Properties.Match("backup_error").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Txn.backup_error)) {
-            $failures.Add(("build-txn:agent-backup => {0}" -f $Txn.backup_error)) | Out-Null
-        }
         $stats = [pscustomobject]@{ mirrored = 0; reused = $reusedExistingAgent }
         $resolveContext = New-AgentMappingResolveContext
 
@@ -599,6 +601,8 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
             $failures.Add(("build-agent-reused-existing-dir => {0}" -f $cleanAgentError)) | Out-Null
         }
         if ($invalidMappings.Count -gt 0) {
+            # 部分产物也不能晋级：投影会据此摘除源暂时不可用的既有技能。
+            $failures.Add(("build-agent-invalid-mappings => {0} 条映射源无效，拒绝投影不完整产物" -f $invalidMappings.Count)) | Out-Null
             Log ("检测到 {0} 条失效 mappings（源目录不存在或缺少标记文件），建议清理 skills.json。" -f $invalidMappings.Count) "WARN"
             Write-Host ("⚠️ 检测到 {0} 条失效 mappings（未参与同步）。" -f $invalidMappings.Count) -ForegroundColor Yellow
             $preview = @($invalidMappings | Select-Object -First 10)

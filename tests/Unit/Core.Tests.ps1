@@ -4,6 +4,67 @@ BeforeAll {
 
 }
 Describe "Core Functions" {
+    Context 'Bounded mirror execution' {
+        It 'accepts Robocopy success code <Code> through the bounded runner' -ForEach @(
+            @{ Code = 0 }, @{ Code = 1 }, @{ Code = 7 }
+        ) {
+            Mock EnsureDir {}
+            Mock Invoke-ExternalCommandWithTimeout { [pscustomobject]@{ timed_out = $false; exit_code = $Code; output = @(); error = '' } }
+
+            RoboMirror 'source with spaces' 'destination with spaces'
+
+            Should -Invoke Invoke-ExternalCommandWithTimeout -Times 1 -Exactly -ParameterFilter {
+                $command -eq 'robocopy' -and $timeoutSeconds -gt 0 -and
+                $CommandArgs[0] -eq 'source with spaces' -and $CommandArgs[1] -eq 'destination with spaces' -and
+                $CommandArgs -contains '/R:2' -and $CommandArgs -contains '/W:1' -and
+                $OutputEncoding.CodePage -eq [Globalization.CultureInfo]::InstalledUICulture.TextInfo.OEMCodePage
+            }
+        }
+
+        It 'rejects mirror <Failure> instead of reporting a successful build' -ForEach @(
+            @{ Failure = 'copy failure'; Code = 8; TimedOut = $false; ErrorText = '' }
+            @{ Failure = 'timeout'; Code = 124; TimedOut = $true; ErrorText = 'timeout_after_300s' }
+            @{ Failure = 'start failure'; Code = 1; TimedOut = $false; ErrorText = 'executable missing' }
+            @{ Failure = 'output timeout'; Code = 0; TimedOut = $false; ErrorText = 'output_read_timeout' }
+        ) {
+            Mock EnsureDir {}
+            Mock Invoke-ExternalCommandWithTimeout { [pscustomobject]@{ timed_out = $TimedOut; exit_code = $Code; output = @(); error = $ErrorText } }
+
+            { RoboMirror 'source' 'destination' } | Should -Throw '*robocopy 失败*'
+        }
+
+        It 'leaves dry-run mirrors inert' {
+            $oldDryRun = $DryRun
+            try {
+                $DryRun = $true
+                Mock EnsureDir {}
+                Mock Invoke-ExternalCommandWithTimeout {}
+                RoboMirror 'source' 'destination'
+                Should -Invoke Invoke-ExternalCommandWithTimeout -Times 0 -Exactly
+            }
+            finally { $DryRun = $oldDryRun }
+        }
+
+        It 'fails promptly on a locked destination and succeeds after it is released' {
+            $source = Join-Path $TestDrive 'mirror source [fixture]'
+            $destination = Join-Path $TestDrive 'mirror destination [fixture]'
+            New-Item -ItemType Directory -Path $source, $destination -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'payload.txt') 'replacement content'
+            $target = Join-Path $destination 'payload.txt'
+            Set-ContentUtf8 $target 'original'
+            $handle = [IO.File]::Open($target, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            try {
+                { RoboMirror $source $destination } | Should -Throw '*robocopy 失败*'
+                $watch.Elapsed.TotalSeconds | Should -BeLessThan 15
+            }
+            finally { $handle.Dispose() }
+            Get-ContentUtf8 $target | Should -Be 'original'
+            RoboMirror $source $destination
+            Get-ContentUtf8 $target | Should -Be 'replacement content'
+        }
+    }
+
     Context "Filesystem entry probes" {
         It "treats only a missing path as absent and propagates inspection failures" {
             $missingPath = Join-Path $TestDrive "missing-entry"
