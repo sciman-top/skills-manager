@@ -84,18 +84,22 @@ function New-RuleFixture([string]$Name) {
         @($result.candidates | Where-Object { $_.path -match 'src\\feature\\AGENTS\.md$' }).Count | Should -Be 0
     }
 
-    It 'models Antigravity as user GEMINI plus workspace .agents/rules files' {
+    It 'discovers native Antigravity project rules and rejects discarded modular rules' {
         $fixture = New-RuleFixture 'antigravity'
         Set-Content -LiteralPath (Join-Path $fixture.user 'GEMINI.md') -Value '# global antigravity' -Encoding UTF8
         $ruleDir = Join-Path $fixture.repo '.agents\rules'
         New-Item -ItemType Directory -Path $ruleDir -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $ruleDir '00-project.md') -Value '@../../AGENTS.md' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $ruleDir '00-project.md') -Value "---`ntrigger: always_on`n---`n@[Project contract](../../AGENTS.md)" -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $ruleDir 'invalid.md') -Value '@../../AGENTS.md' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $fixture.sub 'AGENTS.md') -Value '# scoped project' -Encoding UTF8
         $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName antigravity -UserRuleRoot $fixture.user
 
-        @($result.documents).Count | Should -Be 2
+        @($result.documents).Count | Should -Be 4
         $result.documents[0].path | Should -Match 'GEMINI\.md$'
-        $result.documents[1].path | Should -Match '\.agents\\rules\\00-project\.md$'
-        @($result.candidates | Where-Object { $_.path -match 'src\\feature' }).Count | Should -Be 0
+        @($result.documents.path) | Should -Contain (Join-Path $fixture.repo 'AGENTS.md')
+        @($result.documents.path) | Should -Contain (Join-Path $ruleDir '00-project.md')
+        @($result.documents.path) | Should -Contain (Join-Path $fixture.sub 'AGENTS.md')
+        @($result.candidates | Where-Object { $_.path -eq (Join-Path $ruleDir 'invalid.md') })[0].reason | Should -Be 'invalid_frontmatter_not_loaded'
     }
 
     It 'discovers WorkBuddy candidate groups and marks loading unverified' {

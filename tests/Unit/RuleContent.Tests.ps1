@@ -34,7 +34,8 @@ Describe 'Checked-in rule content' {
         $antigravity = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md'))
         $antigravity | Should -Match 'Antigravity 平台差异'
         $antigravity | Should -Match '\.agents/rules/'
-        $antigravity | Should -Match '@\.\./\.\./AGENTS\.md'
+        $antigravity | Should -Match 'trigger: always_on'
+        $antigravity | Should -Match '@\[Project contract\]\(\.\./\.\./AGENTS\.md\)'
     }
 
     It 'keeps the project contract bounded and its Claude wrapper canonical' {

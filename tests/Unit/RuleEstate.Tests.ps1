@@ -552,6 +552,25 @@ verify drift
         $report.structural_pass | Should -Be $false
     }
 
+    It 'rejects Antigravity adapters that would be discarded or only reference a path' {
+        $f = New-RuleEstateFixture
+        $ruleDir = Join-Path $f.workspace 'repo-a/.agents/rules'
+        New-Item -ItemType Directory -Path $ruleDir -Force | Out-Null
+        $adapter = Join-Path $ruleDir '00-project.md'
+        [IO.File]::WriteAllText($adapter, '@../../AGENTS.md')
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        @($report.findings.code) | Should -Contain 'project_antigravity_adapter_trigger_invalid'
+        @($report.findings.code) | Should -Contain 'project_antigravity_adapter_reference_mismatch'
+        [IO.File]::WriteAllText($adapter, "---`ntrigger: always_on`n---`n@../../AGENTS.md`n")
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        @($report.findings.code) | Should -Not -Contain 'project_antigravity_adapter_trigger_invalid'
+        @($report.findings.code) | Should -Contain 'project_antigravity_adapter_reference_mismatch'
+        [IO.File]::WriteAllText($adapter, "---`ntrigger: always_on`n---`n@[Project contract](../../AGENTS.md)`n")
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        @($report.findings.code) | Should -Not -Contain 'project_antigravity_adapter_trigger_invalid'
+        @($report.findings.code) | Should -Not -Contain 'project_antigravity_adapter_reference_mismatch'
+    }
+
     It 'validates the repository-root GEMINI.md adapter when present' {
         $f = New-RuleEstateFixture
         $gemini = Join-Path $f.workspace 'repo-a\GEMINI.md'
