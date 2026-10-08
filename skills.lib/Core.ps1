@@ -751,61 +751,6 @@ function Skip-IfDryRun([string]$action) {
     Write-Host ("DRYRUN：{0} 已跳过执行。" -f $action)
     return $true
 }
-function Start-DryRunMirrorCollect {
-    if (-not $DryRun) { return }
-    $script:CollectDryRunMirror = $true
-    $script:DryRunMirrorCommands = New-Object System.Collections.Generic.List[string]
-}
-function Stop-DryRunMirrorCollect {
-    $script:CollectDryRunMirror = $false
-}
-function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [int]$maxShow = 20) {
-    if (-not $DryRun) { return }
-    if (-not (Get-Variable -Name DryRunMirrorCommands -Scope Script -ErrorAction SilentlyContinue)) { return }
-    if ($null -eq $script:DryRunMirrorCommands) { return }
-    $count = $script:DryRunMirrorCommands.Count
-    if ($count -eq 0) { return }
-    Write-Host ("{0}：共 {1} 条" -f $title, $count)
-    $shown = 0
-    foreach ($cmd in $script:DryRunMirrorCommands) {
-        Write-Host $cmd
-        $shown++
-        if ($shown -ge $maxShow) { break }
-    }
-    if ($count -gt $maxShow) {
-        Write-Host ("... 另有 {0} 条未显示" -f ($count - $maxShow))
-    }
-}
-function Get-BuildSummary($cfg) {
-    $manualCount = @(收集ManualSkills $cfg).Count
-    $overrideCount = @(Get-OverridesDirs).Count
-    return ("构建摘要：mappings={0}，imports(manual)={1}，overrides={2}，targets={3}，sync_mode={4}" -f $cfg.mappings.Count, $manualCount, $overrideCount, $cfg.targets.Count, $cfg.sync_mode)
-}
-function Write-BuildSummary($cfg = $null) {
-    try {
-        if ($null -eq $cfg) { $cfg = LoadCfg }
-        Write-Host (Get-BuildSummary $cfg)
-    }
-    catch {}
-}
-function Format-VendorPreview($vendors) {
-    return ($vendors | ForEach-Object { "$($_.name) :: $($_.repo)" })
-}
-function Get-DisplayVendor($item) {
-    if ($null -eq $item) { return "" }
-    if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0) {
-        $display = [string]$item.display_vendor
-        if (-not [string]::IsNullOrWhiteSpace($display)) { return $display }
-    }
-    return [string]$item.vendor
-}
-function Format-MappingPreview($items, [string]$targetPrefix = "") {
-    $prefix = if ([string]::IsNullOrWhiteSpace($targetPrefix)) { "" } else { ($targetPrefix + " ") }
-    return ($items | ForEach-Object { "$prefix$(Get-DisplayVendor $_) :: $($_.from) -> $($_.to)" })
-}
-function Format-SkillPreview($items) {
-    return ($items | ForEach-Object { "$(Get-DisplayVendor $_) :: $($_.from)" })
-}
 function Preflight {
     Need (Get-Command git -ErrorAction SilentlyContinue) "未找到 git，请先安装 Git 并确保在 PATH 中。"
     Need (Get-Command robocopy -ErrorAction SilentlyContinue) "未找到 robocopy，请确保在 PATH 中（Windows 默认包含）。"
