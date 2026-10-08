@@ -48,6 +48,7 @@ $sourceTests = @{
     'src/Application/SkillProjectionPlanning.ps1' = @('SkillProjection', 'SkillProjectionProfiles')
     'src/Application/SkillProjection.ps1' = @('SkillProjection', 'NativeSkillProjection', 'NativeAgentBridge', 'SkillProjectionProfiles')
     'src/Application/SkillSupply.ps1' = @('AgentBuild', 'SkillPackageSafety')
+    'src/Commands/Install.Presentation.ps1' = @('Core')
     'src/Commands/AuditTargets.Args.ps1' = @('AuditTargets')
     'src/Commands/AuditTargets.Snapshot.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.TargetState.ps1' = @('AuditTargets', 'AuditTargetsHardening')

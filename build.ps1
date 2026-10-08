@@ -46,6 +46,7 @@ $Files = @(
     "Commands/Doctor.ps1",
     "Commands/AiCoding.ps1",
     "Commands/AiRiskControl.ps1",
+    "Commands/Install.Presentation.ps1",
     "Commands/Install.ps1",
     "Commands/Update.ps1",
     "Commands/Mcp.HostAdapters.ps1",

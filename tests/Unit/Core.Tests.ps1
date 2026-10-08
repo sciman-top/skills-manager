@@ -1,6 +1,7 @@
 BeforeAll {
     # Dot-source the main script to load functions
     . $PSScriptRoot\..\..\skills.ps1
+    . $PSScriptRoot\..\..\src\Commands\Install.Presentation.ps1
 
 }
 Describe "Core Functions" {
