@@ -71,6 +71,8 @@ MCP config mutation、host projection、live readiness 是三个不同状态。�
 - Implementation：`src/Commands/AuditTargets*.ps1`
 - Runtime state：`reports/skill-audit/<run-id>/`
 
+单仓 repo 扫描与事实采集（多语言/构建系统探测、证据/信号/行探测、`New-AuditRepoScan` 编排）位于 `src/Commands/AuditTargets.RepoFacts.ps1`：新增或退役一种语言/构建系统的探测只改该文件。配置 CRUD、run 管理、needs 合成、coverage 与 profile/receipt 输出留在 `AuditTargets.ps1`，阶段编排按既有伴随文件分工。
+
 数据流：
 
 ```text

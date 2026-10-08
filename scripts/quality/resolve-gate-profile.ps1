@@ -32,6 +32,7 @@ $sourceTests = @{
     'src/Infrastructure/AtomicFile.ps1' = @('InfrastructureSeam')
     'src/Application/CapabilityInventory.ps1' = @('CapabilityInventory', 'ReadOnlyCli')
     'src/Commands/AuditTargets.ps1' = @('AuditTargets', 'AuditTargetsHardening')
+    'src/Commands/AuditTargets.RepoFacts.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Bundle.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Template.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Plan.ps1' = @('AuditTargets', 'AuditTargetsHardening')

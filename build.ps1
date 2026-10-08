@@ -60,6 +60,7 @@ $Files = @(
     "Commands/GlobalRules.ps1",
     "Commands/RulePatch.ps1",
     "Commands/AuditTargets.ps1",
+    "Commands/AuditTargets.RepoFacts.ps1",
     "Commands/AuditTargets.Template.ps1",
     "Commands/AuditTargets.Snapshot.ps1",
     "Commands/AuditTargets.TargetState.ps1",
