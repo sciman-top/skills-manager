@@ -35,6 +35,10 @@
 
 随后 `build.ps1` 重新生成，连同 `skills.ps1`/`skills.lib/` 一起提交。
 
+拆分现有职责时，`Domain/` 放字段契约与校验，`Application/` 放可复用操作及其资源生命周期，`Commands/` 放参数、交互与编排；保持现有函数接口，由 `$Files` 与静态调用闭包决定加载，不增设模块注册器。搬移前搜索直接读取或 dot-source 源文件的调用方（包括 verifier 与测试），同步调整其加载路径；顶层赋值也必须随所属职责移动。仅新位置更清晰而行为不变时，优先复用原行为测试。
+
+退役一个功能时，先搜索入口函数、命令名及兼容别名的所有调用方；随后移除上述参数、分发、帮助/菜单与功能专属实现，确认共享 helper 仍有调用方后保留。源文件删除后同步移除 `$Files` 登记，执行 build 让 `skills.lib/` 清理对应生成文件。只删除失去保护对象的测试与文档，并核对门禁映射；涉及配置字段或持久化数据时，按配置兼容与迁移合同单独验证，不能直接删除旧数据。
+
 新增/退役一个宿主（以注册表为锚）：
 
 1. `src/Application/HostRegistry.ps1`：增删 fact；`tests/Unit/HostRegistry.Tests.ps1` 强制其与 `rules/` 树及各宿主参数 ValidateSet 全等
@@ -46,7 +50,8 @@
 ### Config and source materialization
 
 - Interface：`skills.json`、`skills.lock.json`
-- Implementation：`src/Config.ps1`（配置契约与持久化）、`src/Lock.ps1`（锁定域原语）、`src/Git.ps1`（来源操作），以及 install/update/build commands
+- Implementation：`src/Domain/ConfigContract.ps1`（字段/schema 与配置校验）、`src/Config.ps1`（加载、修复、目录迁移与持久化）、`src/Lock.ps1`（锁定域原语）、`src/Git.ps1`（来源操作），以及 install/update/build commands
+- `src/Application/SkillProbe.ps1` 承载完整 checkout 与 sparse fallback 的技能路径探测、候选排序和临时目录清理；`Install.ps1` 通过原函数接口调用，按命令闭包惰性加载。
 - Outputs：`vendor/`、`imports/`、`agent/`、targets
 
 `src/Application/AgentBuild.ps1` 负责 `agent/` 物化：映射解析、技能名冲突校验，以及构建事务的备份、完成和回滚。`src/Commands/Install.Presentation.ps1` 承载 Install 专属展示 helper（预览格式化、构建摘要、DRYUN 镜像收集），随 Install 闭包惰性加载；dry-run 门卫与 RoboMirror 留在 `src/Core.ps1` 基座。`src/Commands/Install.ps1` 保留安装/卸载交互、`构建生效` 的命令编排与宿主投影调用；安装选择逻辑和构建事务可分别修改。三者沿用现有函数接口与构建闭包加载，不增加独立状态或加载机制。修改物化或回滚行为复用 `AgentBuild.Tests.ps1`，命令编排复用 `Core.Tests.ps1` 与 `E2E/Workflow.Tests.ps1`；跨面变更仍按最低门禁选择 full。

@@ -1,6 +1,6 @@
 # 锁定域原语：skills.lock.json 的路径/来源指纹/读写/一致性校验与工作区应用。
 # 从 Config.ps1 纯迁移（函数名与实现逐字不变）；CLI 入口 验证锁定/锁定
-# 在 Commands/Update.ps1，配置 schema/校验/迁移仍在 Config.ps1。
+# 在 Commands/Update.ps1；配置 schema/校验在 Domain/ConfigContract.ps1，迁移在 Config.ps1。
 
 function Get-LockPath {
     return (Join-Path $Root "skills.lock.json")
