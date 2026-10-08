@@ -1708,6 +1708,8 @@ $scan.detected.artifact_capabilities | Out-Null
             $raw = Get-Content -LiteralPath (Join-Path $script:Root "src/Commands/Utils.ps1") -Raw
             $menuBody = Get-FunctionBody $raw "菜单"
             $menuBody | Should -Match "7\) 目标仓审查"
+            $helpBody = Get-FunctionBody $raw "帮助"
+            $helpBody | Should -Match '审查目标 扫描 \[--query <user-goal>\].*\[--skip-dirty\]'
         }
 
         It "Returns a built-in prompt with the guarded recommendation workflow" {
