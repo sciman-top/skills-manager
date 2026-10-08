@@ -58,7 +58,7 @@
 ### MCP
 
 - Interface：`安装MCP`、`卸载MCP`、`MCP配置`、`同步MCP`
-- Implementation：`src/Commands/Mcp.HostAdapters.ps1`（宿主配置形状与适配）、`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）和 `src/Commands/Mcp.ps1`（规划、事务与同步）
+- Implementation：`src/Commands/Mcp.HostAdapters.ps1`（宿主配置形状、payload/目标根解析与 codex node 缓存适配）、`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）、`src/Commands/Mcp.NativeSync.ps1`（native CLI 验证、重试与同步执行/清理）和 `src/Commands/Mcp.ps1`（规划、事务与签名等价性）
 - State：`skills.json.mcp_servers/mcp_profiles/mcp_targets`；配置 `mcp_profiles` 时由 `mcp_profiles.active` 唯一决定当前启用集合，`mcp_servers[].enabled` 仅保留给无 profile 的历史兼容输入
 
 MCP config mutation、host projection、live readiness 是三个不同状态。仓库保存环境变量名，不保存 credential value。

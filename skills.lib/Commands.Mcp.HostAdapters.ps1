@@ -569,3 +569,325 @@ function Get-McpGenericConfigFileName([string]$Root) {
     }
     return '.mcp.json'
 }
+
+# --- 宿主 MCP 配置文件形状与目标根解析（从 Mcp.ps1 纯迁移） ---
+
+function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
+    $base = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+        try {
+            $parsed = $existingContent | ConvertFrom-Json
+            if ($parsed -ne $null) {
+                foreach ($p in $parsed.PSObject.Properties) {
+                    $base[[string]$p.Name] = $p.Value
+                }
+            }
+        }
+        catch {
+            throw ("Gemini settings.json 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
+        }
+    }
+
+    $managedMap = Convert-McpServersToGeminiConfigMap $servers
+    # Gemini 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
+    $base["mcpServers"] = $managedMap
+    if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
+    return [pscustomobject]$base
+}
+
+function ConvertTo-TomlBasicValue($value) {
+    if ($null -eq $value) { return '""' }
+    if ($value -is [bool]) { return ($(if ($value) { "true" } else { "false" })) }
+    if ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) { return [string]$value }
+    $text = [string]$value
+    $text = $text.Replace("\", "\\").Replace('"', '\"')
+    return ('"{0}"' -f $text)
+}
+
+function Test-TomlBareKey([string]$key) {
+    return $key -cmatch '^[A-Za-z0-9_-]+$'
+}
+
+function ConvertTo-TomlKey([string]$key) {
+    if (Test-TomlBareKey $key) { return $key }
+    return ('"{0}"' -f $key.Replace('\', '\\').Replace('"', '\"'))
+}
+
+function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldName, [string]$Key, [string]$Value) {
+    # Codex config.toml 与 Gemini settings.json 不做 ${VAR} 展开：模板值会按字面量传给服务进程。
+    if ($Value -match '^\s*(?:(?:Bearer|Basic)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}\s*$') {
+        Need $false ('宿主不支持 ${{VAR}} 环境展开（会按字面量传递导致认证失败），拒绝投影：{0} {1}.{2}' -f $ServerName, $FieldName, $Key)
+    }
+}
+
+function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRoot = '') {
+    $lines = @()
+    if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
+        $lines = $existingToml -split "`r?`n"
+    }
+    $codexServers = @()
+    $skippedGithubForMissingToken = $false
+    $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
+    # plan/DRYRUN 是只读命令：不向当前进程复制 token 环境变量。
+    if (-not $DryRun -and [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
+        $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
+    }
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+            if ($hasEnabled) {
+                Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+            }
+            $isExplicitlyDisabled = $hasEnabled -and -not [bool]$server.enabled
+            if (-not $hasGithubToken -and -not $isExplicitlyDisabled) {
+                Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
+                $skippedGithubForMissingToken = $true
+                continue
+            }
+            if ($hasGithubToken) {
+                Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            }
+            else {
+                Log "Codex 检测到 GitHub MCP 已显式停用；缺少 Token 时仍保留停用配置。" "INFO"
+            }
+            $normalizedGithub = [ordered]@{
+                name = [string]$server.name
+                transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "http" } else { [string]$server.transport }
+                url = [string]$server.url
+                bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+            }
+            if ($hasEnabled) {
+                $normalizedGithub.enabled = [bool]$server.enabled
+            }
+            if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
+                $normalizedGithub.enabled_tools = @($server.enabled_tools)
+            }
+            $codexServers += [pscustomobject]$normalizedGithub
+            continue
+        }
+        $codexServers += $server
+    }
+
+    $managedMap = Convert-McpServersToCodexConfigMap $codexServers $CodexRoot
+    $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    # Ownership basis: only names declared here own a section. A section the host
+    # owns (node_repl) or one that is not declared at all is preserved verbatim --
+    # dropping undeclared sections by omission silently deleted host configuration.
+    $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedName in $managedNames) { $managedNameSet.Add([string]$managedName) | Out-Null }
+    $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
+
+    $kept = New-Object System.Collections.Generic.List[string]
+    if ($preserveExistingMcpSections) {
+        foreach ($line in $lines) {
+            $kept.Add($line) | Out-Null
+        }
+    }
+    else {
+        $skipMcpSection = $false
+        $hostOwnedMcpNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $hostOwnedMcpNames.Add("node_repl") | Out-Null
+        foreach ($line in $lines) {
+            if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*(?:#.*)?$') {
+                $serverName = [string]$Matches[1]
+                $skipMcpSection = $managedNameSet.Contains($serverName) -and -not $hostOwnedMcpNames.Contains($serverName)
+                if (-not $skipMcpSection) {
+                    $kept.Add($line) | Out-Null
+                }
+                continue
+            }
+
+            if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*(?:#.*)?$') {
+                $skipMcpSection = $false
+                $kept.Add($line) | Out-Null
+                continue
+            }
+
+            if (-not $skipMcpSection) {
+                $kept.Add($line) | Out-Null
+            }
+        }
+    }
+
+    while ($kept.Count -gt 0 -and [string]::IsNullOrWhiteSpace($kept[$kept.Count - 1])) {
+        $kept.RemoveAt($kept.Count - 1)
+    }
+
+    $output = New-Object System.Collections.Generic.List[string]
+    # MCP sync owns only MCP sections. Preserve host-owned model, approval,
+    # sandbox, feature, and every other non-MCP setting byte-for-byte.
+    $output.AddRange([string[]]$kept.ToArray())
+
+    if ($managedNames.Count -gt 0) {
+        if ($output.Count -gt 0) { $output.Add("") | Out-Null }
+        foreach ($name in $managedNames) {
+            Need (Test-TomlBareKey $name) ("mcp_server 名不是合法的 Codex TOML bare key，拒绝写入 config.toml：{0}" -f $name)
+            $entry = $managedMap.$name
+            $output.Add(("[mcp_servers.{0}]" -f $name)) | Out-Null
+            foreach ($prop in $entry.PSObject.Properties) {
+                $key = [string]$prop.Name
+                $val = $prop.Value
+                if ($null -eq $val) { continue }
+                if ($val -is [Array]) {
+                    $arr = @($val | ForEach-Object { ConvertTo-TomlBasicValue $_ })
+                    $output.Add(("{0} = [{1}]" -f (ConvertTo-TomlKey $key), ($arr -join ", "))) | Out-Null
+                    continue
+                }
+                if ($val -is [hashtable] -or $val -is [System.Collections.IDictionary] -or $val -is [pscustomobject]) {
+                    $dict = @{}
+                    if ($val -is [pscustomobject]) {
+                        foreach ($p in $val.PSObject.Properties) { $dict[[string]$p.Name] = $p.Value }
+                    }
+                    else {
+                        foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
+                    }
+                    foreach ($k in $dict.Keys) { Assert-McpHostValueNotEnvTemplate $name $key ([string]$k) ([string]$dict[$k]) }
+                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f (ConvertTo-TomlKey $_), (ConvertTo-TomlBasicValue $dict[$_]) })
+                    $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
+                    continue
+                }
+                $output.Add(("{0} = {1}" -f (ConvertTo-TomlKey $key), (ConvertTo-TomlBasicValue $val))) | Out-Null
+            }
+            $output.Add("") | Out-Null
+        }
+        while ($output.Count -gt 0 -and [string]::IsNullOrWhiteSpace($output[$output.Count - 1])) {
+            $output.RemoveAt($output.Count - 1)
+        }
+    }
+
+    return ($output -join "`r`n")
+}
+
+function Resolve-GeminiAntigravityRootsFromCandidates($paths) {
+    $roots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $paths) { return @() }
+    $token = ".gemini\antigravity"
+    $tokenLower = $token.ToLowerInvariant()
+    foreach ($p in $paths) {
+        if ([string]::IsNullOrWhiteSpace([string]$p)) { continue }
+        $norm = ([string]$p).Replace("/", "\")
+        $lower = $norm.ToLowerInvariant()
+        $searchStart = 0
+        while ($searchStart -lt $lower.Length) {
+            $idx = $lower.IndexOf($tokenLower, $searchStart)
+            if ($idx -lt 0) { break }
+            if ($idx -gt 0 -and $norm[$idx - 1] -ne '\') {
+                $searchStart = $idx + 1
+                continue
+            }
+            $end = $idx + $token.Length
+            # Require a directory boundary to avoid false matches like antigravity-backup.
+            if ($end -lt $norm.Length -and $norm[$end] -ne '\') {
+                $searchStart = $idx + 1
+                continue
+            }
+            $root = $norm.Substring(0, $idx + $token.Length)
+            if (-not [string]::IsNullOrWhiteSpace($root)) { $roots.Add($root) | Out-Null }
+            $searchStart = $idx + $token.Length
+        }
+    }
+    # 平铺返回：调用点统一以 @(...) 收集数组形状。单目逗号防展开与调用点
+    # @() 叠加会再包一层嵌套（Count 恒 1），使空目标守卫恒真、多 root 期望
+    # 集错乱、Gemini 多 root 参数绑定崩溃。
+    return @($roots | Sort-Object)
+}
+
+function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
+    Need (-not [string]::IsNullOrWhiteSpace($repoRoot)) "repoRoot 不能为空"
+    return (Join-Path (Join-Path $repoRoot ".trae") "mcp.json")
+}
+
+function Get-ZCodeMcpConfigPath([string]$zcodeRoot) {
+    $root = [IO.Path]::GetFullPath($zcodeRoot).TrimEnd('\', '/')
+    $userRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.zcode')).TrimEnd('\', '/')
+    if ($root.Equals($userRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return (Join-Path $root 'cli\config.json')
+    }
+    return (Join-Path $root 'config.json')
+}
+
+function Get-McpTargetCandidatePaths($cfg) {
+    $paths = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $cfg) { return @() }
+    if ($cfg.PSObject.Properties.Match("mcp_targets").Count -gt 0 -and $cfg.mcp_targets -ne $null) {
+        foreach ($mt in $cfg.mcp_targets) {
+            if ($mt -is [string]) {
+                if (-not [string]::IsNullOrWhiteSpace($mt)) { $paths.Add($mt) | Out-Null }
+            }
+            elseif ($mt.PSObject.Properties.Match("path").Count -gt 0) {
+                $v = [string]$mt.path
+                if (-not [string]::IsNullOrWhiteSpace($v)) { $paths.Add($v) | Out-Null }
+            }
+        }
+    }
+    foreach ($t in $cfg.targets) {
+        if ($t.PSObject.Properties.Match("path").Count -gt 0) {
+            $v = [string]$t.path
+            if (-not [string]::IsNullOrWhiteSpace($v)) { $paths.Add($v) | Out-Null }
+        }
+    }
+    $resolved = New-Object System.Collections.Generic.List[string]
+    foreach ($path in $paths) {
+        $r = Resolve-TargetDir $path
+        if (-not [string]::IsNullOrWhiteSpace($r)) { $resolved.Add($r.Replace("/", "\")) | Out-Null }
+    }
+    return @($resolved)
+}
+
+function Resolve-McpTargetRootsFromCfg($cfg) {
+    $roots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $cfg) { return @() }
+
+    $candidates = Get-McpTargetCandidatePaths $cfg
+    foreach ($path in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $norm = $path.Replace("/", "\")
+        $lower = $norm.ToLowerInvariant()
+
+        $dotDirs = @(".claude", ".codex", ".gemini", ".trae", ".zcode")
+        $matched = $false
+        $bestIdx = -1
+        $bestNeedleLen = 0
+        foreach ($dotDir in $dotDirs) {
+            $needle = "\" + $dotDir.ToLowerInvariant()
+            $searchStart = 0
+            while ($searchStart -lt $lower.Length) {
+                $idx = $lower.IndexOf($needle, $searchStart)
+                if ($idx -lt 0) { break }
+                $end = $idx + $needle.Length
+                # Require directory boundary so ".gemini_backup" does not match ".gemini".
+                if ($end -lt $norm.Length -and $norm[$end] -ne '\') {
+                    $searchStart = $idx + 1
+                    continue
+                }
+                if ($bestIdx -lt 0 -or $idx -lt $bestIdx) {
+                    $bestIdx = $idx
+                    $bestNeedleLen = $needle.Length
+                }
+                $matched = $true
+                break
+            }
+        }
+        if ($matched -and $bestIdx -ge 0) {
+            $root = $norm.Substring(0, $bestIdx + $bestNeedleLen)
+            $roots.Add($root) | Out-Null
+        }
+        if ($matched) { continue }
+
+        $leaf = Split-Path $norm -Leaf
+        if ($leaf.Equals("skills", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $parent = Split-Path $norm -Parent
+            if (-not [string]::IsNullOrWhiteSpace($parent)) { $roots.Add($parent) | Out-Null }
+            continue
+        }
+
+        $roots.Add($norm) | Out-Null
+    }
+
+    # 平铺返回：调用点统一以 @(...) 收集数组形状。单目逗号防展开与调用点
+    # @() 叠加会再包一层嵌套（Count 恒 1），使空目标守卫恒真、多 root 期望
+    # 集错乱、Gemini 多 root 参数绑定崩溃。
+    return @($roots | Sort-Object)
+}
+
