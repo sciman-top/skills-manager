@@ -834,7 +834,7 @@ function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
     foreach ($name in @(
             '.git', '.runtime', '.worktrees', '.txn', '.agent-build', '.tmp', '.artifacts',
             '.cache', '.pytest_cache', '.next', '.nuxt', '.vite', '.turbo', '.gradle',
-            'node_modules', 'vendor', 'imports', 'reports', 'artifacts', 'bin', 'obj',
+            'node_modules', 'vendor', 'imports', 'skills.lib', 'reports', 'artifacts', 'bin', 'obj',
             'dist', 'build', 'out', 'coverage', 'tmp', 'temp', 'target', '__pycache__',
             '.venv', 'venv', 'env'
         )) {

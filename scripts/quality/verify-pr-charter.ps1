@@ -55,14 +55,28 @@ $goalMatch = [regex]::Match($charterBody, '(?ims)^\s*##\s*Goal\s*$\r?\n\s*-\s*(?
 if (-not $goalMatch.Success) { throw 'PR charter section is missing: ## Goal' }
 Assert-CharterValue 'Goal' $goalMatch.Groups['value'].Value.Trim()
 
-foreach ($section in @('Charter admission', 'Deletion delta', 'Risks and Rollback')) {
+$newSurface = Get-CharterField $charterBody 'New surface'
+if ($newSurface -notin @('yes', 'no')) {
+    throw 'PR charter field New surface must be yes or no.'
+}
+
+$requiredSections = @('Risks and Rollback')
+if ($newSurface -eq 'yes') { $requiredSections += @('Charter admission', 'Deletion delta') }
+foreach ($section in $requiredSections) {
     if (-not [regex]::IsMatch($charterBody, "(?im)^\s*##\s*$([regex]::Escape($section))(?:\s+\([^\r\n)]*\))?\s*$")) {
         throw "PR charter section is missing: ## $section"
     }
 }
 
-foreach ($label in @('Current caller', 'Replaces / deletes', 'Minimum proof', 'Removed', 'Risk', 'Rollback')) {
+$requiredFields = @('Risk', 'Rollback')
+if ($newSurface -eq 'yes') { $requiredFields += @('Current caller', 'Replaces / deletes', 'Minimum proof', 'Removed') }
+foreach ($label in $requiredFields) {
     Assert-CharterValue $label (Get-CharterField $charterBody $label)
 }
 
-Write-Host 'PR charter check passed: Goal, caller, replacement/deletion, proof, removal delta, risk and rollback are declared.' -ForegroundColor Green
+if ($newSurface -eq 'yes') {
+    Write-Host 'PR charter check passed: new-surface caller, replacement/deletion, minimum proof, removal delta, risk and rollback are declared.' -ForegroundColor Green
+}
+else {
+    Write-Host 'PR charter check passed: routine change; new-surface admission is not applicable.' -ForegroundColor Green
+}

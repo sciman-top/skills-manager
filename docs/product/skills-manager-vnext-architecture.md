@@ -46,8 +46,10 @@
 ### Config and source materialization
 
 - Interface：`skills.json`、`skills.lock.json`
-- Implementation：`src/Config.ps1`、`src/Git.ps1`、install/update/build commands
+- Implementation：`src/Config.ps1`（配置契约与持久化）、`src/Lock.ps1`（锁定域原语）、`src/Git.ps1`（来源操作），以及 install/update/build commands
 - Outputs：`vendor/`、`imports/`、`agent/`、targets
+
+`src/Application/AgentBuild.ps1` 负责 `agent/` 物化：映射解析、技能名冲突校验，以及构建事务的备份、完成和回滚。`src/Commands/Install.ps1` 保留安装/卸载交互、`构建生效` 的命令编排与宿主投影调用；安装选择逻辑和构建事务可分别修改。两者沿用现有函数接口与构建闭包加载，不增加独立状态或加载机制。修改物化或回滚行为复用 `AgentBuild.Tests.ps1`，命令编排复用 `Core.Tests.ps1` 与 `E2E/Workflow.Tests.ps1`；跨面变更仍按最低门禁选择 full。
 
 配置 validator 负责 schema、path containment、duplicate name、mapping、MCP 与 projection invariants。当前 `skills.json` 使用 schema v3：11 个受管顶层字段采用 allowlist，未知顶层字段 fail closed；v2 仍保留只读迁移兼容并仅输出 observation。该迁移由 [HSM-CFG-300/310](../archive/skills-manager-hardening-implementation-plan.md) 按 observe→enforce 两步落地，后续 schema 变更必须保留兼容窗口与回滚合同。未知顶层字段不得成为新的 runtime/任务控制面入口。source update 负责 revision/origin/dirty checks；build 只消费验证后的 source 和 override。
 
@@ -56,7 +58,7 @@
 ### MCP
 
 - Interface：`安装MCP`、`卸载MCP`、`MCP配置`、`同步MCP`
-- Implementation：`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）和 `src/Commands/Mcp.ps1`（adapter、规划、事务与同步）
+- Implementation：`src/Commands/Mcp.HostAdapters.ps1`（宿主配置形状与适配）、`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）和 `src/Commands/Mcp.ps1`（规划、事务与同步）
 - State：`skills.json.mcp_servers/mcp_profiles/mcp_targets`；配置 `mcp_profiles` 时由 `mcp_profiles.active` 唯一决定当前启用集合，`mcp_servers[].enabled` 仅保留给无 profile 的历史兼容输入
 
 MCP config mutation、host projection、live readiness 是三个不同状态。仓库保存环境变量名，不保存 credential value。

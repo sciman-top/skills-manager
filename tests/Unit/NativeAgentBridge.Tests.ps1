@@ -8,20 +8,6 @@ BeforeAll {
         return (Get-ContentUtf8 (Join-Path $repoRoot $RelativePath)) -replace "`r", ''
     }
 
-    # Bridge roles own workflow behavior. Model/effort belongs to the active
-    # preset and must remain selectable at spawn time or inheritable from it.
-    function Get-BridgeRoutingOverrideViolations([string]$TemplateText) {
-        $violations = New-Object System.Collections.Generic.List[string]
-        $modelFields = [regex]::Matches($TemplateText, '(?m)^model\s*=\s*"([^"]*)"$')
-        $effortFields = [regex]::Matches($TemplateText, '(?m)^model_reasoning_effort\s*=\s*"([^"]*)"$')
-        if ($modelFields.Count -gt 0) { $violations.Add('bridge template overrides active preset model') }
-        if ($effortFields.Count -gt 0) { $violations.Add('bridge template overrides active preset effort') }
-
-        foreach ($forbidden in @('provider', 'model_provider', 'base_url', 'api_key', 'auth', 'secret', 'fallback', 'profile', 'session')) {
-            if ($TemplateText -match ('(?m)^{0}\s*=' -f $forbidden)) { $violations.Add(("forbidden template field present: {0}" -f $forbidden)) }
-        }
-        return @($violations)
-    }
 }
 
 Describe 'Native agent bridge' {
@@ -43,24 +29,13 @@ Describe 'Native agent bridge' {
     It 'lets both managed bridge templates use the active preset route' {
         foreach ($name in @('design-griller', 'cold-capability-runner')) {
             $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\{0}.toml" -f $name)
-            @(Get-BridgeRoutingOverrideViolations $template) | Should -Be @()
-        }
-    }
-
-    It 'rejects model, effort, provider and session overrides in bridge templates' {
-        $template = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
-        @(Get-BridgeRoutingOverrideViolations $template) | Should -Be @()
-
-        $mutations = [ordered]@{
-            model = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('model = "gpt-5.6-terra"' + "`n" + '$1')
-            effort = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('model_reasoning_effort = "high"' + "`n" + '$1')
-            provider = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('provider = "smuggled"' + "`n" + '$1')
-            session = $template -replace '(?m)^(sandbox_mode = "read-only")$', ('session = "smuggled"' + "`n" + '$1')
-        }
-
-        foreach ($mutation in $mutations.GetEnumerator()) {
-            $violations = @(Get-BridgeRoutingOverrideViolations ([string]$mutation.Value))
-            @($violations).Count | Should -BeGreaterThan 0 -Because ("mutation '{0}' must be rejected by the routing oracle" -f $mutation.Key)
+            # Model/effort belongs to the active preset; check the shipped
+            # templates directly rather than testing a separate routing oracle.
+            $template | Should -Not -Match '(?m)^model\s*=\s*"([^"]*)"$'
+            $template | Should -Not -Match '(?m)^model_reasoning_effort\s*=\s*"([^"]*)"$'
+            foreach ($forbidden in @('provider', 'model_provider', 'base_url', 'api_key', 'auth', 'secret', 'fallback', 'profile', 'session')) {
+                $template | Should -Not -Match ('(?m)^{0}\s*=' -f $forbidden)
+            }
         }
     }
 

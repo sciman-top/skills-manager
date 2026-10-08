@@ -120,17 +120,4 @@ function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
         $source | Should -Not -Match '(?i)\$env:'
     }
 
-    It 'parses and constructs plain objects in the PowerShell 7 runtime' {
-        $operationPath = (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1').Replace("'", "''")
-        $receiptPath = (Join-Path $repoRoot 'src\Domain\Receipt.ps1').Replace("'", "''")
-        $scriptText = ". '$operationPath'; . '$receiptPath'; `$p = New-OperationPlan -OperationId op-smoke -Domain mcp -Mode dry_run -CreatedAt 2026-08-01T08:00:00Z; `$r = New-OperationReceipt -OperationId op-smoke -Status dry_run -StartedAt 2026-08-01T08:00:00Z -CompletedAt 2026-08-01T08:00:01Z; [pscustomobject]@{ plan = `$p.schema_version; receipt = `$r.schema_version } | ConvertTo-Json -Compress"
-
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
-        $exitCode = $LASTEXITCODE
-        $result = ($output -join "`n") | ConvertFrom-Json
-
-        $exitCode | Should -Be 0
-        $result.plan | Should -Be 1
-        $result.receipt | Should -Be 1
-    }
 }

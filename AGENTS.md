@@ -40,5 +40,5 @@
 ## D. 回滚与收口
 - Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 required checks（`test`，strict）：直推 `main` 会被拒，合入走 推分支 → PR → CI 绿 → merge。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
-- 收口报告必须含 `Removed:` 行（删除或合并的测试、门禁、文档数）；连续 0 视为只加不减，触发一次减法复核。
+- 收口报告含 `Removed:` 行；新增独立功能或治理面时列出删除或合并的测试、门禁、文档数，常规修复写 `N/A`。新增面准入时同步评估可替换项；不得因连续 0 单独触发减法复核。
 - 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件。
