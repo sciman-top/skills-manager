@@ -2337,13 +2337,17 @@ function New-AuditCoverageStatement($PrioritizedNeeds, $ProfileSelectedSkills, $
 
 function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $CatalogSupplySkills = $null, $ExternalSkills = @(), $McpServers = @()) {
     Need (@($scans).Count -gt 0) "扫描画像至少需要一个目标仓扫描结果。"
+    $completedScans = @($scans | Where-Object {
+        (Get-CfgObjectProperty (Get-CfgObjectProperty $_ "scan_coverage") "confidence_ceiling") -ne "skipped_dirty"
+    })
     $fields = @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files", "risks")
     $profile = [ordered]@{
         schema_version = 3
         derived_at = (Get-Date).ToString("o")
         derivation = "target_scans_only"
         target_names = @()
-        scanned_target_count = @($scans).Count
+        scanned_target_count = $completedScans.Count
+        skipped_target_count = @($scans).Count - $completedScans.Count
     }
     foreach ($field in $fields) { $profile[$field] = @() }
     $values = @{}
@@ -2366,9 +2370,9 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $Catalog
     foreach ($field in $fields) { $profile[$field] = @(Merge-AuditKeywordSets @($values[$field].ToArray()) 160) }
     $profile.artifact_capabilities = @(Merge-AuditArtifactCapabilities $scans)
     $profile.requirement_signals = @(Merge-AuditRequirementSignals $scans)
-    $minimumProductWorkflowSourceTargetCount = if (@($scans).Count -gt 1) { 2 } else { 1 }
+    $minimumProductWorkflowSourceTargetCount = if ($completedScans.Count -gt 1) { 2 } else { 1 }
     $profile.prioritized_needs = New-AuditPrioritizedNeeds $profile.requirement_signals $profile.artifact_capabilities $minimumProductWorkflowSourceTargetCount
-    $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs @($scans).Count
+    $profile.user_need_summary = New-AuditUserNeedSummary $profile.prioritized_needs $completedScans.Count
     $profile.target_evidence_partitions = @(New-AuditTargetEvidencePartitions $scans)
     $profile.coverage_statement = @(New-AuditCoverageStatement $profile.prioritized_needs $ProfileSelectedSkills $CatalogSupplySkills $ExternalSkills $McpServers)
     $technology = @($profile.languages + $profile.frameworks + $profile.package_managers | Select-Object -First 8)
@@ -2377,7 +2381,7 @@ function New-AuditTargetProfile($scans, $ProfileSelectedSkills = $null, $Catalog
     $secondaryCount = @($profile.prioritized_needs.secondary_needs).Count
     $observationCount = @($profile.prioritized_needs.observations).Count
     $primaryText = if ($primary.Count -gt 0) { $primary -join ', ' } else { "无达到主需求阈值的扫描信号" }
-    $profile.summary = "由 $($profile.scanned_target_count) 个启用目标仓派生的全仓汇总画像；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount。目标仓扫描仅用于证据归属与覆盖统计；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
+    $profile.summary = "由 $($profile.scanned_target_count) 个已扫描目标仓派生的全仓汇总画像（跳过=$($profile.skipped_target_count)）；重点需求：$primaryText；次级需求=$secondaryCount；观察项=$observationCount。目标仓扫描仅用于证据归属与覆盖统计；技术信号：$($technology -join ', ')；能力信号：$($capability -join ', ')。"
     return [pscustomobject]$profile
 }
 

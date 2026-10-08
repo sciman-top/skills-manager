@@ -136,11 +136,11 @@ function Get-RuleDiscovery {
         if ($null -eq $parent -or -not (Test-RuleDiscoveryPathWithin $parent.FullName $repo)) { throw 'Unable to construct a bounded repository rule chain.' }
         $cursor = $parent.FullName
     }
-    $projectDirs = if ($HostName -in @('zcode', 'antigravity')) { @($repo) } else { @($dirs) }
+    $projectDirs = if ($HostName -eq 'zcode') { @($repo) } else { @($dirs) }
     foreach ($dir in $projectDirs) {
         $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') {
             $ruleDir = Join-Path $dir '.agents\rules'
-            if ([System.IO.Directory]::Exists($ruleDir)) { @(Get-ChildItem -LiteralPath $ruleDir -Filter '*.md' -File | Sort-Object Name | ForEach-Object { Join-Path '.agents\rules' $_.Name }) } else { @() }
+            @('AGENTS.md', 'GEMINI.md', '.agents/AGENTS.md', '.agents/GEMINI.md') + $(if ([System.IO.Directory]::Exists($ruleDir)) { @(Get-ChildItem -LiteralPath $ruleDir -Filter '*.md' -File | Sort-Object Name | ForEach-Object { Join-Path '.agents\rules' $_.Name }) } else { @() })
         } else { @('CLAUDE.md', 'AGENTS.md') }
         $selected = $false
         foreach ($name in $names) {
@@ -149,10 +149,19 @@ function Get-RuleDiscovery {
             $nonEmpty = $exists -and (Test-RuleDiscoveryNonEmptyFile $path)
             $reason = if (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'shadowed_by_higher_priority_candidate' }
             $candidate = [pscustomobject]@{ path = $path; scope = $(if ($dir -eq $repo) { 'repo' } else { 'subtree' }); exists = $exists; selected = $false; reason = $reason }
-            if ($nonEmpty -and -not $selected) {
+            if ($HostName -eq 'antigravity' -and $nonEmpty -and $name -match '^\.agents[\\/]rules[\\/]') {
+                $text = [IO.File]::ReadAllText($path)
+                $header = [regex]::Match($text, '\A---\r?\n(?<header>.*?)\r?\n---(?:\r?\n|$)', 'Singleline')
+                $trigger = [regex]::Match($header.Groups['header'].Value, '(?m)^trigger:\s*(?<quote>[''"]?)(?<trigger>always_on|model_decision|glob|manual)\k<quote>\s*(?:#.*)?$')
+                $valid = $header.Success -and $trigger.Success
+                if ($trigger.Groups['trigger'].Value -eq 'model_decision') { $valid = $valid -and ($header.Groups['header'].Value -match '(?m)^description:\s*\S') }
+                if ($trigger.Groups['trigger'].Value -eq 'glob') { $valid = $valid -and ($header.Groups['header'].Value -match '(?m)^globs?:\s*\S') }
+                if (-not $valid) { $nonEmpty = $false; $candidate.reason = 'invalid_frontmatter_not_loaded' }
+            }
+            if ($nonEmpty -and (-not $selected -or $HostName -eq 'antigravity')) {
                 $scope = if ($name -match 'override') { 'override' } elseif ($dir -eq $repo) { 'repo' } else { 'subtree' }
                 $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -in @('claude', 'antigravity')) { 'platform_delta' } else { 'project_action' })
-                if ($HostName -eq 'claude') { $document.discovery_state = 'inferred'; $document.precedence = $null }
+                if ($HostName -in @('claude', 'antigravity')) { $document.discovery_state = 'inferred'; $document.precedence = $null }
                 $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'claude') { 'candidate_precedence_not_verified' } else { 'first_non_empty_candidate' }); $selected = $true; $precedence++
             }
             $candidates.Add($candidate) | Out-Null

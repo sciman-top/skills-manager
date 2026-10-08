@@ -1,5 +1,5 @@
-# GEMINI.md - Universal Agent Protocol v9.84 | Antigravity / Gemini
-**版本**: 9.84
+# GEMINI.md - Universal Agent Protocol v9.85 | Antigravity / Gemini
+**版本**: 9.85
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引
@@ -47,12 +47,12 @@
 - 默认不新增常驻 gate/hook/skill/receipt/schema；只有真实故障或外部契约且无旧面可替代时新增，并给最低 proof；临时治理面必须有可执行退役条件。
 - 硬上限：全局 `130 lines/16 KiB`、项目根 `80 lines/10 KiB`；85%=`warning`，95%=`addition_blocked`，先拆低频；例外由仓库契约记录。
 ## B. Antigravity 平台差异
-<!-- verified: 2026-10-05 | antigravity.google/docs/rules-workflows | Antigravity 2.0 -->
+<!-- verified: 2026-10-08 | antigravity.google/docs/rules | Antigravity 2.21.1 -->
 ### B.1 加载链
-- 全局规则 `~/.gemini/GEMINI.md`；工作区规则在 Git 仓库或 workspace 根的 `.agents/rules/`（`.agent/rules/` 仅兼容回退）。
-- 本仓项目规则由 `.agents/rules/00-project.md` 以 `@../../AGENTS.md` 承接：相对 `@` 按规则文件所在目录解析，适配文件不是第二份真源；仓根 `GEMINI.md`（同样 `@AGENTS.md`）是**同一项目的兼容承接**，不是独立真源，两者内容必须指向同一 `AGENTS.md`。
+- 受管全局真源投影到 `~/.gemini/GEMINI.md`；宿主也读取 `~/.gemini/` 及其 `config/` 中的 AGENTS.md/GEMINI.md 和全局 rules，额外文件可能叠加规则，不能仅凭受管文件相等证明整个加载面。
+- 宿主原生沿文件目录到 workspace 根读取 `AGENTS.md`/`GEMINI.md`、`.agents/` 同名文件及 `.agents/rules/*.md`；优先直接使用项目 `AGENTS.md`，不为缺少适配器新增副本。已有适配器须含合法 YAML `trigger: always_on`，用 `@[Project contract](../../AGENTS.md)` 内联同一真源；裸 `@../../AGENTS.md` 仅规范化路径引用，不内联内容。仓根 `GEMINI.md` 的 `@AGENTS.md` 保留作 Gemini CLI 兼容引用，不据此证明 Antigravity 已内联。
 - 单文件上限 12,000 字符（宿主硬限）；根规则保持短小，低频说明下沉项目文档/skills/hooks/rules/scripts/CI。
-- 规则激活模式（Manual / Always on / Model decision / Glob pattern）以宿主设置为准；文件存在不等于已加载。
+- `.agents/rules/*.md` 缺 frontmatter 或 trigger 非 `always_on/model_decision/glob/manual` 会被静默丢弃；model_decision 需 description，glob 需 globs/glob。规则目录只扫描直接子文件；条件规则和显式登记以宿主设置为准，文件存在不等于已加载。
 ### B.2 诊断与强制
 - 最小诊断用当前 Antigravity/CLI help 与规则面板；优先新 workspace 会话核对实际加载，不可观察时按 `platform_na` 记替代证据与复测条件。
 - `@` 引用仅限受控、仓库内、可审查的规则承接；禁引凭据、私有状态、网络内容或仓外未审查文件。

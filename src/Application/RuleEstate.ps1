@@ -522,9 +522,9 @@ function New-RuleEstateTargetAudit {
     if ([bool]$Target.antigravity_rule_exists) {
         $adapterBytes = [System.IO.File]::ReadAllBytes([string]$Target.antigravity_rule_path)
         $adapterText = [System.IO.File]::ReadAllText([string]$Target.antigravity_rule_path)
-        $adapterLines = @($adapterText -split "`r?`n")
         if ($adapterBytes.Length -ge 3 -and $adapterBytes[0] -eq 0xEF -and $adapterBytes[1] -eq 0xBB -and $adapterBytes[2] -eq 0xBF) { $antigravityAdapterFindings.Add([pscustomobject]@{ code = 'project_antigravity_adapter_bom'; severity = 'error'; path = $Target.antigravity_rule_path; disposition = 'adapt'; message = 'Antigravity workspace adapter must be UTF-8 without BOM.' }) | Out-Null }
-        if ($adapterLines.Count -eq 0 -or $adapterLines[0] -cne '@../../AGENTS.md') { $antigravityAdapterFindings.Add([pscustomobject]@{ code = 'project_antigravity_adapter_reference_mismatch'; severity = 'error'; path = $Target.antigravity_rule_path; disposition = 'adapt'; message = 'Antigravity workspace adapter must reference the repository AGENTS.md with the official relative @ syntax.' }) | Out-Null }
+        if ($adapterText -cnotmatch '\A---\r?\n(?:(?!---)[^\r\n]*\r?\n)*trigger:\s*always_on\s*\r?\n(?:(?!---)[^\r\n]*\r?\n)*---\r?\n') { $antigravityAdapterFindings.Add([pscustomobject]@{ code = 'project_antigravity_adapter_trigger_invalid'; severity = 'error'; path = $Target.antigravity_rule_path; disposition = 'adapt'; message = 'Antigravity workspace adapter requires YAML trigger: always_on; missing or invalid trigger is silently discarded by the host.' }) | Out-Null }
+        if ($adapterText -cnotmatch '(?m)^@\[[^\]\r\n]+\]\(\.\./\.\./AGENTS\.md\)\s*$') { $antigravityAdapterFindings.Add([pscustomobject]@{ code = 'project_antigravity_adapter_reference_mismatch'; severity = 'error'; path = $Target.antigravity_rule_path; disposition = 'adapt'; message = 'Antigravity workspace adapter must inline AGENTS.md using @[label](../../AGENTS.md); a bare @path does not inline content.' }) | Out-Null }
     }
     foreach ($finding in @($antigravityAdapterFindings.ToArray())) { $findings.Add($finding) | Out-Null }
     $geminiAdapterFindings = New-Object System.Collections.Generic.List[object]
@@ -577,7 +577,7 @@ function Invoke-RuleEstateAudit {
     }
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $geminiAdapterPresent = @($audits | Where-Object { [bool]$_.gemini.adapter_present })
-    if ($geminiAdapterPresent.Count -gt 0 -and $geminiAdapterPresent.Count -lt $audits.Count) { $findings += [pscustomobject]@{ code = 'workspace_gemini_adapter_presence_mixed'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = ('Repository-root GEMINI.md adapter is present in {0} of {1} targets; unify the Gemini/Antigravity project adapter surface.' -f $geminiAdapterPresent.Count, $audits.Count) } }
+    if ($geminiAdapterPresent.Count -gt 0 -and $geminiAdapterPresent.Count -lt $audits.Count) { $findings += [pscustomobject]@{ code = 'workspace_gemini_adapter_presence_mixed'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'observe'; message = ('Optional Gemini CLI adapter is present in {0} of {1} targets; Antigravity reads AGENTS.md natively, so absence alone is not a loading gap.' -f $geminiAdapterPresent.Count, $audits.Count) } }
     $contractFactGapCount = @($audits | ForEach-Object { $_.contract_facts } | Where-Object { -not $_.covered }).Count
     $structuralPass = @($findings | Where-Object severity -eq 'error').Count -eq 0
     $semanticCoveragePass = $contractFactGapCount -eq 0
@@ -600,7 +600,7 @@ function Invoke-RuleEstateAudit {
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
             [pscustomobject]@{ authority = 'official'; source = 'https://code.claude.com/docs/en/memory'; disposition = 'adopt'; use = 'Claude user/project rules, imports, load order and context boundary' },
             [pscustomobject]@{ authority = 'official'; source = 'https://zcode.z.ai/cn/docs/agents'; disposition = 'adopt'; use = 'ZCode user and Workspace-root AGENTS loading boundary' },
-            [pscustomobject]@{ authority = 'official'; source = 'https://antigravity.google/docs/rules-workflows'; disposition = 'adopt'; use = 'Antigravity 2.0 global GEMINI.md, workspace .agents/rules and @ references' },
+            [pscustomobject]@{ authority = 'official'; source = 'https://antigravity.google/docs/rules'; disposition = 'adopt'; use = 'Native AGENTS.md discovery, modular rule triggers, and inline includes distinct from path references' },
             [pscustomobject]@{ authority = 'community_standard'; source = 'https://agents.md/'; disposition = 'adapt'; use = 'Portable project instruction structure and nested repository guidance' }
         )
         writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'

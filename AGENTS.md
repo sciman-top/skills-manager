@@ -1,10 +1,10 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.84
-**最后更新**: 2026-10-06
+**全局规则复核**: 9.85
+**最后更新**: 2026-10-08
 
 ## 1. 产品边界与入口
-- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 通过 `.agents/rules/00-project.md` 的受控 `@../../AGENTS.md` 适配器承接。
+- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 原生读取它，已有 `.agents/rules/00-project.md` 以合法 frontmatter 和内联引用承接同一真源。
 - 主 CLI 管理本地技能/MCP、目标仓规则审查、原生技能投影及 `rules/global/` 的受控投影，不接管模型或宿主 runtime。独立的 `src/model-orchestration/` 仅提供显式 preset 配置和受控启动，遵循其局部 `AGENTS.md`，不进入主 CLI 构建链；两者均不接管 auth、provider、权限、会话或插件缓存。
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
 

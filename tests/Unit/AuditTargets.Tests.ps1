@@ -660,6 +660,15 @@ Describe "Audit Targets" {
                 $cleanScan.git.dirty | Should -Be $false
                 @($cleanScan.detected.package_managers) | Should -Contain "npm"
                 $cleanScan.scan_coverage.confidence_ceiling | Should -Not -Be "skipped_dirty"
+                $profile = New-AuditTargetProfile @($dirtyScan, $cleanScan)
+                $profile.scanned_target_count | Should -Be 1
+                $profile.skipped_target_count | Should -Be 1
+                @($profile.target_names).Count | Should -Be 2
+                @($profile.risks) | Should -Contain "scan_skipped_dirty"
+                $allSkipped = New-AuditTargetProfile @($dirtyScan)
+                $allSkipped.scanned_target_count | Should -Be 0
+                $allSkipped.skipped_target_count | Should -Be 1
+                @($allSkipped.prioritized_needs.primary_needs).Count | Should -Be 0
             }
             finally {
                 $script:Root = $oldRoot
