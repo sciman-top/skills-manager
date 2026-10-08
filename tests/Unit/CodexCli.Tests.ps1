@@ -1,4 +1,4 @@
-﻿BeforeAll {
+BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     # Core.ps1 owns the bounded external-command runner Invoke-CodexCliJson now
     # depends on; load it before the Infrastructure seam under test.
