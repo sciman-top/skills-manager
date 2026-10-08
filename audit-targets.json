@@ -5,9 +5,9 @@
     {
       "name": "classroomtoolkit",
       "path": "D:\\CODE\\ClassroomToolkit",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "classroom-answer-toolkit",
@@ -19,9 +19,9 @@
     {
       "name": "codex-watch-runtime",
       "path": "D:\\CODE\\codex-watch-runtime",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "skills-manager",
@@ -33,37 +33,37 @@
     {
       "name": "k12-question-graph",
       "path": "D:\\CODE\\k12-question-graph",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "physicist_chinese_poster_batch_tool",
       "path": "D:\\CODE\\physicist_chinese_poster_batch_tool",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "ai-content-delivery-studio",
       "path": "D:\\CODE\\ai-content-delivery-studio",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "github-toolkit",
       "path": "D:\\CODE\\github-toolkit",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "qq-codex-bot",
       "path": "D:\\CODE\\qq-codex-bot",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机该路径不存在（2026-10-08）；项目恢复后请重新启用"
     },
     {
       "name": "vps-ssh-launcher",

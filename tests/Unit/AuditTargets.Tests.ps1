@@ -239,6 +239,8 @@ Describe "Audit Targets" {
 
             (Parse-AuditTargetsArgs @("list")).action | Should -Be "list"
             (Parse-AuditTargetsArgs @("scan", "--target", "demo")).target | Should -Be "demo"
+            $skipDirty = Parse-AuditTargetsArgs @("scan", "--skip-dirty")
+            $skipDirty.skip_dirty | Should -Be $true
             $scanWithQuery = Parse-AuditTargetsArgs @("scan", "--target", "demo", "--query", "import scanned exams")
             $scanWithQuery.query | Should -Be "import scanned exams"
 
@@ -609,6 +611,59 @@ Describe "Audit Targets" {
             (@($scan.detected.build_commands) -contains "npm run build") | Should -Be $true
             (@($scan.detected.test_commands) -contains "npm test") | Should -Be $true
             (@($scan.detected.agent_rule_files) -contains "AGENTS.md") | Should -Be $true
+        }
+
+        It "Skips dirty targets without blocking scans of clean targets when requested" {
+            $oldRoot = $script:Root
+            try {
+                $fixtureId = [Guid]::NewGuid().ToString("N")
+                $script:Root = Join-Path $TestDrive ("skip-dirty-scan-root-{0}" -f $fixtureId)
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $dirtyRepo = Join-Path $TestDrive ("skip-dirty-target-{0}" -f $fixtureId)
+                $cleanRepo = Join-Path $TestDrive ("clean-target-{0}" -f $fixtureId)
+                foreach ($repo in @($dirtyRepo, $cleanRepo)) {
+                    New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                    Push-Location $repo
+                    try {
+                        git init | Out-Null
+                        Set-ContentUtf8 (Join-Path $repo "package.json") '{"name":"audit-skip-dirty-fixture","scripts":{"test":"vitest"}}'
+                        git add . | Out-Null
+                        git commit -m init | Out-Null
+                    }
+                    finally {
+                        Pop-Location
+                    }
+                }
+                Set-ContentUtf8 (Join-Path $dirtyRepo "uncommitted.ps1") "Write-Output 'dirty'"
+                $scanConfig = [pscustomobject]@{
+                    version = 3
+                    path_base = "skills_manager_root"
+                    targets = @(
+                        [pscustomobject]@{ name = "dirty"; path = $dirtyRepo; enabled = $true; tags = @(); notes = "" }
+                        [pscustomobject]@{ name = "clean"; path = $cleanRepo; enabled = $true; tags = @(); notes = "" }
+                    )
+                }
+                Mock Load-AuditTargetsConfig { $scanConfig }
+                Mock Write-AuditThreeFileBundle {
+                    param($ReportRoot, $RunId, $Mode, $Query, $Config, [object[]]$Scans)
+                    [pscustomobject]@{ scans = @($Scans) }
+                }
+
+                $result = Invoke-AuditTargetsScan -OutDir (Join-Path $TestDrive ("skip-dirty-bundle-{0}" -f $fixtureId)) -SkipDirty
+                $dirtyScan = @($result.scans | Where-Object { $_.target.name -eq "dirty" })[0]
+                $cleanScan = @($result.scans | Where-Object { $_.target.name -eq "clean" })[0]
+
+                $dirtyScan.git.dirty | Should -Be $true
+                $dirtyScan.scan_coverage.confidence_ceiling | Should -Be "skipped_dirty"
+                @($dirtyScan.risks) | Should -Contain "scan_skipped_dirty"
+                @($dirtyScan.detected.package_managers).Count | Should -Be 0
+                $cleanScan.git.dirty | Should -Be $false
+                @($cleanScan.detected.package_managers) | Should -Contain "npm"
+                $cleanScan.scan_coverage.confidence_ceiling | Should -Not -Be "skipped_dirty"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
 
         It "Extracts dotnet/python/ci command hints from repo scan inputs" {

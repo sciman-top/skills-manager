@@ -62,9 +62,9 @@ try {
     $response = & curl.exe -fsS -m 20 --noproxy "" -x "http://127.0.0.1:$probePort" 'http://ip-api.com/json/?fields=status,query,country,isp,hosting,proxy' 2>$null
     $probeExit = $LASTEXITCODE
     if ($probeExit -ne 0) {
-        # curl exit 28 = operation timed out: the node could not reach ip-api.com
-        # within 20s, i.e. the candidate egress itself is likely unusable.
-        if ($probeExit -eq 28) { throw '出口属性查询超时（curl exit 28）：经该节点 20s 内无法到达 ip-api.com，节点出口大概率不可用，不能作为干净出口候选' }
+        # A timeout only shows that this endpoint probe did not finish; it does
+        # not distinguish endpoint, route, or node availability.
+        if ($probeExit -eq 28) { throw '出口属性查询超时（curl exit 28）：本次 20s 内未能完成对 ip-api.com 的探测；单凭此端点超时不能判断节点是否可用，请稍后重试或使用其他诊断。' }
         throw "出口属性查询失败 exit=$probeExit"
     }
     $result = $response | ConvertFrom-Json
