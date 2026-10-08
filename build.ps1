@@ -51,6 +51,7 @@ $Files = @(
     "Commands/Update.ps1",
     "Commands/Mcp.HostAdapters.ps1",
     "Commands/Mcp.ProfileAndSafety.ps1",
+    "Commands/Mcp.NativeSync.ps1",
     "Commands/Mcp.ps1",
     "Commands/Migration.ps1",
     "Commands/ReleaseUpdate.ps1",
