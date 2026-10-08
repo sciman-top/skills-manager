@@ -169,7 +169,7 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
 }
 
 function Invoke-AuditTargetsScan {
-    param([string]$Target, [string]$Query = "", [string]$OutDir, [switch]$Force)
+    param([string]$Target, [string]$Query = "", [string]$OutDir, [switch]$Force, [switch]$SkipDirty)
     $cfg = Load-AuditTargetsConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -183,6 +183,51 @@ function Invoke-AuditTargetsScan {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
         Write-Host ("Scanning {0} ..." -f $_.name)
         $timer = [Diagnostics.Stopwatch]::StartNew()
+        # --skip-dirty：在途修改的仓扫完即会因 drift fail closed，预检到 dirty 直接
+        # 落一个同 schema 的空画像 scan；git 取证保留，apply 时 drift 检测照常生效。
+        # 仅在显式 -SkipDirty 时预检，不给常规扫描增加重复 git 取证。
+        $gitInfo = if ($SkipDirty) { Get-AuditGitInfo $resolved } else { $null }
+        if ($SkipDirty -and $gitInfo.dirty) {
+            Write-Host ("Skipped {0}: dirty worktree (在途修改，未采集画像)" -f $_.name)
+            [pscustomobject]([ordered]@{
+                schema_version = 1
+                scanned_at = (Get-Date).ToString("o")
+                target = [ordered]@{
+                    name = [string]$_.name
+                    path = [string]$_.path
+                    resolved_path = $resolved
+                    exists = $true
+                }
+                git = $gitInfo
+                detected = [ordered]@{
+                    languages = @()
+                    package_managers = @()
+                    frameworks = @()
+                    build_commands = @()
+                    test_commands = @()
+                    capabilities = @()
+                    artifact_capabilities = @()
+                    requirement_signals = @()
+                    agent_rule_files = @()
+                    notable_files = @()
+                }
+                scan_coverage = [pscustomobject]([ordered]@{
+                    population_count = 0
+                    sampled_count = 0
+                    sample_limit = 600
+                    truncated = $false
+                    large_file_count = 0
+                    text_truncated_count = 0
+                    self_referential_count = 0
+                    read_failure_count = 0
+                    sampled_by_kind = [pscustomobject]@{ source_code = 0; supporting_code = 0; test = 0; non_product_code = 0 }
+                    confidence_ceiling = "skipped_dirty"
+                })
+                risks = @("git_dirty", "scan_skipped_dirty")
+            })
+            Write-Host ("Skipped {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
+            return
+        }
         New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
         Write-Host ("Scanned {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
     })

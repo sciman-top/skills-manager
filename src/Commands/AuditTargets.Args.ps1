@@ -10,6 +10,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         recommendations = $null
         dry_run_ack = $null
         force = $false
+        skip_dirty = $false
         add_selection = $null
         remove_selection = $null
         mcp_add_selection = $null
@@ -103,6 +104,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.force = $true
                 continue
             }
+            "--skip-dirty" {
+                $result.skip_dirty = $true
+                continue
+            }
             "--add-indexes" {
                 Need ($i + 1 -lt $items.Count) "--add-indexes 缺少值"
                 $result.add_selection = [string]$items[++$i]
@@ -173,7 +178,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
     Write-Host "  .\skills.ps1 审查目标 目标列表"
-    Write-Host "  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--query <user-goal>] [--out <dir>] [--force] [--skip-dirty]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
@@ -210,7 +215,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "status" { Show-AuditLatestStatus }
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
         "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
-        "scan" { Invoke-AuditTargetsScan -Target $opts.target -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
+        "scan" { Invoke-AuditTargetsScan -Target $opts.target -Query $opts.query -OutDir $opts.out -Force:$opts.force -SkipDirty:$opts.skip_dirty | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" {
             if (-not $opts.apply) {

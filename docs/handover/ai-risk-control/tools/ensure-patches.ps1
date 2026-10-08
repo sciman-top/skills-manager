@@ -242,8 +242,11 @@ if (Test-AsarLocalized $asar) {
 #       系统代理可能被改回 10808 → Google/Antigravity 流量走被标记的出口 IP。
 #       这里把分流器自愈挂进每 30 分钟的自愈循环。
 $splitScript = 'D:\TOOL\v2rayN\ag-split\ensure-split.ps1'
-$pwshExe     = 'C:\Program Files\PowerShell\7\pwsh.exe'
-if ((Test-Path $splitScript) -and (Test-Path $pwshExe)) {
+# pwsh 7 may be the MSI install (Program Files) or the MSIX/Store install;
+# resolve dynamically so Store-only machines keep the split self-heal wired.
+$pwshExe = @('C:\Program Files\PowerShell\7\pwsh.exe', (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source) |
+    Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if ((Test-Path $splitScript) -and $pwshExe) {
     Write-Log '分流器自愈：调用 ensure-split.ps1'
     try {
         $splitOut = & $pwshExe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $splitScript -Quiet 2>&1

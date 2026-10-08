@@ -33,16 +33,20 @@ $WD    = 'D:\TOOL\v2rayN'
 $TASK  = 'AgSplitEgress'
 $WATCH = 'AgSplitWatchdog'
 $ENSURE= 'D:\TOOL\v2rayN\ag-split\ensure-split.ps1'
-$PWSH  = 'C:\Program Files\PowerShell\7\pwsh.exe'
+# pwsh 7 may be the MSI install (Program Files) or the MSIX/Store install;
+# resolve dynamically so Store-only machines can still register the tasks.
+$PWSH  = @('C:\Program Files\PowerShell\7\pwsh.exe', (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source) |
+    Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 $OUT   = 'D:\TOOL\v2rayN\ag-split\register-split-task.log'
 
 function Say($m) { "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))  $m" | Out-File -Append -Encoding utf8 $OUT }
 
 Say '===== register-split-task start ====='
 
-foreach ($p in @($XRAY, $CFG, $ENSURE, $PWSH)) {
+foreach ($p in @($XRAY, $CFG, $ENSURE)) {
     if (-not (Test-Path $p)) { Say "ERROR: missing $p"; exit 1 }
 }
+if (-not $PWSH) { Say 'ERROR: pwsh 7 executable not found'; exit 1 }
 
 # S4U ("run whether logged on or not", no stored password) runs both tasks in a
 # non-interactive session: no per-3-min console flash, no visible core console.

@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     # Core.ps1 owns the bounded external-command runner Invoke-CodexCliJson now
     # depends on; load it before the Infrastructure seam under test.
@@ -13,6 +13,7 @@ Describe 'Codex CLI plugin inventory' {
         # fixture must exit rather than only set $LASTEXITCODE.
         [IO.File]::WriteAllText($fixtureCodex, "Write-Output '{`"status`":`"degraded`"}'`nexit 1`n", [Text.UTF8Encoding]::new($false))
         Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'pwsh' }
 
         { Invoke-CodexCliJson -Arguments @('doctor', '--json') } | Should -Throw 'codex_cli_failed*'
         (Invoke-CodexCliJson -Arguments @('doctor', '--json') -AllowNonZeroExitWithJson).status | Should -Be 'degraded'
@@ -56,6 +57,7 @@ Describe 'Codex CLI host observation' {
         $fixtureCodex = Join-Path $TestDrive 'codex-array.ps1'
         [IO.File]::WriteAllText($fixtureCodex, "Write-Output '$Json'`nexit 0`n")
         Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'pwsh' }
         $payload = Invoke-CodexCliJson -Arguments @('mcp', 'list', '--json')
         ($payload -is [array]) | Should -BeTrue
         $payload.Count | Should -Be $Count
@@ -96,6 +98,7 @@ Describe 'Codex CLI host observation' {
             $fixtureCodex = Join-Path $TestDrive 'codex-hang.ps1'
             [IO.File]::WriteAllText($fixtureCodex, "Start-Sleep -Seconds 30`nexit 0`n", [Text.UTF8Encoding]::new($false))
             Mock Get-Command { [pscustomobject]@{ Source = $fixtureCodex } } -ParameterFilter { $Name -eq 'codex' }
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'pwsh' }
 
             { Invoke-CodexCliJson -Arguments @('doctor', '--json') } | Should -Throw 'codex_cli_timeout*'
 
