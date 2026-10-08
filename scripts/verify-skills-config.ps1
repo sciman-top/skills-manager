@@ -57,7 +57,7 @@ else {
         $operationPlanSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Domain\OperationPlan.ps1") -Raw -Encoding UTF8
         $skillCatalogSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Domain\SkillCatalog.ps1") -Raw -Encoding UTF8
         $coreSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Core.ps1") -Raw -Encoding UTF8
-        $configSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Config.ps1") -Raw -Encoding UTF8
+        $configSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Domain\ConfigContract.ps1") -Raw -Encoding UTF8
         . ([scriptblock]::Create($operationPlanSource))
         . ([scriptblock]::Create($skillCatalogSource))
         . (Join-Path $repoRoot "src\Application\SkillProjection.ps1")

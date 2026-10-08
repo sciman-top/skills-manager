@@ -481,6 +481,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         # silently costing a full gate.
         $conservative = @(
             'src/Application/AgentBuild.ps1'
+            'src/Application/SkillProbe.ps1'
             'src/Application/GlobalRuleProjection.ps1'
             'src/Application/NativeAgentBridge.ps1'
             'src/Application/NativeSkillProjection.ps1'
@@ -500,6 +501,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Commands/SkillProjection.ps1'
             'src/Commands/Update.ps1'
             'src/Config.ps1'
+            'src/Domain/ConfigContract.ps1'
             'src/Domain/OperationPlan.ps1'
             'src/Domain/RuleDocument.ps1'
             'src/Domain/RuleResponsibility.ps1'
