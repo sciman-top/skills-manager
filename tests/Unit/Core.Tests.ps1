@@ -4,6 +4,18 @@ BeforeAll {
 
 }
 Describe "Core Functions" {
+    Context "Filesystem entry probes" {
+        It "treats only a missing path as absent and propagates inspection failures" {
+            $missingPath = Join-Path $TestDrive "missing-entry"
+            (Test-PathEntry $missingPath) | Should -BeFalse
+            (Is-ReparsePoint $missingPath) | Should -BeFalse
+
+            Mock Get-ExistingFileSystemItem { throw "filesystem entry could not be inspected" }
+            { Test-PathEntry "uninspectable-entry" } | Should -Throw "filesystem entry could not be inspected"
+            { Is-ReparsePoint "uninspectable-entry" } | Should -Throw "filesystem entry could not be inspected"
+        }
+    }
+
     Context "Normalize-Name" {
         It "Normalizes typical names" {
             Normalize-Name " My Skill " | Should -Be "my-skill"
