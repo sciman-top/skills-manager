@@ -20,13 +20,13 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Not -Match 'SkipPublisherCheck'
     }
 
-    It 'avoids duplicate feature-branch push runs while retaining PR main and tag coverage' {
-        $script:workflow | Should -Match 'branches:\s*\r?\n\s+- main'
+    It 'runs required checks on PRs and release tags without a post-merge main rerun' {
+        $script:workflow | Should -Not -Match '(?ms)^  push:\s*\r?\n\s+branches:'
         $script:workflow | Should -Match "tags:\s*\r?\n\s+- '\*'"
         $script:workflow | Should -Match 'pull_request:'
     }
 
-    It 'shares proportional classification for pushes and PRs and reserves unconditional full for tags' {
+    It 'shares proportional classification for PRs and reserves unconditional full for tags' {
         $script:workflow | Should -Match 'github\.ref.*refs/tags/'
         $script:workflow | Should -Not -Match "github\.event_name.*-eq 'push'"
         $script:workflow | Should -Match 'github\.event_name.*pull_request'
@@ -146,6 +146,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
                 body = @'
 ## Goal
 - Keep the merge contract reviewable.
+- New surface: yes
 
 ## Charter admission
 - Current caller: GitHub pull request workflow
@@ -184,6 +185,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
                 body = @'
 ## Goal
 - <what this PR changes>
+- New surface: yes
 
 ## Charter admission
 - Current caller: <who calls this today; "may be useful later" is not a caller>
@@ -218,6 +220,30 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $missingSectionPath = Join-Path $TestDrive 'missing-section-event.json'
         $missingSectionEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $missingSectionPath -Encoding UTF8
         & pwsh -NoProfile -File $scriptPath -EventPath $missingSectionPath *> $null
+        $LASTEXITCODE | Should -Not -Be 0
+
+        $routineEvent = [ordered]@{
+            pull_request = [ordered]@{
+                body = @'
+## Goal
+- Fix a regression in an existing command.
+- New surface: no
+
+## Risks and Rollback
+- Risk: the command may still reject invalid input.
+- Rollback: revert the implementation change.
+'@
+            }
+        }
+        $routinePath = Join-Path $TestDrive 'routine-event.json'
+        $routineEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $routinePath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $routinePath *> $null
+        $LASTEXITCODE | Should -Be 0
+
+        $missingSurfaceEvent = [ordered]@{ pull_request = [ordered]@{ body = $routineEvent.pull_request.body.Replace('- New surface: no', '') } }
+        $missingSurfacePath = Join-Path $TestDrive 'missing-surface-event.json'
+        $missingSurfaceEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $missingSurfacePath -Encoding UTF8
+        & pwsh -NoProfile -File $scriptPath -EventPath $missingSurfacePath *> $null
         $LASTEXITCODE | Should -Not -Be 0
     }
 
