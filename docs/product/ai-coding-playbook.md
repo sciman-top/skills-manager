@@ -24,7 +24,7 @@
 
 | 实践取舍 | 本仓机制锚点 |
 | --- | --- |
-| 上下文保持相关；一个任务围绕一个可验收目标 | `ai-coding-workflow` 的 `Freeze the task` / `Resume and persist`：重读当前事实、按需用短胶囊交接；独立调查仅在授权且并行净收益为正时委派 |
+| 上下文保持相关；一个任务围绕一个可验收目标 | `ai-coding-workflow` 的 `Spend context like a budget` / `Resume, persist, explain`：重读当前事实、按需用短胶囊交接；独立调查仅在授权且并行净收益为正时委派 |
 | AGENTS.md/skills 短而准："删掉会致错吗"检验；重复犯错→retrospective→才入规则 | `src/Domain/SkillMetadata.ps1`（description≤1024、name≤64、frontmatter、块标量）；`RuleDiagnostics.ps1`（global 16384B/130 行、project 10240B/80 行 byte/line budget） |
 | Prompt 四要素 Goal/Context/Constraints/Done-when | 根 AGENTS.md 日常合同：Goal / Exact write set / Minimum proof / Stop |
 | 探索→计划→实现→提交；清晰的小改动直接推进 | `ai-coding-workflow` 的 tiny/direct、normal、high-risk；宿主计划入口以当前可用工具为准 |
@@ -130,6 +130,7 @@ Context: <仓库根、相关文件/模块、当前错误或复现步骤>
 Constraints: <兼容性、不得触碰的目录、秘密和并发改动约束>
 Exact write set: <允许修改的精确文件/目录>
 Minimum proof: <build、受影响测试、contract 或其他最低充分验证>
+Done when: <用户操作、输入和期望结果>
 Stop: <达到什么条件后停止，不做额外重构>
 
 先读取当前 git status、相关源码和测试；如果事实不足，先报告缺口。
@@ -222,6 +223,8 @@ Report gaps, not style preferences；不要为了提出建议而扩大范围。
 - 重要改动的独立审查从需求、diff 和相关测试寻找反例；报告触发条件、影响与证据。第二个模型的同意不能替代验证。
 - 失败用原始错误和当前状态反馈。同一问题连续失败两次，先整理已证实事实、失败尝试和未决问题，再决定澄清或换上下文；不盲目连续打补丁。
 - 效率观察复用已有任务/PR记录，按需附一行：`任务类型 | 宿主/模型 | 一次验收通过与否 | 总耗时 | 人工纠错时间 | 验收后缺陷 | 可取得的费用或额度消耗`。优先看每个验收通过任务的综合成本；不可取得的数据标未知，失败任务的耗时与成本也计入。可在后续两周真实任务中积累可比样本，模型或宿主大版本变化后再抽样复测；这不是定时任务、门禁或本次交付的等待条件。不据少量非对照样本宣称模型优劣，不新建遥测或自动评分系统。
+
+研究边界（2026-10-09 读取）：[METR 2026 更新](https://metr.org/blog/2026-02-24-uplift-update/)说明后续效率实验存在样本选择与时间测量偏差，不能可靠估计当前提速幅度；旧研究的耗时增加也不能外推当前工具。方法来源和社区简单主链的取舍集中在[通用指南第 7 节](ai-coding-general-guide.md#7-依据清单来源与核实日期)，不另建效率报告或固定模型接力。
 
 ## 8. 按行为选择观察能力
 
