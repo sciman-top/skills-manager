@@ -852,24 +852,11 @@ function Get-ExistingFileSystemItem([string]$path) {
 }
 
 function Test-PathEntry([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    try {
-        Get-Item -LiteralPath $path -Force -ErrorAction Stop | Out-Null
-        return $true
-    }
-    catch {
-        return $false
-    }
+    return $null -ne (Get-ExistingFileSystemItem $path)
 }
 function Is-ReparsePoint([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    try {
-        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-        return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
-    }
-    catch {
-        return $false
-    }
+    $item = Get-ExistingFileSystemItem $path
+    return $null -ne $item -and [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
 }
 function Test-AncestorChainHasReparse([string]$path) {
     # Walks from $path up to the filesystem root. Lexical containment
