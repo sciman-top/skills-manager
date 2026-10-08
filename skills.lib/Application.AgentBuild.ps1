@@ -278,6 +278,23 @@ function Restore-BuildConfigAndManualMigration($txn) {
     if ($errors.Count -gt 0) { throw (($errors | Select-Object -First 10) -join '; ') }
 }
 
+function Get-BuildTransactionRecoveryHint($txn) {
+    $txnPath = if ($null -ne $txn -and $txn.PSObject.Properties.Match('path').Count -gt 0) { [string]$txn.path } else { '(未知事务目录)' }
+    $backupPath = if ($null -ne $txn -and $txn.PSObject.Properties.Match('backup_agent').Count -gt 0) { [string]$txn.backup_agent } else { '' }
+    $backupItem = $null
+    if (-not [string]::IsNullOrWhiteSpace($backupPath) -and $null -ne $txn -and
+        $txn.PSObject.Properties.Match('has_backup_agent').Count -gt 0 -and [bool]$txn.has_backup_agent) {
+        try { $backupItem = Get-ExistingFileSystemItem $backupPath }
+        catch { $backupItem = $null }
+    }
+    $backupAvailable = $null -ne $backupItem -and $backupItem.PSIsContainer -and
+        (($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)
+    if ($backupAvailable) {
+        return ("事务目录已保留（agent/ 备份目录仍在，恢复前请核验指纹）：{0}" -f $txnPath)
+    }
+    return ("事务目录已保留（没有可确认的 agent/ 备份；请勿清理事务目录或 agent/ 现场，先人工核查）：{0}" -f $txnPath)
+}
+
 function Rollback-BuildTransaction($txn) {
     if ($DryRun -or $null -eq $txn) { return $true }
     $restored = $false
@@ -301,9 +318,29 @@ function Rollback-BuildTransaction($txn) {
     }
     try {
         if ([string]$txn.agent_before_state -eq "present_no_backup") {
-            # 备份挪动失败但构建前 agent/ 仍在：此时 agent/ 是构建前状态的唯一
-            # 副本，删除现场等于销毁它。fail closed：不删除，如实报回滚未完成。
-            $restoreError = "构建前 agent/ 存在但事务备份缺失（备份挪动失败）；拒绝在无备份状态下删除现场"
+            # The backup move failed before construction began. If the original
+            # directory still matches its pre-build fingerprint, it never left
+            # place and needs no restoration; otherwise retain it and the txn.
+            $currentItem = Get-ExistingFileSystemItem $AgentDir
+            if ($null -eq $currentItem) {
+                $restoreError = "构建前 agent/ 未能备份且当前目录已缺失；没有可验证的副本可恢复"
+            }
+            elseif (-not $currentItem.PSIsContainer -or (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                $restoreError = "构建前 agent/ 未能备份且当前路径已变为非普通目录；保留现场并拒绝清理"
+            }
+            else {
+                try {
+                    $currentFingerprint = Get-DirectoryFingerprint $AgentDir
+                    if ([string]::Equals([string]$currentFingerprint, [string]$txn.agent_before_fingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                        $restored = $true
+                        Write-Host "旧 agent/ 未发生变化；备份移动失败后无需恢复。" -ForegroundColor Yellow
+                    }
+                    else {
+                        $restoreError = ("构建前 agent/ 未能备份且当前内容已发生变化；保留现场并拒绝清理：expected={0}, actual={1}" -f [string]$txn.agent_before_fingerprint, $currentFingerprint)
+                    }
+                }
+                catch { $restoreError = ("构建前 agent/ 未能备份且无法核对当前指纹；保留现场并拒绝清理：{0}" -f $_.Exception.Message) }
+            }
         }
         else {
             $hasFingerprintContract = @('agent_before_fingerprint', 'agent_after_fingerprint', 'agent_after_fingerprint_error') | ForEach-Object {
@@ -433,7 +470,7 @@ function Rollback-BuildTransaction($txn) {
         }
     }
     if (-not $restored) {
-        Log ("构建事务回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；原因：{1}" -f $txn.path, $restoreError) "ERROR"
+        Log ("构建事务回滚未完成；{0}；原因：{1}" -f (Get-BuildTransactionRecoveryHint $txn), $restoreError) "ERROR"
     }
     return $restored
 }

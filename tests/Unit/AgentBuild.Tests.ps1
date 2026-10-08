@@ -48,6 +48,56 @@ Describe "Agent build" {
         Should -Invoke 构建Agent -Times 0 -Exactly
     }
 
+    It 'cleans up the transaction when a failed backup move leaves the original agent unchanged' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldCfgPath = $CfgPath; $oldLogPath = $LogPath; $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $Root = Join-Path $TestDrive 'backup-move-unchanged'
+            $AgentDir = Join-Path $Root 'agent'
+            $CfgPath = Join-Path $Root 'skills.json'
+            $LogPath = Join-Path $Root 'build.log'
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 $CfgPath '{}'
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'only copy'
+            $before = Get-DirectoryFingerprint $AgentDir
+            Mock Invoke-MoveItem { throw 'fixture backup move failure' } -ParameterFilter { $src -eq $AgentDir }
+
+            $txn = Start-BuildTransaction
+            $txn.agent_before_state | Should -Be 'present_no_backup'
+            $txn.has_backup_agent | Should -BeFalse
+            $txn.backup_error | Should -Match 'fixture backup move failure'
+
+            Rollback-BuildTransaction $txn | Should -BeTrue
+            (Get-DirectoryFingerprint $AgentDir) | Should -Be $before
+            Test-Path -LiteralPath $txn.path | Should -BeFalse
+        }
+        finally { $Root = $oldRoot; $AgentDir = $oldAgent; $CfgPath = $oldCfgPath; $LogPath = $oldLogPath; $DryRun = $oldDryRun }
+    }
+
+    It 'retains a changed agent and labels the transaction without a backup' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldCfgPath = $CfgPath; $oldLogPath = $LogPath; $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $Root = Join-Path $TestDrive 'backup-move-drift'
+            $AgentDir = Join-Path $Root 'agent'
+            $CfgPath = Join-Path $Root 'skills.json'
+            $LogPath = Join-Path $Root 'build.log'
+            New-Item -ItemType Directory -Path $AgentDir -Force | Out-Null
+            Set-ContentUtf8 $CfgPath '{}'
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'only copy'
+            Mock Invoke-MoveItem { throw 'fixture backup move failure' } -ParameterFilter { $src -eq $AgentDir }
+
+            $txn = Start-BuildTransaction
+            Set-ContentUtf8 (Join-Path $AgentDir 'old.txt') 'concurrent content'
+
+            Rollback-BuildTransaction $txn | Should -BeFalse
+            Get-ContentUtf8 (Join-Path $AgentDir 'old.txt') | Should -Be 'concurrent content'
+            Test-Path -LiteralPath $txn.path | Should -BeTrue
+            (Get-BuildTransactionRecoveryHint $txn) | Should -Match '没有可确认的 agent/ 备份'
+        }
+        finally { $Root = $oldRoot; $AgentDir = $oldAgent; $CfgPath = $oldCfgPath; $LogPath = $oldLogPath; $DryRun = $oldDryRun }
+    }
+
     It 'reports partial mapping loss even when another skill was built' -ForEach @(
         @{ Failure = 'missing' }, @{ Failure = 'invalid-marker' }
     ) {

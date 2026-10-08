@@ -2016,8 +2016,8 @@ function 构建生效(
                 }
             }
             else {
-                $rollbackFailure = "rollback_failed：agent/ 回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）；已跳过补偿投影，避免把未回滚的构建产物投影到宿主目标"
-                if ($null -ne $txn) { $rollbackFailure = ("rollback_failed：agent/ 回滚未完成，事务目录已保留（含 agent/ 备份，可人工恢复）：{0}；已跳过补偿投影，避免把未回滚的构建产物投影到宿主目标" -f $txn.path) }
+                $recoveryHint = Get-BuildTransactionRecoveryHint $txn
+                $rollbackFailure = ("rollback_failed：agent/ 回滚未完成；{0}；已跳过补偿投影，避免把未回滚的构建产物投影到宿主目标" -f $recoveryHint)
                 # 前置为头条目：回滚未完成是收口时最需要行动的信息，必须在失败
                 # 汇总首行可见，而不是被原始构建失败掩蔽。
                 $failures = @($rollbackFailure) + $failures
