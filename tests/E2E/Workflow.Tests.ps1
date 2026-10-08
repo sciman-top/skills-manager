@@ -3,7 +3,6 @@ BeforeAll {
     Initialize-TestGitIdentity
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
-    . (Join-Path $repoRoot 'src\Commands\Install.Presentation.ps1')
 
     $script:originalWorkspaceState = @{}
     foreach ($name in @('Root', 'CfgPath', 'LogPath', 'VendorDir', 'AgentDir', 'OverridesDir', 'ManualDir', 'ImportDir', 'DryRun')) {
