@@ -55,6 +55,20 @@ GOOGLE_DOMAINS = [
     'domain:google.dev',
 ]
 
+# WorkBuddy 五域强制直连。
+# WorkBuddy 客户端（Electron）只要进程带 HTTP_PROXY 就会硬编码 setProxy 并把
+# bypass 固定为 localhost —— WinINET 例外表和 NO_PROXY 对它全部失效
+# （2026-09-30 app.asar 反编译实证，main.log 曾出现 88 次 PROXY 127.0.0.1:10809）。
+# 因此 ag-split 侧必须有第二道防线：即使流量被 env 短路送进分流器，
+# 这五个域也直连发出，出口地理与直连一致，避免账号风控。
+WORKBUDDY_DIRECT_DOMAINS = [
+    'domain:workbuddy.ai',
+    'domain:workbuddy.cn',
+    'domain:codebuddy.ai',
+    'domain:codebuddy.cn',
+    'domain:lkeap.cloud.tencent.com',
+]
+
 
 def _open_db():
     if not os.path.exists(DB_PATH):
@@ -134,6 +148,10 @@ def build(node_id):
                 'streamSettings': stream,
             },
             {
+                'tag': 'direct',
+                'protocol': 'freedom',
+            },
+            {
                 'tag': 'upstream',
                 'protocol': 'socks',
                 'settings': {'servers': [{'address': UPSTREAM_ADDR, 'port': UPSTREAM_PORT}]},
@@ -145,6 +163,7 @@ def build(node_id):
             'rules': [
                 {'type': 'field', 'port': '443', 'network': 'udp', 'outboundTag': 'block'},
                 {'type': 'field', 'domain': GOOGLE_DOMAINS, 'outboundTag': 'clean'},
+                {'type': 'field', 'domain': WORKBUDDY_DIRECT_DOMAINS, 'outboundTag': 'direct'},
                 # 兜底规则必须带至少一个字段，否则 xray 报 this rule has no effective fields
                 {'type': 'field', 'network': 'tcp,udp', 'outboundTag': 'upstream'},
             ],
@@ -176,6 +195,7 @@ def main():
     print('监听      : 127.0.0.1:%d' % LISTEN_PORT)
     print('上游      : 127.0.0.1:%d' % UPSTREAM_PORT)
     print('Google 域名: %d 条' % len(GOOGLE_DOMAINS))
+    print('WorkBuddy 直连: %d 域 -> freedom' % len(WORKBUDDY_DIRECT_DOMAINS))
     print('写出      : %s (%d bytes)' % (OUT_PATH, os.path.getsize(OUT_PATH)))
     print()
     print('下一步：语法校验后重启分流器')

@@ -149,6 +149,37 @@ if [ "$CN_FOUND" -eq 1 ]; then
   CLIENT_DOMAINS="$CLIENT_DOMAINS workbuddy.cn codebuddy.cn"
 fi
 
+# 客户端渲染层实际代理路径（main.log resolveProxy）。WorkBuddy（Electron）带 HTTP_PROXY
+# 时硬编码 setProxy 且 bypass 固定 localhost —— 例外表/NO_PROXY 对它全部失效，因此
+# 「例外表检查通过」不等于「流量直连」，必须看这条记录本身。
+MAINLOGS=""
+for _m in "$L/logs/main.log" "$B/logs/main.log"; do
+  [ -f "$_m" ] && MAINLOGS="$MAINLOGS $_m"
+done
+if [ -n "$MAINLOGS" ]; then
+  RULES=$(cat $MAINLOGS 2>/dev/null | tail -500 \
+    | grep -o -E 'resolveProxy .*rule=\\"[^\\]+\\"' \
+    | sed 's/.*rule=\\"//; s/\\"$//' | sort | uniq -c | sort -rn | head -3)
+  if [ -n "$RULES" ]; then
+    say "  [注意] 客户端渲染层代理解析记录 (resolveProxy):"
+    printf '%s\n' "$RULES" | sed 's/^/           /'
+    if printf '%s\n' "$RULES" | grep -qv 'PROXY 127\.0\.0\.1:10810'; then
+      say "         含非本机分流器出口 = WorkBuddy 流量以代理出口 IP 访问服务端（历史 11140 账号风控形态）"
+      say "         检查例外表与 HTTP_PROXY env，或让代理端对这些域名直连"
+      M=$((M+1))
+    else
+      say "         均为 127.0.0.1:10810（ag-split 分流器）：五域由分流器 direct(freedom) 规则兜底直连"
+      say "         用 ag-health-check.ps1 的『分流器 WorkBuddy 直连规则』项确认兜底在位"
+      M=$((M+1))
+    fi
+  else
+    say "  [正常] main.log 尾部未见代理解析记录 (resolveProxy)"
+    P=$((P+1))
+  fi
+else
+  say "  [信息] 未找到 main.log，无法观测渲染层代理路径"
+fi
+
 V2=""
 if [ -n "$V2RAY_CONFIG" ]; then
   [ -f "$V2RAY_CONFIG" ] && V2="$V2RAY_CONFIG"

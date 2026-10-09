@@ -102,7 +102,8 @@ agent/ 物化 → ~/.gemini/config/skills
 | Antigravity 不开 TUN 时代理不生效 | `antigravity-proxy`（`version.dll` 注入）+ 系统代理 + 环境变量三者对齐 |
 | Google 出口一致性与可达性 | 按域名分流，并按需记录节点出口及第三方分类；分类结果无法证明账号安全或模型质量 |
 | 日常软件依赖 CN 优化线路 | **按目标域名分流**，其余流量原样走原线路（国内站仍直连，不绕代理），不整机切换 |
-| WorkBuddy 网络与错误分诊 | 检查例外表、`NO_PROXY`、路由及代理配置；结合真实错误、配额与重试节奏定位问题 |
+| WorkBuddy env 短路代理（2026-10-09 修复） | WorkBuddy（Electron）带 `HTTP_PROXY` 就硬编码代理并短路一切例外表；`gen-config.py` 已内置 **WorkBuddy 五域 → direct(freedom) 直连规则**，流量即使被 env 送进分流器也从本机线路直连发出（第二道防线），`ag-health-check.ps1` 含守护项防重新生成时丢失 |
+| WorkBuddy 网络与错误分诊 | 检查例外表、`NO_PROXY`、路由及代理配置；结合真实错误、配额与重试节奏定位问题；自检已含 `main.log resolveProxy` 实际流量路径观测 |
 
 ## 六个必须知道的点
 
@@ -115,9 +116,13 @@ agent/ 物化 → ~/.gemini/config/skills
 5. **⚠️ 自建内核必须换名。** v2rayN 启动/升级时会**按镜像名**清理旧的 `xray.exe` 进程；
    自建分流器若也叫 `xray.exe`，会被一起杀掉 → 系统代理指向死端口 → 断网。
    本包用**换过名的副本** `ag-split-core.exe`。
-6. **WorkBuddy 直连配置需要独立检查。** 当前部署用例外表与 `NO_PROXY` 保持相关域名直连。
-   `ensure-split.ps1` 已把 WorkBuddy 五域例外纳入检查；缺失返回 1，人工确认后追加，脚本不覆写例外表。
-   全局代理变量暂时保留；分流器失效时不再写入失效端口，但已有环境变量和已启动进程不会自动迁移。
+6. **WorkBuddy 直连配置需要独立检查，且例外表对它不是全部。** WorkBuddy（Electron）只要进程带
+   `HTTP_PROXY` 就硬编码 `setProxy` 并把 bypass 固定为 localhost —— WinINET 例外表和 `NO_PROXY`
+   对它全部失效（2026-09-30 app.asar 反编译实证；2026-10-09 经 main.log 复现：流量实际走 10810）。
+   因此防线有两道：例外表/`NO_PROXY`（第一道，对非 Electron 组件有效）+ 分流器五域直连规则
+   （第二道，env 短路后兜底）。`ensure-split.ps1` 守护例外表；`ag-health-check.ps1` 守护直连规则；
+   `workbuddy-risk-selfcheck.*` 观测 `resolveProxy` 实际路径。全局代理变量暂时保留；
+   分流器失效时不再写入失效端口，但已有环境变量和已启动进程不会自动迁移。
    深度材料（六份报告原件）在源机 `C:\Users\sciman\WorkBuddy AI\`；分诊提示词与技能已并入本包 `tools\workbuddy\`。
 
 ## 检测结论的边界
