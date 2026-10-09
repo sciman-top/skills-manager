@@ -158,6 +158,32 @@ if ($wbDomains.Count -gt 0) {
     Info "未能从日志中提取域名" "可手动查看: $logRoot"
 }
 
+# 客户端渲染层实际代理路径（main.log resolveProxy）。WorkBuddy（Electron）带 HTTP_PROXY
+# 时硬编码 setProxy 且 bypass 固定 localhost —— 例外表/NO_PROXY 对它全部失效，因此
+# 「例外表检查通过」不等于「流量直连」，必须看这条记录本身。
+$mainLogs = @((Join-Path $WBL 'logs\main.log'), (Join-Path $WB 'logs\main.log')) | Where-Object { Test-Path $_ }
+if ($mainLogs.Count -gt 0) {
+    $ruleHits = @($mainLogs | ForEach-Object {
+        Get-Content $_ -Tail 500 -ErrorAction SilentlyContinue
+    } | ForEach-Object {
+        if ($_ -match 'resolveProxy .*rule=\\"([^\\]+)\\"') { $Matches[1] } else { $null }
+    } | Where-Object { $_ })
+    $ruleGroups = @($ruleHits | Group-Object | Sort-Object Count -Descending | Select-Object -First 3)
+    if ($ruleGroups.Count -gt 0) {
+        $summary = ($ruleGroups | ForEach-Object { $_.Name + ' x' + $_.Count }) -join ' ; '
+        $nonSplit = @($ruleGroups | Where-Object { $_.Name -notmatch '^PROXY 127\.0\.0\.1:10810$' })
+        if ($nonSplit.Count -gt 0) {
+            Mid ("客户端渲染层在走代理出口: " + $summary) "非本机分流器出口 = WorkBuddy 流量以代理出口 IP 访问服务端（历史 11140 账号风控形态）。检查例外表与 HTTP_PROXY env，或让代理端对这些域名直连"
+        } else {
+            Mid ("客户端渲染层经 ag-split 分流器解析代理 (" + $summary + ")") "WorkBuddy 因 HTTP_PROXY env 短路例外表走 127.0.0.1:10810；五域由分流器 direct(freedom) 规则兜底直连。用 ag-health-check.ps1 的『分流器 WorkBuddy 直连规则』项确认兜底在位"
+        }
+    } else {
+        Ok "客户端渲染层未见代理解析记录 (resolveProxy)" "main.log 尾部 500 行无 resolveProxy 行；客户端可能未活跃或为直连"
+    }
+} else {
+    Info "未找到 main.log" "无法观测渲染层代理路径（已查: $($mainLogs -join ', ')）"
+}
+
 $proxyEnable = $null
 $proxyServer = $null
 try {

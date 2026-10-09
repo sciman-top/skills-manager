@@ -50,8 +50,13 @@ $splitOwnerIds = @($splitConnections.OwningProcess | Sort-Object -Unique)
 $expectedCore = Join-Path $V2_DIR 'ag-split\ag-split-core.exe'
 if ($splitOwnerIds.Count -eq 1) {
     $splitOwner = Get-CimInstance Win32_Process -Filter "ProcessId=$($splitOwnerIds[0])" -ErrorAction SilentlyContinue
-    if ($splitOwner.ExecutablePath -ieq $expectedCore -and @($splitConnections | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -eq 0) {
+    $bindLocal = @($splitConnections | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -eq 0
+    if ($bindLocal -and $splitOwner.ExecutablePath -ieq $expectedCore) {
         Add-Row 'PASS' '监听者身份' "pid=$($splitOwner.ProcessId) path=$($splitOwner.ExecutablePath)"
+    } elseif ($bindLocal -and $splitOwner -and $splitOwner.Name -ieq 'ag-split-core.exe') {
+        # S4U/session-0 进程对非提权查询不返回 ExecutablePath；与 ensure-split 的
+        # Test-SplitListener 同口径退化：进程名 + 唯一监听 + 仅绑 127.0.0.1。
+        Add-Row 'WARN' '监听者身份' "pid=$($splitOwner.ProcessId) name=$($splitOwner.Name) 绑定=127.0.0.1；可执行路径不可读（S4U 权限边界，非风险信号），提权可精确复核"
     } else {
         Add-Row 'FAIL' '监听者身份' "wrong_listener_owner pid=$($splitOwner.ProcessId) path=$($splitOwner.ExecutablePath)"
     }
@@ -148,6 +153,32 @@ if (Test-Path $cfg) {
         else { Add-Row 'INFO' '出口 IP 自检' 'v2.4 已知限制：DLL 运行时会重写 config.json 并写回 false，无法持久开启；不影响分流' }
     } catch { Add-Row 'FAIL' '代理配置' "解析失败：$($_.Exception.Message)" }
 } else { Add-Row 'FAIL' '代理配置' "$cfg 不存在" }
+
+# --- 7b. 分流器 WorkBuddy 直连规则（防回归守护）---
+# WorkBuddy（Electron）只要进程带 HTTP_PROXY 就硬编码 setProxy 并把 bypass 固定为
+# localhost —— WinINET 例外表和 NO_PROXY 对它全部失效（2026-09-30 app.asar 反编译实证）。
+# 分流器侧的五域直连规则是第二道防线；config.json 由 gen-config.py 重新生成时不得丢失。
+$splitCfgPath = Join-Path $V2_DIR 'ag-split\config.json'
+if (-not (Test-Path $splitCfgPath)) {
+    Add-Row 'WARN' '分流器 WorkBuddy 直连规则' "$splitCfgPath 不存在"
+} else {
+    try {
+        $rawCfg = Get-Content -Raw -Encoding UTF8 $splitCfgPath | ConvertFrom-Json
+        $directRules = @($rawCfg.routing.rules | Where-Object { $_.outboundTag -eq 'direct' })
+        $needDomains = @('domain:workbuddy.ai','domain:workbuddy.cn','domain:codebuddy.ai','domain:codebuddy.cn','domain:lkeap.cloud.tencent.com')
+        $haveDomains = @($directRules | ForEach-Object { $_.domain }) | Select-Object -Unique
+        $missingDomains = @($needDomains | Where-Object { $_ -notin $haveDomains })
+        $hasFreedom = @($rawCfg.outbounds | Where-Object { $_.tag -eq 'direct' -and $_.protocol -eq 'freedom' }).Count -eq 1
+        if ($hasFreedom -and $missingDomains.Count -eq 0) {
+            Add-Row 'PASS' '分流器 WorkBuddy 直连规则' '五域 -> direct(freedom) 在兜底前；env 短路时的第二道防线在位'
+        } else {
+            $why = @()
+            if (-not $hasFreedom) { $why += 'direct(freedom) outbound 缺失' }
+            if ($missingDomains.Count -gt 0) { $why += ('规则缺失: ' + ($missingDomains -join ', ')) }
+            Add-Row 'FAIL' '分流器 WorkBuddy 直连规则' ($why -join '；')
+        }
+    } catch { Add-Row 'FAIL' '分流器 WorkBuddy 直连规则' "解析失败：$($_.Exception.Message)" }
+}
 
 # --- 8. 分流器自启（以计划任务为准，Startup 快捷方式只作冗余）---
 # 本机 HiberbootEnabled=1：关机走混合休眠恢复，Startup 文件夹项【不会】被执行，

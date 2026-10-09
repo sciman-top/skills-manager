@@ -168,10 +168,16 @@ domain:google.dev
 ```
 **刻意不含** `youtube.com` / `googlevideo.com` —— 避免把大带宽视频流量挪到较慢的线路。
 
+**WorkBuddy 五域直连规则**（`WORKBUDDY_DIRECT_DOMAINS`，2026-10-09 新增，防回归守护见 `ag-health-check.ps1`）：
+WorkBuddy（Electron）带 `HTTP_PROXY` 就硬编码代理并短路一切例外表（§14.1），因此分流器还须有
+第二道防线——`workbuddy.ai` / `workbuddy.cn` / `codebuddy.ai` / `codebuddy.cn` / `lkeap.cloud.tencent.com`
+→ `direct(freedom)`，流量即使被 env 送进分流器也从本机线路直连发出。
+
 路由规则（顺序不能错）：
 1. `port=443 network=udp → block`（封 QUIC，保证出口一致）
 2. `domain=[上面的列表] → 干净出口`
-3. `network=tcp,udp → 代理客户端本地入站`（**兜底，必须存在**）
+3. `domain=[WorkBuddy 五域] → direct(freedom)`（env 短路兜底）
+4. `network=tcp,udp → 代理客户端本地入站`（**兜底，必须存在**）
 
 **从 v2rayN 数据库取节点凭据的字段映射**（v2rayN 7.x 的 `ProfileItem` 表）：
 | xray 需要 | v2rayN 列 |
@@ -493,8 +499,10 @@ Get-Content MANIFEST.sha256 | ForEach-Object {
 
 ### 14.1 硬规则
 
-1. **WorkBuddy 相关域名必须直连**，不得进任何代理 / 分流器：
+1. **WorkBuddy 相关域名必须直连出口**，不得经任何代理出口 / 分流器转发：
    `workbuddy.ai` / `codebuddy.ai` / `lkeap.cloud.tencent.com` / `workbuddy.cn` / `codebuddy.cn`。
+   （"直连出口"允许"进分流器但被 direct(freedom) 规则直连发出"——2026-10-09 起这是
+   ag-split 部署下的第二道防线；分流器配置缺失该规则视为未闭环。）
 2. **四层固化缺一不可**（都做完才算闭环）：
    - 系统代理例外表（`ProxyOverride`）含五个域（带 `*.` 前缀）
    - 用户级 + 机器级 `NO_PROXY` 含五个域（**裸域名**，后缀匹配；写 `*.` 通配反而永远匹配不上，见第 9 节第 9 条）
