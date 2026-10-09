@@ -890,4 +890,3 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
     # 集错乱、Gemini 多 root 参数绑定崩溃。
     return @($roots | Sort-Object)
 }
-

@@ -13,6 +13,7 @@
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
 - 交付物目录契约固定为：`artifacts/deliveries/<version>/{standard-install,portable,source,private-snapshot}/` 是同版本四类交付物；前三项公共包不含 skills/MCP，私用快照仅限可信私有介质；`rescan/<run-id>/` 只是辅助清单，`artifacts/history/<kind>/<version-or-date>/` 是人工历史留存，`artifacts/work/<kind>/<run-id>/` 是临时构建/验证/evidence；`artifacts/` 根层不得放生成文件，正式公共下载以 GitHub Release 为准。
 - AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。
+- `audit-targets.json` 是共享目标清单；可选的 ignored `audit-targets.local.json` 按目标名覆盖本机 `enabled`/`path`，只影响列表与扫描，CRUD 只写共享文件，非法覆盖 fail closed。
 - Rule Estate 写入必须绑定 reviewed input、精确 scope/token/before-hash、receipt 与回滚；全局规则投影必须绑定 source/target hash、plan token、备份与精确回滚。
 - runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
 

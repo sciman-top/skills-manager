@@ -4,6 +4,7 @@
 /agent/
 /reports/*.log
 /reports/
+/audit-targets.local.json
 /docs/runtime-*.txt
 /artifacts/*
 !/artifacts/README.md
