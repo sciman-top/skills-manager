@@ -170,7 +170,7 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
 
 function Invoke-AuditTargetsScan {
     param([string]$Target, [string]$Query = "", [string]$OutDir, [switch]$Force, [switch]$SkipDirty)
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Load-AuditTargetsEffectiveConfig
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         Write-Warning "审查目标 扫描始终汇总全部 enabled 目标仓；--target 仅为兼容保留，不再缩小扫描范围。"

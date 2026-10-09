@@ -138,6 +138,81 @@ Describe "Audit Targets" {
             }
         }
 
+        It "Applies machine-local enabled and path overrides without changing the shared config" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-local-overrides"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                Add-AuditTargetConfigEntry "demo" "..\shared-demo" | Out-Null
+                $localPath = Join-Path $script:Root "audit-targets.local.json"
+                $localConfig = [pscustomobject]@{
+                    version = 1
+                    target_overrides = @(
+                        [pscustomobject]@{ name = "demo"; enabled = $false; path = "local-demo-override" }
+                    )
+                }
+                Set-ContentUtf8 $localPath ($localConfig | ConvertTo-Json -Depth 5)
+
+                $effective = Load-AuditTargetsEffectiveConfig
+                $shared = Load-AuditTargetsConfig
+
+                $effective.targets[0].enabled | Should -Be $false
+                $effective.targets[0].path | Should -Be "local-demo-override"
+                $shared.targets[0].enabled | Should -Be $true
+                $shared.targets[0].path | Should -Be "..\shared-demo"
+                (Get-ContentUtf8 (Get-AuditTargetsConfigPath)) | Should -Not -Match "local-demo"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Keeps local overrides out of shared target CRUD writes" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-local-crud"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                Add-AuditTargetConfigEntry "demo" "..\shared-demo" | Out-Null
+                $localPath = Join-Path $script:Root "audit-targets.local.json"
+                $localConfig = [pscustomobject]@{
+                    version = 1
+                    target_overrides = @(
+                        [pscustomobject]@{ name = "demo"; enabled = $false; path = "local-demo-override" }
+                    )
+                }
+                Set-ContentUtf8 $localPath ($localConfig | ConvertTo-Json -Depth 5)
+
+                Update-AuditTargetConfigEntry "demo" "..\shared-updated" | Out-Null
+
+                $shared = Load-AuditTargetsConfig
+                $effective = Load-AuditTargetsEffectiveConfig
+                $shared.targets[0].path | Should -Be "..\shared-updated"
+                $shared.targets[0].enabled | Should -Be $true
+                $effective.targets[0].path | Should -Be "local-demo-override"
+                $effective.targets[0].enabled | Should -Be $false
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Fails closed when a local override does not match a shared target" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-local-invalid"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                Set-ContentUtf8 (Join-Path $script:Root "audit-targets.local.json") '{"version":1,"target_overrides":[{"name":"missing","enabled":false}]}'
+
+                { Load-AuditTargetsEffectiveConfig } | Should -Throw "*必须唯一匹配共享 audit-targets.json*"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Adds target with normalized name and preserved input path" {
             $oldRoot = $script:Root
             try {
@@ -643,7 +718,7 @@ Describe "Audit Targets" {
                         [pscustomobject]@{ name = "clean"; path = $cleanRepo; enabled = $true; tags = @(); notes = "" }
                     )
                 }
-                Mock Load-AuditTargetsConfig { $scanConfig }
+                Mock Load-AuditTargetsEffectiveConfig { $scanConfig }
                 Mock Write-AuditThreeFileBundle {
                     param($ReportRoot, $RunId, $Mode, $Query, $Config, [object[]]$Scans)
                     [pscustomobject]@{ scans = @($Scans) }

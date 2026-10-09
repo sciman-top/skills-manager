@@ -444,7 +444,7 @@ function 审查目标菜单 {
         switch ($c) {
             "1" { Invoke-AuditTargetsCommand @("list") }
             "2" {
-                $cfg = Load-AuditTargetsConfig
+                $cfg = Load-AuditTargetsEffectiveConfig
                 $targets = @($cfg.targets)
                 if ($targets.Count -eq 0) {
                     Write-Host "未登记目标仓。"

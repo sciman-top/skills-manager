@@ -2,6 +2,10 @@ function Get-AuditTargetsConfigPath {
     return (Join-Path $script:Root "audit-targets.json")
 }
 
+function Get-AuditTargetsLocalConfigPath {
+    return (Join-Path $script:Root "audit-targets.local.json")
+}
+
 function Get-AuditOuterAiPromptOverridePath {
     return (Join-Path $script:Root "overrides\audit-outer-ai-prompt.md")
 }
@@ -183,6 +187,64 @@ function Load-AuditTargetsConfig {
     return $cfg
 }
 
+function Load-AuditTargetsEffectiveConfig {
+    $cfg = Load-AuditTargetsConfig
+    $path = Get-AuditTargetsLocalConfigPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $cfg }
+
+    $raw = Get-ContentUtf8 $path
+    Need (-not [string]::IsNullOrWhiteSpace($raw)) "audit-targets.local.json 为空"
+    try {
+        $localCfg = $raw | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw ("audit-targets.local.json 解析失败：{0}" -f $_.Exception.Message)
+    }
+
+    Need (Test-AuditObjectLike $localCfg) "audit-targets.local.json 顶层必须是对象"
+    foreach ($property in $localCfg.PSObject.Properties) {
+        Need ($property.Name -in @("version", "target_overrides")) ("audit-targets.local.json 含未知字段：{0}" -f $property.Name)
+    }
+    Need ($localCfg.PSObject.Properties.Match("version").Count -gt 0) "audit-targets.local.json 缺少 version"
+    Need (($localCfg.version -is [int] -or $localCfg.version -is [long]) -and [int]$localCfg.version -eq 1) "audit-targets.local.json version 仅支持 1"
+    Need ($localCfg.PSObject.Properties.Match("target_overrides").Count -gt 0) "audit-targets.local.json 缺少 target_overrides"
+    Need (Assert-IsArray $localCfg.target_overrides) "audit-targets.local.json target_overrides 必须是数组"
+
+    $seenNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($override in @($localCfg.target_overrides)) {
+        Need (Test-AuditObjectLike $override) "audit-targets.local.json 的每个覆盖项必须是对象"
+        foreach ($property in $override.PSObject.Properties) {
+            Need ($property.Name -in @("name", "enabled", "path")) ("audit-targets.local.json 覆盖项含未知字段：{0}" -f $property.Name)
+        }
+        Need ($override.PSObject.Properties.Match("name").Count -gt 0) "audit-targets.local.json 覆盖项缺少 name"
+        $name = ([string]$override.name).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($name)) "audit-targets.local.json 覆盖项 name 不能为空"
+        Need ($seenNames.Add($name)) ("audit-targets.local.json 存在重复目标：{0}" -f $name)
+
+        $matches = @($cfg.targets | Where-Object { [string]$_.name -eq $name })
+        Need ($matches.Count -eq 1) ("audit-targets.local.json 目标必须唯一匹配共享 audit-targets.json：{0}" -f $name)
+        $hasEnabled = $override.PSObject.Properties.Match("enabled").Count -gt 0
+        $hasPath = $override.PSObject.Properties.Match("path").Count -gt 0
+        Need ($hasEnabled -or $hasPath) ("audit-targets.local.json 覆盖项必须包含 enabled 或 path：{0}" -f $name)
+
+        if ($hasEnabled) {
+            Need ($override.enabled -is [bool]) ("audit-targets.local.json enabled 必须是布尔值：{0}" -f $name)
+            if ($matches[0].PSObject.Properties.Match("enabled").Count -eq 0) {
+                $matches[0] | Add-Member -NotePropertyName enabled -NotePropertyValue ([bool]$override.enabled)
+            }
+            else {
+                $matches[0].enabled = [bool]$override.enabled
+            }
+        }
+        if ($hasPath) {
+            Need ($override.path -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$override.path)) ("audit-targets.local.json path 必须是非空字符串：{0}" -f $name)
+            $matches[0].path = ([string]$override.path).Trim()
+        }
+    }
+
+    return $cfg
+}
+
 function Resolve-AuditTargetPath([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) "目标仓路径不能为空"
     $expanded = [Environment]::ExpandEnvironmentVariables($path.Trim())
@@ -261,7 +323,7 @@ function Remove-AuditTargetConfigEntry([string]$name) {
 }
 
 function Write-AuditTargetsList {
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Load-AuditTargetsEffectiveConfig
     $items = @($cfg.targets)
     if ($items.Count -eq 0) {
         Write-Host "未登记目标仓。"

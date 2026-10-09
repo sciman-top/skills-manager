@@ -543,4 +543,3 @@ function Invoke-NativeMcpCleanup([string]$name) {
         }
     }
 }
-
