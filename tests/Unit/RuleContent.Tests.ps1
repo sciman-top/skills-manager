@@ -24,6 +24,21 @@ Describe 'Checked-in rule content' {
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md rules/global/antigravity/GEMINI.md rules/global/workbuddy/CODEBUDDY.md) -join "`n") | Should -Match 'eol: lf'
     }
 
+    It 'reports host char pressure in characters, matching the render gate unit' {
+        $codex = Join-Path $TestDrive 'codex'
+        $claude = Join-Path $TestDrive 'claude'
+        New-Item -ItemType Directory -Path $codex, $claude -Force | Out-Null
+        $result = Test-GlobalRuleSourceFamily $repoRoot $codex $claude
+        $entry = @($result.budget | Where-Object { $_.host -eq 'antigravity' })
+        $entry.Count | Should -Be 1
+        $gemini = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md')).Replace("`r`n", "`n")
+        # 与 Sync-GlobalRuleGeneratedFiles 的 12000 字符硬限同单位：字节÷字符限
+        # 会把中文 UTF-8 的压力高估近一倍，让 healthy 状态报成逼近红线。
+        $entry[0].chars | Should -Be $gemini.Length
+        $entry[0].host_char_limit | Should -Be 12000
+        $entry[0].chars | Should -BeLessOrEqual $entry[0].host_char_limit
+    }
+
     It 'retains the cold-routing execution and observation boundaries' {
         foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md')) {
             $text = [IO.File]::ReadAllText((Join-Path $repoRoot $path))
