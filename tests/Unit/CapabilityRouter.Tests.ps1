@@ -336,6 +336,37 @@ Describe 'Capability router fallback' {
         @($stale.validated_closure).Count | Should -Be 0
     }
 
+    It 'scopes catalog staleness to the drifted entry instead of blocking valid candidates' {
+        $researchRoot = Join-Path $root 'research'
+        $unrelatedRoot = Join-Path $root 'unrelated-skill'
+        New-Item -ItemType Directory -Path $researchRoot,$unrelatedRoot -Force | Out-Null
+        $researchPath = Join-Path $researchRoot 'SKILL.md'
+        $unrelatedPath = Join-Path $unrelatedRoot 'SKILL.md'
+        Set-Content -LiteralPath $researchPath -Encoding UTF8 -Value "---`nname: research`ndescription: Read-only research.`n---"
+        Set-Content -LiteralPath $unrelatedPath -Encoding UTF8 -Value "---`nname: unrelated-skill`ndescription: Unrelated cold skill.`n---"
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills += [pscustomobject][ordered]@{name='research';description='Read-only research.';relative_path='..\research\SKILL.md';entrypoint_sha256=(Get-FileHash $researchPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()}
+        $document.skills += [pscustomobject][ordered]@{name='unrelated-skill';description='Unrelated cold skill.';relative_path='..\unrelated-skill\SKILL.md';entrypoint_sha256=(Get-FileHash $unrelatedPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()}
+        $document.domains[0].skill_names += 'research','unrelated-skill'
+        Write-TestCatalog $document $catalog
+        Add-Content -LiteralPath $unrelatedPath -Encoding UTF8 -Value '# drift unrelated to the research closure'
+
+        # 2026-10-09 scoped 决议：单条无关漂移只是按名排除 + catalog.status=stale，
+        # 不得放大为全目录冷发现停摆（"看似已投影、实际冷发现失效"缺陷修复）。
+        $validated = & $router -Query 'research' -CatalogPath $catalog -Candidate 'skill|research' | ConvertFrom-Json
+        $validated.catalog.status | Should -Be 'stale'
+        $validated.load_validation.pass | Should -Be $true
+        $validated.routing_receipt.status | Should -Be 'validated'
+        $validated.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
+        @($validated.excluded | Where-Object { $_.name -eq 'unrelated-skill' } | ForEach-Object reason) | Should -Contain 'catalog_stale'
+
+        $discovery = & $router -Query 'research' -CatalogPath $catalog -DomainHint engineering | ConvertFrom-Json
+        $discovery.routing_receipt.status | Should -Be 'candidates_returned'
+        $discovery.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_only'
+        @($discovery.retrieval.candidates.name) | Should -Contain 'research'
+        @($discovery.retrieval.candidates.name) | Should -Not -Contain 'unrelated-skill'
+    }
+
     It 'fails closed on catalog drift and explicit exclusion' {
         Add-Content $skillPath '# drift'
         $stale=& $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json

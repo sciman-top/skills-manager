@@ -578,11 +578,17 @@ $discoveryScopeRequired = $requestedNames.Count -eq 0 -and $truncated
 if ($discoveryScopeRequired) {
     $excluded.Add([pscustomobject][ordered]@{ kind = 'request'; name = ''; reason = 'domain_hint_required'; candidate_count = $allRows.Count; max_candidates = $MaxCandidates }) | Out-Null
 }
+# Catalog-level staleness is a scoped observation, not a global gate.  Every row
+# in $allRows already passed its own entrypoint/package hash and containment
+# checks, so one drifted sibling must not turn into a whole-catalog cold
+# discovery outage; the drifted entry is named in excluded[] and catalog.status
+# stays 'stale'.  A structurally invalid catalog ('invalid') still blocks
+# everything because the row scan never ran.
 [object[]]$visible = @()
-if ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) {
+if ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) {
     $visible = @($allRows | Select-Object -First $MaxCandidates)
 }
-if ($catalogStatus -eq 'current' -and $requestValid) {
+if ($catalogStatus -ne 'invalid' -and $requestValid) {
     foreach ($name in $requestedNames) {
         if ($name -in $excludedNames) {
             if (@($excluded | Where-Object { $_.name -eq $name -and $_.reason -eq 'explicitly_excluded' }).Count -eq 0) {
@@ -606,7 +612,7 @@ if ($requestedNames.Count -gt 0) {
     # list when it is unavailable).
     $visible = @($selectedRows)
 }
-$rootSelectionPass = $catalogStatus -eq 'current' -and $requestValid -and
+$rootSelectionPass = $catalogStatus -ne 'invalid' -and $requestValid -and
     $requestedNames.Count -eq 1 -and $selectedRows.Count -eq 1
 $closurePass = $rootSelectionPass
 $validatedClosure = [System.Collections.Generic.List[object]]::new()
@@ -674,8 +680,8 @@ $routingReceipt = [ordered]@{
     validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
     validated_closure = @(if ($loadPass) { $validatedClosureRows | ForEach-Object { [string]$_.name } })
     execution_contract = $effectiveExecutionContract
-    status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable) { 'blocked' } elseif ($catalogStatus -eq 'current' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
-    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable) { 'candidate_discovery_blocked' } elseif ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
+    status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable) { 'blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -ne 'invalid' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
+    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable) { 'candidate_discovery_blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0

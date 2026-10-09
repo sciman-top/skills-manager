@@ -88,7 +88,7 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 
 - 正例：仓内 router、`.agents` junction router、其他根 router 都能使用同一合法 physical catalog。
 - 正例：`-CatalogPath`、`SKILLS_MANAGER_CAPABILITY_CATALOG` 与 auto-discovery 的受支持形态输出一致的校验结果。
-- 负例：物理对照不存在、entrypoint hash 漂移、闭包越界、再解析链非允许形态、catalog 过期或 domain 超限时零执行、零候选、明确 finding。
+- 负例：物理对照不存在、entrypoint hash 漂移、闭包越界、再解析链非允许形态、domain 超限时零执行、零候选（就该候选/该请求而言）、明确 finding。漂移/缺失条目按名排除并保持 `catalog.status=stale`，与请求闭包无关的逐行验证过的候选照常发现与校验；请求闭包内或候选自身的漂移仍阻断该候选；catalog 结构失效（schema/指纹等 finding）仍整体阻断（2026-10-09 scoped 决议：单条无关漂移不再放大为全目录冷发现停摆）。
 - 禁止为规避 junction 测试取消 reparse 检查，或把“路径存在”视为可信。
 
 ### CSR-R1：原生 bridge 与 active preset 一致

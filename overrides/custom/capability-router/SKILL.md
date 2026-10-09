@@ -91,6 +91,8 @@ apply ordinary approval, sandbox, MCP, and external-write controls.
 
 Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance. An explicitly named candidate that the catalog cannot validate reports `status=blocked` and `truth_boundary=candidate_discovery_blocked` with `excluded[].reason=not_available` — never `candidate_discovery_only`, which would read as success while `selected` is empty.
 
+Catalog staleness is scoped, not a global outage: when `catalog.status=stale`, the drifted or missing skill is named in `excluded[]` (`catalog_stale`, `package_stale`, or `entrypoint_unavailable`), and any other candidate whose own entrypoint/package hashes validate still discovers and validates normally. Only drift of the selected candidate or inside its dependency closure blocks that candidate. A structurally invalid catalog (`catalog.status=invalid`, e.g. fingerprint mismatch or unsupported schema) blocks all discovery and validation until the catalog is regenerated.
+
 ## Native cold-capability handoff
 
 Before constructing admission/plan or handoff files, compare the selected

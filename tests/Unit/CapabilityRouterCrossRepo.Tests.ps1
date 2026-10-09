@@ -215,11 +215,13 @@ description: >-
         @($result.retrieval.candidates).Count | Should -Be 0
     }
 
-    It 'fails the whole copied router catalog when a non-resident sibling is missing from the host root' {
-        # Live-probe F4 (2026-10-03): a host root that received a *copy* of the
-        # router package (not a junction) passes the declared-vs-projected name
-        # diff, but every cold sibling outside the copy resolves to a missing
-        # file -> one stale entry fails the whole directory -> candidates zero.
+    It 'names the missing sibling and keeps validating the intact copy in a copied router root' {
+        # 2026-10-09 scoped 决议（修订 F4 live-probe 2026-10-03）：一次 F4 观测把
+        # "one stale entry fails the whole directory" 钉为全局阻断；实机证明这会把
+        # 单条无关漂移放大为整本目录冷发现停摆（"看似已投影、实际冷发现失效"）。
+        # 每个候选行已有独立的 entrypoint/package hash 与 containment 校验，字节
+        # 不一致的复制品本来就过不了校验；因此漂移条目按名排除、catalog.status
+        # 保持 stale，逐行验证过的完整候选照常发现与校验，receipt 不夸大边界。
         $ghostRoot = Join-Path $portableRoot 'ghost-cold-skill'
         $catalogDoc = Get-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Raw | ConvertFrom-Json
         $ghostEntry = [ordered]@{
@@ -248,11 +250,18 @@ description: >-
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering | ConvertFrom-Json
 
         $result.catalog.status | Should -Be 'stale'
-        $result.routing_receipt.status | Should -Be 'blocked'
-        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
-        @($result.retrieval.candidates).Count | Should -Be 0
-        @($result.selected.name) | Should -Not -Contain 'codebase-design'
+        $result.routing_receipt.status | Should -Be 'candidates_returned'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_only'
+        @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
+        @($result.retrieval.candidates.name) | Should -Not -Contain 'ghost-cold-skill'
+        @($result.selected.name) | Should -Not -Contain 'ghost-cold-skill'
         @($result.excluded | Where-Object { $_.name -eq 'ghost-cold-skill' -and $_.reason -eq 'entrypoint_unavailable' }).Count | Should -Be 1
+
+        $validated = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
+            -Query '设计模块边界和工程终态' -AutoDiscover -Candidate 'skill|codebase-design' | ConvertFrom-Json
+        $validated.load_validation.pass | Should -Be $true
+        $validated.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
+        $validated.routing_receipt.status | Should -Be 'validated'
     }
 
     It 'fails closed when the environment catalog is a reachable but stale copy' {
