@@ -114,11 +114,11 @@ function Get-GlobalRuleSourceEntries {
 
 function Get-GlobalRuleFileFacts([string]$Path) {
     $resolved=[IO.Path]::GetFullPath($Path)
-    if(-not [IO.File]::Exists($resolved)){return [pscustomobject]@{exists=$false;path=$resolved;bytes=0;lines=0;bom=$false;version=$null;text=$null;hash=(Get-OperationSha256 '')}}
+    if(-not [IO.File]::Exists($resolved)){return [pscustomobject]@{exists=$false;path=$resolved;bytes=0;chars=0;lines=0;bom=$false;version=$null;text=$null;hash=(Get-OperationSha256 '')}}
     $bytes=[IO.File]::ReadAllBytes($resolved);$text=(New-Object Text.UTF8Encoding($false,$true)).GetString($bytes)
     $versionMatch=[regex]::Match($text,'(?m)^\*\*版本\*\*:\s*([0-9][0-9A-Za-z_.-]*)\s*$')
     return [pscustomobject][ordered]@{
-        exists=$true;path=$resolved;bytes=$bytes.Length;lines=($text -split "`r?`n").Count
+        exists=$true;path=$resolved;bytes=$bytes.Length;chars=$text.Replace("`r`n","`n").Length;lines=($text -split "`r?`n").Count
         bom=($bytes.Length -ge 3 -and $bytes[0]-eq 0xEF -and $bytes[1]-eq 0xBB -and $bytes[2]-eq 0xBF)
         version=$(if($versionMatch.Success){$versionMatch.Groups[1].Value}else{$null});text=$text
         hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
@@ -157,10 +157,11 @@ function Test-GlobalRuleSourceFamily {
         $ratio=[Math]::Max($fact.bytes/16384.0,$fact.lines/130.0)
         # 恒定的预算成本信号：无论是否越过 85%/95%，都回显距离硬墙的余量，
         # 让每次检查都暴露「再改一次会不会撞墙」。observations 保持阈值语义不变。
-        # Antigravity 另有宿主硬限（渲染文件 ≤12000 字符，见 Sync-GlobalRuleGeneratedFiles），
-        # 源文件比率看不到它，故单独标注 host_char_limit 供选档参考。
+        # Antigravity 另有宿主硬限（渲染文件 ≤12000 字符，见 Sync-GlobalRuleGeneratedFiles）：
+        # chars 与该硬限同单位（LF 归一化后计数），供 check 摘要按字符口径求压力；
+        # 字节÷字符限会把中文 UTF-8 的压力高估近一倍。
         $hostCharLimit=$(if($entry.id -eq 'antigravity'){12000}else{0})
-        $budget.Add([pscustomobject][ordered]@{host=$entry.id;path=$entry.source_path;bytes=$fact.bytes;max_bytes=16384;lines=$fact.lines;max_lines=130;usage_ratio=[Math]::Round($ratio,4);host_char_limit=$hostCharLimit;state=$(if($ratio-ge .95){'addition_blocked'}elseif($ratio-ge .85){'warning'}else{'healthy'})})|Out-Null
+        $budget.Add([pscustomobject][ordered]@{host=$entry.id;path=$entry.source_path;bytes=$fact.bytes;chars=$fact.chars;max_bytes=16384;lines=$fact.lines;max_lines=130;usage_ratio=[Math]::Round($ratio,4);host_char_limit=$hostCharLimit;state=$(if($ratio-ge .95){'addition_blocked'}elseif($ratio-ge .85){'warning'}else{'healthy'})})|Out-Null
         if($ratio-ge .95){$observations.Add([pscustomobject]@{code='source_budget_addition_blocked';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         elseif($ratio-ge .85){$observations.Add([pscustomobject]@{code='source_budget_warning';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         if([string]::IsNullOrWhiteSpace([string]$fact.version)){$findings.Add((New-GlobalRuleFinding 'source_version_missing' $entry.source_path 'Global rule version is missing.'))|Out-Null}

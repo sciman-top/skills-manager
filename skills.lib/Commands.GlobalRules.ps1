@@ -143,12 +143,12 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
     }
     $json=$envelope|ConvertTo-Json -Depth 30 -Compress
     $budgetHeadline=if($Mode-eq'check'){
-        # 摘取全局压力最大的一项：优先看宿主硬限（如 Antigravity 12000 字符），
-        # 无宿主硬限时退回源文件 16 KiB/130 行预算。
+        # 摘取全局压力最大的一项：宿主字符硬限按 chars 计（与渲染门禁同单位，
+        # 字节口径会把中文文本压力高估近一倍），无宿主硬限时退回源文件 16 KiB/130 行预算。
         $worstHost='';$worstPressure=-1.0
         foreach($entry in @($envelope.result.budget)){
             $limit=[int]$entry.host_char_limit
-            $p=if($limit -gt 0){1.0*[int]$entry.bytes/$limit}else{[double]$entry.usage_ratio}
+            $p=if($limit -gt 0){1.0*[int]$entry.chars/$limit}else{[double]$entry.usage_ratio}
             if($p -gt $worstPressure){$worstPressure=$p;$worstHost=[string]$entry.host}
         }
         if($worstPressure -lt 0){''}else{'{0} {1:P1} used' -f $worstHost,$worstPressure}
