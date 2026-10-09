@@ -179,6 +179,10 @@ function Invoke-AuditTargetsScan {
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
     $runId = Get-AuditRunId
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
+    # 2026-10-09 实测（8 逻辑核）：ForEach-Object -Parallel runspaces 下每仓
+    # 耗时为串行的 2-4 倍（12-22s vs 2.5-6.5s），总墙钟不降反升——解释型 PS
+    # 循环 + 正则在共享进程内争抢 GC/引擎锁，扫描是 CPU 串行型负载，保持
+    # 逐仓串行；单仓耗时由 RepoFacts 的缓存/预筛优化承担。
     $scans = @($targets | ForEach-Object {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
         Write-Host ("Scanning {0} ..." -f $_.name)

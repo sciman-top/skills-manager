@@ -404,29 +404,36 @@ function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
     }
 }
 
-function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
-    # Several manifest probes ask for the same bounded recursive listing.  Keep
-    # the exact filtered result per target/filter/limit so one scan does not
-    # enumerate the repository once for every language detector.  The cache is
-    # scoped to this scan process; a new scan always observes fresh filesystem
-    # state and no evidence semantics change.
-    $cacheKey = "{0}|{1}|{2}" -f ([System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')), [string]$filter, [int]$limit
-    if ($null -eq $script:AuditRecursiveFilesCache) { $script:AuditRecursiveFilesCache = @{} }
-    if ($script:AuditRecursiveFilesCache.ContainsKey($cacheKey)) {
-        return @($script:AuditRecursiveFilesCache[$cacheKey])
+function Get-AuditTargetFileIndex([string]$resolvedPath) {
+    # 每个目标仓只做一次剪枝后的完整文件枚举；源码索引与各 manifest 探测
+    # （*.csproj、requirements*.txt 等）共享同一份列表，目录树不再按过滤器
+    # 重复遍历。列表为剪枝后的普通文件（含 FullName/Length/Extension）。
+    $cacheKey = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')
+    if ($null -eq $script:AuditTargetFileIndexCache) { $script:AuditTargetFileIndexCache = @{} }
+    if ($script:AuditTargetFileIndexCache.ContainsKey($cacheKey)) {
+        return @($script:AuditTargetFileIndexCache[$cacheKey])
     }
-    $result = @(
-        Get-AuditPrunedFiles $resolvedPath $filter |
-            Select-Object -First $limit
-    )
-    $script:AuditRecursiveFilesCache[$cacheKey] = $result
+    $result = @(Get-AuditPrunedFiles $resolvedPath)
+    $script:AuditTargetFileIndexCache[$cacheKey] = $result
     return @($result)
 }
 
+function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
+    # Several manifest probes ask for the same bounded recursive listing.  All
+    # listings share the single per-target file index and apply the wildcard and
+    # limit in memory (case-insensitive, matching the filesystem -Filter
+    # semantics these probes were written against), so one scan never walks the
+    # tree once per (filter, limit) pair.  The cache is scoped to this scan
+    # process; a new scan always observes fresh filesystem state and no evidence
+    # semantics change.
+    $matches = @(Get-AuditTargetFileIndex $resolvedPath | Where-Object { $_.Name -like $filter })
+    return @($matches | Select-Object -First ([Math]::Max(0, $limit)))
+}
+
 function Get-AuditSourceFileIndex([string]$resolvedPath) {
-    # Source scanning is the hot path.  Several language/manifest probes already
-    # walk the same tree; keep one deterministic, filtered index per target so the
-    # expensive recursive enumeration is not repeated for every probe.
+    # Source scanning is the hot path.  The filtered index reuses the single
+    # per-target file listing so the expensive recursive enumeration is neither
+    # repeated per probe nor per extension set.
     $cacheKey = [System.IO.Path]::GetFullPath($resolvedPath).TrimEnd('\', '/')
     if ($null -eq $script:AuditSourceFileIndexCache) { $script:AuditSourceFileIndexCache = @{} }
     if ($script:AuditSourceFileIndexCache.ContainsKey($cacheKey)) {
@@ -437,7 +444,7 @@ function Get-AuditSourceFileIndex([string]$resolvedPath) {
         $null = $extensions.Add($extension)
     }
     $files = New-Object System.Collections.Generic.List[object]
-    foreach ($file in @(Get-AuditPrunedFiles $resolvedPath)) {
+    foreach ($file in @(Get-AuditTargetFileIndex $resolvedPath)) {
         if (-not $extensions.Contains($file.Extension)) { continue }
         $files.Add($file) | Out-Null
     }
@@ -489,19 +496,48 @@ function Select-AuditBalancedSourceFiles([string]$resolvedPath, [object[]]$Files
     return @($selected.ToArray() | Sort-Object FullName)
 }
 
-function Add-AuditBoundedEvidence($Evidence, $Item) {
+function New-AuditEvidenceStats {
+    # 证据条目的 O(1) 记账 sidecar：key 去重集（与旧 "-eq" 大小写不敏感比较
+    # 对齐用 OrdinalIgnoreCase）+ group→条数增量计数，替代每次插入时的全表
+    # 去重扫描与全表 group 重算。
+    return [pscustomobject]@{
+        evidenceKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        evidenceGroupCounts = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    }
+}
+
+function Add-AuditEvidenceGroupCount($Stats, [string]$Group, [int]$Delta) {
+    $value = 0
+    if (-not $Stats.evidenceGroupCounts.TryGetValue($Group, [ref]$value)) { $value = 0 }
+    $Stats.evidenceGroupCounts[$Group] = $value + $Delta
+}
+
+function Add-AuditBoundedEvidence($Evidence, $Item, $Stats = $null, [string]$ItemKey = "") {
+    # 淘汰算法与旧实现逐项一致：满 48 条后选「group 轮次最高、平局取 kind 权重
+    # 最高（首次出现的最大值）」的受害者替换。$Stats 存在时用增量计数与 key 集
+    # 替代全表重算/去重，判定依据（group 计数、rank）数值不变；无 Stats 时保留
+    # 旧的全表路径。
+    $incomingGroup = '{0}|{1}' -f $Item.target, $Item.kind
     if ($Evidence.Count -lt 48) {
         $Evidence.Add($Item) | Out-Null
+        if ($null -ne $Stats) {
+            Add-AuditEvidenceGroupCount $Stats $incomingGroup 1
+            if ($ItemKey -ne "") { $Stats.evidenceKeys.Add($ItemKey) | Out-Null }
+        }
         return
     }
     # Keep representative target/kind groups before retaining more hits from one group.
     $ranks = @{ source_code = 0; test = 1; supporting_code = 2; dependency = 3; project_file = 3; documentation = 4 }
     $counts = @{}
-    foreach ($existing in $Evidence) {
-        $group = '{0}|{1}' -f $existing.target, $existing.kind
-        $counts[$group] = [int]$counts[$group] + 1
+    if ($null -ne $Stats) {
+        foreach ($pair in $Stats.evidenceGroupCounts.GetEnumerator()) { $counts[$pair.Key] = $pair.Value }
     }
-    $incomingGroup = '{0}|{1}' -f $Item.target, $Item.kind
+    else {
+        foreach ($existing in $Evidence) {
+            $group = '{0}|{1}' -f $existing.target, $existing.kind
+            $counts[$group] = [int]$counts[$group] + 1
+        }
+    }
     $incomingRound = [int]$counts[$incomingGroup] + 1
     $incomingRank = if ($ranks.ContainsKey([string]$Item.kind)) { $ranks[[string]$Item.kind] } else { 5 }
     $victim = -1
@@ -518,7 +554,23 @@ function Add-AuditBoundedEvidence($Evidence, $Item) {
             $worstRank = $rank
         }
     }
-    if ($victim -ge 0) { $Evidence[$victim] = $Item }
+    if ($victim -ge 0) {
+        $existing = $Evidence[$victim]
+        if ($null -ne $Stats) {
+            Add-AuditEvidenceGroupCount $Stats ('{0}|{1}' -f $existing.target, $existing.kind) -1
+            Add-AuditEvidenceGroupCount $Stats $incomingGroup 1
+            if ($ItemKey -ne "") {
+                $Stats.evidenceKeys.Add($ItemKey) | Out-Null
+                $victimKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
+                $Stats.evidenceKeys.Remove($victimKey) | Out-Null
+            }
+        }
+        $Evidence[$victim] = $Item
+    }
+    elseif ($null -ne $Stats -and $ItemKey -ne "") {
+        # 未入表的候选不能留在去重集，否则后续同 key 候选会被提前跳过而偏离旧语义。
+        $Stats.evidenceKeys.Remove($ItemKey) | Out-Null
+    }
 }
 
 function Add-AuditArtifactEvidence {
@@ -540,23 +592,21 @@ function Add-AuditArtifactEvidence {
             actions = New-Object System.Collections.Generic.List[string]
             evidence = New-Object System.Collections.Generic.List[object]
             targets = New-Object System.Collections.Generic.List[string]
+            stats = New-AuditEvidenceStats
         }
     }
     $entry = $Accumulator[$artifactKey]
     Add-AuditUniqueValue $entry.actions $actionKey
     if (-not [string]::IsNullOrWhiteSpace($Target)) { Add-AuditUniqueValue $entry.targets $Target.Trim() }
     $evidenceKey = "{0}|{1}|{2}|{3}" -f $Kind, $Path, $Signal, $Target
-    foreach ($existing in @($entry.evidence.ToArray())) {
-        $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
-        if ($existingKey -eq $evidenceKey) { return }
-    }
+    if ($entry.stats.evidenceKeys.Contains($evidenceKey)) { return }
     $evidence = [ordered]@{
         kind = $Kind
         path = $Path
         signal = $Signal
     }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence) $entry.stats $evidenceKey
 }
 
 function Get-AuditArtifactConfidence($entry) {
@@ -613,19 +663,17 @@ function Add-AuditRequirementEvidence {
             actions = New-Object System.Collections.Generic.List[string]
             evidence = New-Object System.Collections.Generic.List[object]
             targets = New-Object System.Collections.Generic.List[string]
+            stats = New-AuditEvidenceStats
         }
     }
     $entry = $Accumulator[$key]
     Add-AuditUniqueValue $entry.actions $Action.Trim().ToLowerInvariant()
     if (-not [string]::IsNullOrWhiteSpace($Target)) { Add-AuditUniqueValue $entry.targets $Target.Trim() }
     $evidenceKey = "{0}|{1}|{2}|{3}" -f $Kind, $Path, $Signal, $Target
-    foreach ($existing in @($entry.evidence.ToArray())) {
-        $existingKey = "{0}|{1}|{2}|{3}" -f [string]$existing.kind, [string]$existing.path, [string]$existing.signal, [string]$existing.target
-        if ($existingKey -eq $evidenceKey) { return }
-    }
+    if ($entry.stats.evidenceKeys.Contains($evidenceKey)) { return }
     $evidence = [ordered]@{ kind = $Kind; path = $Path; signal = $Signal }
     if (-not [string]::IsNullOrWhiteSpace($Target)) { $evidence.target = $Target.Trim() }
-    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence)
+    Add-AuditBoundedEvidence $entry.evidence ([pscustomobject]$evidence) $entry.stats $evidenceKey
 }
 
 function Get-AuditRequirementSignalConfidence($entry) {
@@ -843,6 +891,7 @@ function Add-AuditArtifactFactsFromText {
     # 定义行，与旧行集准入一致。判定树与 location 形态逐分支复刻。
     $all = @($candidateArtifacts) + @($table.actions)
     $combined = Get-AuditLineProbeRegex @($all | ForEach-Object { $_.regex })
+    $actions = @($table.actions)
     $lines = [regex]::Split($Content, "\r?\n")
     if ($null -eq $script:AuditRuleDefinitionRegex) {
         $script:AuditRuleDefinitionRegex = [regex]::new("(?i)\b(?:artifact|domain|subject|pattern|actions)\s*=")
@@ -855,17 +904,30 @@ function Add-AuditArtifactFactsFromText {
         $nextText = if ($index + 1 -lt $lines.Count) { $lines[$index + 1] } else { $null }
         $nextAdmissible = ($null -ne $nextText) -and (-not [string]::IsNullOrWhiteSpace($nextText)) -and (-not $script:AuditRuleDefinitionRegex.IsMatch($nextText))
         $lineNumber = $index + 1
-        foreach ($artifact in $candidateArtifacts) {
-            $artifactOnCurrentLine = $artifact.regex.IsMatch($text)
-            $artifactOnNextLine = $nextAdmissible -and $artifact.regex.IsMatch($nextText)
-            if (-not $artifactOnCurrentLine -and -not $artifactOnNextLine) { continue }
-            foreach ($action in @($table.actions)) {
-                $actionOnCurrentLine = $action.regex.IsMatch($text)
-                $actionOnNextLine = $nextAdmissible -and $action.regex.IsMatch($nextText)
-                $matched = ($artifactOnCurrentLine -and ($actionOnCurrentLine -or $actionOnNextLine)) -or ($actionOnCurrentLine -and $artifactOnNextLine)
+        # 每行对当前行/下一行只测一次 artifact 与 action 命中，嵌套循环读布尔
+        # 数组；判定结果与逐 (artifact×action) 重复 IsMatch 逐布尔一致，命中
+        # 行的内层正则调用从 O(|artifact|×|action|×2) 降为 O(|artifact|+|action|)。
+        $artifactCount = @($candidateArtifacts).Count
+        $artifactCur = New-Object bool[] $artifactCount
+        $artifactNext = New-Object bool[] $artifactCount
+        for ($artifactIndex = 0; $artifactIndex -lt $artifactCount; $artifactIndex++) {
+            $artifactCur[$artifactIndex] = $candidateArtifacts[$artifactIndex].regex.IsMatch($text)
+            $artifactNext[$artifactIndex] = $nextAdmissible -and $candidateArtifacts[$artifactIndex].regex.IsMatch($nextText)
+        }
+        $actionCount = @($actions).Count
+        $actionCur = New-Object bool[] $actionCount
+        $actionNext = New-Object bool[] $actionCount
+        for ($actionIndex = 0; $actionIndex -lt $actionCount; $actionIndex++) {
+            $actionCur[$actionIndex] = $actions[$actionIndex].regex.IsMatch($text)
+            $actionNext[$actionIndex] = $nextAdmissible -and $actions[$actionIndex].regex.IsMatch($nextText)
+        }
+        for ($artifactIndex = 0; $artifactIndex -lt $artifactCount; $artifactIndex++) {
+            if (-not $artifactCur[$artifactIndex] -and -not $artifactNext[$artifactIndex]) { continue }
+            for ($actionIndex = 0; $actionIndex -lt $actionCount; $actionIndex++) {
+                $matched = ($artifactCur[$artifactIndex] -and ($actionCur[$actionIndex] -or $actionNext[$actionIndex])) -or ($actionCur[$actionIndex] -and $artifactNext[$artifactIndex])
                 if ($matched) {
-                    $location = if ($nextAdmissible -and ($artifactOnNextLine -or $actionOnNextLine) -and -not ($artifactOnCurrentLine -and $actionOnCurrentLine)) { "L{0}-L{1}" -f $lineNumber, ($lineNumber + 1) } else { "L{0}" -f $lineNumber }
-                    Add-AuditArtifactEvidence $Accumulator $artifact.artifact $action.action $Kind $RelativePath ("{0}:{1}@{2}" -f $artifact.artifact, $action.action, $location)
+                    $location = if ($nextAdmissible -and ($artifactNext[$artifactIndex] -or $actionNext[$actionIndex]) -and -not ($artifactCur[$artifactIndex] -and $actionCur[$actionIndex])) { "L{0}-L{1}" -f $lineNumber, ($lineNumber + 1) } else { "L{0}" -f $lineNumber }
+                    Add-AuditArtifactEvidence $Accumulator $candidateArtifacts[$artifactIndex].artifact $actions[$actionIndex].action $Kind $RelativePath ("{0}:{1}@{2}" -f $candidateArtifacts[$artifactIndex].artifact, $actions[$actionIndex].action, $location)
                 }
             }
         }
@@ -1297,7 +1359,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     # here too — otherwise a same-process re-scan (host probes, tests) would keep
     # enumerating the previous filesystem state.
     $script:AuditSourceFileIndexCache = @{}
-    $script:AuditRecursiveFilesCache = @{}
+    $script:AuditTargetFileIndexCache = @{}
     $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
     $risks = New-Object System.Collections.Generic.List[string]
     $languages = New-Object System.Collections.Generic.List[string]
