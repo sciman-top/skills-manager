@@ -325,7 +325,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fixture diff check failed.' }
 | 当前约束 | 现有入口 | 证明范围与强化位置 |
 | --- | --- | --- |
 | 日常目标、写集、最低证明和 stop | 根 `AGENTS.md`、`overrides/custom/ai-coding-workflow/SKILL.md` | 语义指导；具体行为由目标仓已有测试证明，宿主副作用由其权限限制 |
-| 冷技能闭包与受控执行 | `src/Domain/ExecutionAdmission.ps1`、router、native-agent bridge、`scripts/hooks/claude-cold-skill-guard.ps1` | 只覆盖对应调用链；helper/hash 测试不是 OS 隔离，hook 覆盖另做新会话验收 |
+| 冷技能闭包与受控执行 | `src/Domain/ExecutionAdmission.ps1`、router、native-agent bridge | 只覆盖对应调用链；无 hook 强制层，冷源直读阻断由投影宿主规则语义承担 |
 | 审查后的规则写入与回滚 | 现有 Rule Estate 和全局规则投影事务 | 授权、精确目标、before hash 与回滚在实际写入口裁决；文件相等只证明投影 |
 | 比例门禁与生成漂移 | `scripts/quality/resolve-gate-profile.ps1`、`run-local-quality-gates.ps1`、`.github/workflows/ci.yml` | 本地默认 auto；CI 复用同一选档并 `-CheckGenerated`，不在 Git hook 或 Stop hook 再跑一份 full |
 | 临时文件提交检查 | `.githooks/pre-commit` | 本地便利检查，可绕过；不是 CI 必需检查或任务写集准入 |
