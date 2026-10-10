@@ -46,6 +46,14 @@ $result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query 
 $result.retrieval.candidates
 ```
 
+Run this from a PowerShell shell, not `cmd.exe`: under `cmd.exe /c`, the
+`-File` form breaks on quoting when `-Query` contains spaces or non-ASCII
+text, and repeated failed attempts look like a broken router. If the host
+shell is `cmd.exe` anyway, pass the whole invocation through
+`pwsh -NoProfile -Command "& { ... }"` or `-EncodedCommand`, and treat a
+non-zero exit as "the router did not run" — retry once with the robust form
+instead of concluding cold discovery is unavailable.
+
 The router writes a pure-ASCII JSON document: every non-ASCII character in a
 skill description is emitted as a `\uXXXX` escape. Keep the plain
 `| ConvertFrom-Json` form. A host decodes a child process's stdout with its own
