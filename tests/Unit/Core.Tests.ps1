@@ -1989,6 +1989,66 @@ Describe "构建生效 rollback compensation" {
             $script:SuppressAllLogging = $oldSuppressAllLogging
         }
     }
+
+    It "keeps a usable catalog when clean-commit host promotion is blocked" {
+        $oldDryRun = $DryRun
+        $oldCfgPath = $CfgPath
+        $oldLogPath = $LogPath
+        $oldRoot = $Root
+        $oldLocked = $Locked
+        $oldSuppressAllLogging = $script:SuppressAllLogging
+        try {
+            $DryRun = $false
+            $Locked = $false
+            $script:SuppressAllLogging = $true
+            $Root = Join-Path $TestDrive "ws-build-promotion-blocked"
+            New-Item -ItemType Directory -Path $Root -Force | Out-Null
+            $CfgPath = Join-Path $Root "skills.json"
+            $LogPath = Join-Path $Root "build.log"
+            $managed = Join-Path $Root "agent"
+            $cfg = [pscustomobject]@{
+                vendors = @(); targets = @(); mappings = @(); imports = @()
+                mcp_servers = @(); mcp_targets = @(); sync_mode = "link"; update_force = $true
+                skill_projection = [pscustomobject]@{ managed_source_path = $managed }
+            }
+            Mock Preflight {}
+            Mock LoadCfg { $cfg }
+            Mock SaveCfg {}
+            Mock Optimize-Imports {}
+            Mock Write-BuildSummary {}
+            Mock New-SkillDiscoveryCatalogTransaction {
+                [pscustomobject]@{
+                    file_snapshots = @()
+                    preserve_file_paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                }
+            }
+            Mock Start-BuildTransaction { [pscustomobject]@{ path = (Join-Path $Root '.txn\build-test') } }
+            Mock 构建Agent { @() }
+            Mock Sync-SkillDiscoveryCatalog {
+                param($ProjectionCfg, $Transaction, [switch]$SkipLock)
+                [pscustomobject]@{ enabled = $true; changed = $true; persisted = $true; skill_count = 81; domain_count = 22 }
+            }
+            Mock Get-HostProjectionPromotionContext { throw "clean commit required" }
+            Mock Sync-NativeAgentBridge { throw "must not reach native bridge after promotion block" }
+            Mock Complete-BuildTransaction {}
+
+            { 构建生效 } | Should -Throw '*构建生效失败*'
+
+            Should -Invoke New-SkillDiscoveryCatalogTransaction -Times 1 -Exactly
+            Should -Invoke Sync-SkillDiscoveryCatalog -Times 1 -Exactly -ParameterFilter { $null -ne $Transaction -and [bool]$SkipLock }
+            Should -Invoke Get-HostProjectionPromotionContext -Times 1 -Exactly
+            Should -Invoke Sync-NativeAgentBridge -Times 0 -Exactly
+            Should -Invoke Complete-BuildTransaction -Times 1 -Exactly
+        }
+        finally {
+            $DryRun = $oldDryRun
+            $CfgPath = $oldCfgPath
+            $LogPath = $oldLogPath
+            $Root = $oldRoot
+            $Locked = $oldLocked
+            $script:SuppressAllLogging = $oldSuppressAllLogging
+        }
+    }
 }
 
 Describe "Sparse checkout disable guard" {

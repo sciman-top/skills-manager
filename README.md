@@ -257,6 +257,7 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 ### 技能投影与 fallback
 
 宿主原生 metadata 是普通请求的首选选择面。只有用户明确要求使用当前不可见的本地技能，或宿主高置信度判定没有足够的可见技能匹配完整请求且确实需要专门工作流时，才调用一次 `capability-router` 做 cold discovery 或 policy validation；它接收完整请求和至多两个宿主选择的 `DomainHint`，返回小候选集，仍由宿主语义选择。提及或讨论技能、以及语义不确定的普通请求都不是调用；不确定时默认使用通用推理或可见技能。随后 router 校验一个精确候选及其依赖闭包，不作语义排序、不切换 profile、不写宿主状态。输出中的 `routing_receipt` 只保存 query SHA-256、候选/闭包、catalog fingerprint、`truth_boundary` 和写入计数，不回显原始请求；它用于证明“候选发现/候选校验”边界，不等于宿主已加载或真实调用技能。
+若复制形态的 router 目录能读到 catalog、但 catalog 引用的兄弟技能没有随包存在，router 会返回 `catalog_projection_incomplete`，并将 receipt 标为 `candidate_discovery_blocked`；这表示投影不完整而非语义无匹配。修复应重新执行 `skills.ps1 构建生效`，或显式使用受管 catalog 的 `SKILLS_MANAGER_CAPABILITY_CATALOG`/`-CatalogPath`，不要把只含 router 的副本当成完整技能供应。
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 

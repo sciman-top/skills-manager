@@ -298,7 +298,19 @@ description: >-
         $copyRouter = Join-Path $copyHostRoot 'capability-router'
         New-Item -ItemType Directory -Path (Join-Path $copyRouter 'scripts') -Force | Out-Null
         Copy-Item -LiteralPath $script:routerScript -Destination (Join-Path $copyRouter 'scripts\route-capability.ps1') -Force
-        Set-Content -LiteralPath (Join-Path $copyRouter 'catalog.json') -Encoding UTF8 -Value '{"schema_version":1,"skills":[]}'
+        Copy-Item -LiteralPath (Join-Path $routerRoot 'catalog.json') -Destination (Join-Path $copyRouter 'catalog.json') -Force
+
+        # Without the managed catalog pin, the copied router can read its valid
+        # catalog but none of the referenced sibling entrypoints exist.  This
+        # must be an explicit projection failure, not an empty successful
+        # discovery that the host could mistake for a semantic no-match.
+        $unbound = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $copyRouter 'scripts\route-capability.ps1') `
+            -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering | ConvertFrom-Json
+        $unbound.catalog.status | Should -Be 'stale'
+        @($unbound.catalog.diagnostics | Where-Object code -eq 'catalog_projection_incomplete').Count | Should -Be 1
+        $unbound.routing_receipt.status | Should -Be 'blocked'
+        $unbound.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        @($unbound.retrieval.candidates).Count | Should -Be 0
 
         $env:SKILLS_MANAGER_CAPABILITY_CATALOG = Join-Path $routerRoot 'catalog.json'
         try {
