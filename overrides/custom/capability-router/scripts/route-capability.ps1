@@ -299,6 +299,8 @@ $managedRoot = ''
 $catalogDependencies = @{}
 $catalogExecutionContracts = @{}
 $allAvailableRows = @()
+$catalogDiagnostics = [Collections.Generic.List[object]]::new()
+$catalogProjectionIncomplete = $false
 $requestValid = $true
 $stale = $false
 
@@ -567,6 +569,31 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
     $catalogStatus = if ($stale) { 'stale' } else { 'current' }
 }
 
+# A copied router package can carry a valid catalog while none of the catalog
+# entrypoints exist beside it.  That shape used to look like a successful
+# discovery with an empty candidate set (`candidate_discovery_only`), which
+# made an incomplete projection indistinguishable from a semantic no-match.
+# Keep the scoped stale semantics, but mark the projection boundary explicitly
+# and block the discovery receipt until the managed catalog is reachable or a
+# complete package is supplied.
+$unavailableEntrypoints = @($excluded | Where-Object { $_.kind -eq 'skill' -and $_.reason -eq 'entrypoint_unavailable' })
+if ($catalogStatus -eq 'stale' -and $catalogSkillCount -gt 0 -and
+    $allAvailableRows.Count -eq 0 -and $unavailableEntrypoints.Count -eq $catalogSkillCount) {
+    $catalogProjectionIncomplete = $true
+    $managedCatalogHint = if (-not [string]::IsNullOrWhiteSpace($managedRoot)) {
+        Join-Path $managedRoot '.skills-manager\catalog.json'
+    }
+    else { '' }
+    $managedCatalogAvailable = -not [string]::IsNullOrWhiteSpace($managedCatalogHint) -and
+        (Test-Path -LiteralPath $managedCatalogHint -PathType Leaf)
+    $catalogDiagnostics.Add([pscustomobject][ordered]@{
+            code = 'catalog_projection_incomplete'
+            reason = 'all_catalog_entrypoints_unavailable'
+            recovery = 'run_build_effective_or_pin_managed_catalog'
+            managed_catalog_available = [bool]$managedCatalogAvailable
+        }) | Out-Null
+}
+
 $allRows = @($rows.ToArray())
 $truncated = $allRows.Count -gt $MaxCandidates
 # The router is a deterministic catalog reader, not a semantic ranker.  Returning
@@ -643,7 +670,8 @@ $loadPass = $rootSelectionPass -and $closurePass
 $effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows ([string]$selectedRows[0].name) } else { New-HostAdmissionExecutionContract }
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
-$authorizationReason = if ($discoveryScopeRequired) { 'domain_hint_required' }
+$authorizationReason = if ($catalogProjectionIncomplete) { 'catalog_projection_incomplete' }
+elseif ($discoveryScopeRequired) { 'domain_hint_required' }
 elseif ($multipleRootCandidates) { 'multiple_candidates_not_admissible' }
 elseif ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
 elseif ($effectiveExecutionContract.mode -eq 'host_admission_required') { 'execution_contract_requires_host_admission' }
@@ -680,8 +708,8 @@ $routingReceipt = [ordered]@{
     validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
     validated_closure = @(if ($loadPass) { $validatedClosureRows | ForEach-Object { [string]$_.name } })
     execution_contract = $effectiveExecutionContract
-    status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable) { 'blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -ne 'invalid' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
-    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable) { 'candidate_discovery_blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
+    status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable -or $catalogProjectionIncomplete) { 'blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -ne 'invalid' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
+    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable -or $catalogProjectionIncomplete) { 'candidate_discovery_blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0
@@ -694,7 +722,7 @@ $document = [pscustomobject][ordered]@{
     query_received = (-not [string]::IsNullOrWhiteSpace($Query))
     catalog_path = $catalogFile
     catalog_resolution = [ordered]@{ mode = [string]$resolution.mode; auto_discover_requested = [bool]$AutoDiscover }
-    catalog = [ordered]@{ status = $catalogStatus; skill_count = $catalogSkillCount; findings = @($catalogFindings.ToArray()) }
+    catalog = [ordered]@{ status = $catalogStatus; skill_count = $catalogSkillCount; findings = @($catalogFindings.ToArray()); diagnostics = @($catalogDiagnostics.ToArray()) }
     discovery_domains = @(if ($null -ne $catalog -and $catalogFindings.Count -eq 0) { $catalog.domains | Select-Object name, purpose })
     retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; candidate_count = $allRows.Count; max_candidates = $MaxCandidates; truncated = $truncated; scope_required = $discoveryScopeRequired }
     selected = $selectedRows

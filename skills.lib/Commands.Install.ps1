@@ -1918,7 +1918,7 @@ function 构建生效(
 
             Write-BuildSummary $cfg
             Log "=== 启动构建生效流程 ==="
-            if ($SkipHostProjection -and -not $DryRun) {
+            if (-not $DryRun) {
                 # Snapshot the catalog after optimization so rollback restores
                 # the exact pre-build projection inputs and outputs.
                 $catalogTransaction = New-SkillDiscoveryCatalogTransaction $cfg.skill_projection
@@ -1950,15 +1950,34 @@ function 构建生效(
                 if ($syncFailures) { $failures += $syncFailures }
             }
             else {
-                $promotionContext = $null
                 try {
-                    $promotionContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
+                    # Keep the in-repository cold-discovery catalog aligned with
+                    # the freshly built agent/ before checking whether external
+                    # host promotion is allowed.  A dirty-worktree promotion
+                    # block must retain a usable staging tree; otherwise the
+                    # next read sees an empty/incomplete catalog and reports a
+                    # misleading semantic no-match.  The catalog transaction is
+                    # also part of aggregate rollback if a later host sync fails.
+                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection $catalogTransaction -SkipLock
+                    if ([bool]$catalogProjection.enabled) {
+                        Log ("已生成仓内 cold-discovery catalog：skills={0}，domains={1}" -f [int]$catalogProjection.skill_count, [int]$catalogProjection.domain_count)
+                    }
                 }
                 catch {
-                    $promotionBlocked = $true
-                    $failures += ("host-projection-promotion => {0}" -f $_.Exception.Message)
-                    Log ("宿主投影晋级已阻断：{0}" -f $_.Exception.Message) "ERROR"
-                    Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
+                    $failures += ("capability-catalog => {0}" -f $_.Exception.Message)
+                    Log ("仓内 cold-discovery catalog 生成失败：{0}" -f $_.Exception.Message) "ERROR"
+                }
+                $promotionContext = $null
+                if (@($failures).Count -eq 0) {
+                    try {
+                        $promotionContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
+                    }
+                    catch {
+                        $promotionBlocked = $true
+                        $failures += ("host-projection-promotion => {0}" -f $_.Exception.Message)
+                        Log ("宿主投影晋级已阻断：{0}" -f $_.Exception.Message) "ERROR"
+                        Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
+                    }
                 }
                 if (@($failures).Count -eq 0) {
                     $hostProjectionAttempted = $true
