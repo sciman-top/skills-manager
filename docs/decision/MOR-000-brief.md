@@ -9,6 +9,8 @@
 
 用户修订共同启用池为 GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）；GPT-6-luna 整体移除（含 `gpt56_luna_only` 别名），`default_preset=glm53_flash_only`。当前中转通道模型目录投影的精确 slug 即 `deepseek-v4.1-flash`（旧通道 slug `deepseek-flash` 不再使用）；两元组于 2026-10-11 经当前中转 provider 通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
 
+**同日扩展执行（用户授权"按推荐连续执行"）**：①ZCode 侧手工投影一枚子代理定义 `~/.zcode/agents/glm-max.md`（frontmatter `model: account:bigmodel-start-plan/GLM-5.3-Flash` + `thoughtLevel: max`，正文=有界执行契约；不经本工具投影，工具对 ZCode 仍 resolve-only）——model 值采用本机 ListModels 当前权威 id（与当前 plan 耦合，plan 变更须同步改值）；host_loaded 未证：定义文件新会话才加载，复测条件=新开 ZCode 会话在子代理清单中可见 glm-max 且调用走 max 档，回滚=删除该文件。证据层级止于 filesystem_projected。②Antigravity 官方文档首次取证（antigravity.google/docs/subagents，2026-10-11 直抓）：Antigravity 2.0 原生 Custom subagents——父代理 `invoke_subagent` 并发派发、上下文隔离、定义文件置于 workspace `.agents/agents/` 或全局 `~/.gemini/config/agents/`，frontmatter `model` 仅 tier 级（inherit/flash/pro）、无 effort/精确模型键，另有 define_subagent 瞬态子代理、/boost、/teamwork-preview、/agents 面板；tier 词表无法表达本池精确元组，适配器结论不变（无适配器）。③WorkBuddy 有界核查收口：workbuddy.ai 不可达、codebuddy.ai 空内容、copilot.tencent.com 首页无子代理条目，官方文档入口未找到，维持未核验。④证据账本：MOR-090 新增 C10（通道迁移后两池元组复测）+ 矩阵新行 deepseek-v4.1-flash/max（90 tuples/verified 53）。
+
 下文 2026-10-07 节描述的启用池（Luna+GLM）由本节取代，其余原则保留。
 
 ## 2026-10-07 日常子代理预设修订

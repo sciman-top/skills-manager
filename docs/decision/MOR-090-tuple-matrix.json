@@ -5,7 +5,7 @@
     "contract_layers": ["host_adapter", "provider_dialect"],
     "allowlist_rule": "status==verified; final route candidate additionally requires host_adapter AND provider_dialect sides verified (intersection). No cross-surface extrapolation (e.g. openai_* max -> codex_config_surface).",
     "collected": "2026-08-28",
-    "updated": "2026-09-17",
+    "updated": "2026-10-11",
     "pending_surfaces": [
       {
         "surface": "claude_host",
@@ -103,6 +103,7 @@
     {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "glm-5.3-flash", "effort": "high", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
     {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "glm-5.3-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
     {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-flash", "effort": "high", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
-    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"}
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C9"], "notes": "同上"},
+    {"surface": "codex_provider_channel", "layer": "host_adapter", "model": "deepseek-v4.1-flash", "effort": "max", "field_path": "request model slug + reasoning effort", "status": "verified", "facts": ["C10"], "notes": "2026-10-11 经迁移后的远端中转通道最小探针 exit 0；当前通道目录 slug 投影即此名（旧 slug deepseek-flash 属 4163 通道时代，不再使用）"}
   ]
 }
