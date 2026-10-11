@@ -66,7 +66,7 @@ GPT/Codex and GLM/ZCode are task-fit executors, not stages in a fixed pipeline;
 judge a choice by same-task acceptance; verify current help, schema, documentation and actual inputs. Keep one primary executor through inspect, implement and
 verify. Delegate or parallelize only when explicitly authorized, write sets are
 disjoint, and each slice has independent proof and a positive net benefit.
-Prove a batch fan-out prompt on a 2-3 item sample before scaling it. Use
+Prove 2-3 item fan-out before scaling. Use
 a visible matching skill directly; `capability-router` is a bounded one-shot
 fallback when a named or required skill is not visible — not routine middleware,
 and never cascade every workflow skill.
