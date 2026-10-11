@@ -247,8 +247,8 @@ $config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$s
 $config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
 AddFile $configPath $config
 }
-# Not elseif: a preset may carry both facets (deepseek projects Claude Code and
-# the shared codex surface in one Apply).
+# Not elseif: a preset may carry both facets (one Apply can project Claude Code
+# and the shared codex surface together).
 if ('claude' -in $modelPreset.hosts) {
     $ClaudeRoot = [IO.Path]::GetFullPath($ClaudeRoot)
     $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
