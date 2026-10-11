@@ -5,9 +5,15 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-10-11 日常子代理预设修订
+
+用户修订共同启用池为 GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）；GPT-6-luna 整体移除（含 `gpt56_luna_only` 别名），`default_preset=glm53_flash_only`。当前中转通道模型目录投影的精确 slug 即 `deepseek-v4.1-flash`（旧通道 slug `deepseek-flash` 不再使用）；两元组于 2026-10-11 经当前中转 provider 通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
+
+下文 2026-10-07 节描述的启用池（Luna+GLM）由本节取代，其余原则保留。
+
 ## 2026-10-07 日常子代理预设修订
 
-当前菜单与任务映射以 [`presets.json`](../../src/model-orchestration/presets.json) 和[使用说明](../../src/model-orchestration/README.md)为准。用户最终修订为 schema v4 共同启用池：GPT-6-luna max、GLM-5.3-Flash max，共两个模型、两个元组；DeepSeek 已移除。Luna 与 GLM 所有槽位固定 max。菜单按同模型 effort 严格升序，避免失败重选将升档误标为降档。`default_preset=gpt6_luna_only` 只提供缺省路线，不限制其他模型共同启用。每个语义槽位可独立选择池内受宿主支持的任意元组，不要求整套切换。初始八个语义槽位可按配置扩展；两个精确元组角色同时投影。旧 GPT preset 参数作为新 ID 的别名保留。
+**（启用池部分已被 2026-10-11 节取代）** 当前菜单与任务映射以 [`presets.json`](../../src/model-orchestration/presets.json) 和[使用说明](../../src/model-orchestration/README.md)为准。用户最终修订为 schema v4 共同启用池：GPT-6-luna max、GLM-5.3-Flash max，共两个模型、两个元组；DeepSeek 已移除。Luna 与 GLM 所有槽位固定 max。菜单按同模型 effort 严格升序，避免失败重选将升档误标为降档。`default_preset=gpt6_luna_only` 只提供缺省路线，不限制其他模型共同启用。每个语义槽位可独立选择池内受宿主支持的任意元组，不要求整套切换。初始八个语义槽位可按配置扩展；两个精确元组角色同时投影。旧 GPT preset 参数作为新 ID 的别名保留。
 
 本次子代理请求使用 `-SubagentsOnly`，保留父模型、review 与父 effort；普通宿主 AI 可在明确委派授权内按依赖拆分任务，并在新任务派发前依据复杂度选择槽位。并行仍要求独立验收、互斥写集、净收益与原生并发预算。菜单不可用的显式重选和任务复杂度升降档是两条不同路径，均不得重放已完成写入。
 

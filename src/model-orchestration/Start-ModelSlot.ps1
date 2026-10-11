@@ -28,7 +28,7 @@ if (-not [string]::IsNullOrWhiteSpace($Model)) {
 $readOnlyTask = $ReadOnly -or $Slot -cin @($resolved.read_only_slots)
 $presetHosts = @($policy.presets[$Preset].hosts)
 # Launch on the first declared facet with a verified native interface, so the
-# primary host wins (deepseek=claude) and zcode is always skipped as
+# first codex/claude host wins and zcode is always skipped as
 # resolve-only; a zcode-only preset has no launchable facet at all.
 $targetHost = $null
 foreach ($h in $presetHosts) { if ($h -ceq 'codex' -or $h -ceq 'claude') { $targetHost = $h; break } }
