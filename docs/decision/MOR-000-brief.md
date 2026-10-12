@@ -1,6 +1,6 @@
 # MOR-000：runtime 归属与控制面边界决议
 
-**状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `skills-manager/src/model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。
+**状态**：完整 MOR 控制面继续 `decided_deferred`；2026-09-12 用户授权按推荐连续执行宿主启用，独立原生 preset 投影与受控槽位入口落到 `skills-manager/src/model-orchestration`，本机 owner 为当前用户 sciman。该切片只负责 preset/model/effort/槽位、受控投影与回滚，不接管网关、provider、凭据或后台自动故障切换，不等同于 MOR-010 全量启动。受控 launcher 的一次显式重选属于下一 bounded task 的人工选择例外，要求当前 capability receipt，不能升级为 MOR 自动 failover。
 **依据**：[PRD](../archive/cross-host-model-orchestration-prd.md) §9 · [MOR-001 自动故障切换模拟准入规格](MOR-001-automatic-failover-simulation.md)
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
@@ -10,6 +10,12 @@
 用户修订共同启用池为 GPT-6-luna max（`gpt6_luna_only`，hosts codex）、GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）三元组；GPT-5.6-Terra（`gpt_terra_only`）整体移除，`default_preset=glm53_flash_only` 不变。429 可用性链按声明序更新为 luna→glm→deepseek→停等操作者。luna 精确 slug `gpt-6-luna` 沿用 2026-10-07 池时代的通道投影与 live 记录；`gpt6-luna-only` 新 profile 于当日 strict-load 通过，且该元组经当前中转 provider 通道 `codex exec` 最小请求探针 1 次 exit 0（read-only sandbox，input≈22.5k tok，C11），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
 
 下文 2026-10-11 节描述的启用池（GLM+DeepSeek 两元组）由本节取代，其余原则（ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论）保留。
+
+## 2026-10-13 宿主分面档位修订
+
+本机当前 Codex 原生目录对 `glm-5.3-flash` 与 `deepseek-v4.1-flash` 仅声明 `low/medium/high/xhigh`，未声明 `max`。因此 schema v5 将 Codex 菜单改为 GLM/xhigh 与 DeepSeek/xhigh；GPT-6-luna 仍为 max。GLM 的 ZCode 分面保留 `thoughtLevel: max`，通过 `-ExecutionHost zcode -Action Resolve` 只读呈现，仍不声称本工具具备 ZCode 写入适配器；DeepSeek 继续无已验证 ZCode 分面。一次任务的宿主与精确 tuple 在启动前冻结；不把 ZCode 的 max 静默映射为 Codex 的 xhigh，也不因档位变化放宽一请求/一显式重选和 429、auth、risk 停止规则。
+
+收口验收（2026-10-13，接管会话执行）：投影由原会话完成（`.state/20261012T175110822Z-eced116c` 等三份 receipt），接管侧复验 Plan 幂等 0、三 profile strict-load 过、`build.ps1 -Check` 零漂移、Test-ModelPreset 212 断言绿、门禁 -DiffBase origin/main focused 6/6 绿；新元组 `glm-5.3-flash`/xhigh 与 `deepseek-v4.1-flash`/xhigh 经当前中转通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox，预检通过，C12，矩阵 93 tuples/verified 56）。luna/max 未变不重测。
 
 ## 2026-10-11 日常子代理预设修订
 

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "default_preset": "glm53_flash_only",
   "active_presets": [
     "gpt6_luna_only",
@@ -82,9 +82,17 @@
       "menu": [
         {
           "model": "glm-5.3-flash",
-          "effort": "max"
+          "effort": "xhigh"
         }
       ],
+      "host_menus": {
+        "zcode": [
+          {
+            "model": "glm-5.3-flash",
+            "effort": "max"
+          }
+        ]
+      },
       "slot_map": {
         "routine_maintenance": 0,
         "architecture_review": 0,
@@ -103,7 +111,7 @@
       "menu": [
         {
           "model": "deepseek-v4.1-flash",
-          "effort": "max"
+          "effort": "xhigh"
         }
       ],
       "slot_map": {

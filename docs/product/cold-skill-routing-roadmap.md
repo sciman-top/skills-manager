@@ -93,7 +93,7 @@ CSR-R0 的已知输入是提交 `6e5e390d719e34f76ca2631a109507c06160e405`。该
 
 ### CSR-R1：原生 bridge 与 active preset 一致
 
-两份 source template 不得包含 `model` 或 `model_reasoning_effort`，避免角色文件覆盖父代理为任务选择的模型与档位。当前共同启用池、精确 tuple 与可扩展语义槽位以 `src/model-orchestration/presets.json`（schema v4）及其 README 为准；父代理按任务性质和当前执行面的支持证据选择 tuple，没有任务专属选择时继承子代理默认值。语义槽位数量与宿主原生并发预算分别核验。
+两份 source template 不得包含 `model` 或 `model_reasoning_effort`，避免角色文件覆盖父代理为任务选择的模型与档位。当前共同启用池、精确 tuple、宿主分面菜单与可扩展语义槽位以 `src/model-orchestration/presets.json`（schema v5）及其 README 为准；父代理按任务性质和当前执行面的支持证据选择 tuple，没有任务专属选择时继承子代理默认值。语义槽位数量与宿主原生并发预算分别核验。
 
 `design-griller` 与 `cold-capability-runner` 继续固定工作流、admission、sandbox 和副作用约束。模型/effort 属于 preset 控制面，不属于角色语义；新会话 child 事件仍是 CSR-R4 的独立门槛。
 

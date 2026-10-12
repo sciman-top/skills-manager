@@ -68,10 +68,49 @@ function Get-CodexCatalog([string]$Path) {
     try { return (($output | Out-String).Trim() | ConvertFrom-Json) }
     catch { throw "codex debug models did not return JSON: $($_.Exception.Message)" }
 }
+function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$Effort) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'CapabilityProbePath is required for provider_override.' }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Provider capability evidence not found: $Path" }
+    try { $root = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
+    catch { throw "Provider capability evidence is not valid JSON: $($_.Exception.Message)" }
+    $records = if ($root.PSObject.Properties.Name -contains 'tuples') { @($root.tuples) } else { @($root) }
+    $match = @($records | Where-Object { [string]$_.model -ceq $Model -and [string]$_.effort -ceq $Effort -and [string]$_.status -ceq 'verified' })[0]
+    if ($null -eq $match) { throw "Provider evidence has no verified exact tuple '$Model/$Effort'." }
+    $surface = [string]$root.surface
+    if ([string]::IsNullOrWhiteSpace($surface)) { $surface = [string]$root.provider }
+    if ([string]::IsNullOrWhiteSpace($surface)) { $surface = [string]$match.surface; if ([string]::IsNullOrWhiteSpace($surface)) { $surface = [string]$match.provider } }
+    $source = [string]$root.source
+    if ([string]::IsNullOrWhiteSpace($source)) { $source = [string]$match.source }
+    $observedText = [string]$root.observed_at
+    if ([string]::IsNullOrWhiteSpace($observedText)) { $observedText = [string]$match.observed_at }
+    $expiresText = [string]$root.expires_at
+    if ([string]::IsNullOrWhiteSpace($expiresText)) { $expiresText = [string]$match.expires_at }
+    if ([string]::IsNullOrWhiteSpace($surface) -or [string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($observedText) -or [string]::IsNullOrWhiteSpace($expiresText)) {
+        throw 'Provider capability evidence must bind surface/provider, observed_at, expires_at and source.'
+    }
+    try {
+        $observed = [DateTimeOffset]::Parse($observedText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        $expires = [DateTimeOffset]::Parse($expiresText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    }
+    catch { throw 'Provider capability evidence has invalid observed_at or expires_at.' }
+    $now = [DateTimeOffset]::UtcNow
+    if ($observed -gt $now -or $expires -le $now -or $expires -le $observed) { throw 'Provider capability evidence is outside its validity window.' }
+    [ordered]@{
+        model = $Model
+        effort = $Effort
+        status = 'verified'
+        surface = $surface
+        observed_at = $observed.ToString('o')
+        expires_at = $expires.ToString('o')
+        source = $source
+    }
+}
 if (-not $Plan) {
     if ($CapabilityMode -eq 'provider_override') {
-        $capability.status = 'provider_override_declared'
-        $capability.reason = 'Explicit one-shot provider override; current provider evidence remains a parent precondition.'
+        try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
+        catch { ThrowCapabilityBlock 'provider_evidence_invalid' $_.Exception.Message }
+        $capability.status = 'provider_evidence_verified'
+        $capability.surface = $capability.evidence.surface
     }
     else {
         if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
@@ -105,17 +144,56 @@ if ($Plan) {
     return
 }
 if ([string]::IsNullOrWhiteSpace($Prompt)) { throw 'Prompt is required to execute a slot.' }
+$maxExplicitReselections = [int]$resolved.dispatch_policy.max_explicit_reselections
+if ($ReselectionCount -ge $maxExplicitReselections) {
+    $budget = [ordered]@{
+        status = 'reselection_budget_exhausted'
+        slot = $Slot
+        preset = $routePreset
+        model = [string]$route.model
+        effort = [string]$route.effort
+        host = $targetHost
+        reselection_count = $ReselectionCount
+        max_explicit_reselections = $maxExplicitReselections
+        upstream_contacted = $false
+        replay_allowed = $false
+        next_action = 'stop_and_wait_for_fresh_parent_selection'
+    }
+    $budgetDoc = @{ reselection_budget_exhausted = $budget } | ConvertTo-Json -Depth 8 -Compress
+    $budgetDoc
+    throw "Reselection budget exhausted; no upstream request was sent. $budgetDoc"
+}
 # No arbitrary CLI pass-through: the caller cannot override the frozen route or re-enable delegation.
 $scopedPrompt = "Execution slot: $Slot. Use only this session's configured model/effort. Do not delegate, start another AI process, change provider/model settings, or replay this task under another preset. "
 if ($readOnlyTask) { $scopedPrompt += 'This is read-only work; do not modify files or external state. ' }
 $scopedPrompt += "`n`n"+$Prompt
-function Classify-Failure([string]$Text) {
-    if ($Text -match '(?i)(risk|suspicious|ban|banned|illegal|policy|fraud|风控|封号)') { return 'account_risk' }
-    if ($Text -match '(?i)(429|rate[s-]?limit|too many requests|quota)') { return 'rate_limit' }
-    if ($Text -match '(?i)(401|403|unauthori[sz]ed|forbidden|authentication|auth)') { return 'auth_or_permission' }
-    if ($Text -match '(?i)(502|503|504|overload|temporarily unavailable|timeout|timed out)') { return 'upstream_unavailable' }
-    if ($Text -match '(?i)(not found|cannot find|path|sandbox|tool|permission denied)') { return 'tool_or_environment' }
-    return 'unknown'
+function Classify-Failure([object[]]$Output) {
+    $errors = [Collections.Generic.List[object]]::new()
+    foreach ($item in @($Output)) {
+        $event = $null
+        if ($item -is [string]) {
+            $text = ([string]$item).Trim()
+            if ([string]::IsNullOrWhiteSpace($text)) { continue }
+            try { $event = $text | ConvertFrom-Json } catch { continue }
+        } else { $event = $item }
+        if ($null -eq $event) { continue }
+        foreach ($property in @('error','errors')) {
+            if ($event.PSObject.Properties.Name -contains $property) {
+                foreach ($errorRecord in @($event.$property)) { if ($null -ne $errorRecord -and $errorRecord -isnot [string]) { $errors.Add($errorRecord) } }
+            }
+        }
+    }
+    foreach ($errorRecord in $errors) {
+        $tokens = @(
+            $errorRecord.code, $errorRecord.reason_code, $errorRecord.category, $errorRecord.type, $errorRecord.status, $errorRecord.http_status
+        ) | ForEach-Object { if ($null -ne $_) { ([string]$_).Trim().ToLowerInvariant() } } | Where-Object { $_ }
+        if (@($tokens | Where-Object { $_ -in @('risk','account_risk','policy_violation','safety_block','fraud','banned') }).Count -gt 0) { return [pscustomobject]@{ class='account_risk'; source='structured_error_event' } }
+        if (@($tokens | Where-Object { $_ -in @('429','rate_limit','rate-limit','quota','too_many_requests') }).Count -gt 0) { return [pscustomobject]@{ class='rate_limit'; source='structured_error_event' } }
+        if (@($tokens | Where-Object { $_ -in @('401','403','auth','authentication','unauthorized','forbidden','permission') }).Count -gt 0) { return [pscustomobject]@{ class='auth_or_permission'; source='structured_error_event' } }
+        if (@($tokens | Where-Object { $_ -in @('502','503','504','overload','service_unavailable','upstream_unavailable','temporarily_unavailable') }).Count -gt 0) { return [pscustomobject]@{ class='upstream_unavailable'; source='structured_error_event' } }
+        if (@($tokens | Where-Object { $_ -in @('tool_error','environment_error','sandbox_error','not_found') }).Count -gt 0) { return [pscustomobject]@{ class='tool_or_environment'; source='structured_error_event' } }
+    }
+    [pscustomobject]@{ class='unknown'; source=if ($errors.Count -gt 0) { 'structured_error_unclassified' } else { 'unstructured_output' } }
 }
 Push-Location -LiteralPath $WorkingDirectory
 try {
@@ -153,7 +231,8 @@ try {
                 if (@($crossPreset).Count -ge [int]$resolved.dispatch_policy.max_explicit_reselections) { break }
             }
         }
-        $failureClass = Classify-Failure (($launchOutput | Out-String))
+        $classification = Classify-Failure $launchOutput
+        $failureClass = [string]$classification.class
         $nextAction = switch ($failureClass) {
             'account_risk' { 'stop_and_operator_review' }
             'auth_or_permission' { 'stop_and_operator_review' }
@@ -164,6 +243,7 @@ try {
         $failureDoc = @{ slot_failure = [ordered]@{
                 exit = $code
                 failure_class = $failureClass
+                failure_source = [string]$classification.source
                 failed_tuple = $failedTuple
                 capability = $capability
                 upstream_contacted = $true

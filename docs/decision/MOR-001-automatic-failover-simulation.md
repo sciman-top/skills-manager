@@ -7,7 +7,7 @@
 
 ## 1. 决议与不变量
 
-当前 MOR 的正式合同仍为“人工声明 -> scoped `operator_override` -> 离线 Resolve”，任务失败只能追加 receipt，**不得** reroute、retry、切换 preset 或写入状态。本规格只定义未来是否准入一个独立的自动故障切换模块；未获该模块的独立授权前，任何自动行为均为禁止。
+当前 MOR 的正式合同仍为“人工声明 -> scoped `operator_override` -> 离线 Resolve”，任务失败只能追加 receipt，**不得** reroute、retry、切换 preset 或写入状态。本规格只定义未来是否准入一个独立的自动故障切换模块；未获该模块的独立授权前，任何自动行为均为禁止。现有 `src/model-orchestration/Start-ModelSlot.ps1` 是独立的受控 launcher，不是 MOR runtime：它允许父代理在确认 `overload/unavailable` 后为**尚未开始的下一 bounded task** 做一次显式重选，并以当前宿主 capability preflight 或有期限的 provider receipt 重新取证；它不自动作出决策、不重放失败任务，也不改变 MOR 的 deferred 状态。
 
 该模块必须是一个深模块：调用方只提交结构化失败证据、当前选择与一份策略快照，获得一个无副作用的 `FailoverDecision`。失败分类、fallback 图、风险门、熔断、冷却、恢复滞后和 receipt redaction 都在模块内部；调用方不得各自实现 `if Sol then Terra`。
 
