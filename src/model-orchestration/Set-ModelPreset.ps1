@@ -7,7 +7,8 @@ param(
     [string]$CodexRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }),
     [string]$ClaudeRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
     [string]$ReceiptPath = '',
-    [switch]$SubagentsOnly
+    [switch]$SubagentsOnly,
+    [string]$CapabilityProbePath = ''
 )
 $ErrorActionPreference = 'Stop'
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
@@ -230,11 +231,79 @@ foreach ($entry in $enabledRoutes) {
     AddFile $rolePath $roleText
     $tupleBlocks.Add("[agents.$($entry.role)]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
 }
+$capability = [ordered]@{
+    status = 'not_applicable'
+    host = 'codex'
+    source = $CapabilityProbePath
+    tuples = @()
+    unsupported = @()
+}
+function Get-CodexCatalog([string]$Path) {
+    if ($Path) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Capability probe file not found: $Path" }
+        try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) }
+        catch { throw "Capability probe file is not valid JSON: $($_.Exception.Message)" }
+    }
+    $output = @(& codex debug models 2>&1)
+    $probeCode = $LASTEXITCODE
+    if ($probeCode -ne 0) { throw "codex debug models failed (exit=$probeCode)." }
+    try { return (($output | Out-String).Trim() | ConvertFrom-Json) }
+    catch { throw "codex debug models did not return JSON: $($_.Exception.Message)" }
+}
+function Test-CodexNativeTuples($Catalog, $Entries, [string]$Source) {
+    $models = @($Catalog.models)
+    if ($models.Count -eq 0) { throw 'Codex capability catalog contains no models.' }
+    $tupleResults = [Collections.Generic.List[object]]::new()
+    $unsupported = [Collections.Generic.List[object]]::new()
+    foreach ($entry in $Entries) {
+        $model = [string]$entry.model
+        $effort = [string]$entry.effort
+        $modelInfo = @($models | Where-Object { $_.slug -ceq $model })[0]
+        if ($null -eq $modelInfo) {
+            $record = [ordered]@{ model=$model; effort=$effort; status='model_missing'; supported_efforts=@() }
+            $tupleResults.Add($record); $unsupported.Add($record); continue
+        }
+        $levels = if ($modelInfo.PSObject.Properties.Name -contains 'supported_reasoning_levels') { @($modelInfo.supported_reasoning_levels) } else { @() }
+        $supported = @($levels | ForEach-Object {
+            if ($_ -is [string]) { [string]$_ }
+            elseif ($null -ne $_ -and $_.PSObject.Properties.Name -contains 'effort') { [string]$_.effort }
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        $status = if ($supported -ccontains $effort) { 'supported' } else { 'tuple_unsupported' }
+        $record = [ordered]@{ model=$model; effort=$effort; status=$status; supported_efforts=@($supported) }
+        $tupleResults.Add($record)
+        if ($status -ne 'supported') { $unsupported.Add($record) }
+    }
+    return [ordered]@{
+        status = if ($unsupported.Count -eq 0) { 'native_supported' } else { 'blocked' }
+        host = 'codex'
+        source = $Source
+        tuples = @($tupleResults)
+        unsupported = @($unsupported)
+    }
+}
+if ('codex' -in @($modelPreset.hosts)) {
+    $codexEntries = @($enabledRoutes | Where-Object { 'codex' -in @($_.hosts) })
+    try {
+        $catalog = Get-CodexCatalog $CapabilityProbePath
+        $capabilitySource = if ($CapabilityProbePath) { $CapabilityProbePath } else { 'codex debug models' }
+        $capability = Test-CodexNativeTuples $catalog $codexEntries $capabilitySource
+    }
+    catch {
+        $capability.status = 'probe_failed'
+        $capability.reason = $_.Exception.Message
+        $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 12 -Compress
+        throw "Codex native capability preflight failed; no host files were written. $doc"
+    }
+    if (@($capability.unsupported).Count -gt 0) {
+        $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 12 -Compress
+        throw "Codex native capability preflight blocked projection; no host files were written. $doc"
+    }
+}
 if ('codex' -in $modelPreset.hosts) {
-# Every preset with a codex facet gets a complete native profile, so the strict
-# slot launcher can freeze any of them; codex_order presets come first.
-$codexIds = @($policy.codex_order | Where-Object { 'codex' -in $policy.presets[$_].hosts })
-foreach ($id in $policy.presets.Keys) { if ($id -cnotin $codexIds -and 'codex' -in $policy.presets[$id].hosts) { $codexIds += $id } }
+# Every active preset with a codex facet gets a complete native profile, so the
+# strict slot launcher can freeze any selected pool member; codex_order wins.
+$codexIds = @($policy.codex_order | Where-Object { $activePresets -ccontains $_ -and 'codex' -in $policy.presets[$_].hosts })
+foreach ($id in $policy.presets.Keys) { if ($activePresets -ccontains $id -and $id -cnotin $codexIds -and 'codex' -in $policy.presets[$id].hosts) { $codexIds += $id } }
 foreach ($id in $codexIds) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
@@ -320,11 +389,11 @@ if ('claude' -in $modelPreset.hosts) {
     }
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
-if ($Action -eq 'Plan') { @{preset=$Preset; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; gateway_changes=0} | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Plan') { @{preset=$Preset; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; gateway_changes=0} | ConvertTo-Json -Depth 12; return }
 if ($changed.Count -eq 0) { 'No changes.'; return }
 $run = Join-Path $stateRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($run) | Out-Null
-$receipt = @{schema_version=2;preset=$Preset;active_presets=$activePresets;scope=$projectionScope;status='prepared';files=@()}
+$receipt = @{schema_version=2;preset=$Preset;active_presets=$activePresets;scope=$projectionScope;status='prepared';capability=$capability;files=@()}
 foreach ($f in $changed) {
     if ((Hash $f.path) -cne $f.before_hash) { throw "Before-hash drift: $($f.path)" }
     $backup = Join-Path $run ("$($receipt.files.Count).bak")
@@ -356,4 +425,4 @@ catch {
     WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
     throw "Apply failed ($($failure.Exception.Message)); $($receipt.status). Receipt: $receiptFile"
 }
-@{preset=$Preset;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;host_loaded=$false;execution_boundary='Start-ModelSlot.ps1 freezes one child route and disables nested delegation'} | ConvertTo-Json
+@{preset=$Preset;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Start-ModelSlot.ps1 freezes one child route and disables nested delegation'} | ConvertTo-Json -Depth 12

@@ -89,13 +89,31 @@ $deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_inv
 Assert $deepReadOnly.read_only 'Deep cross-model review supports explicit read-only scope'
 $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Raw
 Assert ($launcher.Contains('no replay or preset substitution performed') -and $launcher.Contains('No arbitrary CLI pass-through')) 'Failed task must not replay'
+$providerEvidencePath = Join-Path ([IO.Path]::GetTempPath()) ('model-provider-evidence-'+[guid]::NewGuid().ToString('N')+'.json')
+$providerEvidence = [ordered]@{
+    schema_version = 1
+    surface = 'codex_provider_channel'
+    observed_at = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('o')
+    expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
+    source = 'test-current-parent-receipt'
+    tuples = @(
+        @{ model = 'gpt-6-luna'; effort = 'max'; status = 'verified' },
+        @{ model = 'glm-5.3-flash'; effort = 'max'; status = 'verified' },
+        @{ model = 'deepseek-v4.1-flash'; effort = 'max'; status = 'verified' }
+    )
+}
+[IO.File]::WriteAllText($providerEvidencePath, ($providerEvidence | ConvertTo-Json -Depth 8))
 if (Test-Path Function:/global:codex) { throw 'Cannot install acceptance mock over an existing global codex function.' }
 $global:ModelSlotAcceptanceCalls = [Collections.Generic.List[object]]::new()
 $global:ModelSlotAcceptanceExitCode = 1
+$global:ModelSlotAcceptanceFailureMode = 'rate_limit'
 function global:codex {
     $global:ModelSlotAcceptanceCalls.Add(@($args))
     $global:LASTEXITCODE = $global:ModelSlotAcceptanceExitCode
-    if ($global:ModelSlotAcceptanceExitCode -ne 0) { '{"type":"turn.failed","error":{"message":"429 Too Many Requests (simulated)"}}' }
+    if ($global:ModelSlotAcceptanceExitCode -ne 0) {
+        if ($global:ModelSlotAcceptanceFailureMode -ceq 'timeout_message_only') { '{"type":"turn.failed","error":{"message":"request timeout (simulated)"}}' }
+        else { '{"type":"turn.failed","error":{"code":"rate_limit","message":"Too Many Requests (simulated)"}}' }
+    }
     else { '{"type":"turn.completed"}' }
 }
 try {
@@ -105,20 +123,39 @@ try {
         @{ model = 'deepseek-v4.1-flash'; next = @() }
     )) {
         $failureMessage = ''
-        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort max -ReadOnly -CapabilityMode provider_override -Prompt 'Simulated unavailable request' | Out-Null }
+        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
         catch { $failureMessage = $_.Exception.Message }
         Assert ($failureMessage -like '*no replay or preset substitution performed*') 'Failure returns control without replay'
         $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
         Assert $jsonMatch.Success 'Structured failure emitted'
         $failure = ($jsonMatch.Value | ConvertFrom-Json).slot_failure
         Assert ($failure.failed_tuple.model -ceq $failedRoute.model -and $failure.failed_tuple.effort -ceq 'max') 'Failed tuple is exact'
+        Assert ($failure.failure_class -ceq 'rate_limit' -and $failure.failure_source -ceq 'structured_error_event') 'Failure class comes from structured error fields'
         Assert (@($failure.reselection.within_preset_lower).Count -eq 0 -and @($failure.reselection.within_preset_higher_overload_only).Count -eq 0) 'Fixed max has no effort fallback'
         Assert ((@($failure.reselection.cross_preset.preset) -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-model fallback never cycles'
     }
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Failures never automatically retry'
+    $global:ModelSlotAcceptanceFailureMode = 'timeout_message_only'
+    $timeoutFailure = ''
+    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Output contains timeout text but no structured code' | Out-Null }
+    catch { $timeoutFailure = $_.Exception.Message }
+    $timeoutJson = [regex]::Match($timeoutFailure, '\{.*\}')
+    Assert $timeoutJson.Success 'Unclassified structured error still emits failure evidence'
+    $timeoutDoc = ($timeoutJson.Value | ConvertFrom-Json).slot_failure
+    Assert ($timeoutDoc.failure_class -ceq 'unknown' -and $timeoutDoc.failure_source -ceq 'structured_error_unclassified' -and $timeoutDoc.retry_policy.next_action -ceq 'diagnose_before_any_new_dispatch') 'Timeout text without a structured code stays unknown'
+    $global:ModelSlotAcceptanceFailureMode = 'rate_limit'
+    $budgetMessage = ''
+    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -ReselectionCount 1 -Prompt 'Budget must block before launch' | Out-Null }
+    catch { $budgetMessage = $_.Exception.Message }
+    Assert ($budgetMessage -like '*Reselection budget exhausted*' -and $budgetMessage -like '*no upstream request was sent*') 'Exhausted reselection budget blocks dispatch'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Exhausted reselection budget makes no launch call'
+    $budgetJson = [regex]::Match($budgetMessage, '\{.*\}')
+    Assert $budgetJson.Success 'Budget block emits structured evidence'
+    $budget = ($budgetJson.Value | ConvertFrom-Json).reselection_budget_exhausted
+    Assert ($budget.reselection_count -eq 1 -and $budget.max_explicit_reselections -eq 1 -and $budget.upstream_contacted -eq $false) 'Budget evidence records the hard stop'
     $global:ModelSlotAcceptanceExitCode = 0
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -CapabilityMode provider_override -Prompt 'Explicit remaining read-only work' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Parent can explicitly select the next supported model'
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Explicit remaining read-only work' | Out-Null
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and $call -ccontains 'model_reasoning_effort="max"') 'All launches preserve read-only, fixed max and no nested delegation'
     }
@@ -136,8 +173,16 @@ try {
     $cfg = Join-Path $target 'config.toml'
     $original = "model = `"old`"`r`nmodel_provider = `"preserve-provider`"`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`n"
     [IO.File]::WriteAllText($cfg,$original,[Text.UTF8Encoding]::new($true))
+    $projectionCapabilityPath = Join-Path $fixture 'models-all-max.json'
+    $projectionCatalog = @{ models = @(
+        @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
+        @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) },
+        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) }
+    ) }
+    [IO.File]::WriteAllText($projectionCapabilityPath, ($projectionCatalog | ConvertTo-Json -Depth 8))
     $before = (Get-FileHash -LiteralPath $cfg).Hash
-    $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 3) 'Apply records the verified native tuple set'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
     $projectedConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($projectedConfig.Contains('# availability-rules: ') -and $projectedConfig.Contains('429/quota/rate-limit/auth/risk: stop and wait') -and $projectedConfig.Contains('No hot-swap, aliasing, effort substitution')) 'Shared config carries the stop-and-wait availability rules'
@@ -145,12 +190,12 @@ try {
     Assert ($profileText.Contains('One upstream attempt is allowed per bounded task') -and $profileText.Contains('never replay an identical prompt')) 'Profile instructions pin the one-attempt safety policy'
     Assert ($profileText.Contains('confirmed overload may receive one explicit reselection only')) 'Profile instructions reserve one alternate for confirmed overload'
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
-    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
     $quotedRoot = '"model" = "old"' + "`n[agents] # inline comment`nenabled = true`n"
     [IO.File]::WriteAllText($cfg, $quotedRoot)
-    $quotedReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $quotedReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $quotedResult = Get-Content -LiteralPath $cfg -Raw
     Assert (@([regex]::Matches($quotedResult, '(?m)^\s*(?:model|"model"|''model'')\s*=')).Count -eq 1) 'Quoted root model key must be replaced instead of duplicated'
     Assert ($quotedResult.Contains('[agents] # inline comment')) 'Commented agents table must be recognized'
@@ -158,7 +203,7 @@ try {
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $quotedRoot) 'Quoted-root rollback must restore original content'
     $emptyRoot = "[agents]`n[unrelated]`nmodel = `"preserve-other-section`""
     [IO.File]::WriteAllText($cfg, $emptyRoot)
-    $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $emptyRootResult = Get-Content -LiteralPath $cfg -Raw
     Assert ($emptyRootResult.StartsWith('model = "glm-5.3-flash"')) 'Empty root must receive its own model key'
     Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
@@ -167,9 +212,9 @@ try {
     $parentRoot = '"model" = "gpt-5.6-terra" # keep parent' + "`r`n" + 'review_model = "gpt-5.6-terra"' + "`r`n" + 'model_reasoning_effort = "max"' + "`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`ndefault_subagent_model = `"old`"`r`ndefault_subagent_reasoning_effort = `"xhigh`"`r`n"
     [IO.File]::WriteAllText($cfg, $parentRoot, [Text.UTF8Encoding]::new($true))
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
-    $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
+    $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($subagentPlan.scope -ceq 'subagents_only' -and (Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent Plan is read-only'
-    $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
+    $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
     Assert ($subagentConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "max"')) 'Subagent standard defaults'
@@ -180,7 +225,7 @@ try {
         Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and $roleText.Contains('enabled = false')) 'Tuple role pins its exact route and disables nested delegation'
     }
     Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
-    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
     $catalogPath = Join-Path $fixture 'models.json'
@@ -190,6 +235,12 @@ try {
         @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) }
     ) }
     [IO.File]::WriteAllText($catalogPath, ($catalog | ConvertTo-Json -Depth 8))
+    $blockedProjectionBefore = (Get-FileHash -LiteralPath $cfg).Hash
+    $blockedProjectionMessage = ''
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $catalogPath | Out-Null }
+    catch { $blockedProjectionMessage = $_.Exception.Message }
+    Assert ($blockedProjectionMessage -like '*capability preflight blocked projection*' -and $blockedProjectionMessage -like '*no host files were written*') 'Unsupported native projection fails closed'
+    Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $blockedProjectionBefore) 'Blocked native projection leaves host config unchanged'
     $global:CapabilityCalls = [Collections.Generic.List[object]]::new()
     function global:codex {
         $global:CapabilityCalls.Add(@($args))
@@ -202,7 +253,12 @@ try {
         catch { $blocked = $_.Exception.Message -like '*no upstream request was sent*' }
         Assert $blocked 'Unsupported native tuple is blocked before upstream contact'
         Assert ($global:CapabilityCalls.Count -eq 0) 'Capability block makes no launch call'
-        & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort max -CapabilityMode provider_override -Prompt 'explicit one-shot provider override' | Out-Null
+        $missingEvidence = $false
+        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort max -CapabilityMode provider_override -Prompt 'missing provider evidence must block' | Out-Null }
+        catch { $missingEvidence = $_.Exception.Message -like '*provider_evidence_invalid*' -and $_.Exception.Message -like '*no upstream request was sent*' }
+        Assert $missingEvidence 'Provider override without current evidence fails closed'
+        Assert ($global:CapabilityCalls.Count -eq 0) 'Missing provider evidence makes no launch call'
+        & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort max -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'explicit one-shot provider override' | Out-Null
         Assert ($global:CapabilityCalls.Count -eq 1) 'Provider override requires one explicit launch and does not probe/retry'
     }
     finally {
@@ -212,10 +268,10 @@ try {
     $ownedFile = (Join-Path $fixture '.generated/codex/pool/sol_low.toml').Replace('\','/')
     $orphanConfig = $parentRoot + "`n[agents.sol_low]`ndescription = `"retired`"`nconfig_file = '$ownedFile'`n# keep this user comment`n# model-orchestration end`n[agents.user_role]`ndescription = `"unrelated`"`nconfig_file = 'D:/user-role.toml'`n"
     [IO.File]::WriteAllText($cfg, $orphanConfig)
-    $orphanReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
+    $orphanReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $cleaned = Get-Content -LiteralPath $cfg -Raw
     Assert (-not $cleaned.Contains('[agents.sol_low]') -and $cleaned.Contains('[agents.user_role]') -and $cleaned.Contains('# keep this user comment')) 'Retire orphan owned roles while preserving unrelated roles and comments'
-    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Orphan cleanup remains idempotent'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Orphan cleanup remains idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $orphanReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $orphanConfig) 'Orphan cleanup rollback restores exact original config'
     [IO.File]::WriteAllText($cfg, $parentRoot)
@@ -227,7 +283,7 @@ try {
     [IO.File]::WriteAllText($fixturePolicyPath, ($expandedPolicy | ConvertTo-Json -Depth 12))
     $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model deepseek-v4.1-flash -Effort max -Plan | ConvertFrom-Json
     Assert ($customPlan.slot -ceq 'custom_task' -and $customPlan.model -ceq 'deepseek-v4.1-flash') 'Additional configured slot can use another model without launcher edits'
-    $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
+    $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('[agents.custom_task]')) 'Additional configured slot projects to a native role'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
@@ -240,7 +296,7 @@ try {
     Assert $orderRejected 'Reject descending menus before they can label escalation as downgrade'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     [IO.File]::WriteAllText($cfg, $original)
-    $retryReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
+    $retryReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $retryState = Get-Content -LiteralPath $retryReceipt.receipt -Raw | ConvertFrom-Json
     $lockedPath = [string]$retryState.files[0].path
     $lockedStream = [IO.File]::Open($lockedPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -262,5 +318,6 @@ finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
     if (-not $resolvedFixture.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup path.' }
     Remove-Item -LiteralPath $resolvedFixture -Recurse
+    if (Test-Path -LiteralPath $providerEvidencePath) { Remove-Item -LiteralPath $providerEvidencePath -Force }
 }
 "PASS: $count assertions (joint model pool, cross-model slots, read-only boundaries, extensible slots, removed-model rejection, projection idempotence, exact rollback)."
