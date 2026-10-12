@@ -2,17 +2,17 @@
   "schema_version": 4,
   "default_preset": "glm53_flash_only",
   "active_presets": [
-    "gpt_terra_only",
+    "gpt6_luna_only",
     "glm53_flash_only",
     "deepseek_flash_only"
   ],
   "role_prefixes": {
-    "gpt_terra_only": "terra",
+    "gpt6_luna_only": "luna",
     "glm53_flash_only": "glm",
     "deepseek_flash_only": "deepseek"
   },
   "codex_order": [
-    "gpt_terra_only",
+    "gpt6_luna_only",
     "glm53_flash_only",
     "deepseek_flash_only"
   ],
@@ -34,14 +34,14 @@
     "architecture_review"
   ],
   "presets": {
-    "gpt_terra_only": {
+    "gpt6_luna_only": {
       "hosts": [
         "codex"
       ],
       "menu": [
         {
-          "model": "gpt-5.6-terra",
-          "effort": "xhigh"
+          "model": "gpt-6-luna",
+          "effort": "max"
         }
       ],
       "slot_map": {

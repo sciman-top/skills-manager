@@ -5,6 +5,12 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-10-12 日常子代理预设修订
+
+用户修订共同启用池为 GPT-6-luna max（`gpt6_luna_only`，hosts codex）、GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）三元组；GPT-5.6-Terra（`gpt_terra_only`）整体移除，`default_preset=glm53_flash_only` 不变。429 可用性链按声明序更新为 luna→glm→deepseek→停等操作者。luna 精确 slug `gpt-6-luna` 沿用 2026-10-07 池时代的通道投影与 live 记录；`gpt6-luna-only` 新 profile 于当日 strict-load 通过，且该元组经当前中转 provider 通道 `codex exec` 最小请求探针 1 次 exit 0（read-only sandbox，input≈22.5k tok，C11），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
+
+下文 2026-10-11 节描述的启用池（GLM+DeepSeek 两元组）由本节取代，其余原则（ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论）保留。
+
 ## 2026-10-11 日常子代理预设修订
 
 用户修订共同启用池为 GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）；GPT-6-luna 整体移除（含 `gpt56_luna_only` 别名），`default_preset=glm53_flash_only`。当前中转通道模型目录投影的精确 slug 即 `deepseek-v4.1-flash`（旧通道 slug `deepseek-flash` 不再使用）；两元组于 2026-10-11 经当前中转 provider 通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。

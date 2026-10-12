@@ -7,7 +7,7 @@ $slots = @($policy.slots)
 $expected = @{
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     deepseek_flash_only = @{ menu = @(,@('deepseek-v4.1-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    gpt_terra_only      = @{ menu = @(,@('gpt-5.6-terra','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
 Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three single-tier models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
@@ -20,14 +20,14 @@ foreach ($id in $expected.Keys) {
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'glm53_flash_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Terra xhigh plus two max tuples jointly active'
+Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Luna/GLM/DeepSeek max tuples jointly active'
 $reselection = $defaultResolved.reselection
 Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit semantics'
 Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
-Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-5.6-terra' })[0].effort -ceq 'xhigh') 'Terra tuple is pinned to xhigh'
-Assert ('gpt-6-luna' -cnotin @($defaultResolved.enabled_routes.model)) 'Luna removed from active pool'
+Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
+Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,deepseek_flash_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
@@ -38,8 +38,8 @@ foreach ($legacyId in $policy.aliases.Keys) {
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
 }
 $legacyRejected = $false
-try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt56_luna_only,glm53_flash_only | Out-Null } catch { $legacyRejected = $true }
-Assert $legacyRejected 'Removed Luna presets and aliases are rejected, not silently resolved'
+try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset gpt_terra_only,glm53_flash_only | Out-Null } catch { $legacyRejected = $true }
+Assert $legacyRejected 'Removed Terra presets and aliases are rejected, not silently resolved'
 foreach ($id in @($policy.active_presets)) {
     foreach ($slot in $slots) {
         $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
@@ -64,8 +64,9 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='medium'},
     @{Slot='standard_review';Preset='gpt61_sol_only'},
     @{Slot='standard_review';Model='gpt-6-luna'},
+    @{Slot='standard_review';Model='gpt-6-luna';Effort='xhigh'},
     @{Slot='unknown_slot'},
-    @{Slot='standard_review';Preset='gpt6_luna_only'},
+    @{Slot='standard_review';Preset='gpt_terra_only'},
     @{Slot='standard_review';AvailablePreset=@('glm53_flash_only');Model='gpt-6-luna';Effort='max'}
 )) {
     $rejected = $false
@@ -87,6 +88,7 @@ function global:codex {
 }
 try {
     foreach ($failedRoute in @(
+        @{ model = 'gpt-6-luna'; next = @('glm53_flash_only','deepseek_flash_only') },
         @{ model = 'glm-5.3-flash'; next = @('deepseek_flash_only') },
         @{ model = 'deepseek-v4.1-flash'; next = @() }
     )) {
@@ -101,10 +103,10 @@ try {
         Assert (@($failure.reselection.within_preset_lower).Count -eq 0 -and @($failure.reselection.within_preset_higher_overload_only).Count -eq 0) 'Fixed max has no effort fallback'
         Assert ((@($failure.reselection.cross_preset.preset) -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-model fallback never cycles'
     }
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 2) 'Failures never automatically retry'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceExitCode = 0
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Parent can explicitly select the next supported model'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and $call -ccontains 'model_reasoning_effort="max"') 'All launches preserve read-only, fixed max and no nested delegation'
     }
@@ -149,7 +151,7 @@ try {
     Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $emptyRootReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $emptyRoot) 'Empty-root rollback must restore original content'
-    $parentRoot = '"model" = "gpt-6-luna" # keep parent' + "`r`n" + 'review_model = "gpt-6-luna"' + "`r`n" + 'model_reasoning_effort = "max"' + "`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`ndefault_subagent_model = `"old`"`r`ndefault_subagent_reasoning_effort = `"xhigh`"`r`n"
+    $parentRoot = '"model" = "gpt-5.6-terra" # keep parent' + "`r`n" + 'review_model = "gpt-5.6-terra"' + "`r`n" + 'model_reasoning_effort = "max"' + "`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`ndefault_subagent_model = `"old`"`r`ndefault_subagent_reasoning_effort = `"xhigh`"`r`n"
     [IO.File]::WriteAllText($cfg, $parentRoot, [Text.UTF8Encoding]::new($true))
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json
@@ -164,7 +166,7 @@ try {
         $roleText = Get-Content -LiteralPath (Join-Path $fixture ".generated/codex/pool/$($entry.role).toml") -Raw
         Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and $roleText.Contains('enabled = false')) 'Tuple role pins its exact route and disables nested delegation'
     }
-    Assert (-not $subagentConfig.Contains('[agents.luna') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-6-luna"')) 'Managed projection excludes removed Luna roles and defaults'
+    Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
