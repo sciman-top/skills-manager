@@ -319,6 +319,44 @@ try {
     $threw = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
     Assert $threw 'Out-of-range slot index must fail closed'
+    $hostMenuPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+    $hostMenus = if ($hostMenuPolicy.presets['glm53_flash_only']['host_menus']) { $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] } else { @{} }
+    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'high' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' })
+    $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] = $hostMenus
+    [IO.File]::WriteAllText($fixturePolicyPath, ($hostMenuPolicy | ConvertTo-Json -Depth 12))
+    $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
+    $hostMenuEvidence = [ordered]@{
+        schema_version = 1
+        surface = 'codex_provider_channel'
+        observed_at = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('o')
+        expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
+        source = 'test-host-menu-reselection'
+        tuples = @(
+            @{ model = 'glm-5.3-flash'; effort = 'high'; status = 'verified' },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
+            @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; status = 'verified' }
+        )
+    }
+    [IO.File]::WriteAllText($hostMenuEvidencePath, ($hostMenuEvidence | ConvertTo-Json -Depth 8))
+    $global:HostMenuFailureCalls = [Collections.Generic.List[object]]::new()
+    function global:codex {
+        $global:HostMenuFailureCalls.Add(@($args))
+        $global:LASTEXITCODE = 1
+        '{"type":"turn.failed","error":{"code":"rate_limit","message":"Too Many Requests (simulated)"}}'
+    }
+    try {
+        $hostMenuFailure = ''
+        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $hostMenuEvidencePath -Prompt 'Host facet failure document' | Out-Null }
+        catch { $hostMenuFailure = $_.Exception.Message }
+        Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') 'Host-menu failure returns control without replay'
+        $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
+        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'glm-5.3-flash/high') 'Failure reselection menus follow the codex host menu'
+        Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
+    }
+    finally {
+        Remove-Item Function:/global:codex -ErrorAction SilentlyContinue
+        Remove-Variable HostMenuFailureCalls -Scope Global -ErrorAction SilentlyContinue
+    }
 }
 finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)

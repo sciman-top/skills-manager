@@ -208,8 +208,10 @@ try {
         # never retries or substitutes; higher-effort entries are listed only
         # for confirmed service overload, never for 429/quota/rate-limit.
         $failedTuple = @{ preset = $routePreset; slot = $Slot; model = $route.model; effort = $route.effort; host = $targetHost; read_only = $readOnlyTask }
+        # Reselection options must be the resolved host facet's menu (a preset
+        # may override its menu per host under host_menus), not the default menu.
         $menuByPreset = @{}
-        foreach ($id in @($resolved.active_presets)) { $menuByPreset[$id] = @($policy.presets[$id].menu | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } }) }
+        foreach ($entry in @($resolved.reselection.rate_limit_order)) { $menuByPreset[[string]$entry.preset] = @($entry.menu | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } }) }
         $withinLower = @()
         $withinHigher = @()
         $failedIndex = -1
