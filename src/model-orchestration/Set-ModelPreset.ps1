@@ -8,7 +8,8 @@ param(
     [string]$ClaudeRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
     [string]$ReceiptPath = '',
     [switch]$SubagentsOnly,
-    [string]$CapabilityProbePath = ''
+    [string]$CapabilityProbePath = '',
+    [ValidateSet('codex','claude','zcode')][string]$ExecutionHost = 'codex'
 )
 $ErrorActionPreference = 'Stop'
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
@@ -36,37 +37,57 @@ if (-not $dispatchPolicy -or
     $dispatchPolicy.overload_action -cne 'one_explicit_reselection_only') {
     throw 'dispatch_policy must enforce one attempt, one explicit reselection, and no duplicate replay.'
 }
-foreach ($id in $policy.presets.Keys) {
-    $p = $policy.presets[$id]
-    $menu = @($p.menu)
-    if ($menu.Count -eq 0) { throw "Preset $id has an empty menu." }
+function Get-PresetMenu {
+    param($PresetPolicy, [string]$HostName)
+    $hostMenus = $PresetPolicy['host_menus']
+    if ($hostMenus -and $hostMenus.Contains($HostName)) {
+        return @($hostMenus[$HostName])
+    }
+    return @($PresetPolicy['menu'])
+}
+function Assert-PresetMenu {
+    param([string]$PresetId, [string]$HostName, $Menu)
+    $menu = @($Menu)
+    if ($menu.Count -eq 0) { throw "Preset $PresetId has an empty menu for host $HostName." }
     foreach ($entry in $menu) {
-        # xhigh is Codex's tier above max (e.g. gpt-5.6-terra); the Claude facet never projects it.
-        if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $id." }
+        if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $PresetId for host $HostName." }
     }
     # Failure re-selection uses menu indices as effort order.
     $effortOrder = @('low','medium','high','max','xhigh')
     for ($index = 1; $index -lt $menu.Count; $index++) {
         if ($menu[$index].model -cne $menu[0].model -or
             [array]::IndexOf($effortOrder, $menu[$index].effort) -le [array]::IndexOf($effortOrder, $menu[$index - 1].effort)) {
-            throw "Preset $id menu must use one model with strictly increasing effort."
+            throw "Preset $PresetId menu for host $HostName must use one model with strictly increasing effort."
         }
     }
+}
+foreach ($id in $policy.presets.Keys) {
+    $p = $policy.presets[$id]
+    Assert-PresetMenu $id 'default' $p.menu
     $hosts = @($p.hosts)
     if ($hosts.Count -eq 0 -or ($hosts | Where-Object { $_ -cnotin @('codex','claude','zcode') })) { throw "Preset $id has invalid hosts." }
+    if ($p.host_menus) {
+        foreach ($hostName in $p.host_menus.Keys) {
+            if ($hostName -cnotin $hosts) { throw "Preset $id has a host menu without a matching host facet: $hostName" }
+            Assert-PresetMenu $id $hostName $p.host_menus[$hostName]
+        }
+    }
     if (-not $p.slot_map -or @($p.slot_map.Keys).Count -ne $slotNames.Count) { throw "Preset $id slot_map must cover exactly all slots." }
-    foreach ($slot in $slotNames) {
-        if (-not $p.slot_map.Contains($slot)) { throw "Preset $id is missing slot mapping: $slot" }
-        $idx = $p.slot_map[$slot]
-        if ($idx -isnot [int] -and $idx -isnot [long]) { throw "Preset $id slot index must be an integer: $slot" }
-        if ($idx -lt 0 -or $idx -ge $menu.Count) { throw "Preset $id slot index out of range: $slot -> $idx" }
+    foreach ($hostName in $hosts) {
+        $hostMenu = @(Get-PresetMenu $p $hostName)
+        foreach ($slot in $slotNames) {
+            if (-not $p.slot_map.Contains($slot)) { throw "Preset $id is missing slot mapping: $slot" }
+            $idx = $p.slot_map[$slot]
+            if ($idx -isnot [int] -and $idx -isnot [long]) { throw "Preset $id slot index must be an integer: $slot" }
+            if ($idx -lt 0 -or $idx -ge $hostMenu.Count) { throw "Preset $id slot index out of range for host $hostName`: $slot -> $idx" }
+        }
     }
 }
 foreach ($slot in $slotNames) {
     $autoPreset = [string]$policy.auto_routes[$slot]
     if (-not $policy.presets.Contains($autoPreset)) { throw "auto_routes[$slot] points to an unknown preset: $autoPreset" }
-    if ('codex' -notin @($policy.presets[$autoPreset].hosts) -and 'claude' -notin @($policy.presets[$autoPreset].hosts)) {
-        throw "auto_routes[$slot] must point to a launchable preset: $autoPreset"
+    if ($ExecutionHost -notin @($policy.presets[$autoPreset].hosts) -and $ExecutionHost -ne 'zcode') {
+        throw "auto_routes[$slot] must point to a preset available on host $ExecutionHost`: $autoPreset"
     }
 }
 $aliases = if ($policy.aliases) { $policy.aliases } else { @{} }
@@ -88,15 +109,23 @@ $activePresets = @($policy.active_presets | Where-Object { $requestedPool -ccont
 if ($activePresets.Count -ne @($requestedPool | Select-Object -Unique).Count) { throw 'Pool contains a preset outside active_presets.' }
 if (-not $explicitPreset -and $Preset -cnotin $activePresets) { $Preset = $activePresets[0] }
 if ($Preset -cnotin $activePresets) { throw 'Selected default preset is outside the active pool.' }
+$hostActivePresets = @($activePresets | Where-Object { $ExecutionHost -in @($policy.presets[$_].hosts) })
+if ($hostActivePresets.Count -eq 0) { throw "No active preset is available on host $ExecutionHost." }
+if ($Preset -notin $hostActivePresets) {
+    if ($explicitPreset) { throw "Selected preset is not available on host $ExecutionHost`: $Preset" }
+    $Preset = $hostActivePresets[0]
+}
+$activePresets = $hostActivePresets
 if (-not $policy.presets.Contains($Preset)) { throw 'Unknown preset.' }
 # Deterministic availability re-selection contract, derived from the active
 # pool (never hard-coded model names).  Rate-limit/quota/auth failures must not
 # escalate effort (a higher effort spends more tokens against the same limit);
 # only confirmed service overload/unavailability may try a higher effort.
-function Get-ReselectionContract($Policy, [string[]]$ActiveIds) {
+function Get-ReselectionContract {
+    param($Policy, [string[]]$ActiveIds, [string]$HostName)
     $menus = [ordered]@{}
     foreach ($id in $ActiveIds) {
-        $menus[$id] = @($Policy.presets[$id].menu | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } })
+        $menus[$id] = @(Get-PresetMenu $Policy.presets[$id] $HostName | ForEach-Object { @{ model = [string]$_.model; effort = [string]$_.effort } })
     }
     return [ordered]@{
         rule = 'Parent re-selects for the NEXT bounded task; never hot-swap a running task; record failed tuple, failure, selected tuple and remaining scope.'
@@ -105,7 +134,7 @@ function Get-ReselectionContract($Policy, [string[]]$ActiveIds) {
         prohibition = 'No silent model aliasing, no effort substitution, no automatic replay; a 429/quota/rate-limit/auth/risk/billing failure is never an effort escalation signal.'
     }
 }
-$reselectionContract = Get-ReselectionContract $policy $activePresets
+$reselectionContract = Get-ReselectionContract $policy $activePresets $ExecutionHost
 $reselectionSummary = ('429/quota/rate-limit/auth/risk: stop and wait for operator or fresh parent selection; confirmed overload/unavailable: at most one explicit reselection for the NEXT bounded task, only when the alternate tuple is supported. No hot-swap, aliasing, effort substitution, duplicate prompt replay, or automatic retry. Record failed tuple, failure, selected tuple and remaining scope.')
 $modelPreset = $policy.presets[$Preset]
 $routes = [ordered]@{}
@@ -117,11 +146,12 @@ foreach ($slot in $slotNames) {
     if ($routePreset -notin $activePresets) {
         if ($explicitPreset) { throw "Selected preset is not available for slot ${slot}: $routePreset" }
         $fallbackFrom = $routePreset
-        $routePreset = @($activePresets | Where-Object { 'codex' -in @($policy.presets[$_].hosts) -or 'claude' -in @($policy.presets[$_].hosts) })[0]
-        if ([string]::IsNullOrWhiteSpace($routePreset)) { throw "No launchable active preset remains for auto_routes[$slot]." }
+        $routePreset = @($activePresets | Where-Object { $ExecutionHost -in @($policy.presets[$_].hosts) })[0]
+        if ([string]::IsNullOrWhiteSpace($routePreset)) { throw "No active preset remains for auto_routes[$slot] on host $ExecutionHost." }
     }
     $routePolicy = $policy.presets[$routePreset]
-    $entry = $routePolicy.menu[$routePolicy.slot_map[$slot]]
+    $routeMenu = @(Get-PresetMenu $routePolicy $ExecutionHost)
+    $entry = $routeMenu[$routePolicy.slot_map[$slot]]
     $routePresetIds[$slot] = $routePreset
     $routes[$slot] = @{ preset = $routePreset; requested_preset = $requestedRoutePreset; fallback_from = $fallbackFrom; model = [string]$entry.model; effort = [string]$entry.effort }
 }
@@ -130,14 +160,14 @@ $roleNames = @($slotNames)
 foreach ($id in $activePresets) {
     $prefix = $policy.role_prefixes[$id]
     if ($prefix -cnotmatch '^[a-z][a-z0-9_]*$') { throw "Invalid role prefix: $id" }
-    foreach ($entry in $policy.presets[$id].menu) {
+    foreach ($entry in (Get-PresetMenu $policy.presets[$id] $ExecutionHost)) {
         $roleName = "$($prefix)_$($entry.effort)"
         if ($roleName -cin $roleNames) { throw "Duplicate execution role: $roleName" }
         $roleNames += $roleName
         $enabledRoutes += @{preset=$id;role=$roleName;model=$entry.model;effort=$entry.effort;hosts=@($policy.presets[$id].hosts)}
     }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets) } | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 $stateRoot = Join-Path $PSScriptRoot '.state'
 function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }; return $null }
@@ -181,9 +211,11 @@ if ($Action -eq 'Rollback') {
     }
     'Rollback complete.'; return
 }
-# Only the codex/claude facets have a verified write interface; a preset whose
-# hosts are zcode-only stays resolve-only (fail closed, never guessed writes).
-if ('codex' -notin $modelPreset.hosts -and 'claude' -notin $modelPreset.hosts) { throw 'ZCode native model/effort write interface is not verified; resolve is available, native projection is blocked.' }
+# Only the codex/claude facets have a verified write interface; ZCode remains
+# resolve-only even when a preset carries a host-specific ZCode menu.
+if ($ExecutionHost -eq 'zcode') { throw 'ZCode native model/effort write interface is not verified; use -Action Resolve -ExecutionHost zcode.' }
+if ($ExecutionHost -eq 'codex' -and 'codex' -notin @($modelPreset.hosts)) { throw 'Codex native model/effort projection is not available for the selected preset.' }
+if ($ExecutionHost -eq 'claude' -and 'claude' -notin @($modelPreset.hosts)) { throw 'Claude native model/effort projection is not available for the selected preset.' }
 function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
     # Only edit known flat scalar keys; unfamiliar TOML shapes are rejected.
     $lines = [Collections.Generic.List[string]]::new()
@@ -220,7 +252,7 @@ $slotGuidance = @{
     documentation_review = 'Select for read-only documentation and contract consistency checks.'
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
-$parentGuidance = 'Split work by dependencies and choose the named execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. One upstream attempt is allowed per bounded task: never replay an identical prompt, send duplicate parallel requests, or retry after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported. Do not hot-swap a running task, select a gateway, or substitute max with xhigh.'
+$parentGuidance = 'Split work by dependencies and choose the named execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. One upstream attempt is allowed per bounded task: never replay an identical prompt, send duplicate parallel requests, or retry after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
     if ('codex' -notin $entry.hosts) { continue }
@@ -281,7 +313,7 @@ function Test-CodexNativeTuples($Catalog, $Entries, [string]$Source) {
         unsupported = @($unsupported)
     }
 }
-if ('codex' -in @($modelPreset.hosts)) {
+if ($ExecutionHost -eq 'codex' -and 'codex' -in @($modelPreset.hosts)) {
     $codexEntries = @($enabledRoutes | Where-Object { 'codex' -in @($_.hosts) })
     try {
         $catalog = Get-CodexCatalog $CapabilityProbePath
@@ -299,7 +331,7 @@ if ('codex' -in @($modelPreset.hosts)) {
         throw "Codex native capability preflight blocked projection; no host files were written. $doc"
     }
 }
-if ('codex' -in $modelPreset.hosts) {
+if ($ExecutionHost -eq 'codex' -and 'codex' -in $modelPreset.hosts) {
 # Every active preset with a codex facet gets a complete native profile, so the
 # strict slot launcher can freeze any selected pool member; codex_order wins.
 $codexIds = @($policy.codex_order | Where-Object { $activePresets -ccontains $_ -and 'codex' -in $policy.presets[$_].hosts })
@@ -308,9 +340,10 @@ foreach ($id in $codexIds) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
     $roleBlocks = [Collections.Generic.List[string]]::new()
-    $standard = $p.menu[$p.slot_map['routine_maintenance']]
+        $codexMenu = @(Get-PresetMenu $p 'codex')
+        $standard = $codexMenu[$p.slot_map['routine_maintenance']]
     foreach ($slot in $slotNames) {
-        $entry = $p.menu[$p.slot_map[$slot]]
+        $entry = $codexMenu[$p.slot_map[$slot]]
         $rolePath = Join-Path $PSScriptRoot ".generated/codex/$id/$slot.toml"
         $readOnly = $slot -cin @($policy.read_only_slots)
         $guidance = if ($slotGuidance.ContainsKey($slot)) { $slotGuidance[$slot] } else { 'Select for the configured bounded task; the parent supplies scope, proof and stop.' }
@@ -335,7 +368,7 @@ foreach ($slot in $slotNames) {
 }
 $activeBlocks = $activeRoleBlocks -join "`n"
 $configPath = Join-Path $CodexRoot 'config.toml'
-$standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
+$standard = @(Get-PresetMenu $modelPreset 'codex')[$modelPreset.slot_map['routine_maintenance']]
 $config = [IO.File]::ReadAllText($configPath)
 $config = [regex]::Replace($config, '(?ms)^# model-orchestration begin\r?\n.*?^# model-orchestration end\r?\n?', '')
 # Older host edits can leave owned role tables outside the managed markers.
@@ -364,9 +397,9 @@ AddFile $configPath $config
 }
 # Not elseif: a preset may carry both facets (one Apply can project Claude Code
 # and the shared codex surface together).
-if ('claude' -in $modelPreset.hosts) {
+if ($ExecutionHost -eq 'claude' -and 'claude' -in $modelPreset.hosts) {
     $ClaudeRoot = [IO.Path]::GetFullPath($ClaudeRoot)
-    $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
+    $standard = @(Get-PresetMenu $modelPreset 'claude')[$modelPreset.slot_map['routine_maintenance']]
     $settingsPath = Join-Path $ClaudeRoot 'settings.json'
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
     if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
@@ -382,14 +415,14 @@ if ('claude' -in $modelPreset.hosts) {
     AddFile $settingsPath ($settings | ConvertTo-Json -Depth 80)
     foreach ($slot in $slotNames) {
         $name = $slot.Replace('_','-')
-        $entry = $modelPreset.menu[$modelPreset.slot_map[$slot]]
+        $entry = @(Get-PresetMenu $modelPreset 'claude')[$modelPreset.slot_map[$slot]]
         $body = @('---',"name: $name", "description: $slot execution slot using $($entry.model) at $($entry.effort) effort. $($slotGuidance[$slot])", "model: $($entry.model)", "effort: $($entry.effort)", 'disallowedTools: Agent', '---', '', 'Perform only the assigned bounded task. Preserve unrelated work. Return concrete verification evidence and unresolved uncertainty for parent re-selection before a new bounded task. Do not replay completed writes, change models or delegate.')
         if ($slot -cin @($policy.read_only_slots)) { $body += 'Read-only: do not modify files or external state.' }
         AddFile (Join-Path $ClaudeRoot "agents/$name.md") (($body -join "`n")+"`n")
     }
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
-if ($Action -eq 'Plan') { @{preset=$Preset; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; gateway_changes=0} | ConvertTo-Json -Depth 12; return }
+if ($Action -eq 'Plan') { @{preset=$Preset; host=$ExecutionHost; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; gateway_changes=0} | ConvertTo-Json -Depth 12; return }
 if ($changed.Count -eq 0) { 'No changes.'; return }
 $run = Join-Path $stateRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($run) | Out-Null
@@ -425,4 +458,4 @@ catch {
     WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
     throw "Apply failed ($($failure.Exception.Message)); $($receipt.status). Receipt: $receiptFile"
 }
-@{preset=$Preset;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Start-ModelSlot.ps1 freezes one child route and disables nested delegation'} | ConvertTo-Json -Depth 12
+@{preset=$Preset;host=$ExecutionHost;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Start-ModelSlot.ps1 freezes one child route and disables nested delegation'} | ConvertTo-Json -Depth 12
