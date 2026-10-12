@@ -15,6 +15,8 @@
 
 本机当前 Codex 原生目录对 `glm-5.3-flash` 与 `deepseek-v4.1-flash` 仅声明 `low/medium/high/xhigh`，未声明 `max`。因此 schema v5 将 Codex 菜单改为 GLM/xhigh 与 DeepSeek/xhigh；GPT-6-luna 仍为 max。GLM 的 ZCode 分面保留 `thoughtLevel: max`，通过 `-ExecutionHost zcode -Action Resolve` 只读呈现，仍不声称本工具具备 ZCode 写入适配器；DeepSeek 继续无已验证 ZCode 分面。一次任务的宿主与精确 tuple 在启动前冻结；不把 ZCode 的 max 静默映射为 Codex 的 xhigh，也不因档位变化放宽一请求/一显式重选和 429、auth、risk 停止规则。
 
+收口验收（2026-10-13，接管会话执行）：投影由原会话完成（`.state/20261012T175110822Z-eced116c` 等三份 receipt），接管侧复验 Plan 幂等 0、三 profile strict-load 过、`build.ps1 -Check` 零漂移、Test-ModelPreset 212 断言绿、门禁 -DiffBase origin/main focused 6/6 绿；新元组 `glm-5.3-flash`/xhigh 与 `deepseek-v4.1-flash`/xhigh 经当前中转通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox，预检通过，C12，矩阵 93 tuples/verified 56）。luna/max 未变不重测。
+
 ## 2026-10-11 日常子代理预设修订
 
 用户修订共同启用池为 GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）；GPT-6-luna 整体移除（含 `gpt56_luna_only` 别名），`default_preset=glm53_flash_only`。当前中转通道模型目录投影的精确 slug 即 `deepseek-v4.1-flash`（旧通道 slug `deepseek-flash` 不再使用）；两元组于 2026-10-11 经当前中转 provider 通道 `codex exec` 最小请求探针各 1 次 exit 0（read-only sandbox），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
