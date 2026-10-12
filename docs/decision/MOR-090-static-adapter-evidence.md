@@ -1,6 +1,6 @@
-# MOR-090：静态 Adapter 事实证据包（Codex / ZCode / Claude+DeepSeek）
+# MOR-090：静态 Adapter 事实证据包（Codex / ZCode / Claude+DeepSeek / Antigravity）
 
-**状态**：static-fact evidence；采集日期 2026-08-28（C8/D5 为 2026-09-12 增量直抓）。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
+**状态**：static-fact evidence；采集日期 2026-08-28（C8/D5 为 2026-09-12 增量直抓，C12/Z7 为 2026-10-13 复核）。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受
 **证据状态词表**：`verified`（官方文档/本机 help 直证）｜`operator_declared`（操作者一手声明/界面证据，无独立附件复核）｜`inferred`（由命名/公告推断的精确值）｜`unknown`（无一手来源）。**只有 `verified` 条目可进 Adapter allowlist**。
 **消费方**：未来 `<runtime-root>` runtime 的 Adapter contract/fixture（MOR-100/MOR-300/MOR-400）；runtime 未选定前 fixtures 不创建
 **方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取用户配置、凭据或运行状态（`~/.codex`、`~/.zcode` 配置、`CLAUDE_CONFIG_DIR` 等均未触碰）；Z3 引用的 UI 截图为**操作者提供的 artifact**，不属读取用户目录运行状态；未发送任何模型请求；社区资料仅作结构启发/secondary corroboration，不作为能力证据
@@ -37,7 +37,8 @@
 | Z3 | surface 词表：Chat Completion API `reasoning_effort` 为枚举，GLM-5.2+ 支持 `low / high / max`（默认 `max`）——`verified`（官方文档）；ZCode 选择面提供 低/高/最高 三档与之对应——`operator_declared`（操作者界面截图，2026-08-28，artifact：`~/.zcode/cli/image-cache/sess_fe51fa41-48ad-4999-a591-903968c6fe16/image-c09cf0b5b9c0de7bf52238a342b48f13.png`，SHA-256 `6b79b0e22cd9c37fc8569cd5ff9631f77edefd5c5df663cd7585556f8d1514a5`；image-cache 为易失缓存，附件留存前该半边证据按 operator_declared 计） | docs.bigmodel.cn API 参考/核心参数/GLM-5.3 页 + 操作者截图 | 拆分：文档半边 verified；UI 半边 operator_declared |
 | Z4 | `thinking` 不可关闭：GLM-5.3+ 始终启用思考，不再支持 `thinking.type: "disabled"`；默认 max 档 token 消耗显著 | GLM-5.3 模型页，2026-08-28 | verified；light 档语义须在 MOR-030 明示"low effort 仍思考" |
 | Z5 | **投影面未取证**：ZCode 档位选择位于桌面 UI/计划层；控制面能否表达/投影该选择未知，预期 manual handoff | 无一手来源 | unknown → MOR-090 后续采集项；取证前 GLM route 一律 `manual_mapping_required` |
-| Z6 | **2026-10-03 增量：dynamic workflow 工具面 run 级模型指定生效**——`CreateWorkflow` 的 `subagent_model` 接受 `account:bigmodel-individual-coding-plan/GLM-5.3$high`（非会话模型），run `dwfrun-83c7c2c1` completed，确认回执明示 "Subagents run on ...GLM-5.3$high (the main agent stays on the session model)"；但为 **run 级**粒度：facade `agent(name, persona)` 无 per-child 模型参数（dynamic-workflows 技能 §2 明文 "no per-subagent tool profile or model choice"），单发 Agent 工具（general-purpose/Explore）无模型参数走会话模型。模型面（ListModels）：GLM-5.3 / GLM-5.3-Flash ×（individual-coding-plan、start-plan、offpeak-idle-plan）共 5 条，effort=low/high/max；无 GPT 系 | 本机 ZCode 实测（CreateWorkflow run dwfrun-83c7c2c1-da26-4bb0-ac60-c49e0a606de9，证据 `artifacts/work/cold-routing/20261003-005256/zcode-subagent-model-probe.md`） | verified（run 级指定 + per-child 不存在为合同面事实）；ZCode 投影面仍 resolve-only（本工具不写宿主控制面），编排粒度=按 run 分组多 workflow 并行 |
+| Z6 | **历史（2026-10-03）：dynamic workflow 工具面 run 级模型指定生效**——`CreateWorkflow` 的 `subagent_model` 接受 `account:bigmodel-individual-coding-plan/GLM-5.3$high`（非会话模型），run `dwfrun-83c7c2c1` completed，确认回执明示 "Subagents run on ...GLM-5.3$high (the main agent stays on the session model)"；当时为 **run 级**粒度：facade `agent(name, persona)` 无 per-child 模型参数（dynamic-workflows 技能 §2 明文 "no per-subagent tool profile or model choice"），单发 Agent 工具（general-purpose/Explore）无模型参数走会话模型。模型面（ListModels）：GLM-5.3 / GLM-5.3-Flash ×（individual-coding-plan、start-plan、offpeak-idle-plan）共 5 条，effort=low/high/max；无 GPT 系 | 本机 ZCode 实测（CreateWorkflow run dwfrun-83c7c2c1-da26-4bb0-ac60-c49e0a606de9，证据 `artifacts/work/cold-routing/20261003-005256/zcode-subagent-model-probe.md`） | verified（当时的 run 级指定 + per-child 不存在为合同面事实）；该事实已由 Z7 的官方当前能力记录覆盖，不能继续作为当前产品能力结论；ZCode 投影面仍 resolve-only（本工具不写宿主控制面） |
+| Z7 | **2026-10-13 官方资料复核：ZCode Beta 自定义子智能体与 workflow 已支持按子智能体选择模型/思考档位**——子智能体定义可单独配置 `model` 与大小写敏感的 `thoughtLevel`；主 Agent 可按 `description` 自动选择；前台多个子智能体可并行，另支持后台执行；ZCode 3.15.1 更新日志补充 workflow 中每个 sub-agent 的独立模型选择、可调 concurrency 与保存 run 供 replay。该条只证明官方产品能力与文档表述，不证明当前账号、当前会话已加载这些定义，不证明 `skills-manager` 已投影 ZCode definitions/workflow/replay 控件，也不把宿主原生 replay/concurrency 纳入本工具的一次尝试策略 | 官方 [ZCode subagents](https://zcode.z.ai/cn/docs/subagents) 与 [ZCode 3.15.1 更新日志](https://zcode.z.ai/en/changelog)，2026-10-13 复核 | verified（官方产品能力；surface=host_native）；当前本工具仍为 Resolve-only，待独立 host_loaded/live acceptance 取证 |
 
 **未决**：ZCode identity surface（`builtin:bigmodel-coding-plan/<model>` 标识与选择面的关系）；第三方网关对 `reasoning_effort` 的映射差异（如经非官方端点，须按 surface 另立合同）。
 
@@ -66,18 +67,27 @@
 
 **未决**：Claude Code `effortLevel` 是否向自定义 base URL 透传为 `output_config.effort`（A2×D3 的端到端链路，官方无明文）——维持"集成时 fixture 验证"，不得按"应当透传"写合同；组织策略 clamp（无法静态取证，归入 observed 证据纪律）；Claude 桌面应用（非 CLI）的模型选择/投影面（A6）。
 
-## 5. 采纳决定
+## 5. antigravity（Google Antigravity 宿主面）
 
-### 5.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| G1 | `invoke_subagent` 支持并发调用与上下文隔离；自定义 agent 可放在工作区 `.agents/agents/` 或用户 `~/.gemini/config/agents/`；agent 的 `model` 字段是 `inherit`、`flash`、`pro` tier，不是精确模型 slug 或 effort 枚举 | [Antigravity subagents](https://antigravity.google/docs/subagents?tab=cli)，2026-10-13 复核 | verified（官方产品能力；surface=host_native） |
+| G2 | `/boost` 与 `/teamwork-preview` 提供更高层的宿主编排入口；其并发、重放、失败重试和模型选择语义不等同于 `Start-ModelSlot.ps1` 的受控单次入口，须另取当前宿主会话证据 | 同上，2026-10-13 复核 | verified（入口存在）；host_loaded/live acceptance 未取证 |
+
+**Antigravity 边界**：当前没有经过验证的 exact model/effort adapter，故不进入 Codex tuple allowlist、不映射到 `gpt-6-luna/max`、`glm-5.3-flash/xhigh` 或 `deepseek-v4.1-flash/xhigh`，也不声称本工具能治理 Antigravity 原生的 retry/replay/concurrency。
+
+## 6. 采纳决定
+
+### 6.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
 
 **三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。**协议面按 wire contract 分列**（`output_config.effort` / `reasoning_effort` / `reasoning.effort` 是三个不同字段，不合并）。
 
 canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 93 tuples，verified 56（openai_responses 23 + openai_chat_completions 18 + deepseek_anthropic_messages 3 + deepseek_chat_completions 3 + codex_provider_channel 9（C9 五行 2026-09-17 增量 + C10 一行 2026-10-11 增量：deepseek-v4.1-flash/max 经迁移后远端中转通道实测 + C11 一行 2026-10-12 增量：gpt-6-luna/max 池改版后同通道复测 + C12 两行 2026-10-13 增量：glm/deepseek xhigh schema v5 池改版后各 1 次最小探针）；2026-09-12 增量：Astra 5 行入 openai_responses allowlist、deepseek-v4-flash 6 行因旧名退役降 candidate）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
 
-- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 54 行；由 validate 脚本计算，不人工写死；包含 2026-10-11 的 C10 与 2026-10-12 的 C11 增量）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 56 行；由 validate 脚本计算，不人工写死；包含 2026-10-11 的 C10、2026-10-12 的 C11 与 2026-10-13 的 C12 增量）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
 - 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial + 3 行 gpt-6-astra candidate（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek-v4-flash 6 行 candidate（2026-09-12 旧名退役，D5）、deepseek-flash 3 行 candidate（slug/透传已证，effort 取值词表未逐项直证）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
 
-## 6. 来源 URL 清单（2026-08-28；末三条为 2026-09-12）
+## 7. 来源 URL 清单（2026-08-28；末三条为 2026-09-12；Z7/G1-G2 为 2026-10-13）
 
 - Codex Configuration Reference：https://learn.chatgpt.com/docs/config-file/config-reference
 - Codex Security CLI quickstart：https://learn.chatgpt.com/docs/security/cli
@@ -102,5 +112,8 @@ canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**�
 - gpt-6-astra 官方模型页（C8，2026-09-12 直连）：https://developers.openai.com/api/docs/models/gpt-6-astra
 - DeepSeek Anthropic API（D5，2026-09-12 直连）：https://api-docs.deepseek.com/guides/anthropic_api/
 - DeepSeek Models & Pricing（D5，2026-09-12 直连）：https://api-docs.deepseek.com/quick_start/pricing
+- ZCode subagents（Z7，2026-10-13 复核）：https://zcode.z.ai/cn/docs/subagents
+- ZCode 更新日志（Z7，2026-10-13 复核）：https://zcode.z.ai/en/changelog
+- Antigravity subagents（G1-G2，2026-10-13 复核）：https://antigravity.google/docs/subagents?tab=cli
 - 拒绝：GLM-3.5-Flash 旧名；把 provider 方言可表达性当作宿主生效证明；以社区配置补齐任何 token。
 - fixtures（`tests/fixtures/<host>-static/`）待 `<runtime-root>` 选定后随 MOR-100/300/400 创建；本证据包为其唯一输入底稿。
