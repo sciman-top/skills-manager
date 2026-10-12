@@ -7,8 +7,9 @@ $slots = @($policy.slots)
 $expected = @{
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     deepseek_flash_only = @{ menu = @(,@('deepseek-v4.1-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    gpt_terra_only      = @{ menu = @(,@('gpt-5.6-terra','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
-Assert ($policy.presets.Count -eq 2 -and $slots.Count -gt 3) 'Two max-only models and multiple slots'
+Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three single-tier models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
 foreach ($id in $expected.Keys) {
     $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $id | ConvertFrom-Json -AsHashtable
@@ -19,12 +20,13 @@ foreach ($id in $expected.Keys) {
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'glm53_flash_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 2 -and $defaultResolved.enabled_routes.Count -eq 2) 'Both models and two max tuples jointly active'
+Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Terra xhigh plus two max tuples jointly active'
 $reselection = $defaultResolved.reselection
-Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 2) 'Reselection contract derives from the active pool'
+Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit semantics'
-Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 2) 'Pool includes distinct model families'
+Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
+Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-5.6-terra' })[0].effort -ceq 'xhigh') 'Terra tuple is pinned to xhigh'
 Assert ('gpt-6-luna' -cnotin @($defaultResolved.enabled_routes.model)) 'Luna removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,deepseek_flash_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
@@ -53,6 +55,8 @@ foreach ($entry in $defaultResolved.enabled_routes) {
     }
 }
 foreach ($invalidSelection in @(
+    @{Slot='standard_review';Model='gpt-5.6-terra';Effort='max'},
+    @{Slot='standard_review';Model='gpt-5.6-terra';Effort='high'},
     @{Slot='standard_review';Model='deepseek-flash';Effort='high'},
     @{Slot='standard_review';Model='glm-5.3-flash';Effort='high'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='max'},

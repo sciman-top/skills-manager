@@ -2,14 +2,17 @@
   "schema_version": 4,
   "default_preset": "glm53_flash_only",
   "active_presets": [
+    "gpt_terra_only",
     "glm53_flash_only",
     "deepseek_flash_only"
   ],
   "role_prefixes": {
+    "gpt_terra_only": "terra",
     "glm53_flash_only": "glm",
     "deepseek_flash_only": "deepseek"
   },
   "codex_order": [
+    "gpt_terra_only",
     "glm53_flash_only",
     "deepseek_flash_only"
   ],
@@ -31,6 +34,27 @@
     "architecture_review"
   ],
   "presets": {
+    "gpt_terra_only": {
+      "hosts": [
+        "codex"
+      ],
+      "menu": [
+        {
+          "model": "gpt-5.6-terra",
+          "effort": "xhigh"
+        }
+      ],
+      "slot_map": {
+        "quick_triage": 0,
+        "routine_maintenance": 0,
+        "standard_review": 0,
+        "bounded_implementation": 0,
+        "deep_investigation_or_implementation": 0,
+        "test_execution": 0,
+        "documentation_review": 0,
+        "architecture_review": 0
+      }
+    },
     "glm53_flash_only": {
       "hosts": [
         "zcode",

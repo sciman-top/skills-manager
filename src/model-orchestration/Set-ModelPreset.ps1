@@ -23,10 +23,11 @@ foreach ($id in $policy.presets.Keys) {
     $menu = @($p.menu)
     if ($menu.Count -eq 0) { throw "Preset $id has an empty menu." }
     foreach ($entry in $menu) {
-        if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max')) { throw "Invalid tuple in preset $id." }
+        # xhigh is Codex's tier above max (e.g. gpt-5.6-terra); the Claude facet never projects it.
+        if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $id." }
     }
     # Failure re-selection uses menu indices as effort order.
-    $effortOrder = @('low','medium','high','max')
+    $effortOrder = @('low','medium','high','max','xhigh')
     for ($index = 1; $index -lt $menu.Count; $index++) {
         if ($menu[$index].model -cne $menu[0].model -or
             [array]::IndexOf($effortOrder, $menu[$index].effort) -le [array]::IndexOf($effortOrder, $menu[$index - 1].effort)) {
