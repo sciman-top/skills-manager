@@ -17,6 +17,25 @@
     "deepseek_flash_only"
   ],
   "aliases": {},
+  "auto_routes": {
+    "quick_triage": "glm53_flash_only",
+    "routine_maintenance": "glm53_flash_only",
+    "standard_review": "deepseek_flash_only",
+    "bounded_implementation": "glm53_flash_only",
+    "deep_investigation_or_implementation": "gpt6_luna_only",
+    "test_execution": "glm53_flash_only",
+    "documentation_review": "deepseek_flash_only",
+    "architecture_review": "gpt6_luna_only"
+  },
+  "dispatch_policy": {
+    "max_upstream_attempts_per_bounded_task": 1,
+    "max_explicit_reselections": 1,
+    "duplicate_prompt_replay": false,
+    "parallel_duplicate_requests": false,
+    "rate_limit_action": "stop_and_wait_for_fresh_parent_selection",
+    "auth_or_risk_action": "stop_and_operator_review",
+    "overload_action": "one_explicit_reselection_only"
+  },
   "slots": [
     "quick_triage",
     "routine_maintenance",

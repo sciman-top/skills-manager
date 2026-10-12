@@ -21,10 +21,22 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'glm53_flash_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Luna/GLM/DeepSeek max tuples jointly active'
+$autoRoutes = @{
+    quick_triage = 'glm53_flash_only'
+    routine_maintenance = 'glm53_flash_only'
+    standard_review = 'deepseek_flash_only'
+    bounded_implementation = 'glm53_flash_only'
+    deep_investigation_or_implementation = 'gpt6_luna_only'
+    test_execution = 'glm53_flash_only'
+    documentation_review = 'deepseek_flash_only'
+    architecture_review = 'gpt6_luna_only'
+}
+foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
 $reselection = $defaultResolved.reselection
 Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'max') 'Single-effort preset has no lower-effort entry in the reselection contract'
-Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit semantics'
+Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('risk') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit and risk semantics'
+Assert ($defaultResolved.dispatch_policy.max_upstream_attempts_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'One-attempt upstream safety policy'
 Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
 Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
 Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
@@ -32,7 +44,7 @@ $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -A
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
 $cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,deepseek_flash_only' -Plan | ConvertFrom-Json
-Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'max' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding'
+Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'deepseek_flash_only' -and $cliSelection.effort -eq 'max' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding and route profile'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
@@ -88,12 +100,12 @@ function global:codex {
 }
 try {
     foreach ($failedRoute in @(
-        @{ model = 'gpt-6-luna'; next = @('glm53_flash_only','deepseek_flash_only') },
+        @{ model = 'gpt-6-luna'; next = @('glm53_flash_only') },
         @{ model = 'glm-5.3-flash'; next = @('deepseek_flash_only') },
         @{ model = 'deepseek-v4.1-flash'; next = @() }
     )) {
         $failureMessage = ''
-        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort max -ReadOnly -Prompt 'Simulated unavailable request' | Out-Null }
+        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort max -ReadOnly -CapabilityMode provider_override -Prompt 'Simulated unavailable request' | Out-Null }
         catch { $failureMessage = $_.Exception.Message }
         Assert ($failureMessage -like '*no replay or preset substitution performed*') 'Failure returns control without replay'
         $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
@@ -105,7 +117,7 @@ try {
     }
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceExitCode = 0
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -Prompt 'Explicit remaining read-only work' | Out-Null
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort max -ReadOnly -CapabilityMode provider_override -Prompt 'Explicit remaining read-only work' | Out-Null
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and $call -ccontains 'model_reasoning_effort="max"') 'All launches preserve read-only, fixed max and no nested delegation'
@@ -127,10 +139,11 @@ try {
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
-    Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('# availability-rules: ')) 'Shared config carries the availability re-selection rules'
+    $projectedConfig = Get-Content -LiteralPath $cfg -Raw
+    Assert ($projectedConfig.Contains('# availability-rules: ') -and $projectedConfig.Contains('429/quota/rate-limit/auth/risk: stop and wait') -and $projectedConfig.Contains('No hot-swap, aliasing, effort substitution')) 'Shared config carries the stop-and-wait availability rules'
     $profileText = Get-Content -LiteralPath (Join-Path $target 'glm53-flash-only.config.toml') -Raw
-    Assert ($profileText.Contains('429/quota/rate-limit/auth/billing: nearest lower effort within the same preset')) 'Profile instructions pin the 429 downgrade chain'
-    Assert ($profileText.Contains('confirmed service overload/unavailable: nearest lower effort, then nearest higher effort')) 'Profile instructions reserve higher effort for confirmed overload'
+    Assert ($profileText.Contains('One upstream attempt is allowed per bounded task') -and $profileText.Contains('never replay an identical prompt')) 'Profile instructions pin the one-attempt safety policy'
+    Assert ($profileText.Contains('confirmed overload may receive one explicit reselection only')) 'Profile instructions reserve one alternate for confirmed overload'
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
@@ -170,6 +183,32 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
+    $catalogPath = Join-Path $fixture 'models.json'
+    $catalog = @{ models = @(
+        @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
+        @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
+        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) }
+    ) }
+    [IO.File]::WriteAllText($catalogPath, ($catalog | ConvertTo-Json -Depth 8))
+    $global:CapabilityCalls = [Collections.Generic.List[object]]::new()
+    function global:codex {
+        $global:CapabilityCalls.Add(@($args))
+        $global:LASTEXITCODE = 0
+        '{"type":"turn.completed"}'
+    }
+    try {
+        $blocked = $false
+        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort max -CapabilityProbePath $catalogPath -Prompt 'blocked native tuple' | Out-Null }
+        catch { $blocked = $_.Exception.Message -like '*no upstream request was sent*' }
+        Assert $blocked 'Unsupported native tuple is blocked before upstream contact'
+        Assert ($global:CapabilityCalls.Count -eq 0) 'Capability block makes no launch call'
+        & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort max -CapabilityMode provider_override -Prompt 'explicit one-shot provider override' | Out-Null
+        Assert ($global:CapabilityCalls.Count -eq 1) 'Provider override requires one explicit launch and does not probe/retry'
+    }
+    finally {
+        Remove-Item Function:/global:codex -ErrorAction SilentlyContinue
+        Remove-Variable CapabilityCalls -Scope Global -ErrorAction SilentlyContinue
+    }
     $ownedFile = (Join-Path $fixture '.generated/codex/pool/sol_low.toml').Replace('\','/')
     $orphanConfig = $parentRoot + "`n[agents.sol_low]`ndescription = `"retired`"`nconfig_file = '$ownedFile'`n# keep this user comment`n# model-orchestration end`n[agents.user_role]`ndescription = `"unrelated`"`nconfig_file = 'D:/user-role.toml'`n"
     [IO.File]::WriteAllText($cfg, $orphanConfig)
@@ -183,6 +222,7 @@ try {
     $fixturePolicyPath = Join-Path $fixture 'presets.json'
     $expandedPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
     $expandedPolicy.slots += 'custom_task'
+    $expandedPolicy.auto_routes.custom_task = 'glm53_flash_only'
     foreach ($presetId in $expandedPolicy.presets.Keys) { $expandedPolicy.presets[$presetId].slot_map.custom_task = 0 }
     [IO.File]::WriteAllText($fixturePolicyPath, ($expandedPolicy | ConvertTo-Json -Depth 12))
     $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model deepseek-v4.1-flash -Effort max -Plan | ConvertFrom-Json

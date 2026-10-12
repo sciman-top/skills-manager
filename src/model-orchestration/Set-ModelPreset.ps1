@@ -18,6 +18,23 @@ if ($slotNames.Count -eq 0 -or @($slotNames | Select-Object -Unique).Count -ne $
 foreach ($slot in $slotNames) { if ($slot -cnotmatch '^[a-z][a-z0-9_]*$') { throw "Invalid slot name: $slot" } }
 if ('routine_maintenance' -cnotin $slotNames) { throw 'The default routine_maintenance slot is required.' }
 foreach ($slot in @($policy.read_only_slots)) { if ($slot -cnotin $slotNames) { throw "Unknown read-only slot: $slot" } }
+$autoRouteNames = @($policy.auto_routes.Keys)
+$autoRouteKey = (@($autoRouteNames | Sort-Object) -join ',')
+$slotKey = (@($slotNames | Sort-Object) -join ',')
+if ($autoRouteNames.Count -ne $slotNames.Count -or $autoRouteKey -cne $slotKey) {
+    throw 'auto_routes must cover exactly all slots.'
+}
+$dispatchPolicy = $policy.dispatch_policy
+if (-not $dispatchPolicy -or
+    $dispatchPolicy.max_upstream_attempts_per_bounded_task -ne 1 -or
+    $dispatchPolicy.max_explicit_reselections -ne 1 -or
+    $dispatchPolicy.duplicate_prompt_replay -ne $false -or
+    $dispatchPolicy.parallel_duplicate_requests -ne $false -or
+    $dispatchPolicy.rate_limit_action -cne 'stop_and_wait_for_fresh_parent_selection' -or
+    $dispatchPolicy.auth_or_risk_action -cne 'stop_and_operator_review' -or
+    $dispatchPolicy.overload_action -cne 'one_explicit_reselection_only') {
+    throw 'dispatch_policy must enforce one attempt, one explicit reselection, and no duplicate replay.'
+}
 foreach ($id in $policy.presets.Keys) {
     $p = $policy.presets[$id]
     $menu = @($p.menu)
@@ -42,6 +59,13 @@ foreach ($id in $policy.presets.Keys) {
         $idx = $p.slot_map[$slot]
         if ($idx -isnot [int] -and $idx -isnot [long]) { throw "Preset $id slot index must be an integer: $slot" }
         if ($idx -lt 0 -or $idx -ge $menu.Count) { throw "Preset $id slot index out of range: $slot -> $idx" }
+    }
+}
+foreach ($slot in $slotNames) {
+    $autoPreset = [string]$policy.auto_routes[$slot]
+    if (-not $policy.presets.Contains($autoPreset)) { throw "auto_routes[$slot] points to an unknown preset: $autoPreset" }
+    if ('codex' -notin @($policy.presets[$autoPreset].hosts) -and 'claude' -notin @($policy.presets[$autoPreset].hosts)) {
+        throw "auto_routes[$slot] must point to a launchable preset: $autoPreset"
     }
 }
 $aliases = if ($policy.aliases) { $policy.aliases } else { @{} }
@@ -77,16 +101,28 @@ function Get-ReselectionContract($Policy, [string[]]$ActiveIds) {
         rule = 'Parent re-selects for the NEXT bounded task; never hot-swap a running task; record failed tuple, failure, selected tuple and remaining scope.'
         rate_limit_order = @($ActiveIds | ForEach-Object { @{ preset = $_; menu = $menus[$_] } })
         overload_higher_effort_allowed_presets = @($ActiveIds)
-        prohibition = 'No silent model aliasing, no effort substitution, no automatic replay; a 429/quota/rate-limit/auth/billing failure is never an effort escalation signal.'
+        prohibition = 'No silent model aliasing, no effort substitution, no automatic replay; a 429/quota/rate-limit/auth/risk/billing failure is never an effort escalation signal.'
     }
 }
 $reselectionContract = Get-ReselectionContract $policy $activePresets
-$reselectionSummary = ('429/quota/auth: nearest lower effort within preset, then presets in order ' + (@($activePresets -join ' -> ')) + '; overload/unavailable: also nearest higher effort. Record failed tuple, failure, selected tuple, remaining scope; never hot-swap, alias, or escalate on rate limits.')
+$reselectionSummary = ('429/quota/rate-limit/auth/risk: stop and wait for operator or fresh parent selection; confirmed overload/unavailable: at most one explicit reselection for the NEXT bounded task, only when the alternate tuple is supported. No hot-swap, aliasing, effort substitution, duplicate prompt replay, or automatic retry. Record failed tuple, failure, selected tuple and remaining scope.')
 $modelPreset = $policy.presets[$Preset]
 $routes = [ordered]@{}
+$routePresetIds = [ordered]@{}
 foreach ($slot in $slotNames) {
-    $entry = $modelPreset.menu[$modelPreset.slot_map[$slot]]
-    $routes[$slot] = @{ model = $entry.model; effort = $entry.effort }
+    $requestedRoutePreset = if ($explicitPreset) { $Preset } else { [string]$policy.auto_routes[$slot] }
+    $routePreset = $requestedRoutePreset
+    $fallbackFrom = $null
+    if ($routePreset -notin $activePresets) {
+        if ($explicitPreset) { throw "Selected preset is not available for slot ${slot}: $routePreset" }
+        $fallbackFrom = $routePreset
+        $routePreset = @($activePresets | Where-Object { 'codex' -in @($policy.presets[$_].hosts) -or 'claude' -in @($policy.presets[$_].hosts) })[0]
+        if ([string]::IsNullOrWhiteSpace($routePreset)) { throw "No launchable active preset remains for auto_routes[$slot]." }
+    }
+    $routePolicy = $policy.presets[$routePreset]
+    $entry = $routePolicy.menu[$routePolicy.slot_map[$slot]]
+    $routePresetIds[$slot] = $routePreset
+    $routes[$slot] = @{ preset = $routePreset; requested_preset = $requestedRoutePreset; fallback_from = $fallbackFrom; model = [string]$entry.model; effort = [string]$entry.effort }
 }
 $enabledRoutes = @()
 $roleNames = @($slotNames)
@@ -100,7 +136,7 @@ foreach ($id in $activePresets) {
         $enabledRoutes += @{preset=$id;role=$roleName;model=$entry.model;effort=$entry.effort;hosts=@($policy.presets[$id].hosts)}
     }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; reselection = (Get-ReselectionContract $policy $activePresets) } | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Resolve') { @{ preset = $Preset; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 $stateRoot = Join-Path $PSScriptRoot '.state'
 function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }; return $null }
@@ -183,6 +219,7 @@ $slotGuidance = @{
     documentation_review = 'Select for read-only documentation and contract consistency checks.'
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
+$parentGuidance = 'Split work by dependencies and choose the named execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. One upstream attempt is allowed per bounded task: never replay an identical prompt, send duplicate parallel requests, or retry after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported. Do not hot-swap a running task, select a gateway, or substitute max with xhigh.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
     if ('codex' -notin $entry.hosts) { continue }
@@ -215,11 +252,19 @@ foreach ($id in $codexIds) {
         AddFile $rolePath $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
-    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"Split work by dependencies and choose a named execution slot by task shape before dispatch. Select each child's model and effort independently from the supported tuples in the active model pool; different tasks may use different models simultaneously. Semantic slots are extensible and do not limit child count. Delegate only when explicitly authorized. Parallelize independently verifiable tasks with disjoint write sets and positive benefit within native concurrency limits. Preserve specialist execution contracts. Re-select for new bounded work without replaying completed writes. Missing input, auth errors and rate limits are not effort escalation triggers. Availability failures: stop the task with its evidence, then re-select for the next bounded task in fixed order - 429/quota/rate-limit/auth/billing: nearest lower effort within the same preset, then the next active preset; confirmed service overload/unavailable: nearest lower effort, then nearest higher effort, then cross-preset. Record the failed tuple, the failure, the selected tuple and remaining scope before re-dispatch. Spawn with bounded history. No gateway selection or task replay.`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
+    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
     $profileText = $header + "`n`n" + ($roleBlocks -join "`n") + "`n" + ($tupleBlocks -join "`n")
     AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
     if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
 }
+$activeRoleBlocks = [Collections.Generic.List[string]]::new()
+foreach ($slot in $slotNames) {
+    $routePreset = $routePresetIds[$slot]
+    $routePath = Join-Path $PSScriptRoot ".generated/codex/$routePreset/$slot.toml"
+    $route = $routes[$slot]
+    $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Auto route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
+}
+$activeBlocks = $activeRoleBlocks -join "`n"
 $configPath = Join-Path $CodexRoot 'config.toml'
 $standard = $modelPreset.menu[$modelPreset.slot_map['routine_maintenance']]
 $config = [IO.File]::ReadAllText($configPath)
