@@ -73,7 +73,7 @@
 
 canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 91 tuples，verified 54（openai_responses 23 + openai_chat_completions 18 + deepseek_anthropic_messages 3 + deepseek_chat_completions 3 + codex_provider_channel 7（C9 五行 2026-09-17 增量 + C10 一行 2026-10-11 增量：deepseek-v4.1-flash/max 经迁移后远端中转通道实测 + C11 一行 2026-10-12 增量：gpt-6-luna/max 池改版后同通道复测）；2026-09-12 增量：Astra 5 行入 openai_responses allowlist、deepseek-v4-flash 6 行因旧名退役降 candidate）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
 
-- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 52 行；由 validate 脚本计算，不人工写死）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 54 行；由 validate 脚本计算，不人工写死；包含 2026-10-11 的 C10 与 2026-10-12 的 C11 增量）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
 - 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial + 3 行 gpt-6-astra candidate（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek-v4-flash 6 行 candidate（2026-09-12 旧名退役，D5）、deepseek-flash 3 行 candidate（slug/透传已证，effort 取值词表未逐项直证）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
 
 ## 6. 来源 URL 清单（2026-08-28；末三条为 2026-09-12）
