@@ -50,7 +50,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
-            "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
+            "构建生效" { 构建生效 -SkillProfile $SkillProfile -OnlySkill $OnlySkill -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { Write-CommandResult (Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
