@@ -181,6 +181,47 @@ if (-not (Test-Path $cfgSrc)) {
     }
 }
 
+# ---------- 2.5 DLL 加载提示标记（logs\load-notify-success.marker）----------
+# Antigravity 更新会连 logs\ 目录一起清空，DLL 的「加载成功」提示标记随之丢失，
+# 下次启动会再弹一次「Antigravity-Proxy 加载状态」窗口（同一 DLL 本只需提示一次）。
+# 仅在 version.dll 与主副本逐字节一致时处理标记，避免误抑制新 DLL 的真实首启提示；
+# staging 副本缺失时从现场反哺入库，主副本换 DLL 后按现场刷新。
+$markerName = 'load-notify-success.marker'
+$markerSrc  = Join-Path $LOG_DIR $markerName
+$logsDir    = Join-Path $agDir 'logs'
+$markerDst  = Join-Path $logsDir $markerName
+$dllPatched = (Test-Path $dllSrc) -and (Test-Path $dllDst) -and ((Get-Sha256Short $dllSrc) -eq (Get-Sha256Short $dllDst))
+if ($dllPatched) {
+    if (-not (Test-Path $markerDst)) {
+        if (Test-Path $markerSrc) {
+            try {
+                if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Force -Path $logsDir | Out-Null }
+                Copy-Item $markerSrc $markerDst -Force -ErrorAction Stop
+                Write-Log '加载提示标记 已恢复: load-notify-success.marker（防更新清 logs 后再弹窗）'
+            } catch {
+                Write-Log "加载提示标记 失败  : $($_.Exception.Message)"
+                $pending = 1
+            }
+        } else {
+            Write-Log '加载提示标记 暂缺: staging 无副本且现场已失，下次启动会弹一次窗，之后本脚本自动入库'
+        }
+    } elseif (-not (Test-Path $markerSrc)) {
+        try {
+            Copy-Item $markerDst $markerSrc -Force -ErrorAction Stop
+            Write-Log '加载提示标记 已入库: staging 副本缺失，已从现场反哺'
+        } catch {
+            Write-Log "加载提示标记 入库失败: $($_.Exception.Message)"
+        }
+    } elseif ((Get-FileHash $markerSrc -Algorithm SHA256).Hash -ne (Get-FileHash $markerDst -Algorithm SHA256).Hash) {
+        try {
+            Copy-Item $markerDst $markerSrc -Force -ErrorAction Stop
+            Write-Log '加载提示标记 已刷新: staging 与现场不一致，已按现场更新（兼容主副本换 DLL）'
+        } catch {
+            Write-Log "加载提示标记 刷新失败: $($_.Exception.Message)"
+        }
+    }
+}
+
 # ---------- 3. 汉化补丁 ----------
 $asar = Join-Path $resDir 'app.asar'
 if (-not (Test-Path $asar)) {

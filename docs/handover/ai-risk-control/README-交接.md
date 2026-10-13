@@ -2,7 +2,7 @@
 
 在另一台 Windows 电脑上复现同一套加固方案。
 
-> 版本：2026-10-01（运行身份与出口证据修订）　·　受控验收 23/0；实战验收 11/0（看门狗恢复 115.2 秒）。
+> 版本：2026-10-13（ensure-patches 增补 DLL 加载提示标记自愈；原 2026-10-01 运行身份与出口证据修订）　·　受控验收 23/0；实战验收 11/0（看门狗恢复 115.2 秒）。
 > 技能源唯一落位：`D:\CODE\skills-manager\overrides\custom\`；本目录只保留交接说明、运行脚本和分诊提示词，按 SHA256 校验同步。
 
 ## 包里有什么
@@ -23,7 +23,7 @@
    ├─ ag-split-live-acceptance.ps1    **受控实战验收**：真故障注入，11 个断言，可自动收尾
    ├─ ag-health-check.ps1             只读自检脚本（23 项，有 FAIL 返回 1）
    ├─ ag-egress-probe.ps1             按需测量 Google 节点出口（临时实例，自动清理）
-   ├─ ensure-patches.ps1              **核心**：代理 + 汉化 + 分流器 一体化幂等自愈
+   ├─ ensure-patches.ps1              **核心**：代理 + 汉化 + 分流器 一体化幂等自愈（含 DLL 加载提示标记）
    ├─ register-task.ps1               注册/更新「每 30 分钟 + 登录」的自愈计划任务
    └─ workbuddy\
       ├─ workbuddy-risk-selfcheck.ps1     WorkBuddy 只读风控自检（PowerShell 版）
