@@ -326,6 +326,7 @@ function Build-CodexSkillsProjectionToml([string]$existingToml, $disabledEntries
     $output = New-Object System.Collections.Generic.List[string]
     $output.AddRange([string[]]$kept.ToArray())
     $entries = @($disabledEntries | Sort-Object path -Unique)
+    if (-not $foundBegin -and $entries.Count -eq 0) { return $existingToml }
     if ($entries.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }
         $output.Add($begin) | Out-Null
@@ -338,7 +339,8 @@ function Build-CodexSkillsProjectionToml([string]$existingToml, $disabledEntries
         if ($output.Count -gt 0 -and [string]::IsNullOrWhiteSpace($output[$output.Count - 1])) { $output.RemoveAt($output.Count - 1) }
         $output.Add($end) | Out-Null
     }
-    return (($output.ToArray() -join "`r`n").TrimEnd() + "`r`n")
+    $newLine = if ($existingToml.Contains("`r`n")) { "`r`n" } elseif ($existingToml.Contains("`n")) { "`n" } else { "`r`n" }
+    return (($output.ToArray() -join $newLine).TrimEnd() + $newLine)
 }
 
 function Backup-CodexSkillProjectionConfig([string]$configPath) {

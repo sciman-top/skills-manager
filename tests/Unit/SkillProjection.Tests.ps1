@@ -98,6 +98,16 @@ unified_exec = true
         ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should -Be 1
     }
 
+    It 'preserves TOML bytes on a no-op and retains the existing newline style when updating' {
+        $existing = "model = `"gpt-5.6-sol`"`n[features]`nunified_exec = true`n"
+
+        (Build-CodexSkillsProjectionToml $existing @()) | Should -BeExactly $existing
+
+        $updated = Build-CodexSkillsProjectionToml $existing @([pscustomobject]@{ path = 'C:\new\SKILL.md' })
+        $updated | Should -Not -Match "`r"
+        $updated | Should -Match 'enabled = false'
+    }
+
     It 'does not write config or manifest during dry-run' {
         $oldDryRun = $DryRun
         try {
