@@ -19,13 +19,12 @@ description: 只读排查 WorkBuddy 国际版/CodeBuddy 的 11140、403、429、
 
 ```powershell
 .\skills.ps1 ai-risk-control --platform workbuddy --plan --json
-.\skills.ps1 ai-risk-control --platform workbuddy --checks --json --out .\reports\ai-risk-control.json
 .\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-account-risk --json
 .\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-rate-limit --retry-after 60 --json
 .\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-degradation --json
 ```
 
-无项目时可使用已知的 `docs/handover/ai-risk-control/tools/workbuddy/workbuddy-risk-selfcheck.ps1 -NoFile`；实际部署目录需由当前任务确认，不遍历个人目录猜测路径。输出范围和敏感字段必须在转发前检查。
+该入口只列出仓库内的风控策略并生成分诊计划；不运行本机自检脚本、不读取服务端账号状态、不改代理、客户端、凭据或进程。需要检查真实状态时，使用当前官方客户端、额度/服务状态界面和支持入口，不遍历个人目录猜测路径。输出范围和敏感字段必须在转发前检查。
 
 ## 常见情况与动作
 
@@ -48,6 +47,6 @@ description: 只读排查 WorkBuddy 国际版/CodeBuddy 的 11140、403、429、
 
 ## 参考与停止
 
-`references/log-forensics.md`、`selfcheck-internals.md` 提供日志分层和检测方法；`network-and-proxy.md`、`official-sources.md`、`prevention-ops.md` 提供来源和操作背景。历史参考中的“只能是账号级”“换号止血”、画像决定封禁或唯一有效操作等说法不是已证实判据，不得执行或继承。
+`references/log-forensics.md` 提供日志分层方法；`network-and-proxy.md`、`official-sources.md`、`prevention-ops.md` 提供来源和操作背景。历史参考中的“只能是账号级”“换号止血”、画像决定封禁或唯一有效操作等说法不是已证实判据，不得执行或继承。
 
-结论分清 repo_verified、filesystem_projected、host_loaded、live_accepted。自检通过不等于服务恢复或真实长会话验收；需要真人登录、官方处理或新宿主会话时注明恢复条件并停止相关请求。
+结论分清 repo_verified、filesystem_projected、host_loaded、live_accepted。仓库策略文件通过不等于服务恢复或真实长会话验收；需要真人登录或官方处理时注明恢复条件并停止相关请求。

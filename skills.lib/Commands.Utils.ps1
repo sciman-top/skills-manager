@@ -254,8 +254,8 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
-  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--mode auto|direct|v2rayn|custom-proxy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--checks] [--json] [--out <file>]
-  风控入口默认只读，统一检查 Antigravity/Gemini 与 WorkBuddy 资产；不会切号、轮换凭据、重启进程或修改代理。
+  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--json] [--out <file>]
+  风控入口默认只读，列出 Antigravity/Gemini 与 WorkBuddy 风控技能资产并生成分诊计划；不运行宿主自检脚本、不读写宿主配置，也不会切号、轮换凭据或重启进程。
   --plan 输出日常防范/恢复/停止条件；--event 输出一次事件的合规分诊计划（两者可独立使用）。
   --event 取值：antigravity-ban|antigravity-rate-limit|antigravity-degradation|workbuddy-account-risk|workbuddy-rate-limit|workbuddy-degradation
   机器消费请用 --out（显式 UTF-8），不要依赖 stdout 重定向的编码。
