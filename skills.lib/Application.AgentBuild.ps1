@@ -543,6 +543,11 @@ function 更新单技能(
         Need ($targetItem.PSIsContainer -and ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("现有技能目标必须是普通目录：{0}" -f $targetDir)
     }
 
+    $projectionCfg = if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
+    $refreshCatalog = $null -ne $projectionCfg -and
+        $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
+        -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)
+
     $txnRoot = [IO.Path]::GetFullPath((Join-Path $Root '.txn'))
     $txnRootItem = Get-ExistingFileSystemItem $txnRoot
     if ($null -ne $txnRootItem) {
@@ -556,6 +561,7 @@ function 更新单技能(
         return [pscustomobject]@{ updated = $false; dry_run = $true; skill_name = $canonicalName; target_path = $targetDir; promotion_mode = [string]$promotion.promotion_mode }
     }
 
+    $catalogTransaction = if ($refreshCatalog) { New-SkillDiscoveryCatalogTransaction $projectionCfg } else { $null }
     $targetBefore = if ($null -ne $targetItem) { Get-DirectoryFingerprint $targetDir } else { 'missing' }
     EnsureDir $txnRoot
     $txnPath = Join-Path $txnRoot ("single-skill-{0}" -f [Guid]::NewGuid().ToString('N'))
@@ -565,6 +571,7 @@ function 更新单技能(
     $targetMoved = $false
     $candidateMoved = $false
     $backupFingerprint = ''
+    $catalogProjection = $null
 
     try {
         $txnItem = Get-ExistingFileSystemItem $txnPath
@@ -601,10 +608,14 @@ function 更新单技能(
         $candidateMoved = $true
         $candidateFingerprintAfterMove = Get-DirectoryFingerprint $targetDir
         Need ([string]::Equals($candidateFingerprintAfterMove, $candidateFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能投影读回校验失败：{0}" -f $targetDir)
+        if ($refreshCatalog) {
+            $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg $catalogTransaction -SkipLock
+            Need ($null -ne $catalogProjection -and [bool]$catalogProjection.enabled -and [bool]$catalogProjection.persisted) '单技能更新后的 cold-discovery catalog 未能持久化'
+        }
     }
     catch {
         $updateError = $_.Exception.Message
-        $rollbackError = ''
+        $rollbackErrors = [Collections.Generic.List[string]]::new()
         try {
             $current = Get-ExistingFileSystemItem $targetDir
             if ($null -ne $current -and $candidateMoved) {
@@ -619,14 +630,21 @@ function 更新单技能(
                 Need ([string]::Equals((Get-DirectoryFingerprint $targetDir), $expectedFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能回滚读回校验失败：{0}" -f $targetDir)
             }
         }
-        catch { $rollbackError = $_.Exception.Message }
+        catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
 
-        if ([string]::IsNullOrWhiteSpace($rollbackError)) {
+        if ($null -ne $catalogTransaction) {
+            foreach ($snapshot in @($catalogTransaction.file_snapshots | Sort-Object path -Descending)) {
+                try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
+                catch { $rollbackErrors.Add(('cold-discovery catalog => {0}' -f $_.Exception.Message)) | Out-Null }
+            }
+        }
+
+        if ($rollbackErrors.Count -eq 0) {
             try { Complete-BuildTransaction ([pscustomobject]@{ path = $txnPath }) }
             catch { Log ("单技能回滚已恢复，但事务清理失败，保留现场：{0}" -f $txnPath) 'WARN' }
             throw ("单技能更新失败，原目标已恢复：{0}" -f $updateError)
         }
-        throw ("单技能更新失败且回滚未完成：update={0}; rollback={1}; recovery={2}" -f $updateError, $rollbackError, $txnPath)
+        throw ("单技能更新失败且回滚未完成：update={0}; rollback={1}; recovery={2}" -f $updateError, ($rollbackErrors -join '; '), $txnPath)
     }
 
     $cleanupWarning = ''
@@ -639,6 +657,7 @@ function 更新单技能(
         target_path = $targetDir
         source_hash = (Get-DirectoryFingerprint $sourceDir)
         target_hash = (Get-DirectoryFingerprint $targetDir)
+        catalog_changed = if ($null -ne $catalogProjection) { [bool]$catalogProjection.changed } else { $false }
         promotion_mode = [string]$promotion.promotion_mode
         cleanup_warning = $cleanupWarning
     }

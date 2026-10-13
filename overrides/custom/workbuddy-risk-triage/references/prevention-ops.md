@@ -82,29 +82,9 @@
 
 ---
 
-## 四、自检脚本的正确用法
+## 四、检查边界
 
-自检脚本随交接包分发：仓库检出内为 `docs/handover/ai-risk-control/tools/workbuddy/workbuddy-risk-selfcheck.sh`；已部署机器上通常为 `D:\TOOL\workbuddy-risk\workbuddy-risk-selfcheck.sh`。
-
-```bash
-bash "<风控工具目录>/workbuddy-risk-selfcheck.sh"
-```
-
-**建议使用频率**：
-- 首次配置后跑一次，建立基线（全项绿才算干净起点）
-- 遇到任何异常报错之前先跑一次
-- 换号/换机后跑一次
-
-**正确解读结果**（常见误判）：
-
-| 误判场景 | 正确判读 |
-|---|---|
-| 429 计数写完文档/跑命令后突然上涨 | **先怀疑自污染**（会话日志记录了你写的文本）；看命中行首是否是 ISO 时间戳 |
-| `ardot` / `miora` MCP 认证失败报高危 | 这是内置插件未配令牌的**预期行为**，不是风控信号 |
-| `netdrive` / `genie-baas` MCP 认证失败报高危 | 这是官方网关连接器的**预期行为**，不是风控信号 |
-| 启动次数异常高 | 确认是否沙箱/CI 环境造成的计数虚高 |
-
-详细拆解见 `references/selfcheck-internals.md`。
+仓库不分发本机自检脚本。CLI 只提供策略和分诊计划，不探测客户端目录、系统代理、注册表、进程或账号状态。诊断时以当前官方客户端的结构化响应、官方额度/服务状态界面和脱敏 Trace ID 为依据；日志中的自引文本、测试夹具和 MCP 认证错误都不能单独证明账号风控。
 
 ---
 
@@ -114,7 +94,7 @@ WorkBuddy 五域的目标状态是**直连**，不是挑一个代理出口：官
 
 **日常维护要点**：
 
-1. **开工前确认五域仍在双层例外表内**（WinINET `ProxyOverride` + `NO_PROXY`；自检脚本已含该检查）
+1. **开工前人工确认五域仍在双层例外表内**（WinINET `ProxyOverride` + `NO_PROXY`）；本仓不再提供代理或系统状态自检脚本
 2. **v2rayN 双写**：改例外表必须同步 `guiConfigs/guiNConfig.json` 的 `SystemProxyExceptions`，否则 v2rayN 重启会把注册表改回去
 3. **整机代理健康影响的是其他流量**（如 Antigravity）：代理死时系统代理必须立即回退到常驻前端（自愈双向），否则整机断网
 4. **不频繁切换出口区域节点**：短时间横跳多国节点对走代理的流量是画像异常信号

@@ -182,7 +182,7 @@ Skills 管理器（中文菜单）
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
-  - `构建生效 -OnlySkill <name>` 只更新唯一匹配的 override 技能目录；已链接到该目录的宿主会看到同一文件，不会重建其他技能或宿主配置
+  - `构建生效 -OnlySkill <name>` 只更新唯一匹配的 override 技能目录及 cold-discovery catalog 哈希镜像；已链接到该目录的宿主会看到同一文件，不会重建其他技能目录或宿主配置
 
 常用命令：
   .\skills.ps1 ai-coding [--template implementation|review|failure|handoff|checklist] [--json]
@@ -254,8 +254,8 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
-  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--mode auto|direct|v2rayn|custom-proxy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--checks] [--json] [--out <file>]
-  风控入口默认只读，统一检查 Antigravity/Gemini 与 WorkBuddy 资产；不会切号、轮换凭据、重启进程或修改代理。
+  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--json] [--out <file>]
+  风控入口默认只读，列出 Antigravity/Gemini 与 WorkBuddy 风控技能资产并生成分诊计划；不运行宿主自检脚本、不读写宿主配置，也不会切号、轮换凭据或重启进程。
   --plan 输出日常防范/恢复/停止条件；--event 输出一次事件的合规分诊计划（两者可独立使用）。
   --event 取值：antigravity-ban|antigravity-rate-limit|antigravity-degradation|workbuddy-account-risk|workbuddy-rate-limit|workbuddy-degradation
   机器消费请用 --out（显式 UTF-8），不要依赖 stdout 重定向的编码。

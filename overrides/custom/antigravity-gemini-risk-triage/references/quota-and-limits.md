@@ -1,126 +1,42 @@
-# 配额与限流详解
+# Antigravity 与 Gemini 的额度、429 和退避
 
-## 一、Antigravity 配额模型
+先确认调用发生在哪个产品。Antigravity 订阅、Gemini API、Gemini CLI/Code Assist 的额度合同不同，不能把一个产品的配额数字搬到另一个产品。
 
-官方：`https://antigravity.google/docs/plans`
+## Antigravity 计划额度
 
-### 所有计划的共同基线
+[官方 Plans 页面](https://antigravity.google/docs/plans/)（2026-10-13 复核）当前概述：
 
-- 使用 Gemini 模型作核心 agent 模型，含 **Gemini 3.1 Pro、Gemini 3.8 Flash** 及其他 Gemini Enterprise 模型
-- **无限 Tab 补全**
-- 全部产品功能（计划任务、CLI 等）
+- Google AI Ultra：额度最高，每 5 小时刷新，并有更高的周限额。
+- Google AI Pro：较高额度，每 5 小时刷新，直到触及周限额。
+- 其他计划：基础额度按周刷新。
+- 官方说明额度与 agent 实际完成的工作量相关，复杂任务可能消耗更多；容量与服务稳定性也可能导致规则调整。
+- Pro/Ultra 可用购买的 AI credits 做超额用量，AI Credit Overages 可设置为 Never 或 Always；不希望自动产生超额消费时可选择 Never。
 
-### 分档
+以上仅是页面的概括，不是固定请求数、账号安全等级或保证值。以当前 plan、模型选择器、Settings/Usage 和官方页面为准。AI Studio 的 API 限额不能查看 Antigravity 订阅余量。Antigravity 当前也不支持通过 BYOK 或自定义 endpoint 提高额度。
 
-| 计划 | 配额 | 周限 | 额外 |
-|---|---|---|---|
-| **Google AI Ultra** | 最高、最宽松，**每 5 小时刷新** | 最高 | 可访问**第三方模型** |
-| **Google AI Pro** | 高，**每 5 小时刷新直至触达周上限** | 更高 | — |
-| **非 Pro / Ultra** | 「有意义」的配额，**按周刷新** | 有 | — |
+## Gemini API（Google AI Studio）
 
-### 官方关于「额度怎么算」的原话
+[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits) 说明：
 
-> "The baseline rate limits are primarily determined by available capacity and exist to prevent abuse. Under the hood, the rate limits correlate with **the amount of work done by the agent**, which can differ from prompt to prompt. As a result, you receive more prompts when your tasks are straightforward and the agent can complete the work quickly, while **more complex tasks consume more quota**."
+- RPM、TPM、RPD 等限额随 project、模型、使用层级和账号状态变化；同一 project 内的多个 API key 不会增加 project 配额。
+- RPD 按太平洋时间午夜重置；模型和实验/预览状态可能有不同限制。
+- 当前 project/model 限额以 [AI Studio 用量页](https://aistudio.google.com/rate-limit) 和 API 返回为准。
+- 429 RESOURCE_EXHAUSTED 可能来自某个速率窗口、project spend cap 或其他限额；先查看错误细节、用量页和计费状态。不要把它直接当作封号，也不要用切账号或新建 project 掩盖消耗。
 
-> "Usage limits for this service are subject to modification. These adjustments may be necessary to manage system capacity and maintain service stability."
+## Gemini CLI / Code Assist
 
-→ **次数不是计量单位，工作量才是。** 「我一天才发 X 次就被限」这个抱怨在机制上不成立。
+Gemini CLI 的认证额度与 Gemini API key 配额分开；官方 [Gemini Code Assist quota 页面](https://developers.google.com/gemini-code-assist/resources/quotas) 说明 CLI/agent mode 的请求计量和限制。以所用认证方式、计划、当前版本和官方页面为准，不套用 AI Studio 的 RPM/TPM/RPD 数字。
 
-### 超额（Overages）
+## 429 的处理
 
-- Pro / Ultra 用户可用**购买的 AI credits**（或一次性促销额度）补充，按 Gemini Enterprise 标准消耗定价计。
-- 设置项 **`AI Credit Overages`**（中文界面 = 「**允许 AI 额度超限使用**」，一个开关）：
-  - `Never` = **开关关闭** —— 绝不自动使用，等基线刷新（**保守值，推荐**）
-  - `Always` = **开关开启** —— 基线耗尽时自动用 credits，刷新后自动切回
-- **界面位置**：`设置 → 模型 → 模型额度 → 允许 AI 额度超限使用`。
-  同一页还能看到「每周限额剩余 / 5 小时限额剩余」的百分比与刷新倒计时 —— **这是判断当前是否触顶最快的入口**。
-- **Settings** 页可查看跨模型的基线配额使用情况。
+- **Antigravity 或交互式 CLI**：停止重复提交，查看应用显示的当前模型、额度及刷新信息，等待服务指示的窗口。额度恢复前不要切账号继续相同自动化任务或脚本循环请求。
+- **Gemini API 客户端**：遵守响应中的 Retry-After/reset 提示；仅在错误可重试、操作可安全重放时，使用有次数/总时长上限的指数退避和随机抖动。避免在 SDK 和应用两层各自无限重试。认证失败、权限错误、无效请求或明确条款拒绝应先修正原因，不重试。
+- **降低合法用量**：缩短不必要的上下文和输出、拆分大任务、减少不必要并发；若所用产品支持低成本模型，可根据任务选择。不要压力测试额度。
 
-> 提醒：不要把「关掉超额使用」当成待办事项去反复提醒用户 —— 它默认就是关的，
-> 属于「确认一下」而不是「需要修改」。**先看状态再给建议。**
+Google 的通用客户端指南建议对瞬时错误采用有界指数退避和抖动；Gemini API 文档对 spend-based 429 建议等待、降低昂贵请求速率，必要时申请限额提升。产品 UI 应按其自身提示操作，不自行编写重放循环。
 
-### 官方明确「不支持」
-
-1. **BYOK / BYOE**（自带密钥或自带端点换取额外速率）
-2. 通过自定义合同获得组织级层级
-
-→ 任何「给 Antigravity 配自带端点/中转扩容」的方案，都是在跟官方设计对着干。
-
-## 二、Gemini API 限速
-
-官方：`https://ai.google.dev/gemini-api/docs/rate-limits`
-
-### 三个维度
-
-| 维度 | 含义 |
+| 错误 | 分诊 |
 |---|---|
-| `RPM` | 每分钟请求数 |
-| `TPM` | 每分钟输入 token 数 |
-| `RPD` | 每天请求数 |
-
-- **按 project 计，不是按 API Key 计** → 多建 Key 无效。
-- **任一项超限即报错**（RPM 20 时，一分钟内第 21 个请求就报错，哪怕 TPM 还很空）。
-- **RPD 在太平洋时间午夜重置** → 对国内用户是**下午**。
-- 限速因模型而异；有些限制只对特定模型生效（如 IPM 只对图像生成模型算）。
-- **preview / experimental 模型限速更严。**
-
-### 消费型限流（spend-based）
-
-按**滚动 10 分钟窗口**计：
-
-| 层级 | 上限 |
-|---|---|
-| Free | 不适用 |
-| Tier 1 | $10 |
-| Tier 2 | $50 |
-| Tier 3 | $200 |
-
-超限返回 `429 RESOURCE_EXHAUSTED`。解法：等待重试 / 降低昂贵请求速率（更小上下文、更短输出）/ 申请提额。
-
-### 使用层级
-
-| 层级 | 升级条件 | 计费上限 |
-|---|---|---|
-| Free | 有活跃 project 或免费试用 | — |
-| Tier 1 | 设置并绑定有效计费账号 | $250 |
-| Tier 2 | 已付费 $100 + 首次成功付款满 3 天 | $2,000 |
-| Tier 3 | 已付费 $1,000 + 首次成功付款满 30 天 | $20,000 – $100,000+ |
-
-- 基于绑定计费账号在 Google Cloud 服务的**累计消费**。
-- Free → Tier 1 一般即时生效；后续层级 10 分钟内生效。
-- 满足条件通常自动升级，但**极少数情况会因审核中的其他因素被拒**。
-
-### 其他
-
-- **Priority inference**：独立限速，默认 = 同模型同层级标准限速的 **0.3 倍**（消耗仍计入整体交互流量）。
-- **Batch API**：独立限速——并发 100、输入文件 2GB、文件存储 20GB，另有各模型的 Batch enqueued tokens 上限。
-- **权威自检入口**：`https://aistudio.google.com/rate-limit`（可按最近 28 天查）。**不要用第三方仪表盘。**
-
-## 三、Gemini CLI 免费层
-
-- OAuth 路径：约 **60 RPM / 1000 RPD**（社区文档口径，官方可能随版本调整）。
-- **agentic 会话里每一次工具调用都是一次请求** → 一句「帮我把这个仓库修好」可能触发几十次请求。
-  - **免费层额度是按聊天场景设计的，不是按 agent 循环设计的。**
-- 常见触发场景：agent 循环、模型 fallback 重试（跨模型重试会额外消耗配额）。
-- 旧版 CLI（约 0.1.4 之前）存在**限速后循环切换模型并卡死**的 bug：错误提示每分钟重复出现，程序无响应。官方解释是上线初期容量超载触发速率限制与模型切换逻辑异常。→ **升级到最新版。**
-- 缓解：批处理 prompt、请求间加延迟、用 Flash 处理高吞吐低复杂度任务、改用 AI Studio API Key 按量付费。
-
-### 常见误配（会造成「订阅了却还在吃免费层限流」）
-
-- 同时设了 `GOOGLE_CLOUD_PROJECT` / gcloud 配置 与 AI Studio API Key → CLI 走错认证路径，回落到受限的免费层，报 429。
-- 区分两个产品：
-  - **Gemini for Google Cloud（Code Assist / Vertex AI）**：绑 Google Cloud Project，走 gcloud / IAM / ADC。
-  - **Gemini API（AI Studio 按量付费）**：绑计费账号，**只用 API Key**，不依赖 project id / gcloud。
-- 修法：清掉冲突的环境变量（`GOOGLE_CLOUD_PROJECT`，并检查 shell profile），**在绑定计费后重新生成** API Key（升级前生成的 Key 可能仍被限制在免费层），设 `GOOGLE_API_KEY` / `GEMINI_API_KEY`。
-
-## 四、429 与封号的对照表
-
-| | 429（限流） | 403 / ToS disabled（封号） |
-|---|---|---|
-| 性质 | 官方承认的频率/额度机制 | 未公开细则的账号级风控 |
-| 给恢复时间 | **是**（5 小时 / 周 / 太平洋午夜 / 滚动 10 分钟） | 否 |
-| 官方清单 | 在（Rate limits 文档 + AI Studio 可视化） | 不在 |
-| 错误体 | `429 RESOURCE_EXHAUSTED` / `Quota exceeded` | `403 This service has been disabled in this account for violation of Terms of Service` |
-| 处置 | **等刷新 + 切模型 + 长任务切段 + 买 credits** | **停用违规工具 + 申诉 + 等自动解封 / 走再认证表单** |
-
-**不要把 429 当封号处理。** 反复重试是把限流升级为封号的唯一本地动作。
+| 429 / RESOURCE_EXHAUSTED | 查对应产品/model/project 的实际 quota、billing、reset 或容量信息；不是封号结论。 |
+| 403 / PERMISSION_DENIED | 查认证、权限、资格、地区、project、计费和服务状态；没有明确 service-disabled/ToS 文本时不归为封号。 |
+| 5xx / 临时连接失败 | 确认服务状态与网络；程序端只按有界、幂等的重试策略处理。
