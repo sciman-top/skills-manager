@@ -490,6 +490,160 @@ function Complete-BuildTransaction($txn) {
     Need ($removed -and $null -eq (Get-ExistingFileSystemItem $txnPath)) ("构建事务目录清理未完成：{0}" -f $txnPath)
 }
 
+function Move-SingleSkillDirectory([string]$Source, [string]$Destination) {
+    $sourcePath = [IO.Path]::GetFullPath($Source)
+    $destinationPath = [IO.Path]::GetFullPath($Destination)
+    $sourceItem = Get-ExistingFileSystemItem $sourcePath
+    Need ($null -ne $sourceItem -and $sourceItem.PSIsContainer -and ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("单技能移动源必须是普通目录：{0}" -f $sourcePath)
+    Need ($null -eq (Get-ExistingFileSystemItem $destinationPath)) ("单技能移动目标必须不存在：{0}" -f $destinationPath)
+    $destinationParent = [IO.Directory]::GetParent($destinationPath)
+    Need ($null -ne $destinationParent -and (Test-Path -LiteralPath $destinationParent.FullName -PathType Container)) ("单技能移动目标父目录不存在：{0}" -f $destinationPath)
+    Need ([string]::Equals([IO.Path]::GetPathRoot($sourcePath), [IO.Path]::GetPathRoot($destinationPath), [StringComparison]::OrdinalIgnoreCase)) ("单技能事务移动必须在同一卷：{0} -> {1}" -f $sourcePath, $destinationPath)
+    Need (-not (Test-AncestorChainHasReparse $sourcePath) -and -not (Test-AncestorChainHasReparse $destinationParent.FullName)) ("单技能移动路径父级链不允许存在 reparse point：{0} -> {1}" -f $sourcePath, $destinationPath)
+    [IO.Directory]::Move($sourcePath, $destinationPath)
+}
+
+function 更新单技能(
+    [Parameter(Mandatory = $true)][string]$SkillName,
+    [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
+    [switch]$SkipLock
+) {
+    if (-not $SkipLock) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            更新单技能 -SkillName $SkillName -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipLock
+        })
+    }
+
+    Preflight
+    $requestedName = Normalize-Name $SkillName
+    Need (-not [string]::IsNullOrWhiteSpace($requestedName) -and $requestedName -match '^[a-z0-9]+(?:-[a-z0-9]+)*$') ("单技能更新名称无效：{0}" -f $SkillName)
+    $cfg = LoadCfg
+    $promotion = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
+
+    $overrides = @(Get-OverridesDirs | Where-Object {
+        [string]::Equals([string]$_.Name, $requestedName, [StringComparison]::OrdinalIgnoreCase)
+    })
+    Need ($overrides.Count -eq 1) ("单技能更新要求恰好一个同名 override：{0}（found={1}）" -f $requestedName, $overrides.Count)
+    $sourceDir = [string]$overrides[0].FullName
+    Assert-SkillPackageSafe -Path $sourceDir -ContainmentRoot $OverridesDir -Label ("single-skill:{0}" -f $requestedName) | Out-Null
+    Need (Test-IsSkillDir $sourceDir) ("override 缺少技能入口：{0}" -f $sourceDir)
+    $canonicalName = Get-CanonicalSkillTargetName $sourceDir $requestedName
+    Need ([string]::Equals($canonicalName, $requestedName, [StringComparison]::OrdinalIgnoreCase)) ("单技能更新只接受与 override 名称一致的 canonical skill：{0} != {1}" -f $canonicalName, $requestedName)
+    $sourceSkillFile = Join-Path $sourceDir 'SKILL.md'
+    Need (Test-Path -LiteralPath $sourceSkillFile -PathType Leaf) ("override 必须包含 SKILL.md：{0}" -f $sourceDir)
+
+    $agentRoot = [IO.Path]::GetFullPath($AgentDir)
+    $agentItem = Get-ExistingFileSystemItem $agentRoot
+    Need ($null -ne $agentItem -and $agentItem.PSIsContainer -and ($agentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("agent/ 必须是普通目录：{0}" -f $agentRoot)
+    Need (-not (Test-AncestorChainHasReparse $agentRoot)) ("agent/ 路径父级链不允许存在 reparse point：{0}" -f $agentRoot)
+    $targetDir = [IO.Path]::GetFullPath((Join-Path $agentRoot $canonicalName))
+    Need (Is-PathInsideOrEqual $targetDir $agentRoot -and -not [string]::Equals($targetDir, $agentRoot, [StringComparison]::OrdinalIgnoreCase)) ("单技能目标路径越界：{0}" -f $targetDir)
+    $targetItem = Get-ExistingFileSystemItem $targetDir
+    if ($null -ne $targetItem) {
+        Need ($targetItem.PSIsContainer -and ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("现有技能目标必须是普通目录：{0}" -f $targetDir)
+    }
+
+    $txnRoot = [IO.Path]::GetFullPath((Join-Path $Root '.txn'))
+    $txnRootItem = Get-ExistingFileSystemItem $txnRoot
+    if ($null -ne $txnRootItem) {
+        Need ($txnRootItem.PSIsContainer -and ($txnRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("单技能事务根必须是普通目录：{0}" -f $txnRoot)
+    }
+    $txnParent = [IO.Directory]::GetParent($txnRoot)
+    Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("单技能事务父级链不允许存在 reparse point：{0}" -f $txnRoot)
+
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将只更新 {0} -> {1}（promotion={2}）" -f $sourceDir, $targetDir, [string]$promotion.promotion_mode)
+        return [pscustomobject]@{ updated = $false; dry_run = $true; skill_name = $canonicalName; target_path = $targetDir; promotion_mode = [string]$promotion.promotion_mode }
+    }
+
+    $targetBefore = if ($null -ne $targetItem) { Get-DirectoryFingerprint $targetDir } else { 'missing' }
+    EnsureDir $txnRoot
+    $txnPath = Join-Path $txnRoot ("single-skill-{0}" -f [Guid]::NewGuid().ToString('N'))
+    EnsureDir $txnPath
+    $candidateDir = Join-Path $txnPath 'candidate'
+    $backupDir = Join-Path $txnPath 'previous'
+    $targetMoved = $false
+    $candidateMoved = $false
+    $backupFingerprint = ''
+
+    try {
+        $txnItem = Get-ExistingFileSystemItem $txnPath
+        Need ($null -ne $txnItem -and $txnItem.PSIsContainer -and ($txnItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("单技能事务目录必须是普通目录：{0}" -f $txnPath)
+        RoboMirror $sourceDir $candidateDir
+        $repair = Repair-AgentSkillMarkdownFiles $candidateDir
+        Need ([int]$repair.failed -eq 0 -and [int]$repair.removed -eq 0) ("override 技能入口校验失败：{0}" -f $sourceDir)
+        Assert-SkillPackageSafe -Path $candidateDir -ContainmentRoot $txnPath -Label ("single-skill-candidate:{0}" -f $requestedName) | Out-Null
+        $candidateSkillFile = Join-Path $candidateDir 'SKILL.md'
+        Need (Test-Path -LiteralPath $candidateSkillFile -PathType Leaf) ("构建结果缺少 SKILL.md：{0}" -f $candidateDir)
+        $candidateName = Get-DeclaredSkillNameFromDir $candidateDir
+        Need ([string]::Equals($candidateName, $canonicalName, [StringComparison]::OrdinalIgnoreCase)) ("构建结果技能名称漂移：{0} != {1}" -f $candidateName, $canonicalName)
+        $candidateFingerprint = Get-DirectoryFingerprint $candidateDir
+
+        $conflictBuckets = Get-SkillNameConflictBuckets $agentRoot
+        $otherPaths = @()
+        if ($conflictBuckets.ContainsKey($candidateName)) {
+            $otherPaths = @($conflictBuckets[$candidateName] | Where-Object { -not (Is-PathInsideOrEqual $_ $targetDir) })
+        }
+        if ($otherPaths.Count -gt 0) {
+            $allPaths = @($candidateSkillFile) + $otherPaths
+            Need ((Test-SkillNameDuplicateContentAllowed $allPaths) -or (Test-SkillNameSystemOverrideAllowed $allPaths)) ("技能名称冲突，拒绝单技能更新：{0}" -f $candidateName)
+        }
+
+        $currentTargetItem = Get-ExistingFileSystemItem $targetDir
+        $currentFingerprint = if ($null -ne $currentTargetItem) { Get-DirectoryFingerprint $targetDir } else { 'missing' }
+        Need ([string]::Equals($currentFingerprint, $targetBefore, [StringComparison]::OrdinalIgnoreCase)) ("单技能目标在构建期间发生变化，拒绝覆盖：{0}" -f $targetDir)
+        if ($null -ne $currentTargetItem) {
+            Move-SingleSkillDirectory $targetDir $backupDir
+            $targetMoved = $true
+            $backupFingerprint = Get-DirectoryFingerprint $backupDir
+        }
+        Move-SingleSkillDirectory $candidateDir $targetDir
+        $candidateMoved = $true
+        $candidateFingerprintAfterMove = Get-DirectoryFingerprint $targetDir
+        Need ([string]::Equals($candidateFingerprintAfterMove, $candidateFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能投影读回校验失败：{0}" -f $targetDir)
+    }
+    catch {
+        $updateError = $_.Exception.Message
+        $rollbackError = ''
+        try {
+            $current = Get-ExistingFileSystemItem $targetDir
+            if ($null -ne $current -and $candidateMoved) {
+                Need ($current.PSIsContainer -and ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("回滚目标不是普通目录：{0}" -f $targetDir)
+                Need ([string]::Equals((Get-DirectoryFingerprint $targetDir), $candidateFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能目标在失败后发生外部变化，保留现场：{0}" -f $targetDir)
+                Need (Invoke-RemoveItemWithRetry $targetDir -Recurse) ("无法移除失败的单技能投影：{0}" -f $targetDir)
+            }
+            if ($targetMoved) {
+                Need ($null -eq (Get-ExistingFileSystemItem $targetDir)) ("回滚目标被外部内容占用，备份保留：{0}" -f $targetDir)
+                Move-SingleSkillDirectory $backupDir $targetDir
+                $expectedFingerprint = if ([string]::IsNullOrWhiteSpace($backupFingerprint)) { $targetBefore } else { $backupFingerprint }
+                Need ([string]::Equals((Get-DirectoryFingerprint $targetDir), $expectedFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能回滚读回校验失败：{0}" -f $targetDir)
+            }
+        }
+        catch { $rollbackError = $_.Exception.Message }
+
+        if ([string]::IsNullOrWhiteSpace($rollbackError)) {
+            try { Complete-BuildTransaction ([pscustomobject]@{ path = $txnPath }) }
+            catch { Log ("单技能回滚已恢复，但事务清理失败，保留现场：{0}" -f $txnPath) 'WARN' }
+            throw ("单技能更新失败，原目标已恢复：{0}" -f $updateError)
+        }
+        throw ("单技能更新失败且回滚未完成：update={0}; rollback={1}; recovery={2}" -f $updateError, $rollbackError, $txnPath)
+    }
+
+    $cleanupWarning = ''
+    try { Complete-BuildTransaction ([pscustomobject]@{ path = $txnPath }) }
+    catch { $cleanupWarning = $_.Exception.Message; Log ("单技能更新成功但事务清理失败：{0}；现场：{1}" -f $cleanupWarning, $txnPath) 'WARN' }
+    return [pscustomobject]@{
+        updated = $true
+        dry_run = $false
+        skill_name = $canonicalName
+        target_path = $targetDir
+        source_hash = (Get-DirectoryFingerprint $sourceDir)
+        target_hash = (Get-DirectoryFingerprint $targetDir)
+        promotion_mode = [string]$promotion.promotion_mode
+        cleanup_warning = $cleanupWarning
+    }
+}
+
 function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch]$SkipLock) {
     if (-not $SkipLock) {
         return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {

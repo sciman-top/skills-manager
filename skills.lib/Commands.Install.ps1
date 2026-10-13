@@ -1867,10 +1867,15 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 
 function 构建生效(
     [string]$SkillProfile = '',
+    [string]$OnlySkill = $OnlySkill,
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection,
     [switch]$SkipLock
 ) {
+    if (-not [string]::IsNullOrWhiteSpace($OnlySkill)) {
+        Need ([string]::IsNullOrWhiteSpace($SkillProfile) -and -not $SkipHostProjection) "-OnlySkill 仅更新 agent/ 中的指定 override 技能，不能与 -SkillProfile 或 -SkipHostProjection 并用。"
+        return (更新单技能 -SkillName $OnlySkill -AllowUnverifiedProjection:$AllowUnverifiedProjection)
+    }
     if (-not $SkipLock) {
         return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
             构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipHostProjection:$SkipHostProjection -SkipLock

@@ -376,3 +376,84 @@ Describe "Agent build" {
         Test-SkillNameDuplicateContentAllowed @($a, $b) | Should -Be $false
     }
 }
+
+Describe 'Scoped single-skill projection' {
+    BeforeEach {
+        Mock Preflight {}
+        Mock LoadCfg { [pscustomobject]@{} }
+        Mock Get-HostProjectionPromotionContext { [pscustomobject]@{ promotion_mode = 'verified_clean_commit' } }
+        Mock Get-OverridesDirs {
+            @([pscustomobject]@{ Name = 'ai-coding-workflow'; FullName = (Join-Path $OverridesDir 'custom\ai-coding-workflow') })
+        }
+        Mock RoboMirror {
+            param([string]$src, [string]$dst)
+            New-Item -ItemType Directory -Path $dst -Force | Out-Null
+            foreach ($entry in @(Get-ChildItem -LiteralPath $src -Force)) {
+                Copy-Item -LiteralPath $entry.FullName -Destination $dst -Recurse -Force
+            }
+        }
+    }
+
+    It 'replaces only the requested override output and leaves sibling skills untouched' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
+        try {
+            $Root = Join-Path $TestDrive 'single-skill-success'
+            $AgentDir = Join-Path $Root 'agent'
+            $OverridesDir = Join-Path $Root 'overrides'
+            $LogPath = Join-Path $Root 'build.log'
+            $DryRun = $false
+            $source = Join-Path $OverridesDir 'custom\ai-coding-workflow'
+            $target = Join-Path $AgentDir 'ai-coding-workflow'
+            $sibling = Join-Path $AgentDir 'untouched-sibling'
+            New-Item -ItemType Directory -Path $source, $target, $sibling -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') (@('---', 'name: ai-coding-workflow', 'description: updated', '---', '') -join [Environment]::NewLine)
+            Set-ContentUtf8 (Join-Path $source 'extra.md') 'new payload'
+            Set-ContentUtf8 (Join-Path $target 'stale.txt') 'removed by mirror'
+            Set-ContentUtf8 (Join-Path $sibling 'keep.txt') 'sibling remains'
+
+            $result = 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock
+
+            $result.updated | Should -BeTrue
+            (Get-ContentUtf8 (Join-Path $target 'SKILL.md')) | Should -Match 'description: updated'
+            (Get-ContentUtf8 (Join-Path $target 'extra.md')) | Should -Be 'new payload'
+            Test-Path -LiteralPath (Join-Path $target 'stale.txt') | Should -BeFalse
+            (Get-ContentUtf8 (Join-Path $sibling 'keep.txt')) | Should -Be 'sibling remains'
+            @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+        finally {
+            $Root = $oldRoot; $AgentDir = $oldAgent; $OverridesDir = $oldOverrides; $DryRun = $oldDryRun; $LogPath = $oldLogPath
+        }
+    }
+
+    It 'restores the previous skill when candidate promotion fails' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
+        try {
+            $Root = Join-Path $TestDrive 'single-skill-rollback'
+            $AgentDir = Join-Path $Root 'agent'
+            $OverridesDir = Join-Path $Root 'overrides'
+            $LogPath = Join-Path $Root 'build.log'
+            $DryRun = $false
+            $source = Join-Path $OverridesDir 'custom\ai-coding-workflow'
+            $target = Join-Path $AgentDir 'ai-coding-workflow'
+            New-Item -ItemType Directory -Path $source, $target -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') (@('---', 'name: ai-coding-workflow', 'description: candidate', '---', '') -join [Environment]::NewLine)
+            Set-ContentUtf8 (Join-Path $target 'old.txt') 'original content'
+            Mock Move-SingleSkillDirectory {
+                param([string]$Source, [string]$Destination)
+                if ((Split-Path $Source -Leaf) -eq 'candidate' -and $Destination -eq [IO.Path]::GetFullPath($target)) {
+                    throw 'fixture promotion failure'
+                }
+                [IO.Directory]::Move([IO.Path]::GetFullPath($Source), [IO.Path]::GetFullPath($Destination))
+            }
+
+            { 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock } | Should -Throw '*原目标已恢复*'
+
+            (Get-ContentUtf8 (Join-Path $target 'old.txt')) | Should -Be 'original content'
+            Test-Path -LiteralPath (Join-Path $target 'SKILL.md') | Should -BeFalse
+            @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+        finally {
+            $Root = $oldRoot; $AgentDir = $oldAgent; $OverridesDir = $oldOverrides; $DryRun = $oldDryRun; $LogPath = $oldLogPath
+        }
+    }
+}
