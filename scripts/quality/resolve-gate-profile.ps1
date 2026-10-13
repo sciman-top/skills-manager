@@ -204,6 +204,23 @@ if ($diff.exit_code -ne 0) {
 $changed = @(@($diff.lines) + $untrackedFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
 $changedCount = $changed.Count
 
+# build.ps1 flattens each generated skills.lib path from its src counterpart.
+# Treat that output as derived only when the matching source path is also in
+# this diff. A generated-only edit or mismatched output remains unknown/full.
+$generatedLibraryPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($changedPath in $changed) {
+    $normalizedPath = ([string]$changedPath).Replace('\', '/')
+    if (-not $normalizedPath.StartsWith('src/', [StringComparison]::OrdinalIgnoreCase) -or
+        -not $normalizedPath.EndsWith('.ps1', [StringComparison]::OrdinalIgnoreCase)) {
+        continue
+    }
+    $sourceRelativePath = $normalizedPath.Substring(4)
+    if ($sourceRelativePath -in @('Version.ps1', 'Main.ps1') -or $sourceRelativePath.StartsWith('model-orchestration/', [StringComparison]::OrdinalIgnoreCase)) {
+        continue
+    }
+    $generatedLibraryPaths.Add(('skills.lib/{0}' -f $sourceRelativePath.Replace('/', '.'))) | Out-Null
+}
+
 $riskRegex = [regex]::new($riskPath)
 $sourceRegex = [regex]::new($sourcePath)
 $docsRegex = [regex]::new($docsOnlyPath)
@@ -245,7 +262,7 @@ if ($docsOnly) {
  $configFocusedChanged = @($changed | Where-Object { $skillsConfigRegex.IsMatch($_) })
  $ruleChanged = @($changed | Where-Object { $ruleRegex.IsMatch($_) })
  $unknownChanged = @($changed | Where-Object {
-    $_ -ne 'skills.ps1' -and -not ($sourceRegex.IsMatch($_) -or $sourceTests.ContainsKey($_) -or $skillFocusedRegex.IsMatch($_) -or $skillsConfigRegex.IsMatch($_) -or $ruleRegex.IsMatch($_) -or $docsRegex.IsMatch($_))
+    $_ -ne 'skills.ps1' -and -not ($generatedLibraryPaths.Contains($_) -or $sourceRegex.IsMatch($_) -or $sourceTests.ContainsKey($_) -or $skillFocusedRegex.IsMatch($_) -or $skillsConfigRegex.IsMatch($_) -or $ruleRegex.IsMatch($_) -or $docsRegex.IsMatch($_))
  })
 if ($unknownChanged.Count -gt 0) {
     $result = Get-GateProfileResult 'full' 'unknown_path' $baseShaValue $headShaValue $false @() $changedCount $untrackedCount

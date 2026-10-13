@@ -321,6 +321,51 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.result.reason | Should -Be 'unknown_path'
     }
 
+    It 'treats the exact generated skills.lib counterpart as derived in local and CI mode' -ForEach @(
+        @{ Mode = 'local' }, @{ Mode = 'ci' }
+    ) {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        $source = Join-Path $repo 'src\Commands\Install.Presentation.ps1'
+        $generated = Join-Path $repo 'skills.lib\Commands.Install.Presentation.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $source -Parent) -Force | Out-Null
+        New-Item -ItemType Directory -Path (Split-Path $generated -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $source -Value '# mapped source change'
+        Set-Content -LiteralPath $generated -Value '# generated source output'
+        if ($Mode -eq 'ci') {
+            & git -C $repo add -- src/Commands/Install.Presentation.ps1 skills.lib/Commands.Install.Presentation.ps1
+            & git -C $repo commit -m 'source and generated output change' *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'source/generated fixture commit failed' }
+        }
+
+        $r = Invoke-Resolver $repo @{ BaseSha = $base; Mode = $Mode }
+
+        $r.result.profile | Should -Be 'focused'
+        $r.result.reason | Should -Be 'source_path'
+        @($r.result.focused_test_paths) | Should -Be @('tests/Unit/Core.Tests.ps1')
+        $r.result.requires_build | Should -BeTrue
+    }
+
+    It 'keeps generated-only or unmatched skills.lib output on the full path' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        $libDir = Join-Path $repo 'skills.lib'
+        New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $libDir 'Core.ps1') -Value '# generated-only change'
+        $generatedOnly = Invoke-Resolver $repo @{ BaseSha = $base }
+        $generatedOnly.result.profile | Should -Be 'full'
+        $generatedOnly.result.reason | Should -Be 'unknown_path'
+
+        Remove-Item -LiteralPath (Join-Path $libDir 'Core.ps1') -Force
+        $source = Join-Path $repo 'src\Commands\Install.Presentation.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $source -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $source -Value '# mapped source change'
+        Set-Content -LiteralPath (Join-Path $libDir 'Other.ps1') -Value '# unmatched generated output'
+        $mismatched = Invoke-Resolver $repo @{ BaseSha = $base }
+        $mismatched.result.profile | Should -Be 'full'
+        $mismatched.result.reason | Should -Be 'unknown_path'
+    }
+
     It 'adds changed unit test files to the focused set without duplicates' {
         $repo = New-ResolveGateFixture
         $base = (& git -C $repo rev-parse HEAD).Trim()

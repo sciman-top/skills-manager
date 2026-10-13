@@ -425,7 +425,7 @@ Describe 'Scoped single-skill projection' {
         }
     }
 
-    It 'refreshes the cold-discovery catalog after replacing a managed package' {
+    It 'refreshes dependent catalogs and projection state after replacing a managed package' {
         $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
         try {
             $Root = Join-Path $TestDrive 'single-skill-catalog-refresh'
@@ -440,13 +440,22 @@ Describe 'Scoped single-skill projection' {
             Set-ContentUtf8 (Join-Path $target 'stale.txt') 'old package'
             Mock LoadCfg { [pscustomobject]@{ skill_projection = [pscustomobject]@{ managed_source_path = 'agent' } } }
             Mock New-SkillDiscoveryCatalogTransaction { [pscustomobject]@{ file_snapshots = @() } }
-            Mock Sync-SkillDiscoveryCatalog { [pscustomobject]@{ enabled = $true; changed = $true; persisted = $true } }
+            Mock Sync-ConfiguredSkillProjection {
+                [pscustomobject]@{
+                    success = $true
+                    persisted = $true
+                    changed = $false
+                    capability_catalog_projection = [pscustomobject]@{ enabled = $true; changed = $true; persisted = $true }
+                }
+            }
 
             $result = 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock
 
             $result.catalog_changed | Should -BeTrue
+            $result.projection_refreshed | Should -BeTrue
+            $result.codex_config_changed | Should -BeFalse
             Should -Invoke New-SkillDiscoveryCatalogTransaction -Times 1 -Exactly
-            Should -Invoke Sync-SkillDiscoveryCatalog -Times 1 -Exactly
+            Should -Invoke Sync-ConfiguredSkillProjection -Times 1 -Exactly -ParameterFilter { $SkipLock }
             (Get-ContentUtf8 (Join-Path $target 'SKILL.md')) | Should -Match 'description: updated'
             @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
         }
@@ -455,7 +464,7 @@ Describe 'Scoped single-skill projection' {
         }
     }
 
-    It 'restores the skill and catalog snapshot when catalog refresh fails' {
+    It 'restores the skill and catalog snapshot when projection refresh fails' {
         $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
         try {
             $Root = Join-Path $TestDrive 'single-skill-catalog-rollback'
@@ -470,7 +479,7 @@ Describe 'Scoped single-skill projection' {
             Set-ContentUtf8 (Join-Path $target 'old.txt') 'original content'
             Mock LoadCfg { [pscustomobject]@{ skill_projection = [pscustomobject]@{ managed_source_path = 'agent' } } }
             Mock New-SkillDiscoveryCatalogTransaction { [pscustomobject]@{ file_snapshots = @([pscustomobject]@{ path = 'fixture-catalog.json' }) } }
-            Mock Sync-SkillDiscoveryCatalog { throw 'fixture catalog sync failure' }
+            Mock Sync-ConfiguredSkillProjection { throw 'fixture projection sync failure' }
             Mock Restore-SkillProjectionFileTransactionSnapshot {}
 
             { 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock } | Should -Throw '*原目标已恢复*'

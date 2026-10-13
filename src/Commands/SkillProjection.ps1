@@ -950,11 +950,11 @@ function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null, [s
     }
 }
 
-function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null, [string]$SkillProfile = '') {
+function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null, [string]$SkillProfile = '', [switch]$SkipLock) {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
     $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName codex -RequestedProfile $SkillProfile
     $projectionCfg = New-SkillProjectionHostConfig -ProjectionConfig $cfg.skill_projection -Selection $selection
-    return (Sync-CodexSkillProjection $projectionCfg $promotionContext)
+    return (Sync-CodexSkillProjection $projectionCfg $promotionContext -SkipLock:$SkipLock)
 }

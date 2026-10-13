@@ -119,6 +119,18 @@ unified_exec = true
         finally { $DryRun = $oldDryRun }
     }
 
+    It 'forwards the held projection lock through configured Codex synchronization' {
+        $promotion = [pscustomobject]@{ source_revision = 'fixture'; promotion_mode = 'verified_clean_commit' }
+        Mock Resolve-SkillProjectionSelection { [pscustomobject]@{ host = 'codex'; profile = 'core-lean' } }
+        Mock New-SkillProjectionHostConfig { [pscustomobject]@{} }
+        Mock Sync-CodexSkillProjection { [pscustomobject]@{ success = $true; persisted = $true } }
+
+        $result = Sync-ConfiguredSkillProjection ([pscustomobject]@{ skill_projection = [pscustomobject]@{} }) $promotion -SkipLock
+
+        $result.success | Should -BeTrue
+        Should -Invoke Sync-CodexSkillProjection -Times 1 -Exactly -ParameterFilter { $SkipLock -and $promotionContext.source_revision -eq 'fixture' }
+    }
+
     It 'projects the neutral catalog beside the portable capability router' {
         $oldDryRun = $DryRun
         try {
