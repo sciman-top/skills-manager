@@ -425,6 +425,66 @@ Describe 'Scoped single-skill projection' {
         }
     }
 
+    It 'refreshes the cold-discovery catalog after replacing a managed package' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
+        try {
+            $Root = Join-Path $TestDrive 'single-skill-catalog-refresh'
+            $AgentDir = Join-Path $Root 'agent'
+            $OverridesDir = Join-Path $Root 'overrides'
+            $LogPath = Join-Path $Root 'build.log'
+            $DryRun = $false
+            $source = Join-Path $OverridesDir 'custom\ai-coding-workflow'
+            $target = Join-Path $AgentDir 'ai-coding-workflow'
+            New-Item -ItemType Directory -Path $source, $target -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') (@('---', 'name: ai-coding-workflow', 'description: updated', '---', '') -join [Environment]::NewLine)
+            Set-ContentUtf8 (Join-Path $target 'stale.txt') 'old package'
+            Mock LoadCfg { [pscustomobject]@{ skill_projection = [pscustomobject]@{ managed_source_path = 'agent' } } }
+            Mock New-SkillDiscoveryCatalogTransaction { [pscustomobject]@{ file_snapshots = @() } }
+            Mock Sync-SkillDiscoveryCatalog { [pscustomobject]@{ enabled = $true; changed = $true; persisted = $true } }
+
+            $result = 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock
+
+            $result.catalog_changed | Should -BeTrue
+            Should -Invoke New-SkillDiscoveryCatalogTransaction -Times 1 -Exactly
+            Should -Invoke Sync-SkillDiscoveryCatalog -Times 1 -Exactly
+            (Get-ContentUtf8 (Join-Path $target 'SKILL.md')) | Should -Match 'description: updated'
+            @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+        finally {
+            $Root = $oldRoot; $AgentDir = $oldAgent; $OverridesDir = $oldOverrides; $DryRun = $oldDryRun; $LogPath = $oldLogPath
+        }
+    }
+
+    It 'restores the skill and catalog snapshot when catalog refresh fails' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
+        try {
+            $Root = Join-Path $TestDrive 'single-skill-catalog-rollback'
+            $AgentDir = Join-Path $Root 'agent'
+            $OverridesDir = Join-Path $Root 'overrides'
+            $LogPath = Join-Path $Root 'build.log'
+            $DryRun = $false
+            $source = Join-Path $OverridesDir 'custom\ai-coding-workflow'
+            $target = Join-Path $AgentDir 'ai-coding-workflow'
+            New-Item -ItemType Directory -Path $source, $target -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') (@('---', 'name: ai-coding-workflow', 'description: candidate', '---', '') -join [Environment]::NewLine)
+            Set-ContentUtf8 (Join-Path $target 'old.txt') 'original content'
+            Mock LoadCfg { [pscustomobject]@{ skill_projection = [pscustomobject]@{ managed_source_path = 'agent' } } }
+            Mock New-SkillDiscoveryCatalogTransaction { [pscustomobject]@{ file_snapshots = @([pscustomobject]@{ path = 'fixture-catalog.json' }) } }
+            Mock Sync-SkillDiscoveryCatalog { throw 'fixture catalog sync failure' }
+            Mock Restore-SkillProjectionFileTransactionSnapshot {}
+
+            { 更新单技能 -SkillName 'ai-coding-workflow' -SkipLock } | Should -Throw '*原目标已恢复*'
+
+            (Get-ContentUtf8 (Join-Path $target 'old.txt')) | Should -Be 'original content'
+            Test-Path -LiteralPath (Join-Path $target 'SKILL.md') | Should -BeFalse
+            Should -Invoke Restore-SkillProjectionFileTransactionSnapshot -Times 1 -Exactly
+            @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+        finally {
+            $Root = $oldRoot; $AgentDir = $oldAgent; $OverridesDir = $oldOverrides; $DryRun = $oldDryRun; $LogPath = $oldLogPath
+        }
+    }
+
     It 'restores the previous skill when candidate promotion fails' {
         $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
         try {

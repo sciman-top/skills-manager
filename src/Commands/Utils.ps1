@@ -182,7 +182,7 @@ Skills 管理器（中文菜单）
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
-  - `构建生效 -OnlySkill <name>` 只更新唯一匹配的 override 技能目录；已链接到该目录的宿主会看到同一文件，不会重建其他技能或宿主配置
+  - `构建生效 -OnlySkill <name>` 只更新唯一匹配的 override 技能目录及 cold-discovery catalog 哈希镜像；已链接到该目录的宿主会看到同一文件，不会重建其他技能目录或宿主配置
 
 常用命令：
   .\skills.ps1 ai-coding [--template implementation|review|failure|handoff|checklist] [--json]
