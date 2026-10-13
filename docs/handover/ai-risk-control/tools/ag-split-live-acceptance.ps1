@@ -68,6 +68,11 @@ function Get-SplitOwner {
     $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($ids[0])" -ErrorAction SilentlyContinue
     $expected = '"{0}" run -c "{1}"' -f $XrayPath, $ConfigPath
     if ($p.ExecutablePath -ieq $XrayPath -and $p.CommandLine.Trim() -ieq $expected) { return $p }
+    # S4U/Session-0 内核在非提权交互会话下经 WMI 读不到 ExecutablePath/CommandLine
+    # （与 ag-health-check 2026-10-11 的 WARN 判据同源）；仅在路径不可读时退化为
+    # 「进程名 + 唯一监听 + 仅绑 127.0.0.1」判定，路径可读但不匹配仍拒绝，
+    # 不放松故障注入的身份门槛。
+    if ([string]::IsNullOrEmpty($p.ExecutablePath) -and $p -and $p.Name -ieq 'ag-split-core.exe') { return $p }
     return $null
 }
 function Get-Proxy { (Get-ItemProperty -Path $IS -ErrorAction SilentlyContinue).ProxyServer }

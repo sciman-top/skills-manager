@@ -90,7 +90,13 @@ function Test-SplitListener {
             return $false
         }
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$($ownerIds[0])" -ErrorAction Stop
-        return ($owner.ExecutablePath -and [IO.Path]::GetFullPath($owner.ExecutablePath) -ieq [IO.Path]::GetFullPath($ExpectedPath))
+        if (-not [string]::IsNullOrEmpty($owner.ExecutablePath)) {
+            return ([IO.Path]::GetFullPath($owner.ExecutablePath) -ieq [IO.Path]::GetFullPath($ExpectedPath))
+        }
+        # S4U/Session-0 内核在非提权交互会话下经 WMI 读不到 ExecutablePath（与
+        # ag-health-check 2026-10-11 判据同源）；路径不可读时以「进程名 + 唯一监听 +
+        # 仅绑 127.0.0.1」（上方已查）代替；lnk 赛跑等外来内核 Name 不符仍返回 false。
+        return ($owner.Name -ieq [IO.Path]::GetFileName($ExpectedPath))
     } catch { return $false }
 }
 
