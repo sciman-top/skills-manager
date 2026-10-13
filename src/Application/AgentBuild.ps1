@@ -544,7 +544,7 @@ function 更新单技能(
     }
 
     $projectionCfg = if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
-    $refreshCatalog = $null -ne $projectionCfg -and
+    $refreshProjection = $null -ne $projectionCfg -and
         $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
         -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)
 
@@ -557,11 +557,11 @@ function 更新单技能(
     Need ($null -ne $txnParent -and -not (Test-AncestorChainHasReparse $txnParent.FullName)) ("单技能事务父级链不允许存在 reparse point：{0}" -f $txnRoot)
 
     if ($DryRun) {
-        Write-Host ("DRYRUN：将只更新 {0} -> {1}（promotion={2}）" -f $sourceDir, $targetDir, [string]$promotion.promotion_mode)
-        return [pscustomobject]@{ updated = $false; dry_run = $true; skill_name = $canonicalName; target_path = $targetDir; promotion_mode = [string]$promotion.promotion_mode }
+        Write-Host ("DRYRUN：将更新 {0} -> {1}，并刷新发现 catalog 与当前 Codex profile 的受管技能投影（promotion={2}）" -f $sourceDir, $targetDir, [string]$promotion.promotion_mode)
+        return [pscustomobject]@{ updated = $false; dry_run = $true; skill_name = $canonicalName; target_path = $targetDir; projection_refresh_required = [bool]$refreshProjection; promotion_mode = [string]$promotion.promotion_mode }
     }
 
-    $catalogTransaction = if ($refreshCatalog) { New-SkillDiscoveryCatalogTransaction $projectionCfg } else { $null }
+    $catalogTransaction = if ($refreshProjection) { New-SkillDiscoveryCatalogTransaction $projectionCfg } else { $null }
     $targetBefore = if ($null -ne $targetItem) { Get-DirectoryFingerprint $targetDir } else { 'missing' }
     EnsureDir $txnRoot
     $txnPath = Join-Path $txnRoot ("single-skill-{0}" -f [Guid]::NewGuid().ToString('N'))
@@ -572,6 +572,7 @@ function 更新单技能(
     $candidateMoved = $false
     $backupFingerprint = ''
     $catalogProjection = $null
+    $projectionSync = $null
 
     try {
         $txnItem = Get-ExistingFileSystemItem $txnPath
@@ -608,8 +609,10 @@ function 更新单技能(
         $candidateMoved = $true
         $candidateFingerprintAfterMove = Get-DirectoryFingerprint $targetDir
         Need ([string]::Equals($candidateFingerprintAfterMove, $candidateFingerprint, [StringComparison]::OrdinalIgnoreCase)) ("单技能投影读回校验失败：{0}" -f $targetDir)
-        if ($refreshCatalog) {
-            $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg $catalogTransaction -SkipLock
+        if ($refreshProjection) {
+            $projectionSync = Sync-ConfiguredSkillProjection $cfg $promotion -SkipLock
+            Need ($null -ne $projectionSync -and [bool]$projectionSync.success -and [bool]$projectionSync.persisted) '单技能更新后的 Codex 技能投影未能持久化'
+            $catalogProjection = $projectionSync.capability_catalog_projection
             Need ($null -ne $catalogProjection -and [bool]$catalogProjection.enabled -and [bool]$catalogProjection.persisted) '单技能更新后的 cold-discovery catalog 未能持久化'
         }
     }
@@ -658,6 +661,8 @@ function 更新单技能(
         source_hash = (Get-DirectoryFingerprint $sourceDir)
         target_hash = (Get-DirectoryFingerprint $targetDir)
         catalog_changed = if ($null -ne $catalogProjection) { [bool]$catalogProjection.changed } else { $false }
+        projection_refreshed = if ($null -ne $projectionSync) { [bool]$projectionSync.persisted } else { $false }
+        codex_config_changed = if ($null -ne $projectionSync) { [bool]$projectionSync.changed } else { $false }
         promotion_mode = [string]$promotion.promotion_mode
         cleanup_warning = $cleanupWarning
     }
