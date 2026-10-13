@@ -84,6 +84,27 @@ Describe 'Get-AiRiskControlAsset' {
 }
 
 Describe 'AI risk policy helpers' {
+    It 'keeps a selected ban scenario distinct from a confirmed account ban' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-ban'
+        $result.basis | Should -Match 'user_selected_scenario'
+        $result.diagnosis | Should -Match 'service disabled.*一般 403.*权限、资格与认证'
+        $result.immediate | Should -Contain '使用当前 Google 官方支持或反馈入口'
+    }
+
+    It 'separates Antigravity, Gemini API, and Gemini CLI quota diagnosis without retrying' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-rate-limit'
+        $result.diagnosis | Should -Match 'Antigravity 订阅五小时/周额度.*Gemini API project/model/spend cap.*Gemini CLI 认证额度'
+        $result.immediate -join ';' | Should -Match '停止当前请求的重试.*五小时刷新不保证周额度恢复'
+        $result.immediate -join ';' | Should -Match '不自动换模型重放'
+    }
+
+    It 'triages output quality using visible model, output, and tool evidence' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-degradation'
+        $result.diagnosis | Should -Match '可见模型.*上下文.*思考/采样参数.*输出截断.*工具失败'
+        $result.immediate -join ';' | Should -Match 'finishReason/usage（若入口提供）.*具体遗漏'
+        $result.immediate -join ';' | Should -Match '遇到 429、认证或明确服务拒绝时停止当前任务'
+    }
+
     It 'does not invent a cooldown without a server hint' {
         $result = Get-AiRiskControlCooldown
         $result.state | Should -Be 'unknown'
