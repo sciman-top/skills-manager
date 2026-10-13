@@ -9,7 +9,7 @@ description: 只读分诊 Antigravity/Gemini 的账号拒绝、429 配额限流�
 
 先区分账号/服务资格、认证权限、配额、网络和上下文问题。错误码、代理可达、出口分类或社区案例均不能单独证明封号原因、模型降级或账号安全。
 
-[Antigravity 官方条款](https://antigravity.google/terms)（2026-10-08 读取）禁止第三方软件通过 Antigravity OAuth 访问服务，并说明可能暂停或终止 Antigravity/Gemini CLI 账号。该措辞不是对其他账号状态的保证，也不能推出统一的二振制、自动解封期限或重试一定造成封禁。
+[Antigravity 官方条款](https://antigravity.google/terms)（2026-10-13 核对）禁止第三方软件通过 Antigravity OAuth 访问服务，并说明可能暂停或终止 Antigravity/Gemini CLI 账号。该措辞不是对其他账号状态的保证，也不能推出统一的二振制、自动解封期限或重试一定造成封禁。
 
 只使用用户已授权的官方客户端和认证路径；不提取 OAuth/token、不转售订阅配额、不轮换账号、不伪造设备或请求指纹。保持低并发，避免失败后的连续重试。
 
@@ -45,6 +45,6 @@ Gemini API 的 project/model 配额、Gemini CLI 的认证额度和 Antigravity 
 
 ## 参考与停止
 
-`references/official-sources.md` 提供来源定位；`network-and-proxy.md`、`quota-and-limits.md`、`degradation.md`、`prevention-ops.md` 提供按需检查方法。参考中的社区案例、历史恢复机制、固定额度和因果推测必须重新核验，不能覆盖本入口的分诊边界或用于规避限制。
+`references/official-sources.md` 提供来源定位；`ban-mechanics.md`、`quota-and-limits.md`、`degradation.md`、`prevention-ops.md` 提供按需检查方法。参考中的社区案例、历史恢复机制、固定额度和因果推测必须重新核验，不能覆盖本入口的分诊边界或用于规避限制。
 
 报告实际检查、脱敏证据、未证明层级和恢复条件。达到当前检查目标后停止；需要真人登录、服务方处理或新宿主会话时保留明确阻塞，不伪造 live acceptance。

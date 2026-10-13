@@ -42,9 +42,11 @@ function Get-AiRiskControlPolicy {
         purpose = '降低封号、限流和误判降智风险；不绕过服务方限制'
         enforcement = 'advisory_only; this command does not intercept host requests or enforce client concurrency'
         official_sources = @(
-            [pscustomobject]@{ url='https://antigravity.google/terms'; verified_on='2026-10-04'; scope='Antigravity OAuth third-party access restriction' }
+            [pscustomobject]@{ url='https://antigravity.google/terms'; verified_on='2026-10-13'; scope='Antigravity OAuth third-party access restriction; enterprise terms are separate' }
             [pscustomobject]@{ url='https://www.workbuddy.ai/document/term'; verified_on='2026-10-04'; scope='International service protection and reasonable use' }
-            [pscustomobject]@{ url='https://ai.google.dev/gemini-api/docs/rate-limits'; verified_on='2026-10-04'; scope='Gemini API project/model quotas; not Antigravity subscription quotas' }
+            [pscustomobject]@{ url='https://ai.google.dev/gemini-api/docs/rate-limits'; verified_on='2026-10-13'; scope='Gemini API project/model and applicable spend quotas; not Antigravity subscription quotas' }
+            [pscustomobject]@{ url='https://antigravity.google/docs/plans'; verified_on='2026-10-13'; scope='Antigravity baseline refresh, weekly limits and AI credit overages' }
+            [pscustomobject]@{ url='https://ai.google.dev/gemini-api/docs/troubleshooting'; verified_on='2026-10-13'; scope='Gemini API bounded transient retries and model parameter diagnostics; not host retry authorization' }
         )
         principles = @(
             '保持官方客户端、官方认证和单一稳定身份；不做 OAuth 反代、Token 提取、多账号轮换或指纹伪造。'
@@ -80,9 +82,9 @@ function Get-AiRiskControlPolicy {
 
 function Get-AiRiskControlIncidentPlan([string]$Event) {
     $plans = @{
-        'antigravity-ban' = [ordered]@{ platform='antigravity'; category='account_safety'; severity='critical'; diagnosis='403 / service disabled / ToS 违规提示优先按账号或服务资格风控处理'; immediate=@('立即停止第三方 OAuth、网关和复用订阅的工具', '保存脱敏错误、时间、客户端版本和请求上下文', '使用 Google 官方申诉或再认证渠道'); forbidden=@('换号继续同一套工具链', '反复重试或重启', '伪造设备或请求指纹') }
-        'antigravity-rate-limit' = [ordered]@{ platform='antigravity'; category='quota_rate_limit'; severity='high'; diagnosis='429 RESOURCE_EXHAUSTED / Quota exceeded 属配额或频率窗口，不等同封号'; immediate=@('读取服务端给出的 reset 时间或配额面板', '暂停请求并把长任务切段', '仅使用官方允许的模型或 credits 方案'); forbidden=@('绕过配额', '并发压测', '用多账号轮换掩盖消耗') }
-        'antigravity-degradation' = [ordered]@{ platform='antigravity'; category='degradation_triage'; severity='medium'; diagnosis='先比较上下文长度、实际模型、配额状态和高峰调度；静默降智没有硬证据时不作结论'; immediate=@('新开短会话复现', '记录模型标识、上下文规模和输出差异', '等待配额或调度窗口后低频复测'); forbidden=@('把主观质量变化当作封号证据', '用降级链或第三方路由绕过官方选择') }
+        'antigravity-ban' = [ordered]@{ platform='antigravity'; category='account_safety'; severity='critical'; diagnosis='明确 service disabled / ToS 违规提示才支持服务封禁判断；单条 401/403 需排除认证、权限、地区/资格和端点错误'; immediate=@('暂停被拒服务的请求；发现第三方 OAuth 或订阅复用时停止该接入', '保存脱敏响应、时间、客户端版本和请求上下文，核对认证与服务资格', '明确封禁后使用当前 Google 官方反馈或申诉渠道，不承诺自动解封'); forbidden=@('换号继续同一套工具链', '反复重试或重启', '伪造设备或请求指纹') }
+        'antigravity-rate-limit' = [ordered]@{ platform='antigravity'; category='quota_rate_limit'; severity='high'; diagnosis='429 RESOURCE_EXHAUSTED / Quota exceeded 不等同封号；分别核验 Antigravity 订阅五小时/周窗口与 Gemini API project/model/适用支出限制'; immediate=@('读取 Retry-After/reset 和对应服务官方配额面板；没有提示不自造恢复时间', '停止当前任务的重试，把后续长任务切段；五小时刷新不保证周限额恢复', '仅在当前授权与官方支持范围内选择后续模型或 credits，不自动换模型重放'); forbidden=@('绕过配额', '并发压测', '用多账号轮换掩盖消耗') }
+        'antigravity-degradation' = [ordered]@{ platform='antigravity'; category='degradation_triage'; severity='medium'; diagnosis='固定任务与实际模型，检查上下文、思考/采样参数、截断、安全反馈和工具循环；没有硬证据不认定静默降智或高峰自动换模型'; immediate=@('新开短会话，用相同材料、提示词和验收标准作少量低频对照', '记录可见模型标识、上下文规模、finishReason/usage（若入口提供）和具体错误', '复现后核对官方版本/服务状态并反馈；遇到 429/认证/风控错误停止当前任务'); forbidden=@('把主观质量变化当作封号证据', '用降级链或第三方路由绕过官方选择') }
         'workbuddy-account-risk' = [ordered]@{ platform='workbuddy'; category='account_safety'; severity='critical'; diagnosis='403 / 11140 / request illegal 是拒绝信号；单条错误不能确认账号封禁，需排除认证、权限、内容和连接器错误'; immediate=@('停止重试和频繁重启', '保存 Trace ID、脱敏日志和账号时间线，区分模型请求与 MCP 认证', '通过 WorkBuddy 官方反馈渠道核实拒绝原因'); forbidden=@('伪造 device-id', '删除凭据或修改数据库绕过风控', '用订阅反代、积分中转或换号规避限制') }
         'workbuddy-rate-limit' = [ordered]@{ platform='workbuddy'; category='quota_rate_limit'; severity='high'; diagnosis='429 / 6003 / 6004 属频率或额度限制，与 403/11140 处置路径不同'; immediate=@('读取 Retry-After 或 reset 时间', '等待窗口并降低并发', '按官方建议切换模型或切段任务'); forbidden=@('连续重试风暴', '自建中转绕过限制', '切换账号规避窗口') }
         'workbuddy-degradation' = [ordered]@{ platform='workbuddy'; category='degradation_triage'; severity='medium'; diagnosis='先排查上下文、模型调度和额度；没有官方证据时不宣称存在静默风控降智'; immediate=@('新开短会话对照', '固定模型和任务输入后再测', '记录服务时间、模型和响应质量'); forbidden=@('用自定义 API 改道', '把偶发质量变化归因于账号处罚') }

@@ -1,54 +1,36 @@
-# 官方来源与社区实证
+# 来源、可信度与时效
 
-## 官方页面（权威，优先引用）
+## 本轮核对的官方来源（2026-10-13）
 
-| 主题 | 链接 |
-|---|---|
-| Additional Terms of Service（**红线第 6 条**） | `https://antigravity.google/terms` |
-| FAQ（第三方工具禁令、地区清单、年龄、数据收集） | `https://antigravity.google/docs/faq/` |
-| Plans and AI credits（配额模型、Overages、不支持 BYOK） | `https://antigravity.google/docs/plans/` |
-| Models（各计划模型可用性） | `https://antigravity.google/docs/models` |
-| Enterprise（企业通道） | `https://antigravity.google/docs/enterprise` |
-| Support（社区入口） | `https://antigravity.google/support` |
-| Gemini API Rate limits（RPM/TPM/RPD、层级、消费型限流） | `https://ai.google.dev/gemini-api/docs/rate-limits` |
-| AI Studio 实时额度自检 | `https://aistudio.google.com/rate-limit` |
-| Google 服务条款（Universal Terms） | `https://policies.google.com/terms` |
-| 关联地区修改申请 | `https://policies.google.com/country-association-form` |
-| 年龄验证 | `https://myaccount.google.com/age-verification` |
-| 删除 Interactions 请求 | `antigravity-support@google.com` |
+| 来源 | 支持的结论 | 边界 |
+|---|---|---|
+| https://antigravity.google/terms | 个人条款第 6 条限制第三方访问 Antigravity，包括使用 Antigravity OAuth；可暂停或终止 Antigravity/Gemini CLI 账号 | 企业条款另行适用；不保证其他服务状态或恢复期限 |
+| https://antigravity.google/docs/plans | 五小时/周窗口、按 agent 工作量消耗、AI credits 超额设置 | 不证明静默换模型；实际额度与设置需现场读取 |
+| https://antigravity.google/pricing | 个人与正式企业/API 产品入口 | 不意味着任意第三方 OAuth 网关获授权 |
+| https://ai.google.dev/gemini-api/docs/rate-limits | project/model 配额、适用支出速率限制、太平洋午夜 RPD 重置 | 不能外推为 Antigravity 订阅额度；数值与资格会变化 |
+| https://ai.google.dev/gemini-api/docs/troubleshooting | 暂时性错误的有上限退避、避免客户端错误重试、采样与思考参数诊断 | 不替代本仓宿主停止合同，也不证明账号静默降智 |
 
-## 官方公告与条款修订
+当前账号 Gemini API 限额入口：https://aistudio.google.com/rate-limit。Antigravity 基线用量从官方 Settings 查看；两个面板不是同一额度。
 
-| 事件 | 出处 |
-|---|---|
-| 2026-03 解封公告：全面解封 + 再认证流程 + 二振制 | gemini-cli GitHub Discussions `#20632` |
-| 2026-09-07 条款修订：处罚边界 = Antigravity / Gemini CLI 账号，不连坐 Google 账号 | `antigravity.google/terms`（对照修订前版本） |
+## 按需重新核验的定位入口
 
-## 社区实证（可信度中等，需交叉验证）
+- Antigravity FAQ：https://antigravity.google/docs/faq/
+- Models：https://antigravity.google/docs/models
+- Enterprise：https://antigravity.google/docs/enterprise
+- 官方反馈社区：https://discuss.ai.google.dev/c/antigravity/64
+- Gemini API 服务状态：https://aistudio.google.com/status
+- Gemini API 可用地区：https://ai.google.dev/gemini-api/docs/available-regions
 
-| 主题 | 出处 |
-|---|---|
-| 封号实证：3 账号同封 / 40 账号全封 / 4 Pro 号封 3 / 相同 project 是封号模式 / `403 service disabled` 原文 | CLIProxyAPI GitHub Issue `#1637` |
-| 2026-08-30 新一轮封号 | Linux.do topic `2830699` |
-| 封号特征与挽救方案 | Linux.do topic `1618883` |
-| 解封流程与申诉邮箱 | Linux.do topic `1613359`；知乎「Antigravity账号被封的恢复方法」 |
-| 解封后续（二振制、条款未变） | 开发者博客（laplusda.com，2026-03-01） |
-| 封号事件深度分析（检测机制推断、影响面） | 路由之外（im.awsl.app，2026-02-20） |
-| 薅羊毛翻车始末（OAuth 漏洞原理） | blog.swifttools.eu（2026-02-24） |
-| Gemini 降智五类原因、排查表 | 知乎「Gemini为什么降智了？」（2026-07-28） |
-| Gemini 2026-05 配额制改革、Pro 默认降级 | 什么值得买（2026-07-10） |
-| 地区限制解决（**仅作现象参考，其解法多为代理，注意合规**） | 阿里云开发者社区、博客园、独立博客（2026） |
+这些定位链接不表示本轮已验证其中每项事实。登录、地区、年龄与企业资格以当前对应服务说明为准。历史公告、再认证表单或邮箱需重新核验，不给出统一解封或二振制承诺。
 
-## 社区点名的高危工具（**封号加速器**）
+## 已阅读的社区原帖
 
-`CLIProxyAPI`、`Zerogravity`、`OpenClaw`、`OpenCode`、`Claude Code（配合 Antigravity OAuth）`、`Antigravity Tools`、`Antigravity Rotator`、`Antigravity-Manager`、`gcl2api-plus`
+https://discuss.ai.google.dev/t/antigravity-usage-quota-is-not-making-any-sense/167934
 
-**识别特征**：宣称多账号池、自动轮换、配额自动降级链、无限使用、绕过限制、稳流、把 OAuth 接到 Claude Code/OpenCode。
+2026-05-30 起有用户报告 Pro 额度在未使用甚至关机期间下降。它支持保留用量时间线、排查显示/同步与后台消耗、提交反馈；不能证明所有异常来自处罚，不能给出发生概率，也不能证明换号、换出口有效。官方论坛内用户发帖仍属用户报告，不等于官方确认。
 
-## 时效与可信度声明
+其他博客、论坛或 GitHub 案例只作线索；没有可核验原文、日期、作者身份和复现证据时不作为当前政策或检测机制依据。工具风险按认证、端点和实际用途判断，不按产品名称推定。
 
-1. 本技能事实以 **2026-10-01** 时点为准。**Google 的模型版本、配额与条款变化很快**，使用前请回官网复核。
-2. 「检测机制」一节为**社区逆向推断**，非官方公开说明，**不要当成可依赖的规避依据**。
-3. 「降智」中除「配额驱动型」有官方文档依据外，其余多为用户主观描述。**不要把单次输出波动当成平台结论。**
-4. 本技能**刻意不提供任何绕过手段**。所有可执行建议都落在官方明示的合法路径内——这不是保守，而是唯一真正能降低封号概率的做法。
-5. 所有社区来源都可能含推广软文，**遇到「多账号轮换」「反代接入」类方案一律视为封号加速器**。
+## 证据等级
+
+官方条款支持合规边界；官方文档支持产品机制；当前客户端/控制台支持账号状态；脱敏日志支持具体故障；社区报告支持候选线索。低等级不能替代高等级，也不能推出未公开的请求指纹、账号关联、IP 安全或静默模型替换机制。

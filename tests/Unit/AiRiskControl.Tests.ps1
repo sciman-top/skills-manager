@@ -137,6 +137,27 @@ Describe 'Invoke-AiRiskControlReadOnlyCheck' {
 }
 
 Describe 'AI risk policy helpers' {
+    It 'keeps a selected ban scenario distinct from a confirmed account ban' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-ban'
+        $result.basis | Should -Match 'user_selected_scenario'
+        $result.diagnosis | Should -Match '401/403.*认证.*权限'
+        $result.immediate -join ';' | Should -Match '不承诺自动解封'
+    }
+
+    It 'separates subscription windows from API quotas without replaying the task' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-rate-limit'
+        $result.diagnosis | Should -Match '订阅.*Gemini API.*支出'
+        $result.immediate -join ';' | Should -Match '五小时刷新不保证周限额恢复'
+        $result.immediate -join ';' | Should -Match '不自动换模型重放'
+    }
+
+    It 'asks for output and tool evidence instead of asserting silent model replacement' {
+        $result = Get-AiRiskControlIncidentPlan 'antigravity-degradation'
+        $result.diagnosis | Should -Match '截断.*工具循环'
+        $result.immediate -join ';' | Should -Match 'finishReason/usage.*若入口提供'
+        $result.immediate -join ';' | Should -Match '停止当前任务'
+    }
+
     It 'does not invent a cooldown without a server hint' {
         $result = Get-AiRiskControlCooldown
         $result.state | Should -Be 'unknown'
