@@ -1,50 +1,49 @@
 ---
 name: antigravity-gemini-risk-triage
-description: 只读分诊 Antigravity/Gemini 的账号拒绝、429 配额限流、代理链路和输出质量变化；按官方入口核验，保留证据与停止条件，不轮换账号或绕过服务限制。
+description: 只读分诊 Antigravity/Gemini 的服务资格、账号拒绝、429 配额限流、网络和输出质量变化；按官方入口核验，不轮换账号或绕过服务限制。
 ---
 
-# Antigravity / Gemini 风控分诊
+# Antigravity / Gemini 风险分诊
 
 ## 证据与执行边界
 
-先区分账号/服务资格、认证权限、配额、网络和上下文问题。错误码、代理可达、出口分类或社区案例均不能单独证明封号原因、模型降级或账号安全。
+把服务资格/条款、认证权限、产品配额、网络连通性和输出质量分开。单条 403、429、代理可达、第三方 IP 分类和社区案例都不能单独证明账号被封、受到隐形降级或处于安全状态。Google 未公开可供用户核验的封号评分、检测阈值或通用恢复时间。
 
-[Antigravity 官方条款](https://antigravity.google/terms)（2026-10-13 核对）禁止第三方软件通过 Antigravity OAuth 访问服务，并说明可能暂停或终止 Antigravity/Gemini CLI 账号。该措辞不是对其他账号状态的保证，也不能推出统一的二振制、自动解封期限或重试一定造成封禁。
+按 2026-10-13 在线复核的 [Antigravity 条款](https://antigravity.google/terms) 与 [FAQ](https://antigravity.google/docs/faq/)：使用第三方软件、工具或服务访问 Antigravity 违反条款，可能导致 Antigravity 和/或 Gemini CLI 账号被暂停或终止。FAQ 说明 **agy -p** 可用于直接脚本和 CI；消费计划不支持把它包进第三方 agent/应用，也不支持自动轮换账号。第三方 coding agent 调用 Gemini 时，官方建议使用 Gemini Enterprise 或 Google AI Studio API key。
 
-只使用用户已授权的官方客户端和认证路径；不提取 OAuth/token、不转售订阅配额、不轮换账号、不伪造设备或请求指纹。保持低并发，避免失败后的连续重试。
+只用产品当前支持的客户端、认证、地区和额度路径；不提取/共享订阅 OAuth token，不把订阅额度做成网关，不自动切号，不伪造设备或请求指纹。没有任何本地工具能保证账户不被服务端限制或替用户解封。
 
-`antigravity-proxy` 的 DLL 注入属于社区网络改造。网络出口生效不证明 Google 批准这种改造；条款适用范围未获官方确认时明确保留合规不确定性。优先官方支持的网络配置；不得把它推荐为防封工具。
+网络探测只证明相应端点在该时刻的可达性。固定出口、hosting/proxy 标签和第三方 IP 数据库都不是 Google 公布的账号风险指标。DLL 注入等客户端改造不是防封措施；条款是否覆盖某项纯网络改造不作推断，默认不推荐。
 
-## 统一只读入口
+## 只读入口
 
-已知项目检出内优先调用：
+在已知项目检出内可运行：
 
-```powershell
+~~~powershell
 .\skills.ps1 ai-risk-control --platform antigravity --plan --json
-.\skills.ps1 ai-risk-control --platform antigravity --checks --json --out .\reports\ai-risk-control.json
 .\skills.ps1 ai-risk-control --platform antigravity --event antigravity-ban --json
 .\skills.ps1 ai-risk-control --platform antigravity --event antigravity-rate-limit --retry-after 60 --json
 .\skills.ps1 ai-risk-control --platform antigravity --event antigravity-degradation --json
-```
+~~~
 
-命令只输出检查/分诊，不拦截宿主请求或强制并发。找不到项目时只读取已知技能参考入口或用户给出的工具位置；不得遍历个人目录代替缺失输入。
+该命令只列出仓库控制并按需生成分诊计划；它不运行宿主自检脚本、不读取 Google 账号服务端状态、不拦截请求、不强制并发，也不改代理、客户端或凭据。找不到项目时，只读取已知技能入口或用户明确给出的路径；不得扫描个人目录代替缺失输入。
 
-## 分诊与恢复
+## 分诊
 
-| 观察 | 允许的结论与动作 |
+| 观察 | 结论与动作 |
 | --- | --- |
-| 明确 service disabled / ToS 提示 | 停止被拒服务的请求，保存脱敏响应、时间与版本，使用当前官方反馈/申诉渠道；不承诺恢复时间 |
-| 单条 403 或 permission denied | 检查认证、权限、地区/资格、端点与服务状态；不直接认定账号封禁 |
-| 429 / RESOURCE_EXHAUSTED | 读取 Retry-After/reset 和该服务官方配额界面，暂停到恢复窗口，缩小后续任务；不切号规避、不立即换模型重放 |
-| 连接失败、TLS/DNS/代理异常 | 核对系统代理、用户环境、DLL 上游和监听者；端点失败不等于风控 |
-| 输出质量下降 | 固定任务、材料、模型标识与上下文作低频对照；没有服务证据时不认定静默降智 |
+| 明确 service disabled / ToS 提示 | 停止被拒服务上的请求；保留脱敏错误、时间、请求 ID 和客户端版本；使用当前官方支持/反馈入口。不要承诺恢复时间。 |
+| 普通 403 / permission denied | 核对登录态、权限、地区/资格、API key 或 project、计费、端点和服务状态；单条 403 不等于账号封禁。 |
+| 429 / RESOURCE_EXHAUSTED | 确认发生在哪个产品/额度面，查看该产品官方用量页和服务端等待提示；停止重复提交，等待恢复窗口。不要切号规避或自动重放 agent 工作流。 |
+| 连接失败、TLS、DNS 或代理异常 | 只按网络连通性故障排查；成功探测不等于认证、模型请求或账号状态通过。 |
+| 输出质量变化 | 核对实际选择的模型、计划/额度、上下文和输入；做低负载、同条件对照。没有服务端证据时不认定“静默降智”。 |
 
-Gemini API 的 project/model 配额、Gemini CLI 的认证额度和 Antigravity 订阅额度分别核验；AI Studio API 配额页不能验收 Antigravity 订阅。当前额度与资格以官方客户端/控制台为准，不采用历史数值作为当前上限。
+分别核对 Antigravity 计划额度、Gemini API 的 project/model 限额和 Gemini CLI 的认证额度。AI Studio API 限额不能验收 Antigravity 订阅，也不能代表 Gemini CLI 的个人额度；具体限额会变化，以当前产品界面和官方文档为准。
 
-不开 TUN 的既有部署中，分别核对 Sign In 的系统代理、language server 的代理环境和 DLL 上游；不得从 curl 端点可达外推为实际进程、登录或模型调用已通过。机房/代理 IP 分类不是安全或封禁证明。修改前备份并绑定哈希，宿主重启、认证和账号数据操作必须另有明确授权。
+遇到 429 时，用户界面使用官方提示和恢复时间；API 客户端遵守 Retry-After，只对可安全重试的瞬时错误做有上限的指数退避和随机抖动。不要叠加多层重试，不要自动重放有副作用的 agent 任务。403、认证失败、条款拒绝和无效请求应先调查原因，不盲目重试。
 
 ## 参考与停止
 
-`references/official-sources.md` 提供来源定位；`ban-mechanics.md`、`quota-and-limits.md`、`degradation.md`、`prevention-ops.md` 提供按需检查方法。参考中的社区案例、历史恢复机制、固定额度和因果推测必须重新核验，不能覆盖本入口的分诊边界或用于规避限制。
+`references/official-sources.md` 汇总官方入口及有限的社区案例；`references/ban-mechanics.md`、`quota-and-limits.md`、`prevention-ops.md`、`degradation.md` 分别说明服务资格、额度、日常控制和质量对照。
 
-报告实际检查、脱敏证据、未证明层级和恢复条件。达到当前检查目标后停止；需要真人登录、服务方处理或新宿主会话时保留明确阻塞，不伪造 live acceptance。
+报告只写实际检查的产品面、脱敏证据、未证明层级和恢复条件。需要用户登录、Google 支持处理或新的宿主会话时，明确保留该边界；达到当前检查目标后停止。

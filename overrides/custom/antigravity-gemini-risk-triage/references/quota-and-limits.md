@@ -1,57 +1,42 @@
-# 配额与限流
+# Antigravity 与 Gemini 的额度、429 和退避
 
-2026-10-13 核对 Antigravity Plans 与 Gemini API Rate limits。以下是文档口径，实际账号额度、资格和 reset 以对应官方客户端/控制台为准，不承诺固定恢复时间。
+先确认调用发生在哪个产品。Antigravity 订阅、Gemini API、Gemini CLI/Code Assist 的额度合同不同，不能把一个产品的配额数字搬到另一个产品。
 
-## Antigravity 订阅
+## Antigravity 计划额度
 
-来源：https://antigravity.google/docs/plans
+[官方 Plans 页面](https://antigravity.google/docs/plans/)（2026-10-13 复核）当前概述：
 
-| 计划 | 基线刷新 | 周限额 |
-|---|---|---|
-| 非 Pro/Ultra | 每周 | 有 |
-| Pro | 每五小时，直至达到周限额 | 有 |
-| Ultra | 每五小时 | 有，额度更高 |
+- Google AI Ultra：额度最高，每 5 小时刷新，并有更高的周限额。
+- Google AI Pro：较高额度，每 5 小时刷新，直到触及周限额。
+- 其他计划：基础额度按周刷新。
+- 官方说明额度与 agent 实际完成的工作量相关，复杂任务可能消耗更多；容量与服务稳定性也可能导致规则调整。
+- Pro/Ultra 可用购买的 AI credits 做超额用量，AI Credit Overages 可设置为 Never 或 Always；不希望自动产生超额消费时可选择 Never。
 
-额度与 agent 实际工作量相关，复杂任务通常消耗更多。请求次数少不能排除高消耗，也不能排除额度显示/同步异常。五小时刷新不保证周额度恢复；不要把额度耗尽等同封禁或自动换模型。
+以上仅是页面的概括，不是固定请求数、账号安全等级或保证值。以当前 plan、模型选择器、Settings/Usage 和官方页面为准。AI Studio 的 API 限额不能查看 Antigravity 订阅余量。Antigravity 当前也不支持通过 BYOK 或自定义 endpoint 提高额度。
 
-Pro/Ultra 可用官方 AI credits 承担超额使用。AI Credit Overages 的 Never 表示不自动使用，Always 表示基线耗尽时使用 credits、刷新后切回。先查看实际设置再建议；不假定默认值或固定中文 UI 路径。Settings 可查看基线使用情况。
+## Gemini API（Google AI Studio）
 
-个人 Plans 当前不支持通过 BYOK/BYOE 增加速率限制；正式企业 API 入口另按企业文档核验。两者不能混为同一产品设置。
+[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits) 说明：
 
-## Gemini API
+- RPM、TPM、RPD 等限额随 project、模型、使用层级和账号状态变化；同一 project 内的多个 API key 不会增加 project 配额。
+- RPD 按太平洋时间午夜重置；模型和实验/预览状态可能有不同限制。
+- 当前 project/model 限额以 [AI Studio 用量页](https://aistudio.google.com/rate-limit) 和 API 返回为准。
+- 429 RESOURCE_EXHAUSTED 可能来自某个速率窗口、project spend cap 或其他限额；先查看错误细节、用量页和计费状态。不要把它直接当作封号，也不要用切账号或新建 project 掩盖消耗。
 
-来源：https://ai.google.dev/gemini-api/docs/rate-limits
+## Gemini CLI / Code Assist
 
-- 配额按 project 应用，不按 API Key；同项目新建或轮换 Key 不能提高限额。
-- RPM（每分钟请求）、输入 TPM、RPD（日请求）等任一维度超限都可能返回 429；部分模型还有 IPM、TPD 等维度。
-- RPD 文档重置口径是太平洋时间午夜，北京时间通常为夏令时 15:00、标准时 16:00；实际以服务端提示为准，不套用到 Antigravity。
-- 预览/实验模型可能有更严格限制。官方公布限额不保证始终获得相同容量。
-- 部分账号还适用按滚动十分钟窗口评估的支出速率限制，是否适用取决于结算历史、层级及账号状态。
-- 在 https://aistudio.google.com/rate-limit 查看当前有效限额；升级、支出和提额条件以当前官方页为准，不把历史数字固化为恢复方案。
+Gemini CLI 的认证额度与 Gemini API key 配额分开；官方 [Gemini Code Assist quota 页面](https://developers.google.com/gemini-code-assist/resources/quotas) 说明 CLI/agent mode 的请求计量和限制。以所用认证方式、计划、当前版本和官方页面为准，不套用 AI Studio 的 RPM/TPM/RPD 数字。
 
-正式 API 的实际调用方应同时控制请求频率、输入 token、并发与费用；串行并不保证 TPM 合规。非即时任务可评估官方 Batch API，但需核对其独立配额和计费。
+## 429 的处理
 
-## 重试与停止
+- **Antigravity 或交互式 CLI**：停止重复提交，查看应用显示的当前模型、额度及刷新信息，等待服务指示的窗口。额度恢复前不要切账号继续相同自动化任务或脚本循环请求。
+- **Gemini API 客户端**：遵守响应中的 Retry-After/reset 提示；仅在错误可重试、操作可安全重放时，使用有次数/总时长上限的指数退避和随机抖动。避免在 SDK 和应用两层各自无限重试。认证失败、权限错误、无效请求或明确条款拒绝应先修正原因，不重试。
+- **降低合法用量**：缩短不必要的上下文和输出、拆分大任务、减少不必要并发；若所用产品支持低成本模型，可根据任务选择。不要压力测试额度。
 
-来源：https://ai.google.dev/gemini-api/docs/troubleshooting
+Google 的通用客户端指南建议对瞬时错误采用有界指数退避和抖动；Gemini API 文档对 spend-based 429 建议等待、降低昂贵请求速率，必要时申请限额提升。产品 UI 应按其自身提示操作，不自行编写重放循环。
 
-官方 API 对暂时性错误建议有上限的指数退避与抖动；400/402/403 等客户端错误不应重复重试。SDK、网关和调用方可能各自重试，须核对实际配置，避免叠加放大。
-
-本仓宿主合同要求 provider 的 429/quota/auth/risk/billing 错误停止当前任务，等待 operator 或 fresh parent selection；官方 API 建议不自动授予宿主重试权限。不热切模型、不换号、不重复 prompt。仅在另有明确调用方合同允许时实现 API 暂时性错误重试，并遵守服务端等待提示、次数与总耗时上限。
-
-收到 429 先区分分钟窗口、日额度、订阅周限额、支出速率或结算问题。按 Retry-After/reset 复查；缺少提示则恢复时间未知，到期也不保证请求被接受。日额度、结算限制不靠秒级重试解决。
-
-## Gemini CLI 认证额度
-
-Gemini CLI OAuth、AI Studio API、Vertex AI/企业认证分别核验，不套用订阅额度或固定免费层数字。发现环境变量或认证冲突时先读取当前 CLI 官方认证说明及本机 help，再确认实际选中路径；不一律删除 GOOGLE_CLOUD_PROJECT，不因升层而无依据重新生成密钥。
-
-## 错误对照
-
-| 观察 | 结论与动作 |
+| 错误 | 分诊 |
 |---|---|
-| 429 RESOURCE_EXHAUSTED | 限流/配额/适用支出限制；查对应面板和等待提示，停止当前任务重试 |
-| 401/403，无明确封禁说明 | 认证/权限/资格/端点等原因待查，不认定封禁 |
-| 明确 ToS service disabled | 服务受到限制；暂停相关调用并使用官方反馈/申诉，不承诺自动恢复 |
-| 503/超时 | 可能是暂时性容量或链路问题；按当前调用方授权处理，不自动归类账号风险 |
-
-重试风暴增加负载、消耗和重复副作用风险；没有证据支持“反复重试必然升级成封号”。
+| 429 / RESOURCE_EXHAUSTED | 查对应产品/model/project 的实际 quota、billing、reset 或容量信息；不是封号结论。 |
+| 403 / PERMISSION_DENIED | 查认证、权限、资格、地区、project、计费和服务状态；没有明确 service-disabled/ToS 文本时不归为封号。 |
+| 5xx / 临时连接失败 | 确认服务状态与网络；程序端只按有界、幂等的重试策略处理。

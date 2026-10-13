@@ -1,36 +1,27 @@
-# 来源、可信度与时效
+# 官方来源与社区反馈
 
-## 本轮核对的官方来源（2026-10-13）
+本页于 **2026-10-13** 在线复核。Google 会调整产品、条款、模型和额度；每次分诊都应重看对应产品页面。官方政策优先于社区帖和旧的本地缓存。
 
-| 来源 | 支持的结论 | 边界 |
+## 官方资料
+
+| 主题 | 来源 | 可支持的结论 |
 |---|---|---|
-| https://antigravity.google/terms | 个人条款第 6 条限制第三方访问 Antigravity，包括使用 Antigravity OAuth；可暂停或终止 Antigravity/Gemini CLI 账号 | 企业条款另行适用；不保证其他服务状态或恢复期限 |
-| https://antigravity.google/docs/plans | 五小时/周窗口、按 agent 工作量消耗、AI credits 超额设置 | 不证明静默换模型；实际额度与设置需现场读取 |
-| https://antigravity.google/pricing | 个人与正式企业/API 产品入口 | 不意味着任意第三方 OAuth 网关获授权 |
-| https://ai.google.dev/gemini-api/docs/rate-limits | project/model 配额、适用支出速率限制、太平洋午夜 RPD 重置 | 不能外推为 Antigravity 订阅额度；数值与资格会变化 |
-| https://ai.google.dev/gemini-api/docs/troubleshooting | 暂时性错误的有上限退避、避免客户端错误重试、采样与思考参数诊断 | 不替代本仓宿主停止合同，也不证明账号静默降智 |
+| Antigravity Additional Terms | https://antigravity.google/terms | 第 6 节禁止使用第三方软件、工具或服务访问服务；可能暂停或终止 Antigravity 和/或 Gemini CLI 账号。 |
+| Antigravity FAQ | https://antigravity.google/docs/faq/ | 当前登录资格、支持地区、第三方 agent 边界、agy -p 直接脚本/CI 和自动轮换账号的边界；外部 agent 使用 Gemini 的官方替代路径。 |
+| Antigravity Plans and AI credits | https://antigravity.google/docs/plans/ | 各计划额度刷新方式、agent 工作量与额度的关系、credits 超额设置及限制可能变化。 |
+| Antigravity Models | https://antigravity.google/docs/models | 当前各计划模型可用性；不证明服务端是否对某次请求静默换模。 |
+| Gemini API rate limits | https://ai.google.dev/gemini-api/docs/rate-limits | Gemini API project/model 限额、使用层级和 429；这些不是 Antigravity 订阅或 Gemini CLI 的额度。 |
+| AI Studio rate limits | https://aistudio.google.com/rate-limit | 当前 Gemini API project 的用量视图。 |
+| Gemini CLI / Code Assist quotas | https://developers.google.com/gemini-code-assist/resources/quotas | Gemini CLI 与 Code Assist 的相应个人/产品额度；不要套用 AI Studio API 数值。 |
+| API retry guidance | https://cloud.google.com/storage/docs/retry-strategy | Google Cloud 通用客户端建议：分类可重试错误、指数退避加抖动、限制重试并避免叠加；不是 Antigravity 私有重试合同。 |
+| Antigravity support | https://antigravity.google/support | 当前产品反馈/支持入口；不要依赖未由当前官方页面确认的历史邮箱或申诉时限。 |
 
-当前账号 Gemini API 限额入口：https://aistudio.google.com/rate-limit。Antigravity 基线用量从官方 Settings 查看；两个面板不是同一额度。
+## 社区反馈（仅作症状样本）
 
-## 按需重新核验的定位入口
+| 反馈 | 用法边界 |
+|---|---|
+| Gemini CLI issue [#24937](https://github.com/google-gemini/gemini-cli/issues/24937)，2026 年 4 月创建的 429/capacity 汇总 | 用户报告说明容量错误会出现；不代表 Antigravity 账号封禁，也不证明当前仍有同一故障。 |
+| Gemini CLI issue [#29504](https://github.com/google-gemini/gemini-cli/issues/29504)，2026 年 9–10 月报告 spend-cap 429 被界面反复显示为 high demand | 说明具体错误文本和客户端分类值得保留；是 issue 报告，不是账号处罚规则。 |
+| 社区 issue [#1637](https://github.com/router-for-me/CLIProxyAPI/issues/1637)，用户报告第三方代理使用期间服务不可用 | 时间相关不等于因果证明。只能说明社区有人报告此类症状，不能据此推断检测机制、其他账号是否关联或恢复流程。 |
 
-- Antigravity FAQ：https://antigravity.google/docs/faq/
-- Models：https://antigravity.google/docs/models
-- Enterprise：https://antigravity.google/docs/enterprise
-- 官方反馈社区：https://discuss.ai.google.dev/c/antigravity/64
-- Gemini API 服务状态：https://aistudio.google.com/status
-- Gemini API 可用地区：https://ai.google.dev/gemini-api/docs/available-regions
-
-这些定位链接不表示本轮已验证其中每项事实。登录、地区、年龄与企业资格以当前对应服务说明为准。历史公告、再认证表单或邮箱需重新核验，不给出统一解封或二振制承诺。
-
-## 已阅读的社区原帖
-
-https://discuss.ai.google.dev/t/antigravity-usage-quota-is-not-making-any-sense/167934
-
-2026-05-30 起有用户报告 Pro 额度在未使用甚至关机期间下降。它支持保留用量时间线、排查显示/同步与后台消耗、提交反馈；不能证明所有异常来自处罚，不能给出发生概率，也不能证明换号、换出口有效。官方论坛内用户发帖仍属用户报告，不等于官方确认。
-
-其他博客、论坛或 GitHub 案例只作线索；没有可核验原文、日期、作者身份和复现证据时不作为当前政策或检测机制依据。工具风险按认证、端点和实际用途判断，不按产品名称推定。
-
-## 证据等级
-
-官方条款支持合规边界；官方文档支持产品机制；当前客户端/控制台支持账号状态；脱敏日志支持具体故障；社区报告支持候选线索。低等级不能替代高等级，也不能推出未公开的请求指纹、账号关联、IP 安全或静默模型替换机制。
+社区报告有选择偏差、客户端/计划/地区差异，状态也会变化。不得从这些样本推导账号关联算法、共享 IP 风险、设备指纹、固定出口有效性、重试次数阈值、所谓“二振制”或自动解封承诺。
