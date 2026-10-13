@@ -10,9 +10,10 @@
 - Minimum proof: <smallest check that proves the change; does it escalate the gate to full?>
 
 ## Verification
-- [ ] Build passed
-- [ ] Tests passed
-- [ ] Contract/invariant unchanged or updated with migration notes
+- Minimum proof: <checks or direct observations covering this change's behavior and risks>
+- Result: <command, exit code and relevant result; identify unverified acceptance>
+- N/A: <inapplicable build/test/contract steps and reasons, or none>
+- Reuse valid evidence; rerun only invalidated proof. Apply the repository gate profile and explain any escalation.
 
 ## Deletion delta
 - Removed: N/A unless New surface is yes; then list tests, gates, and docs removed or merged.
