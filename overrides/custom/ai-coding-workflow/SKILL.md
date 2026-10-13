@@ -7,6 +7,12 @@ description: Complete implementation and maintenance tasks with repository-groun
 
 Use `ai-coding` for RO templates.
 
+Optimize delivery, rework and maintenance cost while meeting the observable
+goal, compatibility and asset boundaries. Use native host capabilities first;
+extend an existing entrypoint only for a demonstrated gap. Each new structure
+needs a current caller and minimum proof; each extra check needs an uncovered,
+task-relevant failure mode. Deliver the shortest complete main path.
+
 ## Spend context like a budget
 Read the diff, project contract, affected caller, source and checks;
 freeze a compact capsule:
@@ -39,7 +45,9 @@ access.
 
 Skip a formal plan only for clear, low-risk changes; one-line permission or
 data changes can still be high-risk.
-A passing slice is only a checkpoint; continue the authorized goal.
+A passing slice is only a checkpoint; continue the authorized goal. Adjust the
+write set for necessary in-scope discoveries with reasons; new goals or side
+effects require their own authorization.
 
 ## Implement and verify
 
@@ -48,7 +56,11 @@ the symptom, fix the cause, then rerun it
 and one boundary case. Never weaken assertions, delete tests, hide errors or
 invent a new gate to obtain a pass. Strict TDD, coverage, full-suite runs and
 independent review are not routine prerequisites unless the request, contract
-or affected risk requires them. Never let a skill invent a new gate.
+or affected risk requires them. Never let a skill invent a new gate. Reuse
+passed evidence while its inputs and environment remain valid; rerun only
+invalidated proof. Reversible low-impact edits can use direct observation.
+Place defensive checks at real trust or data boundaries; fallbacks need a
+defined trigger and correct observable behavior, not a hypothetical scenario.
 
 Classify a failure before changing effort: missing input, tool/environment,
 auth/rate limit, or code/reasoning. After two failed corrections on one issue,
@@ -74,7 +86,10 @@ and never cascade every workflow skill.
 
 Use a fresh-context review only when risk or uncertainty justifies it. Ask for
 correctness, regression, security, compatibility or stated-requirement gaps;
-use `Report gaps, not style preferences`, and do not chase optional findings.
+use `Report gaps, not style preferences`, allow zero findings, and do not chase
+optional findings. Rules and skills guide judgment; enforce detectable limits
+at the existing permission, write or integration boundary. Verify actual tool
+coverage and failure behavior before claiming a hook enforces a limit.
 
 ## Resume, persist, explain
 
