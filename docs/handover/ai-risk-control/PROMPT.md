@@ -407,7 +407,7 @@ node localize.js --now
 
 ## 12. 把「更新后自愈」做成自动化
 
-`tools/ensure-patches.ps1` 是**幂等**自愈脚本，一次覆盖代理 + 汉化两件事：
+`tools/ensure-patches.ps1` 是**幂等**自愈脚本，一次覆盖下表各项的自愈（代理、汉化、DLL 加载提示标记）：
 
 | 检查项 | 判定逻辑 | 动作 |
 |---|---|---|
@@ -415,6 +415,7 @@ node localize.js --now
 | `version.dll` | 缺失 → 补；哈希不一致且未运行 → 覆盖；**运行中 → 跳过并记「待处理」**（不写正在被加载的 DLL） | 从主副本复制 |
 | `config.json` | **比对「有效配置项」而不是文件哈希** —— DLL 会周期性重写这个文件（改换行符、格式、`diagnostics`），按哈希比会永远误判 | 有效项不一致时按主副本覆盖，但**保留 DLL 写入的 `diagnostics`** |
 | `app.asar` | 是否含汉化注入标记 | 缺标记且 Antigravity 未运行 → 跑 `localize.js --now`；运行中 → 记「待处理」 |
+| DLL 加载提示标记 | `logs\load-notify-success.marker` 是否在位 —— 更新清 `logs\` 会连它一起清掉，DLL 下次启动会再弹「加载状态」窗口 | 仅当 `version.dll` 与主副本逐字节一致：缺失 → 从 staging 副本恢复；staging 无副本 → 记提示，下次运行从现场自动入库 |
 
 再用 `tools/register-task.ps1` 注册计划任务（**每 30 分钟 + 登录时**各跑一次；间隔在脚本顶部的 `$IntervalMinutes` 改）。踩过的坑：
 
