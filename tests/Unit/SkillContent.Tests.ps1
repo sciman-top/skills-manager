@@ -49,7 +49,7 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?i)removing it\s+would cause a mistake'
         $skill | Should -Match '(?i)bloated resident\s+file makes the model\s+ignore the rules that matter'
         $skill | Should -Match '(?i)Load the rest just in time'
-        $skill | Should -Match '(?i)Green checks prove behavior, not comprehension'
+        $skill | Should -Match '(?i)Green checks prove only the behavior they exercise, not comprehension'
     }
 
     It 'retains the explicit-use constraint for strict TDD' {
