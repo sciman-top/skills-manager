@@ -8,17 +8,17 @@ description: Complete implementation and maintenance tasks with repository-groun
 Use `ai-coding` for RO templates.
 
 ## Spend context like a budget
-Read the current diff, project contract, affected caller, source and checks;
-freeze the smallest useful capsule:
+Read the diff, project contract, affected caller, source and checks;
+freeze a compact capsule:
 
 ```text
-Goal: the observable user or system result
-Context: relevant files, errors, examples and current state
-Constraints: compatibility, safety, do-not-touch and side-effect limits
-Exact write set: allowed files and generated/host boundaries
-Minimum proof: smallest checks that prove the changed behavior
+Goal: observable result
+Context: files, errors, examples and current state
+Constraints: compatibility, safety and side-effect limits
+Exact write set: files and generated/host boundaries
+Minimum proof: checks for the changed behavior
 Done when: the acceptance condition
-Stop: the authorized boundary or a concrete blocker
+Stop: scope boundary or concrete blocker
 ```
 
 Resident rules hold only what code cannot reveal: non-obvious commands,
@@ -33,18 +33,18 @@ access.
 ## Choose the lightest path
 
 - **tiny/direct**: clear local change; inspect, edit and run focused proof.
-- **normal**: meaningful uncertainty or multiple files; explore, plan,
-  implement verifiable slices.
+- **normal**: meaningful uncertainty; explore, plan, implement verifiable slices.
 - **high-risk**: security, data, migration, public contract, deployment or
   external state; add safeguards, backup/rollback and proportionate proof.
 
-If the diff can be described in one sentence, skip a formal plan. Otherwise
-plan first. A passing slice is only a checkpoint; continue the authorized goal.
+Skip a formal plan only for clear, low-risk changes; one-line permission or
+data changes can still be high-risk.
+A passing slice is only a checkpoint; continue the authorized goal.
 
 ## Implement and verify
 
-Use existing entrypoints and checks. Change one slice at a time; preserve
-unrelated work. For a bug, reproduce the symptom, fix the cause, then rerun it
+Reuse entrypoints and checks. Preserve unrelated work. For a bug, reproduce
+the symptom, fix the cause, then rerun it
 and one boundary case. Never weaken assertions, delete tests, hide errors or
 invent a new gate to obtain a pass. Strict TDD, coverage, full-suite runs and
 independent review are not routine prerequisites unless the request, contract
@@ -52,8 +52,9 @@ or affected risk requires them. Never let a skill invent a new gate.
 
 Classify a failure before changing effort: missing input, tool/environment,
 auth/rate limit, or code/reasoning. After two failed corrections on one issue,
-summarize confirmed facts, attempts and the open question, then use a
-fresh/cleared or compacted context.
+summarize confirmed facts, attempts and the open question; clarify missing
+input or use fresh/cleared or compacted context only when it helps. Preserve
+valid evidence, authorization and stop conditions.
 
 Show the command, exit code and relevant result. Keep `repo_verified`,
 `filesystem_projected`, `host_loaded`, and `live_accepted` separate; lower
@@ -66,8 +67,8 @@ GPT/Codex and GLM/ZCode are task-fit executors, not stages in a fixed pipeline;
 judge a choice by same-task acceptance; verify current help, schema, documentation and actual inputs. Keep one primary executor through inspect, implement and
 verify. Delegate or parallelize only when explicitly authorized, write sets are
 disjoint, and each slice has independent proof and a positive net benefit.
-Prove 2-3 item fan-out before scaling. Use
-a visible matching skill directly; `capability-router` is a bounded one-shot
+Prove 2-3 item fan-out before scaling. Use visible matching skills directly;
+`capability-router` is a bounded one-shot
 fallback when a named or required skill is not visible — not routine middleware,
 and never cascade every workflow skill.
 
@@ -84,5 +85,5 @@ successfully, put durable facts in `AGENTS.md`, methods in a narrow skill, and
 deterministic checks in scripts/hooks/CI. Do not add a skill, MCP, scheduler or
 architecture layer without a real caller, failure or measurable net benefit.
 
-Green checks prove behavior, not comprehension: before done, state what
-changed, which decisions were implicit, and what could break.
+Green checks prove only the behavior they exercise, not comprehension: before
+done, state what changed, implicit decisions and unverified acceptance.
