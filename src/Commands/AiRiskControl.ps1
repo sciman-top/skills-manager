@@ -41,12 +41,13 @@ function Get-AiRiskControlPolicy {
             [pscustomobject]@{ url='https://antigravity.google/terms'; verified_on='2026-10-13'; scope='Antigravity third-party access restriction' }
             [pscustomobject]@{ url='https://antigravity.google/docs/faq/'; verified_on='2026-10-13'; scope='Antigravity eligibility, direct headless CLI, third-party agents, and account rotation' }
             [pscustomobject]@{ url='https://antigravity.google/docs/plans/'; verified_on='2026-10-13'; scope='Antigravity plan quotas, work-based usage, and credits' }
-            [pscustomobject]@{ url='https://www.workbuddy.ai/document/term'; verified_on='2026-10-04'; scope='International service protection and reasonable use' }
+            [pscustomobject]@{ url='https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Error-Code'; verified_on='2026-10-14'; scope='Public WorkBuddy error-code descriptions; not account-risk thresholds' }
+            [pscustomobject]@{ url='https://www.workbuddy.ai/document/term'; verified_on='2026-10-14'; scope='International service protection and reasonable use' }
             [pscustomobject]@{ url='https://ai.google.dev/gemini-api/docs/rate-limits'; verified_on='2026-10-13'; scope='Gemini API project/model quotas; not Antigravity subscription or Gemini CLI quotas' }
         )
         principles = @(
             '使用当前官方支持的客户端和认证路径；不做 OAuth 反代、Token 提取、自动账号轮换或指纹伪造。'
-            '遇到 403/11140 或 429 先停止重试，保存错误证据，再按账号风控与配额限流分流。'
+            '遇到 403/11140 或 429 时暂停当前 UI/agent 连续重试；Gemini API 仅对可安全重放的瞬时错误遵循官方 API/SDK 有界退避，不自动重放有副作用的 agent 工作流。'
             '降智先核对上下文、模型、配额和调度；没有硬证据时不把主观感觉归因于风控。'
             '网络出口和 IP 分类只用于连通性诊断，不作为账号安全或资格证明。'
             '仓库、文件投影、宿主加载和真实业务接受分层证明，低层结果不能外推。'
@@ -80,10 +81,10 @@ function Get-AiRiskControlPolicy {
 function Get-AiRiskControlIncidentPlan([string]$Event) {
     $plans = @{
         'antigravity-ban' = [ordered]@{ platform='antigravity'; category='account_safety'; severity='critical'; diagnosis='明确 service disabled / ToS 文本是服务限制信号；一般 403 仍需区分权限、资格与认证问题'; immediate=@('停止被拒服务的请求', '保存脱敏错误、时间、请求 ID 和客户端版本', '使用当前 Google 官方支持或反馈入口'); forbidden=@('换号继续同一套工具链', '反复重试或重启', '伪造设备或请求指纹') }
-        'antigravity-rate-limit' = [ordered]@{ platform='antigravity'; category='quota_rate_limit'; severity='high'; diagnosis='429 RESOURCE_EXHAUSTED 可能来自配额窗口或服务容量，不等同封号；分别核验 Antigravity 订阅五小时/周额度、Gemini API project/model/spend cap 与 Gemini CLI 认证额度'; immediate=@('读取对应产品用量页和服务端 reset/Retry-After；未知时不自造恢复时间', '停止当前请求的重试并把后续长任务切段；Antigravity 五小时刷新不保证周额度恢复', '只用当前产品支持的 credits 或模型选择，不自动换模型重放'); forbidden=@('绕过配额', '并发压测', '用多账号轮换掩盖消耗') }
+        'antigravity-rate-limit' = [ordered]@{ platform='antigravity'; category='quota_rate_limit'; severity='high'; diagnosis='429 RESOURCE_EXHAUSTED 可能来自配额窗口或服务容量，不等同封号；分别核验 Antigravity 订阅五小时/周额度、Gemini API project/model/spend cap 与 Gemini CLI 认证额度'; immediate=@('读取对应产品用量页和服务端等待提示；没有明确时间时按对应 API 官方建议减速并等待，不自造恢复时间', 'UI/agent 请求停止连续重试；Gemini API 仅对可安全重试的瞬时错误按官方 API/SDK 建议有限退避，不自动重放有副作用的任务；Antigravity 五小时刷新不保证周额度恢复', '只用当前产品支持的 credits 或模型选择，不自动换模型重放任何任务；控制后续非必要请求'); forbidden=@('绕过配额', '并发压测', '用多账号轮换掩盖消耗') }
         'antigravity-degradation' = [ordered]@{ platform='antigravity'; category='degradation_triage'; severity='medium'; diagnosis='对照同一任务并检查可见模型、上下文、思考/采样参数、输出截断、安全反馈和工具失败；没有官方证据不推断静默降智'; immediate=@('用相同材料和验收标准作少量短会话对照', '记录可见模型标识、上下文规模、finishReason/usage（若入口提供）及具体遗漏', '遇到 429、认证或明确服务拒绝时停止当前任务；复现问题提交官方反馈'); forbidden=@('把主观质量变化当作封号证据', '用降级链或第三方路由绕过官方选择') }
         'workbuddy-account-risk' = [ordered]@{ platform='workbuddy'; category='account_safety'; severity='critical'; diagnosis='403 / 11140 / request illegal 是拒绝信号；单条错误不能确认账号封禁，需排除认证、权限、内容和连接器错误'; immediate=@('停止重试和频繁重启', '保存 Trace ID、脱敏日志和账号时间线，区分模型请求与 MCP 认证', '通过 WorkBuddy 官方反馈渠道核实拒绝原因'); forbidden=@('伪造 device-id', '删除凭据或修改数据库绕过风控', '用订阅反代、积分中转或换号规避限制') }
-        'workbuddy-rate-limit' = [ordered]@{ platform='workbuddy'; category='quota_rate_limit'; severity='high'; diagnosis='429 / 6003 / 6004 属频率或额度限制，与 403/11140 处置路径不同'; immediate=@('读取 Retry-After 或 reset 时间', '等待窗口并降低并发', '按官方建议切换模型或切段任务'); forbidden=@('连续重试风暴', '自建中转绕过限制', '切换账号规避窗口') }
+        'workbuddy-rate-limit' = [ordered]@{ platform='workbuddy'; category='quota_rate_limit'; severity='high'; diagnosis='429 是服务限流线索；6003 / 6004 官方描述为请求频率受限，不能据此推导账号封禁或公开额度阈值；与 403 / 11140 拒绝信号分开处理'; immediate=@('遵守服务端 Retry-After/reset 或客户端显示的恢复提示；没有等待信息时停止重复请求并查官方用量/支持', '仅对 6003 / 6004 且当前官方客户端明确建议时，用户手动切换模型并重试一次；持续受限即停止', '降低后续不必要的并发和重复提交'); forbidden=@('连续重试风暴', '自建中转绕过限制', '切换账号规避窗口') }
         'workbuddy-degradation' = [ordered]@{ platform='workbuddy'; category='degradation_triage'; severity='medium'; diagnosis='先排查上下文、模型调度和额度；没有官方证据时不宣称存在静默风控降智'; immediate=@('新开短会话对照', '固定模型和任务输入后再测', '记录服务时间、模型和响应质量'); forbidden=@('用自定义 API 改道', '把偶发质量变化归因于账号处罚') }
     }
     if ([string]::IsNullOrWhiteSpace($Event)) { return $null }
