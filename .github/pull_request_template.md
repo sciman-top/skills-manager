@@ -2,6 +2,7 @@
 - <what this PR changes>
 - New surface: no
 - Set this to `yes` when adding an independent feature/module, gate/workflow, test suite, persistent documentation/policy surface, or reusable abstraction. Routine fixes and regression cases within existing surfaces use `no`.
+- Review this declaration against the diff; CI validates the declaration, not its semantic truth.
 
 ## Charter admission (complete only when New surface is yes)
 - CI rejects unresolved placeholders in this section; the fields must describe the actual change.
@@ -10,6 +11,7 @@
 - Minimum proof: <smallest check that proves the change; does it escalate the gate to full?>
 
 ## Verification
+- Complete this section for every PR; direct observation or N/A with a reason is valid when applicable.
 - Minimum proof: <checks or direct observations covering this change's behavior and risks>
 - Result: <command, exit code and relevant result; identify unverified acceptance>
 - N/A: <inapplicable build/test/contract steps and reasons, or none>
@@ -17,10 +19,6 @@
 
 ## Deletion delta
 - Removed: N/A unless New surface is yes; then list tests, gates, and docs removed or merged.
-
-## Evidence
-- Command output:
-- Screenshots or logs:
 
 ## Risks and Rollback
 - Risk:

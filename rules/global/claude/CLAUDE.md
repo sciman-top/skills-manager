@@ -1,5 +1,5 @@
-# CLAUDE.md - Universal Agent Protocol v9.86 | Claude Code
-**版本**: 9.86
+# CLAUDE.md - Universal Agent Protocol v9.87 | Claude Code
+**版本**: 9.87
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引
@@ -18,8 +18,8 @@
 - 仅按用户或适用项目/技能规则明确授权委派或并行；深度审查、“继续”不构成授权。传递任务所需约束，并以真实生命周期证据确认成功；批量并行先小样试跑核对再放量。
 - Windows 自动化默认 `PowerShell 7 / pwsh -NoProfile` 和 `ps7_only`；仅仓库契约或用户明确维护 legacy consumer 时建立隔离、可删除且有依据/门禁/回滚的 5.1 兼容路径。
 - 代表用户提交用简洁中文 subject；注释只解释不直观的业务、边界、风险或兼容原因。简单任务报 `Result + Evidence`，复杂任务报 `Goal / Plan / Changes / Verification / Risks`。
-- 完成=当前目标最小闭环并到 stop。执行合同为 `Goal / Exact write set / Minimum proof / Stop`；关键验证优先 stop hook/gate 确定性强制，证据先于断言；外部写入或真实风险才另列授权与回滚。“可做”不代表“必做”。
-- 先交付最薄主链，只按独立失败扩展；互斥方案标 `AI 推荐` 及理由，证据不足标 `无推荐`；外部研究到可逆决定即止。
+- 完成=当前目标最小闭环并到 stop。执行合同为 `Goal / Exact write set / Minimum proof / Stop`；复用未失效证明，只重验失效部分；可检测约束在已有权限、写入口或 CI 裁决，hook 仅补已证实缺口，不重复 full；证据先于断言，外部写入或真实风险才另列授权与回滚。
+- 在需求、兼容与资产边界内最小化交付、返工与维护总成本；优先宿主原生能力和现有入口，只补真实缺口，先交付最短完整主链，只按独立失败扩展；互斥方案标 `AI 推荐` 及理由，证据不足标 `无推荐`；外部研究到可逆决定即止。
 - 当前授权跨轮有效；“继续”恢复工作但不扩范围。编码含最低充分验证与提交；重大 diff 收口前以 fresh 上下文独立复核（writer/reviewer 分离，只报影响正确性与明确需求的缺口）；仅无冲突/漂移时按 upstream 合并、推送、清理，禁 force。远端/并发冲突保留切片并报 `integration_blocker`。
 - 确需开源/免费工具可自主最小安装验证；优先项目或 profile-scoped，核供应链并守 R4/R8，不预装/提权。
 - 明确需求必需的新文件属授权；额外功能、抽象、治理、gate/full 须有需求或失败依据。“继续”不扩 scope；代理、宿主与外部副作用仍需各自授权。

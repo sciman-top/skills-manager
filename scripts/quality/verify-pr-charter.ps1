@@ -30,7 +30,7 @@ function Get-CharterBody {
 
 function Get-CharterField([string]$Text, [string]$Label) {
     $escaped = [regex]::Escape($Label)
-    $match = [regex]::Match($Text, "(?im)^\s*-\s*$escaped\s*:\s*(?<value>[^\r\n]*)\s*$")
+    $match = [regex]::Match($Text, "(?im)^[ \t]*-[ \t]*$escaped[ \t]*:[ \t]*(?<value>[^\r\n]*)[ \t]*\r?$")
     if (-not $match.Success) { return '' }
     return $match.Groups['value'].Value.Trim()
 }
@@ -60,12 +60,18 @@ if ($newSurface -notin @('yes', 'no')) {
     throw 'PR charter field New surface must be yes or no.'
 }
 
-$requiredSections = @('Risks and Rollback')
+$requiredSections = @('Verification', 'Risks and Rollback')
 if ($newSurface -eq 'yes') { $requiredSections += @('Charter admission', 'Deletion delta') }
 foreach ($section in $requiredSections) {
     if (-not [regex]::IsMatch($charterBody, "(?im)^\s*##\s*$([regex]::Escape($section))(?:\s+\([^\r\n)]*\))?\s*$")) {
         throw "PR charter section is missing: ## $section"
     }
+}
+
+# Scope repeated labels to Verification so admission text cannot mask missing proof.
+$verification = [regex]::Match($charterBody, '(?ims)^[ \t]*##[ \t]+Verification[ \t]*(?:\([^\r\n)]*\))?[ \t]*\r?\n(?<content>.*?)(?=^[ \t]*##[ \t]+|\z)')
+foreach ($label in @('Minimum proof', 'Result')) {
+    Assert-CharterValue "Verification / $label" (Get-CharterField $verification.Groups['content'].Value $label)
 }
 
 $requiredFields = @('Risk', 'Rollback')
@@ -75,8 +81,8 @@ foreach ($label in $requiredFields) {
 }
 
 if ($newSurface -eq 'yes') {
-    Write-Host 'PR charter check passed: new-surface caller, replacement/deletion, minimum proof, removal delta, risk and rollback are declared.' -ForegroundColor Green
+    Write-Host 'PR charter check passed: verification and new-surface admission are declared; review their consistency with the diff and actual evidence.' -ForegroundColor Green
 }
 else {
-    Write-Host 'PR charter check passed: routine change; new-surface admission is not applicable.' -ForegroundColor Green
+    Write-Host 'PR charter check passed: routine verification, risk and rollback are declared; new-surface admission is not applicable.' -ForegroundColor Green
 }
