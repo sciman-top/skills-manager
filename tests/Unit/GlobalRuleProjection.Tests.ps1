@@ -130,6 +130,24 @@ Describe 'Global rule source contract' {
         Test-Path -LiteralPath $target | Should -BeFalse
     }
 
+    It 'allows an empty Codex override but fails closed on a non-empty shadow' {
+        $override = Join-Path $codex 'AGENTS.override.md'
+        try {
+            [IO.File]::WriteAllText($override, "`n  `n")
+            $empty = Test-GlobalRuleSourceFamily $fixture $codex $claude
+            $empty.pass | Should -BeTrue
+
+            [IO.File]::WriteAllText($override, '# local emergency override')
+            $shadow = Test-GlobalRuleProjection $fixture $codex $claude
+            $shadow.pass | Should -BeFalse
+            @($shadow.findings.code) | Should -Contain 'codex_override_shadow'
+            { New-GlobalRuleProjectionPlan $fixture $codex $claude } | Should -Throw '*codex_override_shadow*'
+        }
+        finally {
+            if (Test-Path -LiteralPath $override) { Remove-Item -LiteralPath $override -Force }
+        }
+    }
+
     It 'requires the 1 section' {
         $path=Join-Path $fixture 'rules\global\codex\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('## 1. 阅读指引','## 阅读指引');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_structure_invalid'

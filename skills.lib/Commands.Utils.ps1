@@ -228,7 +228,7 @@ MCP：
   .\skills.ps1 global-rules-plan --antigravity-user-root "$env:USERPROFILE\.gemini" --out .\reports\global-rule-projection\plan.json --json
   .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --antigravity-user-root "$env:USERPROFILE\.gemini" --json
   .\skills.ps1 global-rules-check --json
-  全局规则以 rules/global 为唯一源；投影只写用户 Codex AGENTS.md、Claude CLAUDE.md 和已配置的 ZCode AGENTS.md，保留备份与 receipt，不证明宿主已加载。
+  全局规则以 rules/global 为唯一源；投影只写用户 Codex/Claude，以及已配置的 ZCode、Antigravity/Gemini、WorkBuddy 规则文件，保留备份与 receipt，不证明宿主已加载。
 
 技能投影：
   .\skills.ps1 构建生效

@@ -201,6 +201,25 @@ verify drift
         $result.releases.aligned | Should -Be $false
     }
 
+    It 'reports configured WorkBuddy release drift in the diagnostic payload' {
+        $f = New-RuleEstateFixture
+        $workbuddy = Join-Path $TestDrive ('workbuddy-release-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workbuddy -Force | Out-Null
+        $path = Join-Path $workbuddy 'CODEBUDDY.md'
+        $text = [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')).Replace('codex host delta', 'workbuddy host delta').Replace('**版本**: 9.60', '**版本**: 9.61')
+        [IO.File]::WriteAllText($path, $text)
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude -WorkBuddyUserRoot $workbuddy
+
+        $result.releases.workbuddy | Should -Be '9.61'
+        $result.releases.workbuddy_configured | Should -BeTrue
+        @($result.findings | Where-Object code -eq 'global_release_mismatch').Count | Should -Be 1
+        $mismatch = @($result.findings | Where-Object code -eq 'global_release_mismatch')[0]
+        $mismatch.observed.workbuddy | Should -Be '9.61'
+        $mismatch.observed.workbuddy_configured | Should -BeTrue
+        $mismatch.message | Should -Match 'WorkBuddy'
+    }
+
     It 'fails when a global rule omits a required top-level contract section' {
         $f = New-RuleEstateFixture
         $codexPath = Join-Path $f.codex 'AGENTS.md'

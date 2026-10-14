@@ -125,6 +125,30 @@ function Get-GlobalRuleFileFacts([string]$Path) {
     }
 }
 
+function Get-GlobalRuleCodexOverrideFindings([string]$CodexUserRoot) {
+    if ([string]::IsNullOrWhiteSpace($CodexUserRoot)) { return @() }
+    $root = [IO.Path]::GetFullPath($CodexUserRoot)
+    $path = Join-Path $root 'AGENTS.override.md'
+    if (-not [IO.File]::Exists($path)) {
+        if ([IO.Directory]::Exists($path)) {
+            return @((New-GlobalRuleFinding 'codex_override_invalid' $path 'Codex AGENTS.override.md must be a file when present.'))
+        }
+        return @()
+    }
+    if (Test-GlobalRuleProjectionReparsePath $path $root) {
+        return @((New-GlobalRuleFinding 'codex_override_reparse_forbidden' $path 'Codex AGENTS.override.md must not cross a reparse point.'))
+    }
+    try {
+        $bytes = [IO.File]::ReadAllBytes($path)
+        $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes)
+    }
+    catch {
+        return @((New-GlobalRuleFinding 'codex_override_invalid' $path ('Codex AGENTS.override.md is not valid UTF-8: {0}' -f $_.Exception.Message)))
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+    return @((New-GlobalRuleFinding 'codex_override_shadow' $path 'Non-empty Codex AGENTS.override.md takes precedence over the managed AGENTS.md projection; resolve or remove the override before planning or applying a global rule projection.'))
+}
+
 function Get-GlobalRuleSections([string]$Text) {
     $normalized=$Text.Replace("`r`n","`n")
     $matches=[regex]::Matches($normalized,'(?m)^## (1\.|A\.|B\.|C\.|D\.)[^\r\n]*$')
@@ -143,6 +167,7 @@ function Test-GlobalRuleSourceFamily {
     param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='', [string]$AntigravityUserRoot='', [string]$WorkBuddyUserRoot='')
     $findings=New-Object Collections.Generic.List[object];$observations=New-Object Collections.Generic.List[object];$budget=New-Object Collections.Generic.List[object]
     $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot $AntigravityUserRoot -WorkBuddyUserRoot $WorkBuddyUserRoot
+    foreach ($finding in @(Get-GlobalRuleCodexOverrideFindings $CodexUserRoot)) { $findings.Add($finding) | Out-Null }
     try { Sync-GlobalRuleGeneratedFiles -RepoRoot $RepoRoot -Check }
     catch { $findings.Add((New-GlobalRuleFinding 'source_generation_drift' $RepoRoot $_.Exception.Message))|Out-Null }
     $sourceEntries=Get-GlobalRuleSourceEntries $RepoRoot;$facts=@{};$sections=@{}
@@ -271,6 +296,7 @@ function Test-GlobalRulePlanBinding {
     $workbuddy=$(if([string]::IsNullOrWhiteSpace($WorkBuddyUserRoot)){''}else{[IO.Path]::GetFullPath($WorkBuddyUserRoot)})
     if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan 'workbuddy_user_root')) $workbuddy)){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' '$.workbuddy_user_root' 'CLI WorkBuddy root must exactly match the plan root.'))|Out-Null}
     if (-not $ForRollback) {
+        foreach ($finding in @(Get-GlobalRuleCodexOverrideFindings $CodexUserRoot)) { $findings.Add($finding) | Out-Null }
         try { Sync-GlobalRuleGeneratedFiles -RepoRoot $RepoRoot -Check }
         catch { $findings.Add((New-GlobalRuleFinding 'source_generation_drift' $RepoRoot $_.Exception.Message))|Out-Null }
     }
