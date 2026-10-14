@@ -137,12 +137,12 @@ else {
             $id = [string]$_.IdentityReference.Value
             ($id -eq $currentUser) -or ($id -like "*\$currentUser")
         })
-    if ($lockAces.Count -eq 0) { Add-Finding "external reference root is not deny-write locked: $externalRoot" }
     if ($lockAces.Count -eq 0) {
         # 残留 deny 的权威检测与修复在 lock-external-repos.ps1:那里有覆盖目录与文件的
         # 精确扫描(实测只扫目录会漏掉 .git\objects 与 packed-refs 上的孤儿 ACE),
-        # 这里不重复实现,只在解锁态指路,避免两套判定长期漂移。
-        Add-Finding "unlocked external root permits reference writes; confirm the boundary with scripts/lock-external-repos.ps1 -Status -Deep before relying on it"
+        # 这里不重复实现,只在解锁态指路,避免两套判定长期漂移。用户可授权保持解锁态,
+        # 该 finding 即该授权窗口的正常信号,一条足够,不再重复成两条。
+        Add-Finding "external reference root is not deny-write locked: $externalRoot; confirm the boundary with scripts/lock-external-repos.ps1 -Status -Deep"
     }
 
     $knownRootRepos = @{}
