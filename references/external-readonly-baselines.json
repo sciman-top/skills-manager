@@ -3,20 +3,75 @@
   "external_root": "D:\\CODE\\external",
   "repos": [
     {
-      "relative_path": "_shared",
-      "head": "d090a42a74ae2a1e4a68471c8aa4eefeaaa69aba",
-      "origin": null
+      "relative_path": "CLIProxyAPI",
+      "head": "0d18d3b365be000eeaee7de4615f9da596b2059d",
+      "origin": "https://github.com/router-for-me/CLIProxyAPI.git"
     },
     {
-      "relative_path": "cockpit-tools",
-      "head": "dbe56a1edd07ac9d794c72ea4e6a12d5a3d4eb16",
-      "origin": "https://github.com/sciman-top/cockpit-tools.git"
+      "relative_path": "dual-nic-split-stack/clash-verge-rev",
+      "head": "d4287970bc7dbe3430c9a33bf2922e355c92c0be",
+      "origin": "https://github.com/clash-verge-rev/clash-verge-rev.git"
     },
     {
-      "relative_path": "codex-meter",
-      "head": "a4c8873ad35bcb4769d9fee4675671eed0aec333",
-      "origin": "https://github.com/Wangnov/codex-meter.git"
+      "relative_path": "dual-nic-split-stack/clash-verge-rev.github.io",
+      "head": "be157f475583a5516bdc0cf6c197768339b1cfea",
+      "origin": "https://github.com/clash-verge-rev/clash-verge-rev.github.io.git"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/clash-verge-service",
+      "head": "396150683e01e79740563561ae2fe2db28fb8904",
+      "origin": "https://github.com/clash-verge-rev/clash-verge-service.git"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/clash-verge-service-ipc",
+      "head": "449b111f019f3620bd8f6b1f1640863ba2a68095",
+      "origin": "https://github.com/clash-verge-rev/clash-verge-service-ipc.git"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/geo",
+      "head": "a4db326ccfd7e21276d5d05f4f7e512d14415553",
+      "origin": "https://github.com/MetaCubeX/geo"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/meta-rules-dat",
+      "head": "4178770badecb1b349fbcd62c737e0d7a2079729",
+      "origin": "https://github.com/MetaCubeX/meta-rules-dat"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/mihomo",
+      "head": "008b91bfe8c0e2daca0ab69061efd9ea1ad71bd2",
+      "origin": "https://github.com/MetaCubeX/mihomo"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/sing-box",
+      "head": "8a42af329c6f8cc2c43a142ea4eadecd5412bfce",
+      "origin": "https://github.com/SagerNet/sing-box.git"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/tauri-plugin-mihomo",
+      "head": "7a03d16f4d39b1bb885b7babe66b9e153e34b615",
+      "origin": "https://github.com/clash-verge-rev/tauri-plugin-mihomo"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/v2ray-rules-dat",
+      "head": "b8ee45341f4995e9bcfd5babe667412841a43ffa",
+      "origin": "https://github.com/Loyalsoldier/v2ray-rules-dat"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/v2rayN",
+      "head": "f1023e08e10a0114dbdeca5afc891e337a95dc9a",
+      "origin": "https://github.com/2dust/v2rayN.git"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/wintun",
+      "head": "ec0a6b98456fe1ba52567bb2add4bbf5f64315a1",
+      "origin": "https://git.zx2c4.com/wintun"
+    },
+    {
+      "relative_path": "dual-nic-split-stack/wireguard-windows",
+      "head": "0588757d18f58ed78357c20d20b03e6369833839",
+      "origin": "https://git.zx2c4.com/wireguard-windows"
     }
   ],
-  "note": "外置根非 manifest 仓的只读基线;refresh 或用户显式提交后由 scripts/lock-external-repos.ps1 重新钉定,不得由 AI 会话更新。"
+  "note": "外置根下非 skills-manager 专属 reference shelf 的全部 Git 仓只读基线（含嵌套仓）；获准刷新后由 scripts/lock-external-repos.ps1 重钉并复锁。"
 }

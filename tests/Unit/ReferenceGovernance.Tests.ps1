@@ -18,6 +18,27 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $manifest.references_root | Should -Be "D:\CODE\external\skills-manager-references"
     }
 
+    It "Finds Git repositories nested under external source collection folders" {
+        . $governanceScript
+
+        $externalRoot = Join-Path $TestDrive 'external-inventory'
+        $nestedRepo = Join-Path $externalRoot 'source-group\nested-repo'
+        $directRepo = Join-Path $externalRoot 'direct-repo'
+        $brokenRepo = Join-Path $externalRoot 'source-group\broken-repo'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $nestedRepo) -Force | Out-Null
+        New-Item -ItemType Directory -Path $nestedRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $directRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $brokenRepo -Force | Out-Null
+        & git -C $nestedRepo init -q --initial-branch main
+        & git -C $directRepo init -q --initial-branch main
+        [IO.File]::WriteAllText((Join-Path $brokenRepo '.git'), 'invalid gitdir marker')
+
+        $repositories = @(Get-ExternalGitRepositories -ExternalRoot $externalRoot)
+
+        @($repositories | ForEach-Object { $_.relative_path }) | Should -Be @('direct-repo', 'source-group/broken-repo', 'source-group/nested-repo')
+        @($repositories | Where-Object { $_.relative_path -eq 'source-group/broken-repo' })[0].git_root_valid | Should -Be $false
+    }
+
     It "Enforces reference portfolio tier and status lifecycle pairs" {
         . $governanceScript
 
