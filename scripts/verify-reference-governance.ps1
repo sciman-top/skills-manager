@@ -6,6 +6,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $manifestPath = Join-Path $root 'references\reference-shelf.manifest.json'
 $provenancePath = Join-Path $root 'overrides\patches\provenance.json'
 $findings = [Collections.Generic.List[string]]::new()
+Import-Module (Join-Path $PSScriptRoot 'ExternalGitRepositoryDiscovery.psm1') -Force
 
 function Add-Finding([string]$Message) { $findings.Add($Message) | Out-Null }
 
@@ -22,42 +23,6 @@ function Test-ReferenceLifecycleState([string]$Tier, [string]$Status) {
 function Test-ReferenceConsumerContract($Repo) {
     return -not [string]::IsNullOrWhiteSpace([string]$Repo.consumer) -and
         -not [string]::IsNullOrWhiteSpace([string]$Repo.retirement_trigger)
-}
-
-function Get-ExternalGitRepositories([string]$ExternalRoot) {
-    $rootPath = [IO.Path]::GetFullPath($ExternalRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $pending = [Collections.Generic.Stack[string]]::new()
-    $repositories = [Collections.Generic.List[object]]::new()
-    $pending.Push($rootPath)
-
-    while ($pending.Count -gt 0) {
-        $currentPath = $pending.Pop()
-        foreach ($directory in @(Get-ChildItem -LiteralPath $currentPath -Directory -Force -ErrorAction Stop)) {
-            if ($directory.Name -eq '.git') { continue }
-
-            $gitMarker = Join-Path $directory.FullName '.git'
-            if (Test-Path -LiteralPath $gitMarker) {
-                $gitRootText = (& git -C $directory.FullName rev-parse --show-toplevel 2>&1 | Out-String).Trim()
-                $candidate = [IO.Path]::GetFullPath($directory.FullName)
-                $gitRootValid = $false
-                if ($LASTEXITCODE -eq 0 -and $gitRootText) {
-                    $gitRoot = [IO.Path]::GetFullPath($gitRootText)
-                    $gitRootValid = $gitRoot.Equals($candidate, [StringComparison]::OrdinalIgnoreCase)
-                }
-                $relativePath = [IO.Path]::GetRelativePath($rootPath, $candidate).Replace('\', '/')
-                $repositories.Add([pscustomobject]@{
-                        relative_path = $relativePath
-                        path = $candidate
-                        git_root_valid = $gitRootValid
-                    })
-                continue
-            }
-
-            $pending.Push($directory.FullName)
-        }
-    }
-
-    return @($repositories | Sort-Object relative_path)
 }
 
 # Dot-sourcing (unit tests import only the Test-* helpers above) must not run
@@ -120,7 +85,7 @@ foreach ($name in $patchNames) {
     if (-not (Test-Path -LiteralPath (Join-Path $root "overrides\patches\$name\SKILL.md") -PathType Leaf)) { Add-Finding "patch provenance points to a missing skill: $name" }
 }
 
-# --- 外置参考仓只读边界:L1 deny-write 锁 + L3 漂移核对 ---
+# --- 外置参考仓边界:可选 ACL 锁 + L3 漂移核对 ---
 $externalRoot = 'D:\CODE\external'
 $baselinesPath = Join-Path $root 'references\external-readonly-baselines.json'
 $externalGitCount = 0
@@ -138,11 +103,7 @@ else {
             ($id -eq $currentUser) -or ($id -like "*\$currentUser")
         })
     if ($lockAces.Count -eq 0) {
-        # 残留 deny 的权威检测与修复在 lock-external-repos.ps1:那里有覆盖目录与文件的
-        # 精确扫描(实测只扫目录会漏掉 .git\objects 与 packed-refs 上的孤儿 ACE),
-        # 这里不重复实现,只在解锁态指路,避免两套判定长期漂移。用户可授权保持解锁态,
-        # 该 finding 即该授权窗口的正常信号,一条足够,不再重复成两条。
-        Add-Finding "external reference root is not deny-write locked: $externalRoot; confirm the boundary with scripts/lock-external-repos.ps1 -Status -Deep"
+        Write-Host "external reference root is unlocked; baseline HEAD, origin, and cleanliness checks remain active: $externalRoot" -ForegroundColor Yellow
     }
 
     $knownRootRepos = @{}
@@ -169,7 +130,7 @@ else {
         }
     }
 
-    $externalRepos = @(Get-ExternalGitRepositories -ExternalRoot $externalRoot)
+    $externalRepos = @(Get-ExternalGitRepositories -ExternalRoot $externalRoot -ExcludedTreeRoots @($expectedRoot, (Join-Path $externalRoot '_shared\migration-backups')) -ExcludedRepositoryRoots @((Join-Path $externalRoot '_shared')))
     $externalGitCount = $externalRepos.Count
     $actualRepos = @{}
     foreach ($repo in $externalRepos) {

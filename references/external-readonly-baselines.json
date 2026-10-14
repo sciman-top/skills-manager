@@ -73,5 +73,5 @@
       "origin": "https://git.zx2c4.com/wireguard-windows"
     }
   ],
-  "note": "外置根下非 skills-manager 专属 reference shelf 的全部 Git 仓只读基线（含嵌套仓）；获准刷新后由 scripts/lock-external-repos.ps1 重钉并复锁。"
+  "note": "外置根中 skills-manager 专属 reference shelf 与 _shared 控制仓之外的规范物理 Git 仓（排除 junction 别名）；显式运行 scripts/lock-external-repos.ps1 -RefreshBaseline 更新清单，ACL 锁定使用独立的 -Lock 操作。"
 }
