@@ -269,8 +269,8 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
 function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [string]$AntigravityUserRoot = '', [string]$WorkBuddyUserRoot = '') {
     # 比对按注册表顺序驱动：codex/claude 是必选根，其余宿主提供根且存在才
     # 参与。delta 两两覆盖由前缀循环结构保证（宿主 j 只与更早宿主比较），
-    # 新宿主登记一条 fact 即进入全量比对。输出字段与 finding 文案是既有
-    # JSON 契约，逐字保留——含 releases 对象不含 workbuddy 字段的历史形状。
+    # 新宿主登记一条 fact 即进入全量比对。输出保留既有字段，并为每个
+    # 已登记宿主公开 release 与 configured 状态，避免诊断遗漏 WorkBuddy。
     $sections = New-Object System.Collections.Generic.List[object]
     $findings = New-Object System.Collections.Generic.List[object]
     $globalRuleMissingMessages = @{
@@ -401,7 +401,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     foreach ($id in @($hostIds | Where-Object { $_ -notin $mandatoryIds })) {
         if ($configured[$id]) { $releaseAligned = $releaseAligned -and ($release['codex'] -eq $release[$id]) }
     }
-    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $release['codex']; observed = [pscustomobject]@{ claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity'] }; message = 'Codex, Claude, and configured ZCode/Antigravity global rule releases are absent or different.' }) | Out-Null }
+    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $release['codex']; observed = [pscustomobject]@{ claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity']; workbuddy = $release['workbuddy']; workbuddy_configured = $configured['workbuddy'] }; message = 'Codex, Claude, and configured ZCode/Antigravity/WorkBuddy global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
         codex_path = if ($null -eq $documents['codex']) { '' } else { [string]$documents['codex'].path }
         claude_path = if ($null -eq $documents['claude']) { '' } else { [string]$documents['claude'].path }
@@ -424,7 +424,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         zcode_delta_present = -not [string]::IsNullOrWhiteSpace($delta['zcode'])
         antigravity_delta_present = -not [string]::IsNullOrWhiteSpace($delta['antigravity'])
         platform_deltas_distinct = $platformDeltasDistinct
-        releases = [pscustomobject][ordered]@{ codex = $release['codex']; claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity']; aligned = $releaseAligned }
+        releases = [pscustomobject][ordered]@{ codex = $release['codex']; claude = $release['claude']; zcode = $release['zcode']; zcode_configured = $configured['zcode']; antigravity = $release['antigravity']; antigravity_configured = $configured['antigravity']; workbuddy = $release['workbuddy']; workbuddy_configured = $configured['workbuddy']; aligned = $releaseAligned }
         budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
     }
