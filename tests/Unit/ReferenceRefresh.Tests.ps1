@@ -63,6 +63,8 @@ BeforeAll {
                     status = 'active'
                     upstream_url = $UpstreamUrl
                     relative_path = 'core/demo'
+                    consumer = 'skills-manager: fixture source comparison'
+                    retirement_trigger = 'remove when fixture source comparison is retired'
                 })
         }
         [System.IO.File]::WriteAllText($Path, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))

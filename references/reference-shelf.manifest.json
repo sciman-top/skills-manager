@@ -18,7 +18,9 @@
       "upstream_url": "https://github.com/openai/codex.git",
       "relative_path": "core/codex",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: Codex host integration and CLI/app-server source comparisons",
+      "retirement_trigger": "remove when skills-manager no longer supports Codex host integration and has no active source-comparison need"
     },
     {
       "name": "openai-plugins",
@@ -29,7 +31,9 @@
       "upstream_url": "https://github.com/openai/plugins.git",
       "relative_path": "core/openai-plugins",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: official OpenAI plugin packaging and skill/MCP interoperability comparisons",
+      "retirement_trigger": "remove when skills-manager has no active OpenAI plugin or interoperability comparison need"
     },
     {
       "name": "anthropics-skills",
@@ -38,7 +42,9 @@
       "upstream_url": "https://github.com/anthropics/skills.git",
       "relative_path": "core/anthropics-skills",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: source-level comparison for configured Anthropic skill vendors",
+      "retirement_trigger": "remove when skills-manager no longer configures Anthropic skill vendors and has no active comparison need"
     },
     {
       "name": "gemini-cli",
@@ -47,7 +53,9 @@
       "upstream_url": "https://github.com/google-gemini/gemini-cli.git",
       "relative_path": "core/gemini-cli",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: Gemini CLI host capability and skill-discovery compatibility comparisons",
+      "retirement_trigger": "remove when skills-manager no longer supports Gemini CLI host integration and has no active comparison need"
     },
     {
       "name": "agentskills",
@@ -57,7 +65,9 @@
       "upstream_url": "https://github.com/agentskills/agentskills.git",
       "relative_path": "core/agentskills",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: Agent Skills format, metadata, and packaging compatibility comparisons",
+      "retirement_trigger": "remove when skills-manager no longer supports the Agent Skills format and has no active comparison need"
     },
     {
       "name": "modelcontextprotocol",
@@ -66,7 +76,9 @@
       "upstream_url": "https://github.com/modelcontextprotocol/modelcontextprotocol.git",
       "relative_path": "core/modelcontextprotocol",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: MCP protocol and server-definition compatibility comparisons",
+      "retirement_trigger": "remove when skills-manager no longer manages MCP definitions and has no active protocol comparison need"
     },
     {
       "name": "servers",
@@ -76,7 +88,9 @@
       "upstream_url": "https://github.com/modelcontextprotocol/servers.git",
       "relative_path": "secondary/servers",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: official MCP server examples for task-specific protocol comparisons",
+      "retirement_trigger": "remove when skills-manager has no active need to compare official MCP server examples"
     },
     {
       "name": "registry",
@@ -85,7 +99,9 @@
       "upstream_url": "https://github.com/modelcontextprotocol/registry.git",
       "relative_path": "core/registry",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: MCP Registry metadata and source-discovery contract comparisons",
+      "retirement_trigger": "remove when skills-manager has no active MCP Registry comparison need"
     },
     {
       "name": "awesome-copilot",
@@ -94,7 +110,9 @@
       "upstream_url": "https://github.com/github/awesome-copilot.git",
       "relative_path": "secondary/awesome-copilot",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: source-level comparison for configured GitHub Copilot skill vendors",
+      "retirement_trigger": "remove when skills-manager no longer configures this skill vendor and has no active comparison need"
     },
     {
       "name": "vercel-agent-skills",
@@ -103,7 +121,9 @@
       "upstream_url": "https://github.com/vercel-labs/agent-skills.git",
       "relative_path": "secondary/vercel-agent-skills",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: source-level comparison for configured Vercel skill vendors",
+      "retirement_trigger": "remove when skills-manager no longer configures this skill vendor and has no active comparison need"
     },
     {
       "name": "wshobson-agents",
@@ -112,7 +132,9 @@
       "upstream_url": "https://github.com/wshobson/agents.git",
       "relative_path": "secondary/wshobson-agents",
       "branch": "main",
-      "policy": "floating"
+      "policy": "floating",
+      "consumer": "skills-manager: source-level comparison for configured wshobson skill vendors",
+      "retirement_trigger": "remove when skills-manager no longer configures this skill vendor and has no active comparison need"
     },
     {
       "name": "openspec",
@@ -125,7 +147,7 @@
       "policy": "floating",
       "reviewed_revision": "1ebddd17f40dde15dfd28289e4493c3cf05ee9df",
       "license": "MIT",
-      "consumer": "host-native-first thin-loop workflow design",
+      "consumer": "skills-manager: host-native-first thin-loop workflow design",
       "adoption_decision": "reference-only; borrow lightweight brownfield artifacts and non-rigid phase progression",
       "retirement_trigger": "remove when thin-loop workflow design no longer has an active comparison need"
     },
@@ -140,7 +162,7 @@
       "policy": "floating",
       "reviewed_revision": "67d876f1c317a82123e429d0c078ff3c601a99a8",
       "license": "MIT with trademark notice",
-      "consumer": "host-native-first thin-loop workflow design",
+      "consumer": "skills-manager: host-native-first thin-loop workflow design",
       "adoption_decision": "reference-only; borrow right-sized process depth while rejecting fixed role and agent stacks",
       "retirement_trigger": "remove when thin-loop workflow design no longer has an active comparison need"
     },
@@ -155,7 +177,7 @@
       "policy": "floating",
       "reviewed_revision": "261a4efb90d7dbe4e71786861858f721b4ab730c",
       "license": "MIT",
-      "consumer": "HSM POC Hermes app-server Windows launcher and configuration-migration maintenance",
+      "consumer": "skills-manager HSM POC: Hermes app-server Windows launcher and configuration-migration maintenance",
       "adoption_decision": "reference-only; use for source-level POC diagnosis and regression comparison, never auto-import runtime code or activate Hermes",
       "retirement_trigger": "remove when the HSM POC no longer has a current Hermes source-maintenance need or an accepted upstream release removes the comparison need"
     }

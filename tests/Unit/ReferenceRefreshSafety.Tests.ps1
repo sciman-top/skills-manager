@@ -34,6 +34,8 @@ Describe 'reference refresh remote provenance safety' {
                 status = 'active'
                 upstream_url = $declaredRemote
                 branch = 'main'
+                consumer = 'skills-manager: fixture source comparison'
+                retirement_trigger = 'remove when fixture source comparison is retired'
             })
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
@@ -66,7 +68,7 @@ Describe 'reference refresh remote provenance safety' {
             schema_version = 1
             references_root = $referencesRoot
             default_refresh_set = @('matching')
-            repos = @([ordered]@{ name='matching'; relative_path='matching'; tier='core-mainline'; status='active'; upstream_url=$remote; branch='main' })
+            repos = @([ordered]@{ name='matching'; relative_path='matching'; tier='core-mainline'; status='active'; upstream_url=$remote; branch='main'; consumer='skills-manager: fixture source comparison'; retirement_trigger='remove when fixture source comparison is retired' })
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
         $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames matching -FetchOnly
