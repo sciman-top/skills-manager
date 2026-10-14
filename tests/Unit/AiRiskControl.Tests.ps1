@@ -94,7 +94,7 @@ Describe 'AI risk policy helpers' {
     It 'separates Antigravity, Gemini API, and Gemini CLI quota diagnosis without retrying' {
         $result = Get-AiRiskControlIncidentPlan 'antigravity-rate-limit'
         $result.diagnosis | Should -Match 'Antigravity 订阅五小时/周额度.*Gemini API project/model/spend cap.*Gemini CLI 认证额度'
-        $result.immediate -join ';' | Should -Match '停止当前请求的重试.*五小时刷新不保证周额度恢复'
+        $result.immediate -join ';' | Should -Match 'UI/agent 请求停止连续重试.*Gemini API.*有限退避.*五小时刷新不保证周额度恢复'
         $result.immediate -join ';' | Should -Match '不自动换模型重放'
     }
 
@@ -150,6 +150,7 @@ Describe 'Invoke-AiRiskControlCommand' {
         $result.policy.forbidden_operations | Should -Contain 'account_rotation_or_bulk_registration'
         $result.policy.platform_contracts.workbuddy.blocked | Should -Contain 'token extraction or connector-proxy bypass'
         @($result.policy.official_sources.url) | Should -Contain 'https://antigravity.google/docs/faq/'
+        @($result.policy.official_sources.url) | Should -Contain 'https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Error-Code'
         $result.policy.platform_contracts.antigravity.allowed | Should -Contain 'agy -p direct scripting or CI within the current FAQ'
         ($result.policy.platform_contracts.antigravity.allowed -join ';') | Should -Not -Match 'stable low-frequency egress'
         $result.policy.enforcement | Should -Be 'advisory_only; this command does not intercept host requests or enforce client concurrency'
@@ -163,6 +164,13 @@ Describe 'Invoke-AiRiskControlCommand' {
         $result.incident.severity | Should -Be 'critical'
         $result.plan.stop_conditions -join ';' | Should -Match '轮换|伪造|提取'
         $result.side_effects -join ';' | Should -Match 'no host configuration reads or writes'
+    }
+
+    It 'keeps WorkBuddy frequency limits distinct from account risk and bounds model switching' {
+        $result = Invoke-AiRiskControlCommand @('--platform', 'workbuddy', '--event', 'workbuddy-rate-limit', '--plan')
+        $result.incident.diagnosis | Should -Match '不能据此推导账号封禁或公开额度阈值'
+        ($result.incident.immediate -join ';') | Should -Match '手动切换模型并重试一次'
+        $result.incident.forbidden | Should -Contain '切换账号规避窗口'
     }
 
     It 'distinguishes generic 403 from explicit Antigravity service-disabled guidance' {

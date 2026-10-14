@@ -31,7 +31,7 @@ description: 只读排查 WorkBuddy 国际版/CodeBuddy 的 11140、403、429、
 | 观察 | 动作与边界 |
 | --- | --- |
 | 403 / 11140 | 暂停被拒请求，排查认证、权限、内容、连接器和网络；通过官方客户端反馈附脱敏 Trace ID；不承诺自动恢复 |
-| 429 / 服务频率限制 | 遵守 Retry-After/reset 或官方额度界面；没有恢复信息时停止自动重试并查询官方状态；不切号或立即切模型绕过窗口 |
+| 429 / 服务频率限制 | 遵守 Retry-After/reset 或官方额度界面；没有恢复信息时停止自动重试并查询官方状态。仅对 6003/6004 且官方客户端明确建议时，手动切换模型并重试一次；不自动循环或切号绕过限制 |
 | models.json 非空 | 核对当前官方客户端是否支持该自定义模型、来源与条款；非空本身不证明反代或违规 |
 | 官方内置 MCP 未授权 | 按连接器认证问题处理；422/10101 不自动等于账号风控 |
 | 系统代理与环境变量不一致 | 核对国际版/国内版真实端点和当前部署路由；保留已有例外，修改需备份、授权与回读 |
@@ -43,10 +43,10 @@ description: 只读排查 WorkBuddy 国际版/CodeBuddy 的 11140、403、429、
 
 使用官方客户端、稳定身份和合理并发，任务分段，尊重服务限制。禁止 token 提取、订阅配额网关、设备指纹伪造、删除凭据或多账号轮换；不因报错盲目重装、清缓存、重启或改变模型配置。错误恢复走当前官方支持渠道，不承诺“根治”或免封。
 
-依据：[WorkBuddy 国际版条款](https://www.workbuddy.ai/document/term)（2026-10-08 读取）。条款、官方模型能力和配额可能变化，执行前核实。
+依据：[WorkBuddy 国际版条款](https://www.workbuddy.ai/document/term)（2026-10-14 复核）。条款、官方模型能力和配额可能变化，执行前核实。
 
 ## 参考与停止
 
-`references/log-forensics.md` 提供日志分层方法；`network-and-proxy.md`、`official-sources.md`、`prevention-ops.md` 提供来源和操作背景。历史参考中的“只能是账号级”“换号止血”、画像决定封禁或唯一有效操作等说法不是已证实判据，不得执行或继承。
+`references/log-forensics.md` 提供脱敏判读方法；`network-and-proxy.md`、`official-sources.md`、`prevention-ops.md` 提供公开错误码、条款与操作背景。错误类别、会话标题、ID、IP 标签、网络对照和社区案例本身都不是账号风险判据。
 
 结论分清 repo_verified、filesystem_projected、host_loaded、live_accepted。仓库策略文件通过不等于服务恢复或真实长会话验收；需要真人登录或官方处理时注明恢复条件并停止相关请求。
