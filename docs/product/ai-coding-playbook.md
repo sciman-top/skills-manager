@@ -331,10 +331,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Fixture diff check failed.' }
 | 冷技能闭包与受控执行 | `src/Domain/ExecutionAdmission.ps1`、router、native-agent bridge | 只覆盖对应调用链；无 hook 强制层，冷源直读阻断由投影宿主规则语义承担 |
 | 审查后的规则写入与回滚 | 现有 Rule Estate 和全局规则投影事务 | 授权、精确目标、before hash 与回滚在实际写入口裁决；文件相等只证明投影 |
 | 比例门禁与生成漂移 | `scripts/quality/resolve-gate-profile.ps1`、`run-local-quality-gates.ps1`、`.github/workflows/ci.yml` | 本地默认 auto；CI 复用同一选档并 `-CheckGenerated`，不在 Git hook 或 Stop hook 再跑一份 full |
+| PR 验证声明 | `.github/pull_request_template.md`、`scripts/quality/verify-pr-charter.ps1` | 所有 PR 的 `Verification` 必填最低证明和结果；允许适用的直接观察或说明理由的 N/A。脚本只校验声明，审查须核对 `New surface` 与 diff、调用方、实际证据；自报 `no` 不证明没有新增面 |
+| Codex CLI 创建 PR | `.codex/rules/skills-manager-pr-create.rules` | 在受信任项目配置中对 `gh pr create` 前缀要求审批，参数顺序不改变匹配；根据仍有效的用户授权核对 repo/base。该规则仅覆盖对应沙箱外命令，不覆盖 API、shell 包装或其他原生工具，不能替代宿主权限 |
 | 临时文件提交检查 | `.githooks/pre-commit` | 本地便利检查，可绕过；不是 CI 必需检查或任务写集准入 |
 | 集成前必须通过检查 | 现有 CI job，加远端 required status checks / ruleset | 从当前 check-runs 核实检查名与 app 来源，再经显式授权绑定主分支；workflow 存在不等于远端已强制 |
 | 工作流的实际宿主效果 | 第 10 节的隔离样例与独立复验 | 仅证明该次受控路径；`host_loaded` 和 `live_accepted` 不能由文本测试或 doctor 推导 |
 
 规则/技能源修改后按既有构建和投影链更新；用归一化正文或正确字节口径核对内容，再在目标宿主新会话观察加载。投影、信任或权限变更需其明确授权，不能用另一会话或另一宿主的成功补记验收。
+
+`Stop` hook 仅在真实遗漏无法由现有入口解决时考虑，检查当前缺失证明并设续做边界；已通过证明不得在每次停止时重跑。命令 rule 的静态匹配只能证明规则源，不能证明当前会话已加载或允许提权审批；full-access/never 会话也不能靠项目 `on-request` 文本补成权限隔离。
 
 远端强化优先将已有 CI 检查设为必需并绑定预期 app，检查绕过权限，按生效策略走 PR 集成。规则应用前预演失败检查、未完成检查和合法通过路径；策略或权限变更与仓库内编码分别授权。当前远端状态在执行时查询，不在本文保存历史成功结论。

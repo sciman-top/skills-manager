@@ -153,6 +153,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
 - Replaces / deletes: none; this is the existing PR template contract
 - Minimum proof: focused CI workflow contract test
 
+## Verification
+- Minimum proof: focused CI workflow contract test
+- Result: pwsh tests/run.ps1; exit=0; the affected contract passes.
+
 ## Deletion delta
 - Removed: 0
 
@@ -229,6 +233,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
 - Fix a regression in an existing command.
 - New surface: no
 
+## Verification
+- Minimum proof: reproduce the invalid input and rerun the affected test.
+- Result: affected test passes; exit=0; live acceptance not exercised.
+
 ## Risks and Rollback
 - Risk: the command may still reject invalid input.
 - Rollback: revert the implementation change.
@@ -239,6 +247,21 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $routineEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $routinePath -Encoding UTF8
         & pwsh -NoProfile -File $scriptPath -EventPath $routinePath *> $null
         $LASTEXITCODE | Should -Be 0
+
+        # Admission evidence must not satisfy an empty Verification field.
+        $invalidVerificationBodies = @(
+            ($routineEvent.pull_request.body -replace '(?ms)^## Verification\r?\n.*?(?=^## )', ''),
+            $routineEvent.pull_request.body.Replace('- Result: affected test passes; exit=0; live acceptance not exercised.', '- Result: <command, exit code and relevant result>'),
+            $routineEvent.pull_request.body.Replace('- Minimum proof: reproduce the invalid input and rerun the affected test.', '- Minimum proof: '),
+            $validEvent.pull_request.body.Replace('- Result: pwsh tests/run.ps1; exit=0; the affected contract passes.', '- Result: '),
+            ([regex]::Replace($validEvent.pull_request.body, '(?m)(^## Verification\r?\n)- Minimum proof:[^\r\n]*', '$1- Minimum proof: <unresolved>'))
+        )
+        foreach ($body in $invalidVerificationBodies) {
+            $invalidVerificationPath = Join-Path $TestDrive 'invalid-verification-event.json'
+            @{ pull_request = @{ body = $body } } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $invalidVerificationPath -Encoding UTF8
+            & pwsh -NoProfile -File $scriptPath -EventPath $invalidVerificationPath *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+        }
 
         $missingSurfaceEvent = [ordered]@{ pull_request = [ordered]@{ body = $routineEvent.pull_request.body.Replace('- New surface: no', '') } }
         $missingSurfacePath = Join-Path $TestDrive 'missing-surface-event.json'
