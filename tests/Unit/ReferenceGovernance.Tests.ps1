@@ -11,6 +11,20 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 $manifestPath = Join-Path $repoRoot "references\reference-shelf.manifest.json"
 $refreshScript = Join-Path $repoRoot "scripts\refresh-reference-repos.ps1"
 $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1"
+    function script:New-ExternalGitFixtureRepo {
+        param([Parameter(Mandatory)][string]$Path)
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        & git -C $Path init -q --initial-branch main
+        if ($LASTEXITCODE -ne 0) { throw "git init failed for fixture: $Path" }
+        [IO.File]::WriteAllText((Join-Path $Path 'README.md'), 'initial')
+        & git -C $Path add README.md
+        if ($LASTEXITCODE -ne 0) { throw "git add failed for fixture: $Path" }
+        & git -C $Path commit -q -m initial
+        if ($LASTEXITCODE -ne 0) { throw "git commit failed for fixture: $Path" }
+        & git -C $Path remote add origin ("https://example.invalid/{0}.git" -f (Split-Path -Leaf $Path))
+        if ($LASTEXITCODE -ne 0) { throw "git remote add failed for fixture: $Path" }
+        (& git -C $Path rev-parse HEAD).Trim()
+    }
 }
 
     It "Limits reference portfolio mutations to the project-owned external root" {
@@ -37,6 +51,125 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
 
         @($repositories | ForEach-Object { $_.relative_path }) | Should -Be @('direct-repo', 'source-group/broken-repo', 'source-group/nested-repo')
         @($repositories | Where-Object { $_.relative_path -eq 'source-group/broken-repo' })[0].git_root_valid | Should -Be $false
+    }
+
+    It "Skips junction aliases and excluded trees but scans the shared canonical repository root" {
+        . $governanceScript
+
+        $externalRoot = Join-Path $TestDrive 'external-canonical-inventory'
+        $controlRoot = Join-Path $externalRoot '_shared'
+        $canonicalRepo = Join-Path $controlRoot 'repos\shared-repo'
+        $ownedRepo = Join-Path $externalRoot 'skills-manager-references\owned-repo'
+        $directRepo = Join-Path $externalRoot 'source-group\direct-repo'
+        $junctionParent = Join-Path $externalRoot 'consumer'
+        $junctionPath = Join-Path $junctionParent 'shared-repo'
+        New-Item -ItemType Directory -Path $canonicalRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $ownedRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $directRepo -Force | Out-Null
+        New-Item -ItemType Directory -Path $junctionParent -Force | Out-Null
+        & git -C $controlRoot init -q --initial-branch main
+        & git -C $canonicalRepo init -q --initial-branch main
+        & git -C $ownedRepo init -q --initial-branch main
+        & git -C $directRepo init -q --initial-branch main
+        try { New-Item -ItemType Junction -Path $junctionPath -Target $canonicalRepo -ErrorAction Stop | Out-Null }
+        catch {
+            Set-ItResult -Skipped -Because "junction creation is unavailable: $($_.Exception.Message)"
+            return
+        }
+
+        try {
+            $repositories = @(Get-ExternalGitRepositories -ExternalRoot $externalRoot -ExcludedTreeRoots @((Join-Path $externalRoot 'skills-manager-references'), (Join-Path $controlRoot 'migration-backups')) -ExcludedRepositoryRoots @($controlRoot))
+            @($repositories | ForEach-Object { $_.relative_path }) | Should -Be @('_shared/repos/shared-repo', 'source-group/direct-repo')
+        }
+        finally {
+            if (Test-Path -LiteralPath $junctionPath) { Remove-Item -LiteralPath $junctionPath -Force }
+        }
+    }
+
+    It 'Plans baseline additions, fast-forward updates, and retired paths without writing' {
+        Import-Module (Join-Path $repoRoot 'scripts\ExternalGitRepositoryDiscovery.psm1') -Force
+        $externalRoot = Join-Path $TestDrive 'external-baseline-plan'
+        $existingPath = Join-Path $externalRoot 'existing-repo'
+        $newPath = Join-Path $externalRoot 'new-repo'
+        $oldHead = New-ExternalGitFixtureRepo -Path $existingPath
+        $origin = "https://example.invalid/existing-repo.git"
+        [IO.File]::WriteAllText((Join-Path $existingPath 'README.md'), 'fast-forward')
+        & git -C $existingPath commit -qam fast-forward
+        if ($LASTEXITCODE -ne 0) { throw 'fixture fast-forward commit failed' }
+        $null = New-ExternalGitFixtureRepo -Path $newPath
+        $baseline = [pscustomobject]@{
+            schema_version = 1
+            external_root = $externalRoot
+            repos = @(
+                [pscustomobject]@{ relative_path = 'existing-repo'; head = $oldHead; origin = $origin }
+                [pscustomobject]@{ relative_path = 'retired-repo'; head = ('a' * 40); origin = 'https://example.invalid/retired.git' }
+            )
+        }
+
+        $plan = New-ExternalGitBaselinePlan -ExternalRoot $externalRoot -BaselineDocument $baseline
+
+        $plan.repositories | Should -Be 2
+        $plan.added | Should -Be @('new-repo')
+        $plan.fast_forward_updated | Should -Be @('existing-repo')
+        $plan.retired | Should -Be @('retired-repo')
+        $plan.changed | Should -BeTrue
+        @($plan.document.repos).Count | Should -Be 2
+    }
+
+    It 'Rejects dirty repositories during baseline planning' {
+        Import-Module (Join-Path $repoRoot 'scripts\ExternalGitRepositoryDiscovery.psm1') -Force
+        $externalRoot = Join-Path $TestDrive 'external-baseline-dirty'
+        $repoPath = Join-Path $externalRoot 'dirty-repo'
+        $head = New-ExternalGitFixtureRepo -Path $repoPath
+        $baseline = [pscustomobject]@{
+            schema_version = 1
+            external_root = $externalRoot
+            repos = @([pscustomobject]@{
+                    relative_path = 'dirty-repo'
+                    head = $head
+                    origin = 'https://example.invalid/dirty-repo.git'
+                })
+        }
+        [IO.File]::WriteAllText((Join-Path $repoPath 'local-change.txt'), 'untracked')
+
+        $plan = New-ExternalGitBaselinePlan -ExternalRoot $externalRoot -BaselineDocument $baseline
+
+        $plan.blocked | Should -Contain 'dirty-repo (dirty working tree)'
+        @($plan.document.repos).Count | Should -Be 1
+        $plan.document.repos[0].head | Should -Be $head
+        $plan.changed | Should -BeFalse
+    }
+
+    It 'Rejects divergent heads instead of blessing them as a baseline update' {
+        Import-Module (Join-Path $repoRoot 'scripts\ExternalGitRepositoryDiscovery.psm1') -Force
+        $externalRoot = Join-Path $TestDrive 'external-baseline-diverged'
+        $repoPath = Join-Path $externalRoot 'diverged-repo'
+        $null = New-ExternalGitFixtureRepo -Path $repoPath
+        & git -C $repoPath checkout -qb baseline
+        [IO.File]::WriteAllText((Join-Path $repoPath 'README.md'), 'baseline side')
+        & git -C $repoPath commit -qam baseline-side
+        if ($LASTEXITCODE -ne 0) { throw 'baseline-side fixture commit failed' }
+        $baselineHead = (& git -C $repoPath rev-parse HEAD).Trim()
+        & git -C $repoPath checkout -q main
+        [IO.File]::WriteAllText((Join-Path $repoPath 'README.md'), 'current side')
+        & git -C $repoPath commit -qam current-side
+        if ($LASTEXITCODE -ne 0) { throw 'current-side fixture commit failed' }
+        $baseline = [pscustomobject]@{
+            schema_version = 1
+            external_root = $externalRoot
+            repos = @([pscustomobject]@{
+                    relative_path = 'diverged-repo'
+                    head = $baselineHead
+                    origin = 'https://example.invalid/diverged-repo.git'
+                })
+        }
+
+        $plan = New-ExternalGitBaselinePlan -ExternalRoot $externalRoot -BaselineDocument $baseline
+
+        $plan.blocked | Should -Contain 'diverged-repo (HEAD is not a fast-forward from the recorded baseline)'
+        @($plan.document.repos).Count | Should -Be 1
+        $plan.document.repos[0].head | Should -Be $baselineHead
+        $plan.changed | Should -BeFalse
     }
 
     It "Enforces reference portfolio tier and status lifecycle pairs" {

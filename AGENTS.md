@@ -24,7 +24,7 @@
 - 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。
 - 更新 vendor/import/MCP 前记录来源、锁定、影响与回滚；宿主/provider/auth/session/plugin/MCP mutation 需要当前明确授权。
 - `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
-- `D:\CODE\external\` 默认整根 deny-write ACL 锁定（外层仓基线见 `references/external-readonly-baselines.json`）；锁定/解锁只经 `scripts/lock-external-repos.ps1` 且为用户显式授权动作，AI 会话不得自行改 ACL 或重钉基线。用户可授权保持解锁态以支持频繁的参考仓更新：解锁期间 L1 只读硬墙不生效，兜底改由基线 HEAD 漂移核对承担，因此必须以 `-Status -Deep` 自检（残留 deny 数 0、顶层写探针通过）并保持基线覆盖完整。子路径上已物化的 deny 副本属其他 token 拥有，只有管理员 PowerShell 能清除，因此 `-Unlock` 必须在提权会话执行并以同一自检为验收。
+- `D:\CODE\external\` 当前经用户授权长期保持解锁，以支持受控参考仓更新；不自动重新加 deny-write ACL。锁脚本无参数只读报告，重新锁定必须显式 `-Lock`，`-Unlock` 只清理历史 ACL；以 `-Status -Deep` 验收全树 deny 残留为 0、顶层写探针通过。解锁态由 `references/external-readonly-baselines.json` 的 HEAD、origin 与 cleanliness 检查兜底；只通过显式 `-RefreshBaseline` 接受干净仓库的 fast-forward 更新。AI 会话不得自行改 ACL 或重钉基线。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
 - 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。准入三问（当前调用方 / 替代或删除了什么 / 最小验证）任一答不上即拒绝，PR 模板同栏。
 - 元治理测试五套（ResolveGateProfile / QualityGateAuto / CiWorkflow / TestRunner / BuildScript）冻结：仅真实故障触发式维护，不做主动性增强或扩面。

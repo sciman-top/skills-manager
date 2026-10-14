@@ -1,7 +1,9 @@
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true)]
 param(
+    [switch]$Lock,
     [switch]$Unlock,
     [switch]$Status,
+    [switch]$RefreshBaseline,
     [switch]$Deep,
     [string]$ExternalRoot = 'D:\CODE\external'
 )
@@ -14,11 +16,17 @@ if (-not (Test-Path -LiteralPath $ExternalRoot -PathType Container)) {
     throw "external root not found: $ExternalRoot"
 }
 
-if ($Unlock -and $Status) {
-    throw 'Use either -Unlock or -Status, not both.'
+$selectedActions = @(@($Lock, $Unlock, $Status, $RefreshBaseline) | Where-Object { $_ }).Count
+if ($selectedActions -gt 1) {
+    throw 'Choose only one of -Lock, -Unlock, -RefreshBaseline, or -Status.'
 }
 
-if ($Deep -and -not $Status) {
+$statusMode = $Status -or ($selectedActions -eq 0)
+if ($selectedActions -eq 0) {
+    Write-Host 'No action specified; checking status only. Use -Lock explicitly to restore the ACL lock.'
+}
+
+if ($Deep -and -not $statusMode) {
     throw '-Deep only applies to -Status.'
 }
 
@@ -145,7 +153,17 @@ function Get-ExternalTopLevelDirectory {
 $resolvedRoot = [IO.Path]::GetFullPath($ExternalRoot).TrimEnd('\')
 
 # 解锁窗口只服务显式 refresh/手动维护;AI 会话不属于合法调用方。
+if ($Unlock -and $WhatIfPreference) {
+    $account = Get-ExternalRootAccount
+    $rootLocked = Test-ExternalRootLockAce -Path $ExternalRoot
+    $residual = @(Get-ExternalResidualDenyPath -Path $ExternalRoot -Account $account)
+    $probeTargets = @(Get-ExternalTopLevelDirectory -Path $ExternalRoot)
+    Write-Host "UNLOCK PREVIEW: rootLocked=$rootLocked residualDenyPaths=$($residual.Count) topLevelDirectories=$($probeTargets.Count); no ACL changes made."
+    exit 0
+}
+
 if ($Unlock) {
+    if (-not $PSCmdlet.ShouldProcess($ExternalRoot, 'Remove this user deny-write ACLs throughout the external root')) { exit 0 }
     $account = Get-ExternalRootAccount
     $elevated = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -196,11 +214,11 @@ if ($Unlock) {
         "residualDenyPaths(before repair)=$($residual.Count); repairs=$repairSummary; residual deny paths=0; " +
         "top-level write probes=$($probeTargets.Count) passed; icaclsExit=$($purge.ExitCode); " +
         "scanSeconds=$([int]$scanWatch.Elapsed.TotalSeconds); elevated=$elevated)")
-    Write-Host "Finish your work, then re-lock: pwsh scripts/lock-external-repos.ps1"
+    Write-Host 'The external root remains unlocked. Re-locking requires an explicit -Lock action.'
     exit 0
 }
 
-if ($Status) {
+if ($statusMode) {
     $account = Get-ExternalRootAccount
     $locked = Test-ExternalRootLockAce -Path $ExternalRoot
     $probeTargets = @(Get-ExternalTopLevelDirectory -Path $ExternalRoot)
@@ -238,29 +256,51 @@ if ($Status) {
     exit 1
 }
 
-if (-not (Test-Path -LiteralPath $baselinesPath)) {
-    throw "baseline file missing: $baselinesPath"
+
+if ($RefreshBaseline) {
+    if (-not (Test-Path -LiteralPath $baselinesPath -PathType Leaf)) { throw "baseline file missing: $baselinesPath" }
+    $baselines = Get-Content -Raw -LiteralPath $baselinesPath -Encoding UTF8 | ConvertFrom-Json
+    $referenceManifestPath = Join-Path $repoRoot 'references\reference-shelf.manifest.json'
+    $referenceManifest = Get-Content -Raw -LiteralPath $referenceManifestPath -Encoding UTF8 | ConvertFrom-Json
+    $ownedShelfRoot = [IO.Path]::GetFullPath([string]$referenceManifest.references_root)
+    $externalRootFull = [IO.Path]::GetFullPath($ExternalRoot).TrimEnd('\')
+    if (-not $ownedShelfRoot.StartsWith($externalRootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "owned reference shelf is outside the external root: $ownedShelfRoot"
+    }
+    Import-Module (Join-Path $PSScriptRoot 'ExternalGitRepositoryDiscovery.psm1') -Force
+    $plan = New-ExternalGitBaselinePlan -ExternalRoot $ExternalRoot -BaselineDocument $baselines `
+        -ExcludedTreeRoots @($ownedShelfRoot, (Join-Path $ExternalRoot '_shared\migration-backups')) `
+        -ExcludedRepositoryRoots @((Join-Path $ExternalRoot '_shared'))
+    Write-Host "BASELINE PLAN: repos=$($plan.repositories) added=$($plan.added.Count) fastForwardUpdated=$($plan.fast_forward_updated.Count) retired=$($plan.retired.Count) blocked=$($plan.blocked.Count)"
+    foreach ($path in @($plan.added | Select-Object -First 5)) { Write-Host "  add: $path" }
+    foreach ($path in @($plan.fast_forward_updated | Select-Object -First 5)) { Write-Host "  fast-forward: $path" }
+    foreach ($path in @($plan.retired | Select-Object -First 5)) { Write-Host "  retire: $path" }
+    foreach ($path in @($plan.blocked | Select-Object -First 10)) { Write-Host "  blocked: $path" }
+    if ($plan.blocked.Count -gt 0) {
+        throw "baseline refresh blocked by $($plan.blocked.Count) repository check(s); no baseline was written. Resolve them and preview again."
+    }
+    if (-not $plan.changed) {
+        Write-Host 'Baseline inventory already matches the clean repository checkouts.'
+        exit 0
+    }
+    if ($PSCmdlet.ShouldProcess($baselinesPath, 'Write the reviewed external repository baseline plan')) {
+        $baselineJson = (ConvertTo-Json -InputObject $plan.document -Depth 5) + [Environment]::NewLine
+        $temporaryPath = Join-Path (Split-Path -Parent $baselinesPath) ('.external-readonly-baselines-{0}.tmp' -f [Guid]::NewGuid().ToString('N'))
+        try {
+            [System.IO.File]::WriteAllText($temporaryPath, $baselineJson, [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::Move($temporaryPath, $baselinesPath, $true)
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+        }
+        Write-Host 'BASELINE REFRESHED: no ACL changes made.'
+    }
+    exit 0
 }
 
-# 上锁即重钉基线:解锁窗口期产生的合法新 HEAD 从此成为漂移比对基点。
-$baselinesText = Get-Content -Raw -LiteralPath $baselinesPath -Encoding UTF8
-$baselines = $baselinesText | ConvertFrom-Json
-foreach ($repo in @($baselines.repos)) {
-    $repoPath = Join-Path $ExternalRoot ([string]$repo.relative_path)
-    $head = (& git -C $repoPath rev-parse HEAD 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
-        throw "cannot resolve HEAD for baseline repo: $($repo.relative_path)"
-    }
-    if ([string]$repo.head -eq $head) { continue }
-    $pattern = '(?s)("relative_path"\s*:\s*"' + [regex]::Escape([string]$repo.relative_path) + '".*?"head"\s*:\s*")[0-9a-f]{40}'
-    $updated = [regex]::Replace($baselinesText, $pattern, ('${1}' + $head), 'IgnoreCase')
-    if ($updated -eq $baselinesText) {
-        throw "baseline head pattern not matched for repo: $($repo.relative_path)"
-    }
-    $baselinesText = $updated
-    Write-Host "baseline re-pinned: $($repo.relative_path) -> $head"
-}
-[System.IO.File]::WriteAllText($baselinesPath, $baselinesText, [System.Text.UTF8Encoding]::new($false))
+if (-not $Lock) { throw 'Choose -Status, -Unlock, -RefreshBaseline, or -Lock.' }
+
+if (-not $PSCmdlet.ShouldProcess($ExternalRoot, 'Apply deny-write ACLs to the external root')) { exit 0 }
 
 # 本机 icacls 对多数 specific rights 误报“无效参数”,改用 .NET ACL API 写 deny。
 # Write 已含 WriteData/WriteAttributes/WriteExtendedAttributes;目录上 AppendData = 建子目录。
@@ -296,5 +336,3 @@ if ($pending.Count -gt 0) {
     throw "deny propagation incomplete for $($pending.Count) file(s), e.g. $($pending[0].FullName); re-run lock-external-repos.ps1"
 }
 Write-Host "deny propagation confirmed on $($probeFiles.Count) probe file(s)"
-
-& (Join-Path $PSScriptRoot 'verify-reference-governance.ps1')
