@@ -293,10 +293,9 @@ if (-not $manifest) {
 }
 
 foreach ($manifestRepo in @($manifest.repos)) {
-    if ([string]$manifestRepo.tier -eq 'conditional' -and
-        ([string]::IsNullOrWhiteSpace([string]$manifestRepo.consumer) -or
-         [string]::IsNullOrWhiteSpace([string]$manifestRepo.retirement_trigger))) {
-        throw ("conditional reference requires consumer and retirement_trigger: {0}" -f [string]$manifestRepo.name)
+    if ([string]::IsNullOrWhiteSpace([string]$manifestRepo.consumer) -or
+        [string]::IsNullOrWhiteSpace([string]$manifestRepo.retirement_trigger)) {
+        throw ("reference requires consumer and retirement_trigger: {0}" -f [string]$manifestRepo.name)
     }
 }
 

@@ -28,13 +28,24 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         Test-ReferenceLifecycleState "secondary" "not-cloned" | Should -Be $false
     }
 
-    It 'requires a named consumer and retirement trigger for conditional references' {
+    It 'requires a named consumer and retirement trigger for every reference tier' {
         . $governanceScript
 
-        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer='watch-runtime'; retirement_trigger='remove when unused' }) | Should -BeTrue
-        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer=''; retirement_trigger='remove when unused' }) | Should -BeFalse
-        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer='watch-runtime'; retirement_trigger='' }) | Should -BeFalse
-        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='secondary' }) | Should -BeTrue
+        foreach ($tier in @('core-mainline', 'secondary', 'conditional')) {
+            Test-ReferenceConsumerContract ([pscustomobject]@{ tier=$tier; consumer='skills-manager: source comparison'; retirement_trigger='remove when unused' }) | Should -BeTrue
+            Test-ReferenceConsumerContract ([pscustomobject]@{ tier=$tier; consumer=''; retirement_trigger='remove when unused' }) | Should -BeFalse
+            Test-ReferenceConsumerContract ([pscustomobject]@{ tier=$tier; consumer='skills-manager: source comparison'; retirement_trigger='' }) | Should -BeFalse
+        }
+    }
+
+    It 'requires a consumer and retirement trigger for every registered reference' {
+        . $governanceScript
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+
+        foreach ($entry in @($manifest.repos)) {
+            (Test-ReferenceConsumerContract $entry) | Should -BeTrue
+            $entry.consumer | Should -Match '^skills-manager'
+        }
     }
 
     It "Rejects rooted and traversal reference paths before normalization" {
@@ -59,6 +70,8 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
                     status = "active"
                     upstream_url = "https://example.invalid/escape.git"
                     relative_path = "nested/../../escape"
+                    consumer = "skills-manager: fixture source comparison"
+                    retirement_trigger = "remove when fixture source comparison is retired"
                 })
         }
         [System.IO.File]::WriteAllText($fixtureManifest, ($fixture | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
@@ -89,7 +102,7 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $conditional = @($manifest.repos | Where-Object tier -eq 'conditional')
         foreach ($entry in $conditional) {
-            (Test-ConditionalReferenceContract $entry) | Should -BeTrue
+            (Test-ReferenceConsumerContract $entry) | Should -BeTrue
         }
 
         $hermes = @($conditional | Where-Object name -eq 'hermes-agent')
@@ -170,6 +183,8 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
                     status = "active"
                     upstream_url = $remote
                     relative_path = "core/demo"
+                    consumer = 'skills-manager: fixture source comparison'
+                    retirement_trigger = 'remove when fixture source comparison is retired'
                 })
         }
         [System.IO.File]::WriteAllText($fixtureManifest, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
