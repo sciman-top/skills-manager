@@ -333,6 +333,6 @@ $pending = @($probeFiles | Where-Object {
             }).Count -eq 0
     })
 if ($pending.Count -gt 0) {
-    throw "deny propagation incomplete for $($pending.Count) file(s), e.g. $($pending[0].FullName); re-run lock-external-repos.ps1"
+    throw "deny propagation incomplete for $($pending.Count) file(s), e.g. $($pending[0].FullName); re-run lock-external-repos.ps1 -Lock"
 }
 Write-Host "deny propagation confirmed on $($probeFiles.Count) probe file(s)"
