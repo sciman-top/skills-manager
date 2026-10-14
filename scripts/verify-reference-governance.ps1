@@ -24,6 +24,42 @@ function Test-ReferenceConsumerContract($Repo) {
         -not [string]::IsNullOrWhiteSpace([string]$Repo.retirement_trigger)
 }
 
+function Get-ExternalGitRepositories([string]$ExternalRoot) {
+    $rootPath = [IO.Path]::GetFullPath($ExternalRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $repositories = [Collections.Generic.List[object]]::new()
+    $pending.Push($rootPath)
+
+    while ($pending.Count -gt 0) {
+        $currentPath = $pending.Pop()
+        foreach ($directory in @(Get-ChildItem -LiteralPath $currentPath -Directory -Force -ErrorAction Stop)) {
+            if ($directory.Name -eq '.git') { continue }
+
+            $gitMarker = Join-Path $directory.FullName '.git'
+            if (Test-Path -LiteralPath $gitMarker) {
+                $gitRootText = (& git -C $directory.FullName rev-parse --show-toplevel 2>&1 | Out-String).Trim()
+                $candidate = [IO.Path]::GetFullPath($directory.FullName)
+                $gitRootValid = $false
+                if ($LASTEXITCODE -eq 0 -and $gitRootText) {
+                    $gitRoot = [IO.Path]::GetFullPath($gitRootText)
+                    $gitRootValid = $gitRoot.Equals($candidate, [StringComparison]::OrdinalIgnoreCase)
+                }
+                $relativePath = [IO.Path]::GetRelativePath($rootPath, $candidate).Replace('\', '/')
+                $repositories.Add([pscustomobject]@{
+                        relative_path = $relativePath
+                        path = $candidate
+                        git_root_valid = $gitRootValid
+                    })
+                continue
+            }
+
+            $pending.Push($directory.FullName)
+        }
+    }
+
+    return @($repositories | Sort-Object relative_path)
+}
+
 # Dot-sourcing (unit tests import only the Test-* helpers above) must not run
 # the fail-closed environment checks; external reference state belongs to
 # explicit verify runs, not to ordinary test loading.
@@ -113,25 +149,58 @@ else {
         if ([int]$baselines.schema_version -ne 1) { Add-Finding 'external readonly baselines schema_version must be 1' }
         if ([string]$baselines.external_root -ne $externalRoot) { Add-Finding "external readonly baselines must use $externalRoot" }
         foreach ($entry in @($baselines.repos)) {
-            $knownRootRepos[[string]$entry.relative_path] = [string]$entry.head
+            $relativePath = ([string]$entry.relative_path).Trim()
+            if (-not (Test-ContainedReferenceRelativePath $relativePath)) {
+                Add-Finding "invalid external readonly baseline path: $relativePath"
+                continue
+            }
+            $key = $relativePath.Replace('\', '/').TrimEnd('/')
+            if ($knownRootRepos.ContainsKey($key)) {
+                Add-Finding "duplicate external readonly baseline path: $relativePath"
+                continue
+            }
+            $knownRootRepos[$key] = $entry
         }
     }
 
-    $externalGitCount = 0
-    foreach ($dir in @(Get-ChildItem -LiteralPath $externalRoot -Directory)) {
-        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName '.git'))) { continue }
-        $externalGitCount++
-        $statusText = (& git -C $dir.FullName status --porcelain 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0) { Add-Finding "external repo status check failed: $($dir.Name)"; continue }
-        if ($statusText) { Add-Finding "external repo has dirty worktree: $($dir.Name)" }
-        if ($knownRootRepos.ContainsKey($dir.Name)) {
-            $head = (& git -C $dir.FullName rev-parse HEAD 2>&1 | Out-String).Trim()
-            if ($head -ne $knownRootRepos[$dir.Name]) {
-                Add-Finding "external repo HEAD drifted from baseline: $($dir.Name) (expected $($knownRootRepos[$dir.Name]), got $head)"
+    $externalRepos = @(Get-ExternalGitRepositories -ExternalRoot $externalRoot)
+    $externalGitCount = $externalRepos.Count
+    $actualRepos = @{}
+    foreach ($repo in $externalRepos) {
+        $key = ([string]$repo.relative_path).Replace('\', '/').TrimEnd('/')
+        $actualRepos[$key] = $repo
+        if (-not $knownRootRepos.ContainsKey($key)) {
+            Add-Finding "external git repo lacks a readonly baseline: $key"
+            continue
+        }
+        if (-not $repo.git_root_valid) {
+            Add-Finding "external git metadata does not resolve to its repository root: $key"
+            continue
+        }
+
+        $statusText = (& git -C $repo.path status --porcelain 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { Add-Finding "external repo status check failed: $key"; continue }
+        if ($statusText) { Add-Finding "external repo has dirty worktree: $key" }
+
+        $head = (& git -C $repo.path rev-parse HEAD 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { Add-Finding "external repo HEAD check failed: $key"; continue }
+        $expectedHead = [string]$knownRootRepos[$key].head
+        if ($head -ne $expectedHead) {
+            Add-Finding "external repo HEAD drifted from baseline: $key (expected $expectedHead, got $head)"
+        }
+
+        $expectedOrigin = [string]$knownRootRepos[$key].origin
+        if (-not [string]::IsNullOrWhiteSpace($expectedOrigin)) {
+            $origin = (& git -C $repo.path remote get-url origin 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $origin -ne $expectedOrigin) {
+                Add-Finding "external repo origin drifted from baseline: $key"
             }
         }
-        else {
-            Add-Finding "external git repo lacks a readonly baseline: $($dir.Name)"
+    }
+
+    foreach ($key in @($knownRootRepos.Keys)) {
+        if (-not $actualRepos.ContainsKey($key)) {
+            Add-Finding "external readonly baseline does not resolve to a Git repository: $key"
         }
     }
 
