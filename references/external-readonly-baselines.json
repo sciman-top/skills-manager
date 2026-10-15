@@ -343,11 +343,6 @@
       "origin": "https://github.com/jlcodes99/cockpit-tools.git"
     },
     {
-      "relative_path": "codex-meter",
-      "head": "383d76f7915e184d1ef53011c8d9a8a56136711d",
-      "origin": "https://github.com/Wangnov/codex-meter.git"
-    },
-    {
       "relative_path": "k12-question-graph-references/architecture-samples/CleanArchitecture",
       "head": "1bc2b07ce75864b0c399e8e3d481de5e17aad509",
       "origin": "https://github.com/jasontaylordev/CleanArchitecture.git"
