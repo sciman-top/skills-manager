@@ -33,6 +33,26 @@ Before network operations, refresh verifies manifest containment, repository ide
 
 Clone/fetch/fast-forward only authorizes read-only comparison. It does not authorize dependency installation, script execution, skill/MCP adoption, runtime activation, host mutation, or deletion from `skills.json`.
 
+## Read-only boundary lock and baseline
+
+The external root is normally left unlocked; its read-only property is enforced by rule plus a recorded baseline, not by ACLs. `references/external-readonly-baselines.json` pins `relative_path`, `head`, and `origin` for every Git checkout discovered below the external root, and `scripts/verify-reference-governance.ps1` fails on missing, relocated, dirty, or drifted entries.
+
+```powershell
+pwsh -NoProfile -File .\scripts\lock-external-repos.ps1 -Status          # root ACE + top-level write probes
+pwsh -NoProfile -File .\scripts\lock-external-repos.ps1 -Status -Deep    # whole-tree residual deny ACE scan
+pwsh -NoProfile -File .\scripts\lock-external-repos.ps1 -RefreshBaseline -WhatIf
+pwsh -NoProfile -File .\scripts\lock-external-repos.ps1 -RefreshBaseline
+```
+
+`-Unlock` removes the root deny ACE and repairs residual descendant ACEs left by failed propagation, so it needs an elevated shell; re-locking requires an explicit `-Lock`. `-RefreshBaseline` previews the reviewed plan, refuses to write while any repository check is blocked, and replaces the baseline atomically. AI sessions do not change ACLs and do not re-pin the baseline on their own; both are explicit, user-authorized actions.
+
+Checkout discovery skips reparse points, so a shelf path that has become a junction is legitimately replaced by its canonical `_shared/repos/<name>` entry. Two causes of drift are expected rather than defects, both observed on 2026-10-16:
+
+- checkouts move into the shared canonical root `_shared/repos/`, leaving junctions behind in the project shelves;
+- a maintenance `-Mode Advance` run fast-forwards floating checkouts, while `-Mode Observe` only refreshes inventory and state and fetches, so it does not move `HEAD`.
+
+Recovery order after an expected advance: confirm no maintenance process is running, preview with `-RefreshBaseline -WhatIf`, apply, then re-run `verify-reference-governance.ps1` and require exit 0.
+
 ## Admission and removal
 
 Add a repository only when a current consumer needs source-level comparison and existing first-party references are insufficient. Record name, tier, URL, contained path, `consumer`, and `retirement_trigger`; verify license and revision during the task. Promote to core only for repeated current use.
