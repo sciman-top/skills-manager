@@ -78,6 +78,13 @@
       "enabled": true,
       "tags": [],
       "notes": ""
+    },
+    {
+      "name": "claude-antiban",
+      "path": "D:\\CODE\\claude-antiban",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
     }
   ]
 }

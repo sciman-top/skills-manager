@@ -119,7 +119,8 @@ function New-DefaultAuditTargetsConfig {
 
 function Save-AuditTargetsConfig($cfg) {
     $json = $cfg | ConvertTo-Json -Depth 20
-    Set-ContentUtf8 (Get-AuditTargetsConfigPath) $json
+    # 写入器按字节落盘,不追加换行会让每次 CLI CRUD 都在 diff 里丢掉文件末尾换行。
+    Set-ContentUtf8 (Get-AuditTargetsConfigPath) ($json + [Environment]::NewLine)
 }
 
 function Initialize-AuditTargetsConfig {
