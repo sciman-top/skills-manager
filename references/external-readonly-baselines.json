@@ -3,75 +3,495 @@
   "external_root": "D:\\CODE\\external",
   "repos": [
     {
-      "relative_path": "CLIProxyAPI",
-      "head": "0d18d3b365be000eeaee7de4615f9da596b2059d",
+      "relative_path": "_shared/repos/CLIProxyAPI",
+      "head": "d7914afdedca7af95ee974a42453dc49fc1388ce",
       "origin": "https://github.com/router-for-me/CLIProxyAPI.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/clash-verge-rev",
-      "head": "d4287970bc7dbe3430c9a33bf2922e355c92c0be",
-      "origin": "https://github.com/clash-verge-rev/clash-verge-rev.git"
+      "relative_path": "_shared/repos/docling",
+      "head": "6fadbae317b09c4dd4051c0f1fc1746c6baf04bc",
+      "origin": "https://github.com/docling-project/docling.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/clash-verge-rev.github.io",
-      "head": "be157f475583a5516bdc0cf6c197768339b1cfea",
-      "origin": "https://github.com/clash-verge-rev/clash-verge-rev.github.io.git"
+      "relative_path": "_shared/repos/EntityFramework.Docs",
+      "head": "12ce0c1da83cda53b61c2dc289690095c110eb92",
+      "origin": "https://github.com/dotnet/EntityFramework.Docs.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/clash-verge-service",
-      "head": "396150683e01e79740563561ae2fe2db28fb8904",
-      "origin": "https://github.com/clash-verge-rev/clash-verge-service.git"
+      "relative_path": "_shared/repos/gemini-cli",
+      "head": "06d329873703ddabe8a842d962342ac4ad779e83",
+      "origin": "https://github.com/google-gemini/gemini-cli.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/clash-verge-service-ipc",
-      "head": "449b111f019f3620bd8f6b1f1640863ba2a68095",
-      "origin": "https://github.com/clash-verge-rev/clash-verge-service-ipc.git"
+      "relative_path": "_shared/repos/hermes-agent",
+      "head": "7520c4e8b3791f081b2c26d5ea9a0c07b0363401",
+      "origin": "https://github.com/NousResearch/hermes-agent.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/geo",
-      "head": "a4db326ccfd7e21276d5d05f4f7e512d14415553",
-      "origin": "https://github.com/MetaCubeX/geo"
+      "relative_path": "_shared/repos/mcp-servers",
+      "head": "bbb701e7ac1e57f3edd1c2836b94c5457eaf7b9c",
+      "origin": "https://github.com/modelcontextprotocol/servers.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/meta-rules-dat",
-      "head": "4178770badecb1b349fbcd62c737e0d7a2079729",
-      "origin": "https://github.com/MetaCubeX/meta-rules-dat"
+      "relative_path": "_shared/repos/modelcontextprotocol",
+      "head": "86f6e0c675afea9a8f233e09b6faf566b126086c",
+      "origin": "https://github.com/modelcontextprotocol/modelcontextprotocol.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/mihomo",
-      "head": "008b91bfe8c0e2daca0ab69061efd9ea1ad71bd2",
-      "origin": "https://github.com/MetaCubeX/mihomo"
+      "relative_path": "_shared/repos/obra-superpowers",
+      "head": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+      "origin": "https://github.com/obra/superpowers.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/sing-box",
-      "head": "8a42af329c6f8cc2c43a142ea4eadecd5412bfce",
-      "origin": "https://github.com/SagerNet/sing-box.git"
+      "relative_path": "_shared/repos/ocrmypdf",
+      "head": "cf0df3da06aef04fe9a5bf91c6feff36370bb3eb",
+      "origin": "https://github.com/ocrmypdf/OCRmyPDF.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/tauri-plugin-mihomo",
-      "head": "7a03d16f4d39b1bb885b7babe66b9e153e34b615",
-      "origin": "https://github.com/clash-verge-rev/tauri-plugin-mihomo"
+      "relative_path": "_shared/repos/open-xml-sdk",
+      "head": "431ab05cf160248cc3885a4a766026d4f8243792",
+      "origin": "https://github.com/dotnet/Open-XML-SDK.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/v2ray-rules-dat",
-      "head": "b8ee45341f4995e9bcfd5babe667412841a43ffa",
-      "origin": "https://github.com/Loyalsoldier/v2ray-rules-dat"
+      "relative_path": "_shared/repos/openai-agents-python",
+      "head": "17d994bd3045dae71acda676a4ef4762ed8ecd94",
+      "origin": "https://github.com/openai/openai-agents-python.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/v2rayN",
-      "head": "f1023e08e10a0114dbdeca5afc891e337a95dc9a",
-      "origin": "https://github.com/2dust/v2rayN.git"
+      "relative_path": "_shared/repos/openai-codex",
+      "head": "f0c5077c34ec7a76b4ad9134835925e6ae3d72ec",
+      "origin": "https://github.com/openai/codex.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/wintun",
-      "head": "ec0a6b98456fe1ba52567bb2add4bbf5f64315a1",
-      "origin": "https://git.zx2c4.com/wintun"
+      "relative_path": "_shared/repos/openai-dotnet",
+      "head": "1f0e8829acac4e004ebe0960fa24f3a0f0e59e40",
+      "origin": "https://github.com/openai/openai-dotnet.git"
     },
     {
-      "relative_path": "dual-nic-split-stack/wireguard-windows",
-      "head": "0588757d18f58ed78357c20d20b03e6369833839",
-      "origin": "https://git.zx2c4.com/wireguard-windows"
+      "relative_path": "_shared/repos/openai-plugins",
+      "head": "0722921d5542fc593105c27bd52630babd8b8c2a",
+      "origin": "https://github.com/openai/plugins.git"
+    },
+    {
+      "relative_path": "_shared/repos/openai-skills",
+      "head": "49f948faa9258a0c61caceaf225e179651397431",
+      "origin": "https://github.com/openai/skills.git"
+    },
+    {
+      "relative_path": "_shared/repos/openclaw",
+      "head": "6afd61993bdd1f62a45d23f04c074d79543f29f6",
+      "origin": "https://github.com/openclaw/openclaw.git"
+    },
+    {
+      "relative_path": "_shared/repos/paddleocr",
+      "head": "dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf",
+      "origin": "https://github.com/PaddlePaddle/PaddleOCR.git"
+    },
+    {
+      "relative_path": "_shared/repos/rapidocr",
+      "head": "7cfd3d9ef786a2e538ca30df700325e72e85b5f5",
+      "origin": "https://github.com/RapidAI/RapidOCR.git"
+    },
+    {
+      "relative_path": "_shared/repos/semantic-kernel",
+      "head": "5b4a3269a6803f7832568e66313c31d714a1f009",
+      "origin": "https://github.com/microsoft/semantic-kernel.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/1code",
+      "head": "9f1bc76fa4372c18c565b5a4f8daf38ae3595f0e",
+      "origin": "https://github.com/21st-dev/1code.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/a2aproject-A2A",
+      "head": "7c861a597b93208de3c19357cc0d66b9f6250e9b",
+      "origin": "https://github.com/a2aproject/A2A.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/aider",
+      "head": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "origin": "https://github.com/Aider-AI/aider.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/anthropic-claude-code",
+      "head": "94506ff0d3bd9185f1752da36e968775021fb48f",
+      "origin": "https://github.com/anthropics/claude-code.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/anthropic-claude-code-action",
+      "head": "a26b07d8c778b0c43f64618e5fd29fd0f8af72e8",
+      "origin": "https://github.com/anthropics/claude-code-action.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/anthropic-claude-code-monitoring-guide",
+      "head": "02777441f2a3fa38a187b57872ca9dc5e0411b48",
+      "origin": "https://github.com/anthropics/claude-code-monitoring-guide.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/anthropic-claude-plugins-official",
+      "head": "8f814f49002ff824e8a9ba43cf96112dc7f5948d",
+      "origin": "https://github.com/anthropics/claude-plugins-official.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/cline",
+      "head": "3834735da26b70503aa5c0aa377949612a2816ad",
+      "origin": "https://github.com/cline/cline.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/continue",
+      "head": "5522c6f44ca0ac3528b37244818fbfa39b5af470",
+      "origin": "https://github.com/continuedev/continue.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/github-copilot-cli",
+      "head": "c01c66377d25426dda70c21750e1956e4dd25657",
+      "origin": "https://github.com/github/copilot-cli.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/github-mcp-server",
+      "head": "796afb74711ddc856fe587debc49373e21c8d0f7",
+      "origin": "https://github.com/github/github-mcp-server.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/github-spec-kit",
+      "head": "6e7348de375f62922349e3bb20640edfda2383ad",
+      "origin": "https://github.com/github/spec-kit.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/google-antigravity-cli",
+      "head": "89081f72e10a98c3689f34b1af7261f43136ab5d",
+      "origin": "https://github.com/google-antigravity/antigravity-cli.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/goose",
+      "head": "0df818175bc854229746c81f01ea154b1c6c5e9e",
+      "origin": "https://github.com/aaif-goose/goose.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/langgraph",
+      "head": "5eb60aef6f3837a1fb632a8abc6cf8e8da81785b",
+      "origin": "https://github.com/langchain-ai/langgraph.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/mcp-inspector",
+      "head": "074b8108f340590268f2900741403755e923a11c",
+      "origin": "https://github.com/modelcontextprotocol/inspector.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/mcp-python-sdk",
+      "head": "754254c08fe1c3eda18b69da3d336106fe8d72d6",
+      "origin": "https://github.com/modelcontextprotocol/python-sdk.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/mcp-typescript-sdk",
+      "head": "9bc40e903fde15534ec06ff4c1347d47000dbe16",
+      "origin": "https://github.com/modelcontextprotocol/typescript-sdk.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/microsoft-agent-framework",
+      "head": "cae49553ce7f1c54edec97ad97fb820fd792175d",
+      "origin": "https://github.com/microsoft/agent-framework.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/microsoft-ai-agents-for-beginners",
+      "head": "6c3a5e13e9298615b3517aa20e792edd841c0506",
+      "origin": "https://github.com/microsoft/ai-agents-for-beginners.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/microsoft-playwright-cli",
+      "head": "b85c7a736bb473bf55b584e54a09ffa698d6d871",
+      "origin": "https://github.com/microsoft/playwright-cli.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/microsoft-playwright-mcp",
+      "head": "b8b4183e099f136cbec0388a6088d4aa2f6b9685",
+      "origin": "https://github.com/microsoft/playwright-mcp.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/mini-swe-agent",
+      "head": "04d809ceab9df28f9adaed044884180159172930",
+      "origin": "https://github.com/SWE-agent/mini-SWE-agent.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/openai-agents-js",
+      "head": "89a9ddf1e241e75f2e0ad4c15d89de9e215ebac6",
+      "origin": "https://github.com/openai/openai-agents-js.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/openclaw-code-agent",
+      "head": "71080ebc984ea0f09cc1d3453a304d20a4bba3f6",
+      "origin": "https://github.com/goldmar/openclaw-code-agent.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/opencode",
+      "head": "af6ec839793da9a48698cb17da567c770164742d",
+      "origin": "https://github.com/sst/opencode.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/openhands",
+      "head": "9c301106a051c9fb7c58c0fb1a0a56f9280209b9",
+      "origin": "https://github.com/All-Hands-AI/OpenHands.git"
+    },
+    {
+      "relative_path": "ai-coding-runtime-references/repos/swe-agent",
+      "head": "3ea751c087f32b16e039a2233dd6eefecef325d5",
+      "origin": "https://github.com/SWE-agent/SWE-agent.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/02-dotnet-wpf/CommunityToolkit-dotnet",
+      "head": "b135626dd54d33b8f05f2ff31591592c004aa848",
+      "origin": "https://github.com/CommunityToolkit/dotnet.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/02-dotnet-wpf/docs-desktop",
+      "head": "1c487f4e64ba00769475c03aa8a65f05f137c13d",
+      "origin": "https://github.com/dotnet/docs-desktop.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/02-dotnet-wpf/Prism",
+      "head": "65530d22379e538ec449a77bb21a11cc9749cd72",
+      "origin": "https://github.com/PrismLibrary/Prism.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/02-dotnet-wpf/WPF-Samples",
+      "head": "811d01e95c8c929e68539d698d0a0609e94fd185",
+      "origin": "https://github.com/microsoft/WPF-Samples.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/GROBID",
+      "head": "569ae14aab5da59974bb60db48525f5dfb85eace",
+      "origin": "https://github.com/grobidOrg/grobid.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/markitdown",
+      "head": "4cc9fa17653d695d64fb9eee5b33d4de55ff84e8",
+      "origin": "https://github.com/microsoft/markitdown.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/MathJax",
+      "head": "fb987178c2d279a99b0db5ea02e751691703955e",
+      "origin": "https://github.com/mathjax/MathJax-src.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/PdfPig",
+      "head": "3452b9fb52440202fa30b8dd8bf57c5186f8de29",
+      "origin": "https://github.com/UglyToad/PdfPig.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/QuestPDF",
+      "head": "12d78dd4beac7c5826ffc201348d1e47043a387f",
+      "origin": "https://github.com/QuestPDF/QuestPDF.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/SkiaSharp",
+      "head": "e3608e405b54fa124cc89306959c981e16d0767b",
+      "origin": "https://github.com/mono/SkiaSharp.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/05-document-rendering/Svg.Skia",
+      "head": "7910666415a96a09643d1729eb5da5d115d75748",
+      "origin": "https://github.com/wieslawsoltes/Svg.Skia.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/06-automation-testing/FlaUI",
+      "head": "fd7cc64ab01908a0ae4cc7d05e704caa34f98d16",
+      "origin": "https://github.com/FlaUI/FlaUI.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/06-automation-testing/playwright-dotnet",
+      "head": "b2415f183d8a318da176fb07f5a0f4dd1d69ef83",
+      "origin": "https://github.com/microsoft/playwright-dotnet.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/ComfyUI",
+      "head": "20b46065ef7f34fa21e8abebe8d0cca90a904d6d",
+      "origin": "https://github.com/comfyanonymous/ComfyUI.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/diffusers",
+      "head": "62cde2b0115d57492d2f5ecefab54994797df2e3",
+      "origin": "https://github.com/huggingface/diffusers.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/InvokeAI",
+      "head": "358257bca6acb9268c89d61c052c729c5c6a1a0a",
+      "origin": "https://github.com/invoke-ai/InvokeAI.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/08-platform-and-observability/aspire",
+      "head": "c0ab32eca29107934e7866859e87e14792184fb3",
+      "origin": "https://github.com/dotnet/aspire.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/08-platform-and-observability/dotnet-extensions",
+      "head": "d95193abf4059fa83b75d4ebb60d406f5a26fc89",
+      "origin": "https://github.com/dotnet/extensions.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/08-platform-and-observability/opentelemetry-dotnet",
+      "head": "a80175e3e7eeb01158fa7390b83020ccf9b0985d",
+      "origin": "https://github.com/open-telemetry/opentelemetry-dotnet.git"
+    },
+    {
+      "relative_path": "ai-content-delivery-studio-references/08-platform-and-observability/opentelemetry-dotnet-contrib",
+      "head": "895948fa0915c4c9fa9fcb7c6b0ca82028198adf",
+      "origin": "https://github.com/open-telemetry/opentelemetry-dotnet-contrib.git"
+    },
+    {
+      "relative_path": "cockpit-tools",
+      "head": "915e7a20b432546660c3cd15e90f9fa527490ecc",
+      "origin": "https://github.com/jlcodes99/cockpit-tools.git"
+    },
+    {
+      "relative_path": "codex-meter",
+      "head": "383d76f7915e184d1ef53011c8d9a8a56136711d",
+      "origin": "https://github.com/Wangnov/codex-meter.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/architecture-samples/CleanArchitecture",
+      "head": "1bc2b07ce75864b0c399e8e3d481de5e17aad509",
+      "origin": "https://github.com/jasontaylordev/CleanArchitecture.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/architecture-samples/dotnet-eShop",
+      "head": "dc7ea499cd356924fb6689b3702964a5869dbae9",
+      "origin": "https://github.com/dotnet/eShop.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/data-search/pgvector",
+      "head": "f37c13f68b57d2c3472b2214fbcff699d6d34876",
+      "origin": "https://github.com/pgvector/pgvector.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/document-ocr-ai/MinerU",
+      "head": "b7f3dd0c5f6e6d66a298239ffd02b328b873918e",
+      "origin": "https://github.com/opendatalab/MinerU.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/document-ocr-ai/PaddleX",
+      "head": "ffb64904d23708863ff5b8da312a5cbd52a7f462",
+      "origin": "https://github.com/PaddlePaddle/PaddleX.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/document-workflows/paperless-ngx",
+      "head": "c50c6f5517e3fd8f97fa546ede69a52b622e2b20",
+      "origin": "https://github.com/paperless-ngx/paperless-ngx.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/education-assessment/moodle",
+      "head": "b7260e59a83124d6311c0217df3ba27ef6b9a7b0",
+      "origin": "https://github.com/moodle/moodle.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/education-assessment/OpenOLAT",
+      "head": "3cb4827657c2441953b00695341b9fc424ffc3aa",
+      "origin": "https://github.com/OpenOLAT/OpenOLAT.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/education-assessment/TAO",
+      "head": "cca05cd5f15e1830f87f48e94736bb53a9eed905",
+      "origin": "https://github.com/oat-sa/tao-core"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/ant-design",
+      "head": "693102909532398f4204db66d07bf1159de1b487",
+      "origin": "https://github.com/ant-design/ant-design.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/AspNetCore.Docs",
+      "head": "16701d5e68e7e5c9de2b5769682e1dd8900b2eb8",
+      "origin": "https://github.com/dotnet/AspNetCore.Docs.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/npgsql-doc",
+      "head": "8bb3d927a08d6951fb57bc0ace142662b1488ba1",
+      "origin": "https://github.com/npgsql/doc.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/openai-python",
+      "head": "e71d781ac5e7b3f365ac130bf338baaf13ae720d",
+      "origin": "https://github.com/openai/openai-python"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/playwright",
+      "head": "5ad202df4f484d593ab42a4a16e6c75f666fef38",
+      "origin": "https://github.com/microsoft/playwright.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/postgresql-docs",
+      "head": "94e1385ed28509bee486aa0be40dea78b9e083c3",
+      "origin": "https://github.com/postgres/postgres"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/PowerShell-Docs",
+      "head": "a3de8f22552170e70852470d46cd52cd9ca471ec",
+      "origin": "https://github.com/MicrosoftDocs/PowerShell-Docs.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/react-router",
+      "head": "bdb6c4a2c54e27fb0426307c24f9ec554b986cf6",
+      "origin": "https://github.com/remix-run/react-router.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/react.dev",
+      "head": "046f17d04295ba047bb5739026b4ac3110f17028",
+      "origin": "https://github.com/reactjs/react.dev.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/tanstack-query",
+      "head": "ee47993724e5b71e65d9f38ae416367d2dd18395",
+      "origin": "https://github.com/TanStack/query.git"
+    },
+    {
+      "relative_path": "k12-question-graph-references/official-docs/vite",
+      "head": "928e721b36690ac0f3f118290a21fc0cc4349055",
+      "origin": "https://github.com/vitejs/vite.git"
+    },
+    {
+      "relative_path": "local-ai-dev-orchestrator-references/hermes-agent-self-evolution",
+      "head": "0a929e3aa20e15cf04dc7c28492a7d41a5139125",
+      "origin": "https://github.com/NousResearch/hermes-agent-self-evolution.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/aiocqhttp",
+      "head": "2520928d2373f5be71059600b832e230a39ccdb9",
+      "origin": "https://github.com/nonebot/aiocqhttp.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/AstrBot",
+      "head": "db4ce0c4b0ae94f443c641f0f78cc9228ddabbeb",
+      "origin": "https://github.com/AstrBotDevs/AstrBot.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/layout-parser",
+      "head": "04e28168d820eea3a1ff1e098078323e7b48648b",
+      "origin": "https://github.com/Layout-Parser/layout-parser.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/LuckyLilliaBot",
+      "head": "dc2b2b90092ef0f571b5546878288b83fff1e436",
+      "origin": "https://github.com/LLOneBot/LuckyLilliaBot.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/NapCat-Docker",
+      "head": "42e4f9e8373c739f4d2ee599980ab8f87cff39b6",
+      "origin": "https://github.com/NapNeko/NapCat-Docker.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/NapCatQQ",
+      "head": "810052c605feb5044a080adfe99ba2fa69b7b351",
+      "origin": "https://github.com/NapNeko/NapCatQQ.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/onebot-11",
+      "head": "d4456ee706f9ada9c2dfde56a2bcfc69752600e4",
+      "origin": "https://github.com/botuniverse/onebot-11.git"
+    },
+    {
+      "relative_path": "qq-codex-bot-references/Qwen3-VL",
+      "head": "96588727e44c78b25ba03ea03b8e12f7e64fd0da",
+      "origin": "https://github.com/QwenLM/Qwen3-VL.git"
     }
   ],
-  "note": "外置根中 skills-manager 专属 reference shelf 与 _shared 控制仓之外的规范物理 Git 仓（排除 junction 别名）；显式运行 scripts/lock-external-repos.ps1 -RefreshBaseline 更新清单，ACL 锁定使用独立的 -Lock 操作。"
+  "note": "Canonical physical Git repositories outside the skills-manager reference shelf and _shared control repository; junction aliases are excluded."
 }
