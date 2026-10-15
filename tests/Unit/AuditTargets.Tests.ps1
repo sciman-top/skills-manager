@@ -234,6 +234,22 @@ Describe "Audit Targets" {
             }
         }
 
+        It "Keeps a trailing newline so CLI edits match the committed file shape" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-newline"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                Add-AuditTargetConfigEntry "demo" "..\demo" | Out-Null
+
+                $raw = Get-Content -LiteralPath (Get-AuditTargetsConfigPath) -Raw
+                $raw.EndsWith("`n") | Should -BeTrue
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Updates an existing target without changing its normalized name" {
             $oldRoot = $script:Root
             try {
