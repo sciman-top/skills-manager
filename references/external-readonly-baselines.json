@@ -29,7 +29,7 @@
     },
     {
       "relative_path": "_shared/repos/hermes-agent",
-      "head": "7520c4e8b3791f081b2c26d5ea9a0c07b0363401",
+      "head": "046094df28b712f62a5e3c728a9e59da05dcbf1e",
       "origin": "https://github.com/NousResearch/hermes-agent.git"
     },
     {
@@ -64,7 +64,7 @@
     },
     {
       "relative_path": "_shared/repos/openai-codex",
-      "head": "f0c5077c34ec7a76b4ad9134835925e6ae3d72ec",
+      "head": "0003732489a514748e61a0f76a652ac992a5f4f5",
       "origin": "https://github.com/openai/codex.git"
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "relative_path": "_shared/repos/openclaw",
-      "head": "6afd61993bdd1f62a45d23f04c074d79543f29f6",
+      "head": "7d35c5ae3def208918d0000228c692ff12ccb4b9",
       "origin": "https://github.com/openclaw/openclaw.git"
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/a2aproject-A2A",
-      "head": "7c861a597b93208de3c19357cc0d66b9f6250e9b",
+      "head": "5eced49535c3cf857be8444627a65b5a4b253a3e",
       "origin": "https://github.com/a2aproject/A2A.git"
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/github-spec-kit",
-      "head": "6e7348de375f62922349e3bb20640edfda2383ad",
+      "head": "fc93fb8e5f6ba37e2a67fc6661b33f93ea728af5",
       "origin": "https://github.com/github/spec-kit.git"
     },
     {
@@ -229,12 +229,12 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/opencode",
-      "head": "af6ec839793da9a48698cb17da567c770164742d",
+      "head": "41cb349c9b19aeac2213f9c605a23ccc004787ad",
       "origin": "https://github.com/sst/opencode.git"
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/openhands",
-      "head": "9c301106a051c9fb7c58c0fb1a0a56f9280209b9",
+      "head": "cb835dd3283b1974b8dc88efe98793eb4c4fd2d0",
       "origin": "https://github.com/All-Hands-AI/OpenHands.git"
     },
     {
@@ -309,12 +309,12 @@
     },
     {
       "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/ComfyUI",
-      "head": "20b46065ef7f34fa21e8abebe8d0cca90a904d6d",
+      "head": "29e28e2b488e7739c351c331d73da25aa435da5c",
       "origin": "https://github.com/comfyanonymous/ComfyUI.git"
     },
     {
       "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/diffusers",
-      "head": "62cde2b0115d57492d2f5ecefab54994797df2e3",
+      "head": "7ecb1e1b4fe500be7fb7381a7bb79a24d7fa3941",
       "origin": "https://github.com/huggingface/diffusers.git"
     },
     {
@@ -339,7 +339,7 @@
     },
     {
       "relative_path": "ai-content-delivery-studio-references/08-platform-and-observability/opentelemetry-dotnet-contrib",
-      "head": "895948fa0915c4c9fa9fcb7c6b0ca82028198adf",
+      "head": "3aaa7709178529748ade65555422dd14c55be6c9",
       "origin": "https://github.com/open-telemetry/opentelemetry-dotnet-contrib.git"
     },
     {
@@ -379,7 +379,7 @@
     },
     {
       "relative_path": "k12-question-graph-references/education-assessment/OpenOLAT",
-      "head": "3cb4827657c2441953b00695341b9fc424ffc3aa",
+      "head": "40c3af60221bea6b71e4371ac75f18e08ca33f11",
       "origin": "https://github.com/OpenOLAT/OpenOLAT.git"
     },
     {
@@ -409,12 +409,12 @@
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/playwright",
-      "head": "5ad202df4f484d593ab42a4a16e6c75f666fef38",
+      "head": "14c74047b3c63fa9f1f290ea2a06858fb529b94b",
       "origin": "https://github.com/microsoft/playwright.git"
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/postgresql-docs",
-      "head": "94e1385ed28509bee486aa0be40dea78b9e083c3",
+      "head": "8f2b598b4bc562d9609a47a3e069a5431237c85e",
       "origin": "https://github.com/postgres/postgres"
     },
     {
@@ -454,7 +454,7 @@
     },
     {
       "relative_path": "qq-codex-bot-references/AstrBot",
-      "head": "db4ce0c4b0ae94f443c641f0f78cc9228ddabbeb",
+      "head": "9441402872f65fffc35685b0ead5bd3337033cb2",
       "origin": "https://github.com/AstrBotDevs/AstrBot.git"
     },
     {
