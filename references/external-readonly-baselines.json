@@ -4,7 +4,7 @@
   "repos": [
     {
       "relative_path": "_shared/repos/CLIProxyAPI",
-      "head": "5be2cdab0869cbaa3d401891f740aebf7e15aa99",
+      "head": "355fd10e76b82e03ba6625acc583b900286e4bf2",
       "origin": "https://github.com/router-for-me/CLIProxyAPI.git"
     },
     {
@@ -14,7 +14,7 @@
     },
     {
       "relative_path": "_shared/repos/docling",
-      "head": "6fadbae317b09c4dd4051c0f1fc1746c6baf04bc",
+      "head": "fd24b9ebc0079822f0644009a2dbeeb5906b4f3c",
       "origin": "https://github.com/docling-project/docling.git"
     },
     {
@@ -24,12 +24,12 @@
     },
     {
       "relative_path": "_shared/repos/gemini-cli",
-      "head": "debf423248af42e5710ccae49380a5031670a94f",
+      "head": "b25669d84e1a404e30c176d779e732e25dafcec0",
       "origin": "https://github.com/google-gemini/gemini-cli.git"
     },
     {
       "relative_path": "_shared/repos/hermes-agent",
-      "head": "acc3cada0da86c81efc8aa6c5a291989549ca900",
+      "head": "3b2f971133e4e011022ccf33dc6dc1c9050563d8",
       "origin": "https://github.com/NousResearch/hermes-agent.git"
     },
     {
@@ -64,7 +64,7 @@
     },
     {
       "relative_path": "_shared/repos/openai-codex",
-      "head": "6b991972c5b539198dcea9bac4fc14e57559c3af",
+      "head": "e790ce271749ce431e446a9e2cc66485fe60f931",
       "origin": "https://github.com/openai/codex.git"
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "relative_path": "_shared/repos/openclaw",
-      "head": "f4f4b192c43fecf333dcaa299b1fdf1622903f77",
+      "head": "7a16e56789212f3d5985317f1e8d0205ab06d787",
       "origin": "https://github.com/openclaw/openclaw.git"
     },
     {
@@ -134,12 +134,12 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/anthropic-claude-plugins-official",
-      "head": "87bc24ab561c4876dff68bfaec4881dbc83f8250",
+      "head": "ea10b213686c90bb1984b2016937310e05336cf3",
       "origin": "https://github.com/anthropics/claude-plugins-official.git"
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/cline",
-      "head": "23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b",
+      "head": "cd01a92faac40af398e43cbafecfb31c63dba2ad",
       "origin": "https://github.com/cline/cline.git"
     },
     {
@@ -169,7 +169,7 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/goose",
-      "head": "0df818175bc854229746c81f01ea154b1c6c5e9e",
+      "head": "44c2ed53b26e5b8ea087af2be1839ade2af7d57e",
       "origin": "https://github.com/aaif-goose/goose.git"
     },
     {
@@ -194,7 +194,7 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/microsoft-agent-framework",
-      "head": "deecbcb062198f926516f89b65e5b1676e4514c2",
+      "head": "9a1d66b3e973bdbfdcd4359d72c5f6fd4ff4d931",
       "origin": "https://github.com/microsoft/agent-framework.git"
     },
     {
@@ -219,7 +219,7 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/openai-agents-js",
-      "head": "976579eb0785337b4d433afb944781f3901738a8",
+      "head": "9687b544c8c873080e6ff7e7d294c0b353cd9ab6",
       "origin": "https://github.com/openai/openai-agents-js.git"
     },
     {
@@ -229,12 +229,12 @@
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/opencode",
-      "head": "d7d44a7e03a9a390a3b66d1da8bb59aa03b65f9e",
+      "head": "eeec76bb620f9bee8cab89c5a3a88e315539645b",
       "origin": "https://github.com/sst/opencode.git"
     },
     {
       "relative_path": "ai-coding-runtime-references/repos/openhands",
-      "head": "aa593c72103862d4f1851988ecacd30f514368dc",
+      "head": "d9ecec24181a0dd7b83b5d87561916abb2fe0e8c",
       "origin": "https://github.com/All-Hands-AI/OpenHands.git"
     },
     {
@@ -309,17 +309,17 @@
     },
     {
       "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/ComfyUI",
-      "head": "9fa63b0acc1fe3503db536109e104bba3bb1614f",
+      "head": "bdc63e72f5ab29fde448c161db3057827148c0ef",
       "origin": "https://github.com/comfyanonymous/ComfyUI.git"
     },
     {
       "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/diffusers",
-      "head": "7ecb1e1b4fe500be7fb7381a7bb79a24d7fa3941",
+      "head": "d42ebf9c6e0b46103b74283f5324357a67acaa04",
       "origin": "https://github.com/huggingface/diffusers.git"
     },
     {
       "relative_path": "ai-content-delivery-studio-references/07-image-workflow-references/InvokeAI",
-      "head": "dee0166efa9e5e4a2e3f766f43cd45cf915f5572",
+      "head": "861210e33fb3cea6dfd1eaf47b37bd82fe05afc7",
       "origin": "https://github.com/invoke-ai/InvokeAI.git"
     },
     {
@@ -389,12 +389,12 @@
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/ant-design",
-      "head": "693102909532398f4204db66d07bf1159de1b487",
+      "head": "d9d01594fa64ff0dec183244702207b82925b3d6",
       "origin": "https://github.com/ant-design/ant-design.git"
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/AspNetCore.Docs",
-      "head": "16701d5e68e7e5c9de2b5769682e1dd8900b2eb8",
+      "head": "86e7954a0ffed92d8a3c53041a06ec0a9ae7b87e",
       "origin": "https://github.com/dotnet/AspNetCore.Docs.git"
     },
     {
@@ -404,7 +404,7 @@
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/openai-python",
-      "head": "9998c1a3806afda55cb3923de1f7f49adcff5a7f",
+      "head": "230a923faba5574ebdc5b45a505a26b6bad79f61",
       "origin": "https://github.com/openai/openai-python"
     },
     {
@@ -414,7 +414,7 @@
     },
     {
       "relative_path": "k12-question-graph-references/official-docs/postgresql-docs",
-      "head": "856a6594d86e4a7c0e9490253912af3f6159802f",
+      "head": "ba51d62be465c420b0fbe3b0efd0ccd488e79922",
       "origin": "https://github.com/postgres/postgres"
     },
     {
