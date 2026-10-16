@@ -53,6 +53,8 @@ Checkout discovery skips reparse points, so a shelf path that has become a junct
 
 Recovery order after an expected advance: confirm no maintenance process is running, preview with `-RefreshBaseline -WhatIf`, apply, then re-run `verify-reference-governance.ps1` and require exit 0.
 
+Re-pinning stays an explicit operator step. The maintenance job never refreshes the baseline itself, because the actor that advances floating checkouts must not author the value the verifier checks; an automatic re-pin would make the drift check unable to fail. The scheduled Advance job is paused, so an advance is a rare, reviewed event whose re-pin lands as its own commit. If that job is ever re-scheduled unattended, it should emit a re-pin receipt for review instead of writing the baseline silently.
+
 ## Admission and removal
 
 Add a repository only when a current consumer needs source-level comparison and existing first-party references are insufficient. Record name, tier, URL, contained path, `consumer`, and `retirement_trigger`; verify license and revision during the task. Promote to core only for repeated current use.
