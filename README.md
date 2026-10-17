@@ -4,7 +4,7 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
 
-主 CLI 不选择模型、不管理 provider/auth/session、不接管宿主语义路由或插件缓存。[独立 preset 工具](src/model-orchestration/README.md) 提供显式模型配置和受控启动，不参与技能/MCP 构建，也不自动故障切换或重放任务。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。冻结面（仅维护、不新增能力）与解冻条件见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+主 CLI 不选择模型、不管理 provider/auth/session、不接管宿主语义路由或插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。冻结面（仅维护、不新增能力）与解冻条件见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
 
 本项目采用 [MIT License](LICENSE)。第三方技能与依赖仍各自遵循其原始许可证。
 
@@ -111,28 +111,6 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效 -SkillProfile full-compatible
 ```
 
-### Antigravity / Gemini 与 WorkBuddy 风控控制
-
-仓库把两份风控技能和统一分诊入口收在同一条链路中。默认命令只读，不修改账号、凭据、代理、客户端或进程：
-
-```powershell
-# 查看仓库资产与内置安全政策
-.\skills.ps1 ai-risk-control --json
-
-# 输出日常防范、恢复和停止条件
-.\skills.ps1 ai-risk-control --plan --json
-
-# 针对一次已观察到的事件生成分诊计划
-.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-account-risk --plan --json
-.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-rate-limit --plan --json
-
-# 有服务端 Retry-After/reset 提示时只计算最早复查时间，不会自动重试
-.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-rate-limit --retry-after 60 --plan --json
-
-```
-
-事件计划只给出官方合规的停手、留证、等待、分段、申诉和低频观察步骤。项目明确阻断多账号轮换、OAuth 反代、Token 提取、请求指纹伪造、设备标识伪造、配额绕过和重试风暴；这些动作会放大封号风险，不能作为“修复”。`--retry-after` 和 `--reset-at` 只接受服务端提示，入口按较晚时间计算最早复查时刻，不会替用户重试，也不保证到期后请求会被接受。该入口只核对仓库内的风控策略文件，不运行宿主自检脚本，也不能证明账号、配额、网络或模型服务状态。
-
 `check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。报告增加 `complete/failed` 与逐源 `reason`：超时、查询失败、未命中 ref 分别为 `timeout/query_failed/ref_not_found`，目标为 `unknown`，不代表已是最新；部分失败仍输出 JSON，调用方必须检查 `complete`，每周 runner 遇到不完整检查会停止。每次远端 Git 查询默认限时 30 秒，可通过 `SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS` 设置为 1–300 秒；同一 repo/ref 的失败在本次检查内缓存，其他源继续检查。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
 
@@ -143,19 +121,11 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 release-update --apply --yes
 # 自动更新成功后才同步 MCP；默认不会同步 MCP
 .\skills.ps1 release-update --apply --yes --sync-mcp
-
-# 每天 09:00 检查并弹出更新提示
-.\skills.ps1 release-update-schedule --enable --time=09:00
-# 每天 09:00 检查、通知并自动启动已校验更新
-.\skills.ps1 release-update-schedule --enable --time=09:00 --auto-apply
-.\skills.ps1 release-update-schedule --disable
 ```
-
-调度任务仅在用户显式运行 `--enable` 时创建，使用当前交互用户和非提权权限；更新后的 `reports/release-update/last.json` 保存结果。下载、checksum、解压、安装或切换任一步失败都会保持或回滚到旧目录。它仍不迁移登录态、provider/auth/session、插件缓存，也不证明 `host_loaded` 或 `live_accepted`。
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 10 项（`core-lean` 7 项加两份风控技能和一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 8 项（`core-lean` 7 项加一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
 当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge；选中 `claude` 才会投影受管 Claude 子代理定义到 `~/.claude/agents`。两者均要求正式宿主晋级，备份位于对应宿主的 `skills-manager-agent-backups`，不进入代理发现目录；加载和调用须单独验收。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
 
@@ -166,8 +136,8 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 | ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
 | Claude | `core-lean`：7 个默认技能 | 全量受管技能 |
 | ZCode | `core-lean`：7 个默认技能 | 排除原生 `documents`/`presentations`/`spreadsheets` 插件已覆盖的 `docx`、`pptx`、`xlsx`，以及 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
-| Antigravity | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
-| WorkBuddy | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| Antigravity | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| WorkBuddy | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
 
 表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
 

@@ -15,16 +15,12 @@ param(
 $riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
 $rulePath = '^(?:rules/global/(?:common\.md|platforms/(?:codex|claude|zcode|antigravity|workbuddy)\.md|(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS|antigravity/GEMINI|workbuddy/CODEBUDDY)\.md)|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
 $sourcePath = '^(src/|tests/Unit/)'
-$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|rules/global/README\.md$|src/model-orchestration/(?:README|AGENTS)\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
+$docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|rules/global/README\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
 $skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml)$'
 $skillsConfigPath = '^skills\.json$'
 # Exact source/script behavior coverage, not a smoke-test substitute.
 # Unmapped paths retain their risk classification or full fallback.
 $sourceTests = @{
-    'src/model-orchestration/Set-ModelPreset.ps1' = @('ModelPreset')
-    'src/model-orchestration/Start-ModelSlot.ps1' = @('ModelPreset')
-    'src/model-orchestration/Test-ModelPreset.ps1' = @('ModelPreset')
-    'src/model-orchestration/presets.json' = @('ModelPreset')
     'src/Core.ps1' = @('Core', 'InfrastructureSeam', 'ReadOnlyCli')
     'src/Commands/Migration.ps1' = @('Migration')
     'src/Commands/ReleaseUpdate.ps1' = @('ReleaseUpdate', 'ReleaseUpdateWorker')
@@ -56,7 +52,6 @@ $sourceTests = @{
     'src/Commands/AuditTargets.Workflow.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/Capability.ps1' = @('CapabilityContracts', 'CapabilityInventory', 'CapabilityRouter', 'CapabilityRouterCrossRepo')
     'src/Commands/AiCoding.ps1' = @('AiCodingCommand')
-    'src/Commands/AiRiskControl.ps1' = @('AiRiskControl')
     'src/Commands/Doctor.ps1' = @('DoctorCli', 'DoctorEnhancements')
     'src/Commands/RuleAudit.ps1' = @('RuleAudit')
     'src/Commands/Utils.ps1' = @('MainDispatch', 'MenuStructure', 'SelectionCancellation')
@@ -75,10 +70,10 @@ $skillFocusedTests = @(
 )
 # Only suites known to use source files and disposable fixtures can skip source
 # materialization. New or unreviewed suites retain the conservative CI setup.
-$assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
+$assetFreeTests = @('AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
-    'AiRiskControl', 'AiCodingCommand',
+    'AiCodingCommand',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 
@@ -215,7 +210,7 @@ foreach ($changedPath in $changed) {
         continue
     }
     $sourceRelativePath = $normalizedPath.Substring(4)
-    if ($sourceRelativePath -in @('Version.ps1', 'Main.ps1') -or $sourceRelativePath.StartsWith('model-orchestration/', [StringComparison]::OrdinalIgnoreCase)) {
+    if ($sourceRelativePath -in @('Version.ps1', 'Main.ps1')) {
         continue
     }
     $generatedLibraryPaths.Add(('skills.lib/{0}' -f $sourceRelativePath.Replace('/', '.'))) | Out-Null

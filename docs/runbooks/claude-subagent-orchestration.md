@@ -2,8 +2,8 @@
 
 **状态**: 原生能力参考与本项目执行约束；模型分档未经同任务基准测试。能力随宿主版本变化，派发前以当前 help、schema 与实际支持面为准。
 **适用**: Claude Code 宿主（Desktop Code tab 与 CLI）。
-**不适用**: Codex / ZCode 的 `src/model-orchestration/presets.json` 策略。该策略没有 Claude 写入适配器，不得外推到 Claude。
-**边界**: 本手册不修改 `presets.json`，不写 `~/.claude` 设置，也不声称宿主已按本规则运行。
+**不适用**: Codex / ZCode 的模型与 effort 策略。该策略没有 Claude 写入适配器，不得外推到 Claude。
+**边界**: 本手册不修改任何模型策略文件，不写 `~/.claude` 设置，也不声称宿主已按本规则运行。
 
 ## 1. 原生能力边界
 

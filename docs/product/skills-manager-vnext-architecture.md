@@ -199,7 +199,6 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 ## 5. 构建与验证
 
-独立 preset 工具不消费主 CLI bundle：其源码、配置和自测映射到 `tests/Unit/ModelPreset.Tests.ps1`，复用既有隔离宿主测试。preset-only focused 不构建主 CLI、不物化锁定技能；混合变更保留对应验证，full 包含 preset 行为测试。`-Verifier mor` 只检查可选设计矩阵，不承担实现验收。
 
 验证顺序为 `build -> test -> contract/invariant -> hotspot`：
 
@@ -208,7 +207,7 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 - contract：committed generated bundle、config、host scheduler ownership 与公开契约；reference contract 仅由显式 reference verify 触发
 - hotspot：仅在真实性能/安全/发布风险存在时执行
 
-full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity、config contract 和 host scheduler ownership。可选的 MOR tuple matrix 只通过显式 `-Verifier mor` 验证；preset 实现行为已经由 `ModelPreset.Tests.ps1` 覆盖。普通改动使用受影响验证，不重复 full。
+full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity、config contract 和 host scheduler ownership。普通改动使用受影响验证，不重复 full。
 
 CI 与本地共用 `scripts/quality/resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件与 tracked diff 合并分类；文档走 docs，规则走专项测试，已映射源码选择行为测试，未知路径、未映射源码、风险或分类失败走 full。源码映射是明确的覆盖选择，不用固定 smoke tests 代替功能验证；新增映射需有行为覆盖依据。`-TestPath` 可追加回归测试，显式 focused 用于已确认的切片。main push 与 PR 使用同一分类器，标签保留 full；focused CI 不额外叠加全套 verifier。文档检查覆盖本地暂存、未暂存及未跟踪内容。分类器是唯一权威副本，历史实施计划不覆盖当前脚本。
 

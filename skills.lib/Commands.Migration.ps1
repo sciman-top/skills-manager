@@ -413,9 +413,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             }
             foreach ($directory in @('src','skills.lib','config','tests','scripts','docs','rules','references','.github')) {
                 $source = Join-Path $Root $directory
-                # The independent preset tool stores host-config backups under src/.
-                $excluded = if ($directory -eq 'src') { @('model-orchestration/.state', 'model-orchestration/.generated') } else { @() }
-                Copy-MigrationTree $source (Join-Path $packageRoot $directory) $excluded | Out-Null
+                Copy-MigrationTree $source (Join-Path $packageRoot $directory) | Out-Null
             }
             if (Test-Path -LiteralPath (Join-Path $Root 'overrides') -PathType Container) { Copy-MigrationTree (Join-Path $Root 'overrides') (Join-Path $packageRoot 'overrides') | Out-Null }
             $sourceRoots = @('vendor','imports')

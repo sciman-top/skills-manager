@@ -51,42 +51,13 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         }
     }
 
-    It 'selects the independent preset suite without locked sources in <Mode> mode' -ForEach @(
-        @{ Mode = 'local' }, @{ Mode = 'ci' }
-    ) {
+    It 'keeps mixed runtime changes conservative when an unmapped source file is present' {
         $repo = New-ResolveGateFixture
-        $base = (& git -C $repo rev-parse HEAD).Trim()
-        $module = Join-Path $repo 'src/model-orchestration'
-        New-Item -ItemType Directory -Path $module | Out-Null
-        foreach ($file in @('Set-ModelPreset.ps1', 'Start-ModelSlot.ps1', 'Test-ModelPreset.ps1', 'presets.json', 'README.md', 'AGENTS.md')) {
-            Set-Content -LiteralPath (Join-Path $module $file) -Value '# fixture'
-        }
-        if ($Mode -eq 'ci') {
-            & git -C $repo add .
-            & git -C $repo commit -m 'preset change' *> $null
-        }
-        $r = Invoke-Resolver $repo @{ BaseSha = $base; Mode = $Mode }
-        $r.result.profile | Should -Be 'focused'
-        @($r.result.focused_test_paths).Count | Should -Be 1
-        $r.result.focused_test_paths[0] | Should -Be 'tests/Unit/ModelPreset.Tests.ps1'
-        $r.result.requires_locked_sources | Should -BeFalse
-    }
-
-    It 'keeps preset documentation cheap and mixed runtime changes conservative' {
-        $repo = New-ResolveGateFixture
-        $module = Join-Path $repo 'src/model-orchestration'
-        New-Item -ItemType Directory -Path $module | Out-Null
-        Set-Content -LiteralPath (Join-Path $module 'README.md') -Value '# docs'
-        $docs = (Invoke-Resolver $repo).result
-        $docs.profile | Should -Be 'docs'
-        $docs.requires_build | Should -BeFalse
-        Set-Content -LiteralPath (Join-Path $module 'presets.json') -Value '{}'
         Add-Content -LiteralPath (Join-Path $repo 'src/Core.ps1') -Value '# changed'
         $r = (Invoke-Resolver $repo).result
         $r.profile | Should -Be 'focused'
-        $r.focused_test_paths | Should -Contain 'tests/Unit/ModelPreset.Tests.ps1'
         $r.focused_test_paths | Should -Contain 'tests/Unit/Core.Tests.ps1'
-        Set-Content -LiteralPath (Join-Path $module 'Unknown.ps1') -Value '# unmapped'
+        Set-Content -LiteralPath (Join-Path $repo 'src/Unknown.ps1') -Value '# unmapped'
         (Invoke-Resolver $repo).result.profile | Should -Be 'full'
     }
 
@@ -164,14 +135,13 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         (Invoke-Resolver $repo).result.profile | Should -Be 'full'
     }
 
-    It 'classifies design-only MOR documents as docs' {
+    It 'classifies design-only documents under docs as docs' {
         $repo = New-ResolveGateFixture
-        New-Item -ItemType Directory -Path (Join-Path $repo 'docs\decision') -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value '# mor'
-        & git -C $repo add docs/decision/MOR-090-static-adapter-evidence.md
-        & git -C $repo commit -m 'add mor doc' *> $null
+        Set-Content -LiteralPath (Join-Path $repo 'docs\design-note.md') -Value '# note'
+        & git -C $repo add docs/design-note.md
+        & git -C $repo commit -m 'add design note' *> $null
         $base = (& git -C $repo rev-parse HEAD).Trim()
-        Add-Content -LiteralPath (Join-Path $repo 'docs\decision\MOR-090-static-adapter-evidence.md') -Value 'change'
+        Add-Content -LiteralPath (Join-Path $repo 'docs\design-note.md') -Value 'change'
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'docs'
         $r.result.reason | Should -Be 'docs_only'
@@ -483,7 +453,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
          @{ Source = 'src/Commands/Doctor.ps1'; Expected = @('DoctorCli', 'DoctorEnhancements'); ExpectedLocked = $true }
          @{ Source = 'src/Domain/ExecutionAdmission.ps1'; Expected = @('ExecutionAdmission'); ExpectedLocked = $true }
          @{ Source = 'src/Main.ps1'; Expected = @('MainDispatch', 'MenuStructure'); ExpectedLocked = $true }
-         @{ Source = 'src/Commands/AiRiskControl.ps1'; Expected = @('AiRiskControl'); ExpectedLocked = $false }
      ) {
         param($Source, $Expected, $ExpectedLocked)
         $repo = New-ResolveGateFixture

@@ -54,7 +54,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             "更新" { 更新 }
             "check-updates" { Write-CommandResult (Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
-            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             "锁定" { 锁定 }
             { $_ -in @("验证锁定", "verify-lock") } { 验证锁定 }
             { $_ -in @("清理无效映射", "prune-invalid-mappings") } { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
@@ -106,19 +105,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
             { $_ -in @("帮助", "help", "--help", "-h") } { 帮助 }
-            { $_ -in @("ai-risk-control", "风险控制") } {
-                $riskTokens = @()
-                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $riskTokens += $Filter }
-                # The top-level -Plan alias is shared by other commands; pass it
-                # through so ai-risk-control can keep its command-local plan API.
-                if ($RunPlan -and $PSBoundParameters.ContainsKey('RunPlan')) { $riskTokens += '--plan' }
-                $riskTokens += @($args)
-                $riskResult = Invoke-AiRiskControlCommand $riskTokens
-                Write-Output (ConvertTo-AsciiJson ($riskResult | ConvertTo-Json -Depth 30))
-                if ($riskResult -and $riskResult.PSObject.Properties.Match('exit_code').Count -gt 0 -and [int]$riskResult.exit_code -ne 0) {
-                    exit ([int]$riskResult.exit_code)
-                }
-            }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }

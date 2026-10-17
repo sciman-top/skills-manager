@@ -49,7 +49,7 @@ Describe 'Agent host registry' {
             @($validateSet.PositionalArguments | ForEach-Object { $_.Value }) | Should -Be $expected
         }
         $sourceRoot = Join-Path $repoRoot 'src'
-        $sourceFiles = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -Filter '*.ps1' -File | Where-Object { $_.FullName -notlike '*model-orchestration*' })
+        $sourceFiles = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -Filter '*.ps1' -File)
         $sourceFiles.Count | Should -BeGreaterThan 0
         foreach ($file in $sourceFiles) {
             $text = [IO.File]::ReadAllText($file.FullName)

@@ -208,7 +208,6 @@ Skills 管理器（中文菜单）
   .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
-  .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
@@ -256,10 +255,6 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
-  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--json] [--out <file>]
-  风控入口默认只读，列出 Antigravity/Gemini 与 WorkBuddy 风控技能资产并生成分诊计划；不运行宿主自检脚本、不读写宿主配置，也不会切号、轮换凭据或重启进程。
-  --plan 输出日常防范/恢复/停止条件；--event 输出一次事件的合规分诊计划（两者可独立使用）。
-  --event 取值：antigravity-ban|antigravity-rate-limit|antigravity-degradation|workbuddy-account-risk|workbuddy-rate-limit|workbuddy-degradation
   机器消费请用 --out（显式 UTF-8），不要依赖 stdout 重定向的编码。
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 

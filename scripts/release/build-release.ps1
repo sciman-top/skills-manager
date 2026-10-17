@@ -290,7 +290,6 @@ function New-ReleasePackage([string]$Kind) {
         'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
         'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.ps1',
         'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1',
-        'scripts\release\release-update-scheduled-runner.ps1', 'scripts\release\register-release-update-task.ps1',
         'references\README.md', 'references\reference-shelf.manifest.json', 'references\updates\README.md'
     )
     # All three host rule wrappers travel together: a Source package without
