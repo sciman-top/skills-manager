@@ -57,6 +57,29 @@ Describe "Audit Targets" {
         $files.Count | Should -Be 1
         $files[0].Name | Should -Be 'main.py'
     }
+    It "Prunes Git-ignored directories from a target nested below the worktree root" {
+        $repo = Join-Path $TestDrive 'git-ignore-pruning'
+        $target = Join-Path $repo 'projects'
+        $ignoredFile = Join-Path $target 'chrome-data\profile\extension.js'
+        $null = New-Item -ItemType Directory -Path (Join-Path $target 'src'), (Split-Path -Parent $ignoredFile) -Force
+        Set-ContentUtf8 (Join-Path $repo '.gitignore') "projects/chrome-data/`n"
+        Set-ContentUtf8 (Join-Path $target 'src\main.py') 'print(1)'
+        Set-ContentUtf8 $ignoredFile 'third-party payload'
+        & git -C $repo init --quiet
+        if ($LASTEXITCODE -ne 0) { throw 'git init failed for ignored-path test fixture' }
+
+        $previousDryRun = $script:DryRun
+        $script:DryRun = $false
+        try {
+            $files = @(Get-AuditPrunedFiles $target)
+        }
+        finally {
+            $script:DryRun = $previousDryRun
+        }
+
+        @($files | Where-Object FullName -eq (Join-Path $target 'src\main.py')).Count | Should -Be 1
+        @($files | Where-Object FullName -eq $ignoredFile).Count | Should -Be 0
+    }
     BeforeEach {
         Mock Get-AuditLiveInstalledState {
             [pscustomobject]([ordered]@{
