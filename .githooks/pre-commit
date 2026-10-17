@@ -21,4 +21,14 @@ if git submodule status --recursive 2>/dev/null | grep -E '[-]dirty' >/dev/null 
   exit 1
 fi
 
+# 生成物只能与其源同批提交：skills.ps1 / skills.lib 或 rules/global/<host>/ 变更时，
+# 必须同时带上 src/、build.ps1 或 rules/global 源文件；CI -CheckGenerated 仍是最终裁决。
+generated_changed="$(printf '%s\n' "$staged" | grep -E '^(skills\.ps1$|skills\.lib/|rules/global/(claude|codex|zcode|antigravity|workbuddy)/)' || true)"
+source_changed="$(printf '%s\n' "$staged" | grep -E '^(src/|build\.ps1$|rules/global/common\.md$|rules/global/platforms/)' || true)"
+if [ -n "$generated_changed" ] && [ -z "$source_changed" ]; then
+  echo "[pre-commit] blocked: generated files staged without their sources (src/, build.ps1, rules/global/common.md, rules/global/platforms/)." >&2
+  printf '%s\n' "$generated_changed" >&2
+  exit 1
+fi
+
 exit 0
