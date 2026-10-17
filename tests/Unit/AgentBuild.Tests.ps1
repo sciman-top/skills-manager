@@ -425,6 +425,37 @@ Describe 'Scoped single-skill projection' {
         }
     }
 
+    It 'regenerates the admission helper when only updating capability-router' {
+        $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
+        try {
+            $Root = Join-Path $TestDrive 'single-capability-router'
+            $AgentDir = Join-Path $Root 'agent'
+            $OverridesDir = Join-Path $Root 'overrides'
+            $LogPath = Join-Path $Root 'build.log'
+            $DryRun = $false
+            $source = Join-Path $OverridesDir 'custom\capability-router'
+            $target = Join-Path $AgentDir 'capability-router'
+            Mock Get-OverridesDirs { @([pscustomobject]@{ Name = 'capability-router'; FullName = $source }) }
+            New-Item -ItemType Directory -Path (Join-Path $source 'scripts'), (Join-Path $target 'scripts') -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') (@('---', 'name: capability-router', 'description: test router', '---', '') -join [Environment]::NewLine)
+            Set-ContentUtf8 (Join-Path $source 'scripts\route-capability.ps1') 'router entrypoint'
+            Set-ContentUtf8 (Join-Path $target 'scripts\execution-admission.ps1') 'stale helper'
+
+            $result = 更新单技能 -SkillName 'capability-router' -SkipLock
+
+            $result.updated | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $source 'scripts\execution-admission.ps1') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $target 'scripts\route-capability.ps1') | Should -BeTrue
+            $helper = Get-ContentUtf8 (Join-Path $target 'scripts\execution-admission.ps1')
+            $helper | Should -Match 'function New-ExecutionAdmissionBridgePayload'
+            $helper | Should -Not -Be 'stale helper'
+            @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+        finally {
+            $Root = $oldRoot; $AgentDir = $oldAgent; $OverridesDir = $oldOverrides; $DryRun = $oldDryRun; $LogPath = $oldLogPath
+        }
+    }
+
     It 'refreshes dependent catalogs and projection state after replacing a managed package' {
         $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
         try {
