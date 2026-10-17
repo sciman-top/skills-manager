@@ -592,8 +592,10 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null, [switch]$Ski
             }
             Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$definition.bytes)
             $written = Get-NativeAgentBridgeFileState $targetPath
-            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("native agent target verification failed: {0}" -f $targetPath)
+            # Record the landed state before verifying it: a write that succeeds but fails
+            # verification must still be restorable by the rollback below.
             $after[$targetPath] = $written
+            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("native agent target verification failed: {0}" -f $targetPath)
             $changed.Add([string]$definition.name) | Out-Null
         }
         Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
