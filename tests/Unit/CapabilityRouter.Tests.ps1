@@ -626,6 +626,9 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'cannot\s+recompute\s+hashes'
         # A live child rejected identifiers alone; the full successor payload must travel inline.
         $skill | Should -Match 'complete successor bridge payload inline'
+        # Live children refuse an answer without its provenance and a paraphrased authorization.
+        $skill | Should -Match '-AnswerProvenance'
+        $skill | Should -Match 'paraphrased authorization is not evidence'
     }
 
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {

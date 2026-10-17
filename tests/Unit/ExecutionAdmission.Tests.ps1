@@ -423,7 +423,7 @@ finally {
         $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
         $plan = New-ExecutionPlan -Admission $admission
 
-        $successor = New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root
+        $successor = New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -AnswerProvenance 'human_verbatim_answer' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root
         $result = Test-ExecutionAdmissionContinuation -PriorAdmission $admission -PriorPlan $plan -SuccessorAdmission $successor.admission -SuccessorPlan $successor.plan -Validation $fixture.validation -RepoRoot $root
 
         $result.pass | Should -BeTrue
@@ -436,6 +436,21 @@ finally {
         $successor.plan.admission_id | Should -Be $successor.admission.admission_id
     }
 
+    It 'records answer provenance and delegate authorization, and refuses an answer with no provenance' {
+        $root = Join-Path $TestDrive 'successor-provenance'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $request = '请逐轮审问这份提案，不改文件。'
+        $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+
+        $delegate = New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -AnswerProvenance 'authorized_ai_delegate_answer' -AuthorizationEvidence '用户授权：仅用于机制验证，不计人工验收。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root
+        $delegate.admission.answer_provenance | Should -Be 'authorized_ai_delegate_answer'
+        $delegate.admission.authorization_evidence_sha256 | Should -Match '^[a-f0-9]{64}$'
+
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -AnswerProvenance 'authorized_ai_delegate_answer' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*delegate_authorization_evidence_missing*'
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -AnswerProvenance '' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*answer_provenance_missing*'
+    }
+
     It 'fails closed when a successor lacks an answer, reuses a request, or is not later than its predecessor' {
         $root = Join-Path $TestDrive 'successor-reject'
         $fixture = New-ExecutionAdmissionFixture $root
@@ -445,6 +460,6 @@ finally {
 
         { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*attributable_user_answer_missing*'
         { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest '不同的请求' -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*continuation_request_mismatch*'
-        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*continuation_issued_at_not_later*'
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -AnswerProvenance 'human_verbatim_answer' -Validation $fixture.validation -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*continuation_issued_at_not_later*'
     }
 }
