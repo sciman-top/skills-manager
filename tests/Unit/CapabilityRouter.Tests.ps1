@@ -576,6 +576,58 @@ Describe 'Capability router fallback' {
         $result.execution_authorization.status | Should -Be 'not_granted'
     }
 
+    It 'accepts the Bash-form comma-separated domain hint from a child process' {
+        # Claude's Bash tool on Windows is Git Bash; the documented form passes
+        # `-DomainHint decision,engineering` as one literal token. A child pwsh
+        # must bind that token as a two-element list, not one unknown domain.
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.domains += [pscustomobject][ordered]@{name='decision';purpose='Decision';skill_names=@()}
+        Write-TestCatalog $document $catalog
+
+        $child = Invoke-RouterInChildProcess $router @(
+            '-Query', 'design',
+            '-CatalogPath', $catalog,
+            '-DomainHint', 'decision,engineering'
+        )
+
+        $child.result.routing_receipt.status | Should -Be 'candidates_returned'
+        @($child.result.retrieval.candidates.name) | Should -Be @('codebase-design')
+    }
+
+    It 'documents shell-neutral discovery commands that do not expand PowerShell variables in Bash' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # `$domainHints` is PowerShell-only. Pasted into Git Bash it expands to
+        # nothing, so `-DomainHint` loses its value and pwsh fails before the
+        # router runs (exit 1, no JSON), which a host reads as "router broken".
+        $skill | Should -Not -Match '-DomainHint \$domainHints'
+        $skill | Should -Match '-DomainHint decision,engineering'
+    }
+
+    It 'documents Claude Agent-tool dispatch beside the Codex fork rule, not as Codex-only' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # A Claude child looked for a Codex-only `spawn_agent` tool because the
+        # handoff rule was written for Codex alone; both hosts must be named.
+        $skill | Should -Match 'Agent tool with `subagent_type`'
+        $skill | Should -Match 'Codex `fork_turns="none"`'
+        $skill | Should -Not -Match 'On Codex, a named specialist handoff must'
+    }
+
+    It 'requires the parent to persist the predecessor admission before a multi-turn successor' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # A live probe lost its admission inside a finished pwsh process, so the
+        # successor could not be built and the interview stalled on question one.
+        $skill | Should -Match 'persist'
+        $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
+        # Run files must sit in the git-ignored work area, never %TEMP% or a tracked path.
+        $skill | Should -Match 'artifacts/work/cold-routing/<run-id>/'
+        $skill | Should -Match 'cannot\s+recompute\s+hashes'
+        # A live child rejected identifiers alone; the full successor payload must travel inline.
+        $skill | Should -Match 'complete successor bridge payload inline'
+    }
+
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
         $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')

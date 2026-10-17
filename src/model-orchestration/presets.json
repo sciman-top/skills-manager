@@ -4,27 +4,30 @@
   "active_presets": [
     "gpt6_luna_only",
     "glm53_flash_only",
-    "deepseek_flash_only"
+    "claude_haiku55_only",
+    "gemini38_flash_only"
   ],
   "role_prefixes": {
     "gpt6_luna_only": "luna",
     "glm53_flash_only": "glm",
-    "deepseek_flash_only": "deepseek"
+    "claude_haiku55_only": "haiku",
+    "gemini38_flash_only": "gemini"
   },
   "codex_order": [
     "gpt6_luna_only",
     "glm53_flash_only",
-    "deepseek_flash_only"
+    "claude_haiku55_only",
+    "gemini38_flash_only"
   ],
   "aliases": {},
   "auto_routes": {
     "quick_triage": "glm53_flash_only",
     "routine_maintenance": "glm53_flash_only",
-    "standard_review": "deepseek_flash_only",
+    "standard_review": "claude_haiku55_only",
     "bounded_implementation": "glm53_flash_only",
     "deep_investigation_or_implementation": "gpt6_luna_only",
     "test_execution": "glm53_flash_only",
-    "documentation_review": "deepseek_flash_only",
+    "documentation_review": "gemini38_flash_only",
     "architecture_review": "gpt6_luna_only"
   },
   "dispatch_policy": {
@@ -104,14 +107,36 @@
         "test_execution": 0
       }
     },
-    "deepseek_flash_only": {
+    "claude_haiku55_only": {
+      "hosts": [
+        "codex",
+        "claude"
+      ],
+      "menu": [
+        {
+          "model": "claude-haiku-5-5",
+          "effort": "xhigh"
+        }
+      ],
+      "slot_map": {
+        "quick_triage": 0,
+        "routine_maintenance": 0,
+        "standard_review": 0,
+        "bounded_implementation": 0,
+        "deep_investigation_or_implementation": 0,
+        "test_execution": 0,
+        "documentation_review": 0,
+        "architecture_review": 0
+      }
+    },
+    "gemini38_flash_only": {
       "hosts": [
         "codex"
       ],
       "menu": [
         {
-          "model": "deepseek-v4.1-flash",
-          "effort": "xhigh"
+          "model": "gemini-3.8-flash-high",
+          "effort": "high"
         }
       ],
       "slot_map": {

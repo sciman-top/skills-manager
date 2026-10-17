@@ -5,9 +5,15 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-10-17 四模型池修订
+
+用户修订日常子代理共同启用池为四元组：GPT-6-luna max（`gpt6_luna_only`，hosts codex）、GLM-5.3-Flash（`glm53_flash_only`，hosts zcode+codex；Codex=xhigh、ZCode=max 分面不变）、Claude Haiku 5.5 xhigh（`claude_haiku55_only`，hosts codex+claude）与 Gemini 3.8 Flash high（`gemini38_flash_only`，hosts codex）；DeepSeek V4.1-Flash（`deepseek_flash_only`）整体移除（中转目录仍列出该 slug，仅作为非活动条目保留），`default_preset=glm53_flash_only` 不变。可用性为操作者声明：ChatGPT Desktop（codex 面）可调用全部四模型，claude/zcode 只调自家模型。auto_routes 中 `standard_review`→haiku/xhigh、`documentation_review`→gemini/high（接管原 DeepSeek 的两个路由位，AI 推荐可调），其余不变；429 可用性链按声明序更新为 luna→glm→haiku→gemini→停等操作者。中转目录精确 slug：`claude-haiku-5-5`（xhigh 在目录声明内）与 `gemini-3.8-flash-high`（档位编入 slug 名，裸名 `gemini-3.8-flash` 不在目录；high 在目录声明内），2026-10-17 经一次只读 `codex debug models` 目录观测确认，属 catalog 观察而非 live 请求证据；本轮不跑模型请求探针，元组在当前执行面通过能力预检/live 验收前仅为 declared routes。haiku 的 claude 分面仅为可用性声明与后续适配器占位：整池 auto_routes 校验使 `-ExecutionHost claude` 投影保持不可用（先于本修订即如此），Claude Code 子代理模型选择维持宿主自有面。同轮顺带修复 Test-ModelPreset 中一处空断言：`& script.ps1` 不写 `$LASTEXITCODE`，原 `$LASTEXITCODE -eq 0` 子句依赖运行上下文遗留值，改为校验 Plan 结果字段（套件其余位置既有约定）。
+
+下文 2026-10-12/2026-10-13 节描述的启用池（luna+glm+deepseek 三元组）由本节取代，其余原则（ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论、一请求/一显式重选与停等规则）保留。
+
 ## 2026-10-12 日常子代理预设修订
 
-用户修订共同启用池为 GPT-6-luna max（`gpt6_luna_only`，hosts codex）、GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）三元组；GPT-5.6-Terra（`gpt_terra_only`）整体移除，`default_preset=glm53_flash_only` 不变。429 可用性链按声明序更新为 luna→glm→deepseek→停等操作者。luna 精确 slug `gpt-6-luna` 沿用 2026-10-07 池时代的通道投影与 live 记录；`gpt6-luna-only` 新 profile 于当日 strict-load 通过，且该元组经当前中转 provider 通道 `codex exec` 最小请求探针 1 次 exit 0（read-only sandbox，input≈22.5k tok，C11），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
+**（启用池部分已被 2026-10-17 节取代）** 用户修订共同启用池为 GPT-6-luna max（`gpt6_luna_only`，hosts codex）、GLM-5.3-Flash max（`glm53_flash_only`，hosts zcode+codex）与 DeepSeek V4.1-Flash max（`deepseek_flash_only`，hosts codex）三元组；GPT-5.6-Terra（`gpt_terra_only`）整体移除，`default_preset=glm53_flash_only` 不变。429 可用性链按声明序更新为 luna→glm→deepseek→停等操作者。luna 精确 slug `gpt-6-luna` 沿用 2026-10-07 池时代的通道投影与 live 记录；`gpt6-luna-only` 新 profile 于当日 strict-load 通过，且该元组经当前中转 provider 通道 `codex exec` 最小请求探针 1 次 exit 0（read-only sandbox，input≈22.5k tok，C11），属该通道面的最小负载 live 证据，不外推其他 provider、宿主或更长任务负载。菜单不可用显式重选与复杂度升降档仍是两条路径，均不重放已完成写入。
 
 下文 2026-10-11 节描述的启用池（GLM+DeepSeek 两元组）由本节取代，其余原则（ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论）保留。
 

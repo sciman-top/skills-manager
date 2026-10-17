@@ -55,7 +55,7 @@ function ThrowCapabilityBlock($Status, $Reason, $SupportedEfforts = @()) {
     $capability.upstream_contacted = $false
     $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 8 -Compress
     $doc
-    throw "Capability preflight blocked dispatch; no upstream request was sent. $doc"
+    throw "Capability preflight blocked dispatch; no model request was sent. $doc"
 }
 function Get-CodexCatalog([string]$Path) {
     if ($Path) {
@@ -105,30 +105,101 @@ function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$
         source = $source
     }
 }
-if (-not $Plan) {
-    if ($CapabilityMode -eq 'provider_override') {
-        try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
-        catch { ThrowCapabilityBlock 'provider_evidence_invalid' $_.Exception.Message }
-        $capability.status = 'provider_evidence_verified'
-        $capability.surface = $capability.evidence.surface
+function Get-CodexRetryControl([string]$ProfileName) {
+    $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        [IO.Path]::GetFullPath($env:CODEX_HOME)
     }
     else {
-        if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
-        try { $catalog = Get-CodexCatalog $CapabilityProbePath }
-        catch { ThrowCapabilityBlock 'probe_failed' $_.Exception.Message }
-        $modelInfo = @($catalog.models | Where-Object { $_.slug -ceq $route.model })[0]
-        if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Native catalog does not contain model '$($route.model)'." }
-        $supported = @($modelInfo.supported_reasoning_levels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.effort } })
-        $capability.supported_efforts = $supported
-        $capability.native_supported = ($supported -ccontains $route.effort)
-        if (-not $capability.native_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Native catalog does not declare '$($route.model)/$($route.effort)'." $supported }
-        $capability.status = 'native_supported'
+        Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex'
     }
+    $basePath = Join-Path $codexRoot 'config.toml'
+    $profilePath = Join-Path $codexRoot ($ProfileName + '.config.toml')
+    $baseText = if (Test-Path -LiteralPath $basePath -PathType Leaf) { [IO.File]::ReadAllText($basePath) } else { '' }
+    $profileText = if (Test-Path -LiteralPath $profilePath -PathType Leaf) { [IO.File]::ReadAllText($profilePath) } else { '' }
+
+    function Get-RootTomlString([string]$Text, [string]$Key) {
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        # Matches both [table] and [[array-of-tables]] headers; keys after either are not root keys.
+        $rootText = [regex]::Split($Text, '(?m)^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$')[0]
+        $keyPattern = [regex]::Escape($Key)
+        $pattern = '(?m)^\s*' + $keyPattern + '\s*=\s*(?:"(?<double>[^"]+)"|''(?<single>[^'']+)'')\s*(?:#.*)?$'
+        $matches = [regex]::Matches($rootText, $pattern)
+        if ($matches.Count -gt 1) { throw "Codex TOML has duplicate root key '$Key'." }
+        if ($matches.Count -eq 0) { return $null }
+        if ($matches[0].Groups['double'].Success) { return $matches[0].Groups['double'].Value }
+        return $matches[0].Groups['single'].Value
+    }
+
+    $providerId = Get-RootTomlString $profileText 'model_provider'
+    if ([string]::IsNullOrWhiteSpace($providerId)) { $providerId = Get-RootTomlString $baseText 'model_provider' }
+    if ([string]::IsNullOrWhiteSpace($providerId) -or $providerId -ceq 'openai') {
+        throw 'The effective Codex provider is built-in or unset; the documented per-provider retry cap is unavailable.'
+    }
+    if ($providerId -cnotmatch '^[A-Za-z0-9_-]+$') { throw 'The effective Codex provider id cannot be safely addressed by a CLI config override.' }
+
+    $sectionPattern = '(?m)^\s*\[model_providers\.' + [regex]::Escape($providerId) + '\]\s*(?:#.*)?$'
+    if ($baseText -notmatch $sectionPattern -and $profileText -notmatch $sectionPattern) {
+        throw 'The effective Codex provider has no declared custom model_providers table for a per-invocation retry override.'
+    }
+    return [ordered]@{
+        provider_id = $providerId
+        request_max_retries = 0
+        stream_max_retries = 0
+        scope = 'this_codex_cli_invocation'
+    }
+}
+$codexRetryControl = $null
+if (-not $Plan -and $CapabilityMode -eq 'provider_override') {
+    # Explicit provider_override evidence is checked before the retry-control
+    # evaluation so its specific failure code is not masked by the
+    # environment-dependent provider lookup below.
+    try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
+    catch { ThrowCapabilityBlock 'provider_evidence_invalid' $_.Exception.Message }
+    $capability.status = 'provider_evidence_verified'
+    $capability.surface = $capability.evidence.surface
+}
+# Plan mode reads the same retry config, so a blocked retry control is reported before dispatch.
+if ($targetHost -eq 'codex') {
+    try {
+        $codexRetryControl = Get-CodexRetryControl $routePreset.Replace('_','-')
+        $capability.retry_control = $codexRetryControl
+    }
+    catch {
+        # A plan is advisory and must stay environment-independent: report the
+        # missing retry control inside the plan payload instead of killing the
+        # plan itself. Native dispatch hard-blocks on the missing cap;
+        # provider_override launches on explicit parent evidence, so the ambient
+        # retry-cap config is best-effort there and the launch proceeds without
+        # the per-invocation retry overrides.
+        if ($Plan) {
+            $capability.retry_control = [ordered]@{ status = 'retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
+        }
+        elseif ($CapabilityMode -eq 'provider_override') {
+            $capability.retry_control = [ordered]@{ status = 'ambient_retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
+        }
+        else { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
+    }
+}
+if (-not $Plan -and $CapabilityMode -ne 'provider_override') {
+    if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
+    try { $catalog = Get-CodexCatalog $CapabilityProbePath }
+    catch { ThrowCapabilityBlock 'probe_failed' $_.Exception.Message }
+    $modelInfo = @($catalog.models | Where-Object { $_.slug -ceq $route.model })[0]
+    if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Native catalog does not contain model '$($route.model)'." }
+    $supported = @($modelInfo.supported_reasoning_levels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.effort } })
+    $capability.supported_efforts = $supported
+    $capability.native_supported = ($supported -ccontains $route.effort)
+    if (-not $capability.native_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Native catalog does not declare '$($route.model)/$($route.effort)'." $supported }
+    $capability.status = 'native_supported'
 }
 if ($targetHost -eq 'codex') {
     $cliArgs = @('exec','--profile',$routePreset.Replace('_','-'),'--strict-config','--json','--skip-git-repo-check','-C',$WorkingDirectory,
         '-c',('model="'+$route.model+'"'),'-c',('review_model="'+$route.model+'"'),
         '-c',('model_reasoning_effort="'+$route.effort+'"'),'-c','agents.enabled=false','--disable','multi_agent')
+    if ($null -ne $codexRetryControl) {
+        $providerId = [string]$codexRetryControl.provider_id
+        $cliArgs += @('-c',("model_providers.$providerId.request_max_retries=0"),'-c',("model_providers.$providerId.stream_max_retries=0"))
+    }
     if ($Ephemeral) { $cliArgs += '--ephemeral' }
     if ($readOnlyTask) { $cliArgs += @('--sandbox','read-only') }
     $executable = 'codex'

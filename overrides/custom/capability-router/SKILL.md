@@ -40,19 +40,33 @@ context supplies one. Stop and ask the user for the target (the
 loading. Inventing a substitute task to route around the missing payload is
 fail-open on an unknown target, not routing.
 
+Bash tool (Git Bash on Windows, the usual Claude shell). Pass one or two
+functional domains as a literal comma-separated token, and single-quote the
+request so a `$skill-name` inside it is not expanded:
+
+```bash
+pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint decision,engineering
+```
+
+PowerShell (one or two functional domains, not task keywords):
+
 ```powershell
-$domainHints = @('decision') # one or two functional domains, not task keywords
-$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint $domainHints | ConvertFrom-Json
+$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint decision,engineering | ConvertFrom-Json
 $result.retrieval.candidates
 ```
 
-Run this from a PowerShell shell, not `cmd.exe`: under `cmd.exe /c`, the
+Do not paste a PowerShell `$variable` into a Bash command. An unset
+`$domainHints` leaves `-DomainHint` without a value, so `pwsh` exits with a
+parameter-binding error before the router runs (exit 1, no JSON). That is a
+binding failure, not a semantic miss and not an empty catalog: correct the
+argument and run the same single discovery once. Do not treat it as
+"cold discovery unavailable".
+
+Prefer PowerShell 7 with `-File` from either shell. Under `cmd.exe /c`, the
 `-File` form breaks on quoting when `-Query` contains spaces or non-ASCII
-text, and repeated failed attempts look like a broken router. If the host
-shell is `cmd.exe` anyway, pass the whole invocation through
+text. If the host shell is `cmd.exe`, pass the whole invocation through
 `pwsh -NoProfile -Command "& { ... }"` or `-EncodedCommand`, and treat a
-non-zero exit as "the router did not run" — retry once with the robust form
-instead of concluding cold discovery is unavailable.
+non-zero exit as "the router did not run" rather than as an empty catalog.
 
 The router writes a pure-ASCII JSON document: every non-ASCII character in a
 skill description is emitted as a `\uXXXX` escape. Keep the plain
@@ -134,6 +148,27 @@ admission. Report this path as `parent_mediated`; it is not native runner
 execution. A skill requiring a multi-turn decision must preserve its questions
 and wait points; never replace it with a one-shot summary.
 
+For a multi-turn decision, the parent persists the admission and plan objects
+(for example with `ConvertTo-Json -Depth 60`) into a run directory such as
+`artifacts/work/cold-routing/<run-id>/` before the first child spawn. That path
+is git-ignored; never use `%TEMP%` or a tracked path, because a run file outside
+the repository cannot be named in an admission read set. Persist each successor
+the same way. `New-ExecutionAdmissionSuccessor` reuses the predecessor's
+allowed_read_set, and a successor file cannot be hashed into the admission it
+produces, so the child cannot check a successor's content by reading the file.
+Send the child the complete successor bridge payload inline (the canonical
+`New-ExecutionAdmissionBridgePayload` output, with the successor admission and
+plan), not identifiers alone: a live child rejected an ID-only continuation
+because it could not check the constraints that still bind the successor. The
+child checks those constraints in the payload it was given and cannot recompute
+hashes without a shell; the parent's revalidation remains the content check
+for the file. Each later answer needs
+`New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
+with a new attempt identity and a later `issued_at`. A predecessor that existed
+only in a finished PowerShell process cannot be rebuilt, so do not forward an
+answer to the same child without a successor; restart with a new root admission
+and say so in the report, rather than forging a continuation.
+
 For independently bounded work, prefer an available host-native subagent when
 the user or applicable instructions authorize delegation. Pass the exact
 validated closure and task scope. Do not assume a named custom agent exists
@@ -152,13 +187,17 @@ router has returned all of the following for the same request:
 - one selected candidate plus its `validated_closure`, with validated paths and
   declared side effects for every member.
 
-On Codex, a named specialist handoff must explicitly set `fork_turns="none"`
-(or a positive number when that specific history is necessary). Never omit
-`fork_turns` or use `"all"` with a nondefault `agent_type`: full-history forks
-inherit the parent model and context. Put the complete admission and validated
-closure in the child message so isolation does not discard required inputs.
-Verify the actual spawn arguments and child events; a receipt alone cannot
-prove isolation or the model and effort that executed the task.
+Start the named specialist without inherited parent history. On Codex, set
+`fork_turns="none"` (or a positive number only when that specific history is
+necessary); never omit `fork_turns` or use `"all"` with a nondefault
+`agent_type`, because full-history forks inherit the parent model and context.
+On Claude, dispatch through the Agent tool with `subagent_type` set to the
+contract's `native_agent`; a fresh Agent call carries no parent history. A child
+that reports no `spawn_agent` tool on Claude is looking for the Codex name:
+use the Agent tool instead. In both hosts, put the complete admission and
+validated closure in the child message so isolation does not discard required
+inputs. Verify the actual spawn arguments and child events; a receipt alone
+cannot prove isolation or the model and effort that executed the task.
 
 For a supported specialist bridge contract, pass the complete validation result, original request, exact selected name, and
 an admission contract to the child. Once those conditions hold, dispatching to
@@ -226,8 +265,9 @@ before admission), passing the same `-OriginalRequest`, `-RepoRoot` and
 that is outside the task's read and write sets; a path outside `RepoRoot` fails
 closed as a write-set violation. This parent-owned transport file is separate
 from the child's task write set. Pass the returned path, SHA-256 and admission
-id, plus helper path/hash and both roots, explicitly in the child message with
-`fork_turns="none"`. If inline transport is required, serialize the returned
+id, plus helper path/hash and both roots, explicitly in the child message, with
+no inherited history (Codex `fork_turns="none"`; on Claude, a fresh Agent call).
+If inline transport is required, serialize the returned
 object with `ConvertTo-Json -Depth 60 -Compress` and place the complete JSON
 under one `bridge_payload` field in the child message; never abbreviate, omit,
 or hand-reconstruct fields. Do not rely on history inheritance or truncated
