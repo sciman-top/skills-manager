@@ -623,7 +623,9 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
         # Run files must sit in the git-ignored work area, never %TEMP% or a tracked path.
         $skill | Should -Match 'artifacts/work/cold-routing/<run-id>/'
-        $skill | Should -Match 'cannot recompute hashes'
+        $skill | Should -Match 'cannot\s+recompute\s+hashes'
+        # A live child rejected identifiers alone; the full successor payload must travel inline.
+        $skill | Should -Match 'complete successor bridge payload inline'
     }
 
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {

@@ -156,10 +156,13 @@ the repository cannot be named in an admission read set. Persist each successor
 the same way. `New-ExecutionAdmissionSuccessor` reuses the predecessor's
 allowed_read_set, and a successor file cannot be hashed into the admission it
 produces, so the child cannot check a successor's content by reading the file.
-The parent carries the successor's `admission_id`, `plan_id`, and a
-revalidation result to the child. The child compares the identifiers it was
-given with its own admission text; it cannot recompute hashes without a shell,
-so the parent's revalidation is the only content check. Each later answer needs
+Send the child the complete successor bridge payload inline (the canonical
+`New-ExecutionAdmissionBridgePayload` output, with the successor admission and
+plan), not identifiers alone: a live child rejected an ID-only continuation
+because it could not check the constraints that still bind the successor. The
+child checks those constraints in the payload it was given and cannot recompute
+hashes without a shell; the parent's revalidation remains the content check
+for the file. Each later answer needs
 `New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
 with a new attempt identity and a later `issued_at`. A predecessor that existed
 only in a finished PowerShell process cannot be rebuilt, so do not forward an
