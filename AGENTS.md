@@ -37,7 +37,7 @@
 - 全局规则文件相等只证明 `filesystem_projected`；`host_loaded` 需要 fresh host probe。
 
 ## 5. 收口
-- 基线分支 `main`，upstream `origin/main`。远端 ruleset 要求 PR 与 `test` 检查（strict），不要求额外批准人数。合入走：推分支 → PR → CI 绿 → merge。禁止 force push。
+- 基线分支 `main`，upstream `origin/main`。远端 ruleset 要求 PR 与 `test` 检查（strict），不要求额外批准人数。合入走：推分支 → PR → CI 绿 → merge。禁止 force push。PR 的 required check 通过且 mergeStateStatus=CLEAN 时会话可自主合并并同步本地 main，无需逐次请示；操作者在任务中明示暂缓（如"暂不推送"）的，以其指令为准。
 - 新增 `src/`、`scripts/`、`tests/`（fixtures 除外）或 `.github/` 文件的 PR 须由人加 `new-surface` 标签；CI 的 `verify-new-surface.ps1` 据此判定。文档新增不计入。
 - 收口报告写明：验证命令与结果、未验证项，以及 `Removed:` 行（常规修复写 `N/A`）。
 - 两台电脑同步见 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md)。`fetch` 不会把远端提交整合进工作树。
