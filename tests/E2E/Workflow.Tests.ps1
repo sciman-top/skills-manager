@@ -418,7 +418,7 @@ description: demo skill
             (@($context.desired_state.path | Sort-Object) -join ',') | Should -Be ($plannedPaths -join ',')
         }
 
-        It "Writes mcp files for codex and project trae when trae target exists" {
+        It "Writes native Codex and project Trae MCP configs when Trae target exists" {
             $root = Join-Path $TestDrive "ws-mcp"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-TestWorkspace $root
@@ -448,10 +448,10 @@ description: demo skill
 
             同步MCP
 
-            $codexMcpPath = Join-Path $root ".codex\.mcp.json"
-            (Test-Path $codexMcpPath) | Should -Be $true
-            (Get-Content -Raw -Path $codexMcpPath) | Should -Match '"fetch"'
-            (Test-Path (Join-Path $root ".codex\config.toml")) | Should -Be $true
+            $codexConfigPath = Join-Path $root ".codex\config.toml"
+            (Test-Path $codexConfigPath) | Should -Be $true
+            (Get-Content -Raw -Path $codexConfigPath) | Should -Match '(?m)^\[mcp_servers\.fetch\]\r?$'
+            (Test-Path (Join-Path $root ".codex\.mcp.json")) | Should -Be $false
             (Test-Path (Join-Path $root ".trae\mcp.json")) | Should -Be $true
         }
 

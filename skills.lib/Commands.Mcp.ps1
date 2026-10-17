@@ -201,39 +201,6 @@ function New-McpServerObject($parsed) {
     return [pscustomobject]$obj
 }
 
-function Remove-McpServersFromPayload($payload, [string[]]$names) {
-    if ($null -eq $payload -or $null -eq $names -or $names.Count -eq 0) { return $payload }
-    if ($payload.PSObject.Properties.Match("mcpServers").Count -eq 0) { return $payload }
-    $serverMap = $payload.mcpServers
-    if ($null -eq $serverMap) { return $payload }
-
-    foreach ($name in @($names)) {
-        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
-        $match = @($serverMap.PSObject.Properties | Where-Object {
-            [string]::Equals([string]$_.Name, [string]$name, [System.StringComparison]::OrdinalIgnoreCase)
-        } | Select-Object -First 1)
-        if ($match.Count -gt 0 -and $null -ne $match[0]) {
-            $serverMap.PSObject.Properties.Remove($match[0].Name)
-        }
-    }
-
-    return $payload
-}
-
-function Get-LegacyMcpServersToPrune() {
-    return @("fetch", "filesystem")
-}
-
-function Get-McpServersToPrune($servers) {
-    $names = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @(Get-LegacyMcpServersToPrune)) {
-        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
-        if (Has-McpServerByName $servers ([string]$name)) { continue }
-        $names.Add([string]$name) | Out-Null
-    }
-    return @($names.ToArray())
-}
-
 function Has-McpServerByName($servers, [string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $false }
     foreach ($s in @($servers)) {
@@ -653,22 +620,27 @@ function 卸载MCP([string[]]$tokens = @()) {
 
     $cfg.mcp_servers = $remaining
     Remove-McpProfileServerReferences $cfg @($name) | Out-Null
-    SaveCfgSafe $cfg $cfgRaw
     if ($DryRun) {
         Write-Host ("DRYRUN：将卸载 MCP 服务：{0}" -f $name)
     }
     else {
+        # Validate the post-removal desired state before persisting the source config.
+        # A rejected host shape must leave both the registry and target files untouched.
+        $null = Get-McpSyncPlanningContext -ReadOnlyConfig -ExplicitRemovalNames @($name)
+        SaveCfgSafe $cfg $cfgRaw
         Write-Host ("已卸载 MCP 服务：{0}" -f $name)
-        Invoke-NativeMcpCleanup $name
     }
-    同步MCP
+    同步MCP -ExplicitRemovalNames @($name)
 }
 
 function Get-McpSyncManagedTargetSpecs {
     param(
         $Roots = @(),
-        $CandidatePaths = @(),
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$ClaudeUserRoot = '',
+        [string]$ClaudeUserConfigPath = '',
+        [string]$ClaudeDesktopConfigPath = '',
+        [string]$AntigravityUserRoot = ''
     )
 
     $specs = New-Object System.Collections.Generic.List[object]
@@ -691,27 +663,52 @@ function Get-McpSyncManagedTargetSpecs {
             }) | Out-Null
     }
 
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { -not (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root (Get-McpGenericConfigFileName $root)) 'generic_json' $root
+    $ClaudeUserRoot = Get-ClaudeUserConfigRoot $ClaudeUserRoot
+    $ClaudeUserConfigPath = Get-ClaudeUserMcpConfigPath $ClaudeUserConfigPath
+    if ([string]::IsNullOrWhiteSpace($ClaudeDesktopConfigPath)) {
+        $appData = [Environment]::GetFolderPath('ApplicationData')
+        if (-not [string]::IsNullOrWhiteSpace($appData)) { $ClaudeDesktopConfigPath = Join-Path (Join-Path $appData 'Claude') 'claude_desktop_config.json' }
     }
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_settings' $root
-    }
-    foreach ($root in @(Resolve-GeminiAntigravityRootsFromCandidates $CandidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_antigravity_settings' $root
-    }
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.codex', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
-    }
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Get-ZCodeMcpConfigPath $root) 'zcode_json' $root
-    }
-    $traeRoots = @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.trae', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)
-    foreach ($root in $traeRoots) {
-        Add-McpTargetSpec (Join-Path $root 'mcp.json') 'trae_json' $root
-    }
-    if ($traeRoots.Count -gt 0) {
-        Add-McpTargetSpec (Get-TraeProjectMcpConfigPath $RepoRoot) 'trae_project_json' $RepoRoot
+    if ([string]::IsNullOrWhiteSpace($AntigravityUserRoot)) { $AntigravityUserRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.gemini' }
+
+    $antigravityUserKey = if ([string]::IsNullOrWhiteSpace($AntigravityUserRoot)) { '' } else { Normalize-OperationPathKey $AntigravityUserRoot }
+    foreach ($root in @($flatRoots.ToArray() | Sort-Object)) {
+        $leaf = (Split-Path ([string]$root) -Leaf).ToLowerInvariant()
+        if (Test-IsClaudeUserConfigRoot ([string]$root) $ClaudeUserRoot) {
+            $claudeConfigRoot = Split-Path -Parent $ClaudeUserConfigPath
+            Add-McpTargetSpec $ClaudeUserConfigPath 'claude_code_json' $claudeConfigRoot
+            $claudeDesktopConfigRoot = if ([string]::IsNullOrWhiteSpace($ClaudeDesktopConfigPath)) { '' } else { Split-Path -Parent $ClaudeDesktopConfigPath }
+            if (-not [string]::IsNullOrWhiteSpace($claudeDesktopConfigRoot) -and (Test-Path -LiteralPath $claudeDesktopConfigRoot -PathType Container)) {
+                Add-McpTargetSpec $ClaudeDesktopConfigPath 'claude_desktop_json' $claudeDesktopConfigRoot
+            }
+            continue
+        }
+        switch ($leaf) {
+            '.claude' {
+                continue
+            }
+            '.codex' {
+                Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
+                continue
+            }
+            '.gemini' {
+                Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_settings' $root
+                if (-not [string]::IsNullOrWhiteSpace($antigravityUserKey) -and (Normalize-OperationPathKey ([string]$root)) -eq $antigravityUserKey) {
+                    Add-McpTargetSpec (Join-Path (Join-Path $root 'config') 'mcp_config.json') 'antigravity_mcp_json' $root
+                }
+                continue
+            }
+            '.zcode' {
+                Add-McpTargetSpec (Get-ZCodeMcpConfigPath $root) 'zcode_json' $root
+                continue
+            }
+            '.trae' {
+                Add-McpTargetSpec (Join-Path $root 'mcp.json') 'trae_json' $root
+                Add-McpTargetSpec (Get-TraeProjectMcpConfigPath $RepoRoot) 'trae_project_json' $RepoRoot
+                continue
+            }
+            default { Add-McpTargetSpec (Join-Path $root (Get-McpGenericConfigFileName $root)) 'generic_json' $root }
+        }
     }
 
     return @($specs.ToArray())
@@ -732,57 +729,106 @@ function Get-McpExistingStateValue($ExistingStates, [string]$Path) {
     return [pscustomobject]@{ exists = $false; content = '' }
 }
 
+function Test-McpTargetHasManagedServer($Spec, [string]$Content, [string[]]$ManagedNames) {
+    if ([string]::IsNullOrWhiteSpace($Content) -or @($ManagedNames).Count -eq 0) { return $false }
+    $label = [string]$Spec.kind
+    if ($label -eq 'codex_toml') {
+        foreach ($name in @($ManagedNames)) {
+            if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+            $section = [regex]::Escape([string]$name)
+            if ($Content -match ("(?m)^\s*\[mcp_servers\.{0}(?:\.[^\]]+)?\]\s*(?:#.*)?$" -f $section)) { return $true }
+        }
+        return $false
+    }
+    $root = Read-McpJsonObject $Content ("{0} MCP 配置" -f $label)
+    $serverMap = $null
+    if ([string]$Spec.kind -eq 'zcode_json') {
+        $mcpMember = Get-McpJsonObjectMember $root 'mcp' 'ZCode 宿主配置'
+        if (-not $mcpMember.found -or $null -eq $mcpMember.value) { return $false }
+        if ($mcpMember.value -isnot [System.Collections.IDictionary]) { throw 'ZCode 宿主配置的 mcp 必须是 JSON 对象。' }
+        $serversMember = Get-McpJsonObjectMember $mcpMember.value 'servers' 'ZCode 宿主配置 mcp'
+        if (-not $serversMember.found) { return $false }
+        $serverMap = $serversMember.value
+    }
+    else {
+        $serversMember = Get-McpJsonObjectMember $root 'mcpServers' ("{0} MCP 配置" -f $label)
+        if (-not $serversMember.found) { return $false }
+        $serverMap = $serversMember.value
+    }
+    if ($null -eq $serverMap) { return $false }
+    $wanted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($ManagedNames)) { if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$wanted.Add([string]$name) } }
+    foreach ($entry in @(Get-McpJsonMapEntries $serverMap ("{0} MCP servers" -f $label))) {
+        if ($wanted.Contains([string]$entry.name)) { return $true }
+    }
+    return $false
+}
+
 function New-McpSyncDesiredState {
     param(
         [object[]]$Specs = @(),
         [object[]]$Servers = @(),
         [object[]]$ActiveServers = @(),
         [string[]]$ProfileDisabledNames = @(),
-        [string[]]$PruneNames = @(),
+        [string[]]$ExplicitRemovalNames = @(),
         $ExistingStates = $null
     )
 
     $desired = New-Object System.Collections.Generic.List[object]
+    $managedNames = @($Servers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.name) } | ForEach-Object { [string]$_.name }) + @($ExplicitRemovalNames)
+    $removeNames = @($ProfileDisabledNames) + @($ExplicitRemovalNames)
     foreach ($spec in @($Specs)) {
         $path = [string]$spec.path
         $state = Get-McpExistingStateValue $ExistingStates $path
         $existing = if ($null -eq $state -or $null -eq $state.content) { '' } else { [string]$state.content }
         $content = $null
 
-        switch ([string]$spec.kind) {
-            'generic_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload @($PruneNames + $ProfileDisabledNames)
-                $content = $payload | ConvertTo-Json -Depth 100
+        if (@($ActiveServers).Count -eq 0 -and -not [bool]$state.exists) { continue }
+
+        $noRewriteKinds = @('generic_json', 'gemini_settings', 'zcode_json', 'trae_json', 'trae_project_json', 'claude_code_json', 'claude_desktop_json', 'antigravity_mcp_json', 'codex_toml')
+        $leaveExistingUntouched = @($ActiveServers).Count -eq 0 -and [bool]$state.exists -and [string]$spec.kind -in $noRewriteKinds -and -not (Test-McpTargetHasManagedServer $spec $existing $managedNames)
+        if ($leaveExistingUntouched) {
+            $content = $existing
+        }
+        else {
+            switch ([string]$spec.kind) {
+                'generic_json' {
+                    $payload = Build-GenericMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'gemini_settings' {
+                    $payload = Build-GeminiSettingsPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'claude_code_json' {
+                    $payload = Build-ClaudeMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'claude_desktop_json' {
+                    $payload = Build-ClaudeDesktopMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'antigravity_mcp_json' {
+                    $payload = Build-AntigravityMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'codex_toml' {
+                    $content = Build-CodexConfigToml $existing $ActiveServers ([string]$spec.root) $removeNames
+                }
+                'zcode_json' {
+                    $payload = Build-ZCodeMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'trae_json' {
+                    $payload = Build-GenericMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                'trae_project_json' {
+                    $payload = Build-GenericMcpPayload $existing $ActiveServers $managedNames $removeNames
+                    $content = $payload | ConvertTo-Json -Depth 100
+                }
+                default { throw ('Unsupported MCP managed target kind: {0}' -f [string]$spec.kind) }
             }
-            'gemini_settings' {
-                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'gemini_antigravity_settings' {
-                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'codex_toml' {
-                $content = Build-CodexConfigToml $existing $Servers ([string]$spec.root)
-            }
-            'zcode_json' {
-                $payload = Build-ZCodeMcpPayload $existing $ActiveServers
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'trae_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'trae_project_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            default { throw ('Unsupported MCP managed target kind: {0}' -f [string]$spec.kind) }
         }
 
         $beforeHash = if ([bool]$state.exists) { Get-OperationSha256 $existing } else { $null }
@@ -914,7 +960,7 @@ function Get-McpExistingStates([object[]]$Specs) {
     return $states
 }
 
-function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig) {
+function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig, [string[]]$ExplicitRemovalNames = @()) {
     # 只读规划上下文（同步MCP --plan）必须无进程副作用：注入 DryRun=true，
     # 使规划链上的 env 复制等副作用守卫一律生效；真实同步（无开关）不受影响。
     $previousDryRun = $DryRun
@@ -922,16 +968,21 @@ function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig) {
     try {
         $loaded = if ($ReadOnlyConfig) { Load-McpPlanConfigReadOnly } else { [pscustomobject]@{ cfg = (LoadCfg); raw = (Get-ContentUtf8 $CfgPath) } }
         $cfg = $loaded.cfg
+        $explicitRemovalNames = @($ExplicitRemovalNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ([string]$_).Trim() })
+        if ($explicitRemovalNames.Count -gt 0) {
+            $removedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($name in $explicitRemovalNames) { [void]$removedNames.Add([string]$name) }
+            $cfg.mcp_servers = @($cfg.mcp_servers | Where-Object { $null -ne $_ -and -not $removedNames.Contains([string]$_.name) })
+            Remove-McpProfileServerReferences $cfg $explicitRemovalNames | Out-Null
+        }
         $servers = @(Resolve-McpProfileServers $cfg)
         $activeServers = @(Get-ActiveMcpServers $servers)
         $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match('enabled').Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
-        $pruneNames = @(Get-McpServersToPrune $servers)
         $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
         Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
-        $candidatePaths = @(Get-McpTargetCandidatePaths $cfg)
-        $specs = @(Get-McpSyncManagedTargetSpecs -Roots $roots -CandidatePaths $candidatePaths -RepoRoot $script:Root)
+        $specs = @(Get-McpSyncManagedTargetSpecs -Roots $roots -RepoRoot $script:Root)
         $existingStates = Get-McpExistingStates $specs
-        $desiredState = @(New-McpSyncDesiredState -Specs $specs -Servers $servers -ActiveServers $activeServers -ProfileDisabledNames $profileDisabledNames -PruneNames $pruneNames -ExistingStates $existingStates)
+        $desiredState = @(New-McpSyncDesiredState -Specs $specs -Servers $servers -ActiveServers $activeServers -ProfileDisabledNames $profileDisabledNames -ExplicitRemovalNames $explicitRemovalNames -ExistingStates $existingStates)
         return [pscustomobject]@{
             cfg = $cfg
             config_raw = [string]$loaded.raw
@@ -939,7 +990,7 @@ function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig) {
             servers = $servers
             active_servers = $activeServers
             profile_disabled_names = $profileDisabledNames
-            prune_names = $pruneNames
+            explicit_removal_names = $explicitRemovalNames
             roots = $roots
             desired_state = $desiredState
         }
@@ -981,7 +1032,6 @@ function Write-McpDesiredTarget($target) {
     Write-Utf8FileAtomic -Path $path -Content ([string]$target.desired_content)
     switch ([string]$target.kind) {
         'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
-        'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
         'codex_toml' { Log ("已同步 Codex MCP 配置：{0}" -f $path) }
         'zcode_json' { Log ("已同步 ZCode MCP 配置：{0}" -f $path) }
         'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
@@ -1157,10 +1207,10 @@ function Request-McpSyncLock([string]$LockPath) {
     }
 }
 
-function 同步MCP {
+function 同步MCP([string[]]$ExplicitRemovalNames = @()) {
     & {
         $script:SkipNativeMcpForSession = $false
-        $context = Get-McpSyncPlanningContext
+        $context = Get-McpSyncPlanningContext -ExplicitRemovalNames $ExplicitRemovalNames
         if (-not $DryRun) {
             Ensure-PostgresMcpEnvironment $context.active_servers
             Ensure-GhAuthForGithubMcp $context.active_servers
@@ -1173,7 +1223,7 @@ function 同步MCP {
         $nativeMutationEnabled=Should-RunNativeMcpSync
         try{
             Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
-            foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
+            foreach ($removeName in @($context.explicit_removal_names)) { Invoke-NativeMcpCleanup $removeName }
             Invoke-NativeMcpSync $context.active_servers
             if (-not $DryRun) {
                 $attemptsParsed = 0
@@ -1189,6 +1239,6 @@ function 同步MCP {
             elseif($null -ne $managedTransaction){Log 'MCP managed files were retained because opt-in native side effects may already have occurred and cannot be transactionally compensated.' 'WARN'}
             throw
         }
-        if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
+        if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空；不会新建缺失配置，仅按当前清单清理已管理的服务项。" }
     }
 }

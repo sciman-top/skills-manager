@@ -64,6 +64,104 @@ function Convert-McpServersToGeminiConfigMap($servers) {
     return [pscustomobject]$map
 }
 
+function Convert-McpServersToClaudeConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($server in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$server.name)) { continue }
+        $entry = [ordered]@{}
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { 'stdio' } else { ([string]$server.transport).Trim().ToLowerInvariant() }
+        if ($transport -eq 'stdio') {
+            Assert-McpKeyValueMapSafe $server.env 'env'
+            Assert-McpProcessArgsSafe @($server.args) 'args'
+            $entry.type = 'stdio'
+            if (-not [string]::IsNullOrWhiteSpace([string]$server.command)) { $entry.command = [string]$server.command }
+            if ($server.PSObject.Properties.Match('args').Count -gt 0 -and $null -ne $server.args) { $entry.args = @($server.args) }
+            if ($server.PSObject.Properties.Match('env').Count -gt 0 -and $null -ne $server.env) { $entry.env = $server.env }
+        }
+        else {
+            $type = if ($transport -eq 'streamable-http') { 'http' } else { $transport }
+            Assert-McpRemoteUrl ([string]$server.url) ([string]$server.name) $type
+            Assert-McpKeyValueMapSafe $server.headers 'header'
+            $entry.type = $type
+            $entry.url = [string]$server.url
+            $headers = [ordered]@{}
+            if ($null -ne $server.headers) {
+                foreach ($property in $server.headers.PSObject.Properties) { $headers[[string]$property.Name] = $property.Value }
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)) {
+                $envName = [string]$server.bearer_token_env_var
+                Need (Test-ValidEnvVarName $envName) ("bearer token 环境变量名非法：{0}" -f $envName)
+                $authorizationKeys = @($headers.Keys | Where-Object { [string]::Equals([string]$_, 'Authorization', [StringComparison]::OrdinalIgnoreCase) })
+                Need ($authorizationKeys.Count -eq 0) ("Claude MCP 的 bearer_token_env_var 与显式 Authorization header 冲突：{0}" -f [string]$server.name)
+                $headers['Authorization'] = 'Bearer ${' + $envName + '}'
+            }
+            if ($headers.Count -gt 0) { $entry.headers = [pscustomobject]$headers }
+        }
+        $map[[string]$server.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
+function Convert-McpServersToClaudeDesktopConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($server in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$server.name)) { continue }
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { 'stdio' } else { ([string]$server.transport).Trim().ToLowerInvariant() }
+        Need ($transport -eq 'stdio') ("Claude Desktop 本地配置只投影已验证的 stdio MCP 形状；远程 connector 由 Claude 账号侧管理：{0}" -f [string]$server.name)
+        Assert-McpKeyValueMapSafe $server.env 'env'
+        Assert-McpProcessArgsSafe @($server.args) 'args'
+
+        $entry = [ordered]@{}
+        if (-not [string]::IsNullOrWhiteSpace([string]$server.command)) { $entry.command = [string]$server.command }
+        if ($server.PSObject.Properties.Match('args').Count -gt 0 -and $null -ne $server.args) { $entry.args = @($server.args) }
+        if ($server.PSObject.Properties.Match('env').Count -gt 0 -and $null -ne $server.env) {
+            foreach ($property in $server.env.PSObject.Properties) { Assert-McpHostValueNotEnvTemplate ([string]$server.name) 'env' ([string]$property.Name) ([string]$property.Value) }
+            $entry.env = $server.env
+        }
+        $map[[string]$server.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
+function Convert-McpServersToAntigravityConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($server in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$server.name)) { continue }
+        $entry = [ordered]@{}
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { 'stdio' } else { ([string]$server.transport).Trim().ToLowerInvariant() }
+        if ($transport -eq 'stdio') {
+            Assert-McpKeyValueMapSafe $server.env 'env'
+            Assert-McpProcessArgsSafe @($server.args) 'args'
+            if (-not [string]::IsNullOrWhiteSpace([string]$server.command)) { $entry.command = [string]$server.command }
+            if ($server.PSObject.Properties.Match('args').Count -gt 0 -and $null -ne $server.args) { $entry.args = @($server.args) }
+            if ($server.PSObject.Properties.Match('env').Count -gt 0 -and $null -ne $server.env) {
+                foreach ($property in $server.env.PSObject.Properties) { Assert-McpHostValueNotEnvTemplate ([string]$server.name) 'env' ([string]$property.Name) ([string]$property.Value) }
+                $entry.env = $server.env
+            }
+        }
+        else {
+            Assert-McpRemoteUrl ([string]$server.url) ([string]$server.name) $transport
+            Assert-McpKeyValueMapSafe $server.headers 'header'
+            if (-not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)) {
+                Need $false ("Antigravity MCP remote headers 不接受未验证的环境变量模板；请使用宿主支持的认证配置：{0}" -f [string]$server.name)
+            }
+            $entry.serverUrl = [string]$server.url
+            if ($null -ne $server.headers) {
+                foreach ($property in $server.headers.PSObject.Properties) { Assert-McpHostValueNotEnvTemplate ([string]$server.name) 'headers' ([string]$property.Name) ([string]$property.Value) }
+                $entry.headers = $server.headers
+            }
+        }
+        $map[[string]$server.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
 function Get-CodexMcpStartupTimeoutSec($server) {
     if ($null -eq $server) { return $null }
     if ($server.PSObject.Properties.Match("startup_timeout_sec").Count -eq 0) { return $null }
@@ -436,55 +534,121 @@ function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
     Write-Utf8FileAtomic -Path $postgresWrapperPath -Content (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
-function Build-GenericMcpPayload([string]$existingContent, $servers) {
-    $base = [ordered]@{}
-    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
-        try {
-            $parsed = $existingContent | ConvertFrom-Json
-            if ($parsed -ne $null) {
-                foreach ($p in $parsed.PSObject.Properties) {
-                    $base[[string]$p.Name] = $p.Value
-                }
-            }
-        }
-        catch {
-            # Fail closed: the existing file holds host settings beyond MCP
-            # (model/theme/auth references). Rebuilding a minimal payload here
-            # would overwrite them; throwing lets the transaction snapshot
-            # restore the original file instead.
-            throw ("宿主 MCP 配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
-        }
-    }
-
-    $managedMap = Convert-McpServersToConfigMap $servers
-    # MCP 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
-    $base["mcpServers"] = $managedMap
-    if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
-    return [pscustomobject]$base
+function New-McpOrdinalJsonObject {
+    return [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
 }
 
-function Build-ZCodeMcpPayload([string]$existingContent, $servers) {
-    $base = [ordered]@{}
-    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
-        try {
-            $parsed = $existingContent | ConvertFrom-Json
-            if ($null -ne $parsed) {
-                foreach ($property in $parsed.PSObject.Properties) { $base[[string]$property.Name] = $property.Value }
-            }
-        }
-        catch {
-            throw ("ZCode 宿主配置 JSON 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
-        }
+function Get-McpJsonObjectMember($Object, [string]$Name, [string]$Label = 'host config') {
+    if ($null -eq $Object) { return [pscustomobject]@{ found = $false; key = ''; value = $null } }
+    if ($Object -isnot [System.Collections.IDictionary]) { throw ("{0} 的 JSON 对象结构非法。" -f $Label) }
+    $matches = @($Object.GetEnumerator() | Where-Object {
+        [string]::Equals([string]$_.Key, $Name, [System.StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($matches.Count -gt 1) { throw ("{0} 存在大小写冲突的 {1} 属性，拒绝覆盖。" -f $Label, $Name) }
+    if ($matches.Count -eq 0) { return [pscustomobject]@{ found = $false; key = ''; value = $null } }
+    if (-not [string]::Equals([string]$matches[0].Key, $Name, [System.StringComparison]::Ordinal)) {
+        throw ("{0} 的 {1} 属性大小写不符合宿主规范，拒绝创建歧义配置。" -f $Label, $Name)
+    }
+    return [pscustomobject]@{ found = $true; key = [string]$matches[0].Key; value = $matches[0].Value }
+}
+
+function Set-McpJsonObjectMember([System.Collections.IDictionary]$Object, [string]$Name, $Value, [string]$Label = 'host config') {
+    $member = Get-McpJsonObjectMember $Object $Name $Label
+    if ($member.found) { $Object[[string]$member.key] = $Value }
+    else { $Object.Add($Name, $Value) }
+}
+
+function Remove-McpJsonObjectMember([System.Collections.IDictionary]$Object, [string]$Name, [string]$Label = 'host config') {
+    $member = Get-McpJsonObjectMember $Object $Name $Label
+    if ($member.found) { $Object.Remove([string]$member.key) }
+}
+
+function Read-McpJsonObject([string]$existingContent, [string]$Label) {
+    if ([string]::IsNullOrWhiteSpace($existingContent)) { return (New-McpOrdinalJsonObject) }
+    try {
+        $parsed = ConvertFrom-Json -InputObject $existingContent -AsHashtable -Depth 100
+        if ($null -eq $parsed -or $parsed -isnot [System.Collections.IDictionary]) { throw 'root is not a JSON object' }
+        return $parsed
+    }
+    catch {
+        throw ("{0} JSON 解析失败，拒绝最小化重建以保护既有内容：{1}" -f $Label, $_.Exception.Message)
+    }
+}
+
+function Get-McpJsonMapEntries($Map, [string]$Label) {
+    if ($null -eq $Map) { return @() }
+    if ($Map -is [System.Collections.IDictionary]) {
+        return @($Map.GetEnumerator() | ForEach-Object { [pscustomobject]@{ name = [string]$_.Key; value = $_.Value } })
+    }
+    if ($Map -is [pscustomobject]) {
+        return @($Map.PSObject.Properties | ForEach-Object { [pscustomobject]@{ name = [string]$_.Name; value = $_.Value } })
+    }
+    throw ("{0} 必须是 JSON 对象。" -f $Label)
+}
+
+function Merge-McpJsonServerMap($ExistingMap, $DesiredMap, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @(), [string]$Label = 'mcpServers') {
+    $merged = New-McpOrdinalJsonObject
+    $managed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $removed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($ManagedNames) + @($RemoveNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$managed.Add([string]$name) }
+    }
+    foreach ($name in @($RemoveNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$removed.Add([string]$name) }
     }
 
-    $mcp = [ordered]@{}
-    $existingMcp = if ($base.Contains('mcp')) { $base['mcp'] } else { $null }
-    if ($null -ne $existingMcp) {
-        foreach ($property in $existingMcp.PSObject.Properties) { $mcp[[string]$property.Name] = $property.Value }
+    $desiredEntries = @(Get-McpJsonMapEntries $DesiredMap $Label)
+    foreach ($entry in $desiredEntries) { [void]$managed.Add([string]$entry.name) }
+    foreach ($entry in @(Get-McpJsonMapEntries $ExistingMap $Label)) {
+        if ($managed.Contains([string]$entry.name)) { continue }
+        $merged.Add([string]$entry.name, $entry.value)
     }
-    $mcp['servers'] = Convert-McpServersToConfigMap $servers
-    $base['mcp'] = [pscustomobject]$mcp
-    return [pscustomobject]$base
+    foreach ($entry in $desiredEntries) {
+        if ($removed.Contains([string]$entry.name)) { throw ("{0} 不能同时启用并移除 MCP server：{1}" -f $Label, [string]$entry.name) }
+        $name = [string]$entry.name
+        if ($merged.Contains($name)) { $merged[$name] = $entry.value }
+        else { $merged.Add($name, $entry.value) }
+    }
+    return $merged
+}
+
+function Build-McpJsonPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @(), [string]$Label = '宿主 MCP 配置', [switch]$Claude, [switch]$ClaudeDesktop, [switch]$Antigravity) {
+    $base = Read-McpJsonObject $existingContent $Label
+    $mcpMember = Get-McpJsonObjectMember $base 'mcpServers' $Label
+    $desiredMap = if ($ClaudeDesktop) { Convert-McpServersToClaudeDesktopConfigMap $servers } elseif ($Claude) { Convert-McpServersToClaudeConfigMap $servers } elseif ($Antigravity) { Convert-McpServersToAntigravityConfigMap $servers } else { Convert-McpServersToConfigMap $servers }
+    $merged = Merge-McpJsonServerMap $mcpMember.value $desiredMap $ManagedNames $RemoveNames ("{0}.mcpServers" -f $Label)
+    Set-McpJsonObjectMember $base 'mcpServers' $merged $Label
+    Remove-McpJsonObjectMember $base 'mcp_servers' $Label
+    return $base
+}
+
+function Build-GenericMcpPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    return (Build-McpJsonPayload $existingContent $servers $ManagedNames $RemoveNames '宿主 MCP 配置')
+}
+
+function Build-ClaudeMcpPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    return (Build-McpJsonPayload $existingContent $servers $ManagedNames $RemoveNames 'Claude MCP 配置' -Claude)
+}
+
+function Build-ClaudeDesktopMcpPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    return (Build-McpJsonPayload $existingContent $servers $ManagedNames $RemoveNames 'Claude Desktop MCP 配置' -ClaudeDesktop)
+}
+
+function Build-AntigravityMcpPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    return (Build-McpJsonPayload $existingContent $servers $ManagedNames $RemoveNames 'Antigravity MCP 配置' -Antigravity)
+}
+
+function Build-ZCodeMcpPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    $base = Read-McpJsonObject $existingContent 'ZCode 宿主配置'
+    $mcpMember = Get-McpJsonObjectMember $base 'mcp' 'ZCode 宿主配置'
+    $mcp = if ($mcpMember.found -and $null -ne $mcpMember.value) { $mcpMember.value } else { New-McpOrdinalJsonObject }
+    if ($mcp -isnot [System.Collections.IDictionary]) { throw 'ZCode 宿主配置的 mcp 必须是 JSON 对象。' }
+    $serversMember = Get-McpJsonObjectMember $mcp 'servers' 'ZCode 宿主配置 mcp'
+    $desiredMap = Convert-McpServersToConfigMap $servers
+    $merged = Merge-McpJsonServerMap $serversMember.value $desiredMap $ManagedNames $RemoveNames 'ZCode mcp.servers'
+    Set-McpJsonObjectMember $mcp 'servers' $merged 'ZCode 宿主配置 mcp'
+    Set-McpJsonObjectMember $base 'mcp' $mcp 'ZCode 宿主配置'
+    return $base
 }
 
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
@@ -572,27 +736,14 @@ function Get-McpGenericConfigFileName([string]$Root) {
 
 # --- 宿主 MCP 配置文件形状与目标根解析（从 Mcp.ps1 纯迁移） ---
 
-function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
-    $base = [ordered]@{}
-    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
-        try {
-            $parsed = $existingContent | ConvertFrom-Json
-            if ($parsed -ne $null) {
-                foreach ($p in $parsed.PSObject.Properties) {
-                    $base[[string]$p.Name] = $p.Value
-                }
-            }
-        }
-        catch {
-            throw ("Gemini settings.json 解析失败，拒绝最小化重建以保护既有内容：{0}" -f $_.Exception.Message)
-        }
-    }
-
-    $managedMap = Convert-McpServersToGeminiConfigMap $servers
-    # Gemini 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
-    $base["mcpServers"] = $managedMap
-    if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
-    return [pscustomobject]$base
+function Build-GeminiSettingsPayload([string]$existingContent, $servers, [string[]]$ManagedNames = @(), [string[]]$RemoveNames = @()) {
+    $base = Read-McpJsonObject $existingContent 'Gemini settings.json'
+    $mcpMember = Get-McpJsonObjectMember $base 'mcpServers' 'Gemini settings.json'
+    $desiredMap = Convert-McpServersToGeminiConfigMap $servers
+    $merged = Merge-McpJsonServerMap $mcpMember.value $desiredMap $ManagedNames $RemoveNames 'Gemini settings.json mcpServers'
+    Set-McpJsonObjectMember $base 'mcpServers' $merged 'Gemini settings.json'
+    Remove-McpJsonObjectMember $base 'mcp_servers' 'Gemini settings.json'
+    return $base
 }
 
 function ConvertTo-TomlBasicValue($value) {
@@ -620,7 +771,7 @@ function Assert-McpHostValueNotEnvTemplate([string]$ServerName, [string]$FieldNa
     }
 }
 
-function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRoot = '') {
+function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRoot = '', [string[]]$RemoveNames = @()) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
@@ -636,30 +787,24 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
         if ($null -eq $server) { continue }
         if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
             $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+            # Planning passes only ActiveServers; disabled entries are removed by
+            # managed name before host serialization and must never be written here.
             if ($hasEnabled) {
-                Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+                Need ($server.enabled -is [bool] -and [bool]$server.enabled) "Codex MCP 构建器只接受已由 profile 解析为启用状态的 GitHub server。"
             }
-            $isExplicitlyDisabled = $hasEnabled -and -not [bool]$server.enabled
-            if (-not $hasGithubToken -and -not $isExplicitlyDisabled) {
+            if (-not $hasGithubToken) {
                 Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
                 $skippedGithubForMissingToken = $true
                 continue
             }
-            if ($hasGithubToken) {
-                Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
-            }
-            else {
-                Log "Codex 检测到 GitHub MCP 已显式停用；缺少 Token 时仍保留停用配置。" "INFO"
-            }
+            Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
             $normalizedGithub = [ordered]@{
                 name = [string]$server.name
                 transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "http" } else { [string]$server.transport }
                 url = [string]$server.url
                 bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
             }
-            if ($hasEnabled) {
-                $normalizedGithub.enabled = [bool]$server.enabled
-            }
+            if ($hasEnabled) { $normalizedGithub.enabled = $true }
             if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
                 $normalizedGithub.enabled_tools = @($server.enabled_tools)
             }
@@ -676,7 +821,10 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
     # dropping undeclared sections by omission silently deleted host configuration.
     $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($managedName in $managedNames) { $managedNameSet.Add([string]$managedName) | Out-Null }
-    $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
+    foreach ($removeName in @($RemoveNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$removeName)) { $managedNameSet.Add(([string]$removeName).Trim()) | Out-Null }
+    }
+    $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and @($RemoveNames).Count -eq 0 -and $skippedGithubForMissingToken)
 
     $kept = New-Object System.Collections.Generic.List[string]
     if ($preserveExistingMcpSections) {
@@ -759,40 +907,6 @@ function Build-CodexConfigToml([string]$existingToml, $servers, [string]$CodexRo
     return ($output -join "`r`n")
 }
 
-function Resolve-GeminiAntigravityRootsFromCandidates($paths) {
-    $roots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($null -eq $paths) { return @() }
-    $token = ".gemini\antigravity"
-    $tokenLower = $token.ToLowerInvariant()
-    foreach ($p in $paths) {
-        if ([string]::IsNullOrWhiteSpace([string]$p)) { continue }
-        $norm = ([string]$p).Replace("/", "\")
-        $lower = $norm.ToLowerInvariant()
-        $searchStart = 0
-        while ($searchStart -lt $lower.Length) {
-            $idx = $lower.IndexOf($tokenLower, $searchStart)
-            if ($idx -lt 0) { break }
-            if ($idx -gt 0 -and $norm[$idx - 1] -ne '\') {
-                $searchStart = $idx + 1
-                continue
-            }
-            $end = $idx + $token.Length
-            # Require a directory boundary to avoid false matches like antigravity-backup.
-            if ($end -lt $norm.Length -and $norm[$end] -ne '\') {
-                $searchStart = $idx + 1
-                continue
-            }
-            $root = $norm.Substring(0, $idx + $token.Length)
-            if (-not [string]::IsNullOrWhiteSpace($root)) { $roots.Add($root) | Out-Null }
-            $searchStart = $idx + $token.Length
-        }
-    }
-    # 平铺返回：调用点统一以 @(...) 收集数组形状。单目逗号防展开与调用点
-    # @() 叠加会再包一层嵌套（Count 恒 1），使空目标守卫恒真、多 root 期望
-    # 集错乱、Gemini 多 root 参数绑定崩溃。
-    return @($roots | Sort-Object)
-}
-
 function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
     Need (-not [string]::IsNullOrWhiteSpace($repoRoot)) "repoRoot 不能为空"
     return (Join-Path (Join-Path $repoRoot ".trae") "mcp.json")
@@ -805,6 +919,27 @@ function Get-ZCodeMcpConfigPath([string]$zcodeRoot) {
         return (Join-Path $root 'cli\config.json')
     }
     return (Join-Path $root 'config.json')
+}
+
+function Get-ClaudeUserConfigRoot([string]$ConfiguredRoot = '') {
+    if ([string]::IsNullOrWhiteSpace($ConfiguredRoot)) {
+        $ConfiguredRoot = [Environment]::GetEnvironmentVariable('CLAUDE_CONFIG_DIR')
+    }
+    if ([string]::IsNullOrWhiteSpace($ConfiguredRoot)) {
+        return (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude')
+    }
+    return $ConfiguredRoot
+}
+
+function Get-ClaudeUserMcpConfigPath([string]$ConfiguredPath = '') {
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) { return $ConfiguredPath }
+    return (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude.json')
+}
+
+function Test-IsClaudeUserConfigRoot([string]$Root, [string]$ConfiguredRoot = '') {
+    if ([string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $userRoot = Get-ClaudeUserConfigRoot $ConfiguredRoot
+    return [string]::Equals((Normalize-OperationPathKey $Root), (Normalize-OperationPathKey $userRoot), [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-McpTargetCandidatePaths($cfg) {
