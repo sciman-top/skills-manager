@@ -42,3 +42,4 @@
 - 收口报告写明：验证命令与结果、未验证项，以及 `Removed:` 行（常规修复写 `N/A`）。
 - 两台电脑同步见 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md)。`fetch` 不会把远端提交整合进工作树。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
+- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt 机制执行，无需逐次请示。
