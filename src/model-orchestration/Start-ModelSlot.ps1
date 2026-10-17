@@ -149,31 +149,48 @@ function Get-CodexRetryControl([string]$ProfileName) {
     }
 }
 $codexRetryControl = $null
+if (-not $Plan -and $CapabilityMode -eq 'provider_override') {
+    # Explicit provider_override evidence is checked before the retry-control
+    # evaluation so its specific failure code is not masked by the
+    # environment-dependent provider lookup below.
+    try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
+    catch { ThrowCapabilityBlock 'provider_evidence_invalid' $_.Exception.Message }
+    $capability.status = 'provider_evidence_verified'
+    $capability.surface = $capability.evidence.surface
+}
 # Plan mode reads the same retry config, so a blocked retry control is reported before dispatch.
 if ($targetHost -eq 'codex') {
-    try { $codexRetryControl = Get-CodexRetryControl $routePreset.Replace('_','-') }
-    catch { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
-    $capability.retry_control = $codexRetryControl
+    try {
+        $codexRetryControl = Get-CodexRetryControl $routePreset.Replace('_','-')
+        $capability.retry_control = $codexRetryControl
+    }
+    catch {
+        # A plan is advisory and must stay environment-independent: report the
+        # missing retry control inside the plan payload instead of killing the
+        # plan itself. Native dispatch hard-blocks on the missing cap;
+        # provider_override launches on explicit parent evidence, so the ambient
+        # retry-cap config is best-effort there and the launch proceeds without
+        # the per-invocation retry overrides.
+        if ($Plan) {
+            $capability.retry_control = [ordered]@{ status = 'retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
+        }
+        elseif ($CapabilityMode -eq 'provider_override') {
+            $capability.retry_control = [ordered]@{ status = 'ambient_retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
+        }
+        else { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
+    }
 }
-if (-not $Plan) {
-    if ($CapabilityMode -eq 'provider_override') {
-        try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
-        catch { ThrowCapabilityBlock 'provider_evidence_invalid' $_.Exception.Message }
-        $capability.status = 'provider_evidence_verified'
-        $capability.surface = $capability.evidence.surface
-    }
-    else {
-        if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
-        try { $catalog = Get-CodexCatalog $CapabilityProbePath }
-        catch { ThrowCapabilityBlock 'probe_failed' $_.Exception.Message }
-        $modelInfo = @($catalog.models | Where-Object { $_.slug -ceq $route.model })[0]
-        if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Native catalog does not contain model '$($route.model)'." }
-        $supported = @($modelInfo.supported_reasoning_levels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.effort } })
-        $capability.supported_efforts = $supported
-        $capability.native_supported = ($supported -ccontains $route.effort)
-        if (-not $capability.native_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Native catalog does not declare '$($route.model)/$($route.effort)'." $supported }
-        $capability.status = 'native_supported'
-    }
+if (-not $Plan -and $CapabilityMode -ne 'provider_override') {
+    if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
+    try { $catalog = Get-CodexCatalog $CapabilityProbePath }
+    catch { ThrowCapabilityBlock 'probe_failed' $_.Exception.Message }
+    $modelInfo = @($catalog.models | Where-Object { $_.slug -ceq $route.model })[0]
+    if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Native catalog does not contain model '$($route.model)'." }
+    $supported = @($modelInfo.supported_reasoning_levels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.effort } })
+    $capability.supported_efforts = $supported
+    $capability.native_supported = ($supported -ccontains $route.effort)
+    if (-not $capability.native_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Native catalog does not declare '$($route.model)/$($route.effort)'." $supported }
+    $capability.status = 'native_supported'
 }
 if ($targetHost -eq 'codex') {
     $cliArgs = @('exec','--profile',$routePreset.Replace('_','-'),'--strict-config','--json','--skip-git-repo-check','-C',$WorkingDirectory,
