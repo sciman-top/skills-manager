@@ -79,6 +79,13 @@ a narrower domain; otherwise return to ordinary reasoning. The host AI selects
 the smallest sufficient candidate set from names, descriptions, and the
 complete user request.
 
+A domain hint filters the catalog; a valid but semantically wrong hint can
+return only unrelated candidates and cannot self-correct. Map by capability,
+not by the nearest word: domain-driven/domain modeling, bounded contexts,
+entities, aggregates, and invariants map to `engineering` (add `decision` only
+when the request also evaluates a decision), not `design`. Reserve `design`
+for visual, UX, art-direction, and similar presentation work.
+
 ## Deterministic validation
 
 Validate a host-selected candidate before loading it:

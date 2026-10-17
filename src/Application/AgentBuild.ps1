@@ -503,6 +503,13 @@ function Move-SingleSkillDirectory([string]$Source, [string]$Destination) {
     [IO.Directory]::Move($sourcePath, $destinationPath)
 }
 
+function Write-CapabilityRouterAdmissionRuntime([string]$SkillRoot) {
+    $routerScripts = Join-Path $SkillRoot 'scripts'
+    if (-not (Test-Path -LiteralPath $routerScripts -PathType Container)) { return $false }
+    Write-Utf8FileAtomic -Path (Join-Path $routerScripts 'execution-admission.ps1') -Content (Get-ExecutionAdmissionRuntimeContent)
+    return $true
+}
+
 function 更新单技能(
     [Parameter(Mandatory = $true)][string]$SkillName,
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
@@ -578,6 +585,9 @@ function 更新单技能(
         $txnItem = Get-ExistingFileSystemItem $txnPath
         Need ($null -ne $txnItem -and $txnItem.PSIsContainer -and ($txnItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("单技能事务目录必须是普通目录：{0}" -f $txnPath)
         RoboMirror $sourceDir $candidateDir
+        if ([string]::Equals($canonicalName, 'capability-router', [StringComparison]::OrdinalIgnoreCase)) {
+            Need (Write-CapabilityRouterAdmissionRuntime -SkillRoot $candidateDir) 'capability-router override 缺少 scripts 目录，无法生成 admission helper'
+        }
         $repair = Repair-AgentSkillMarkdownFiles $candidateDir
         Need ([int]$repair.failed -eq 0 -and [int]$repair.removed -eq 0) ("override 技能入口校验失败：{0}" -f $sourceDir)
         Assert-SkillPackageSafe -Path $candidateDir -ContainmentRoot $txnPath -Label ("single-skill-candidate:{0}" -f $requestedName) | Out-Null
@@ -772,7 +782,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null, [switch
         }
         $routerScripts = Join-Path $AgentDir 'capability-router/scripts'
         if (-not $DryRun -and (Test-Path -LiteralPath $routerScripts -PathType Container)) {
-            Write-Utf8FileAtomic -Path (Join-Path $routerScripts 'execution-admission.ps1') -Content (Get-ExecutionAdmissionRuntimeContent)
+            Write-CapabilityRouterAdmissionRuntime -SkillRoot (Join-Path $AgentDir 'capability-router') | Out-Null
         }
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {

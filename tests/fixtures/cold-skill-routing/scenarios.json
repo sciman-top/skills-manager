@@ -943,6 +943,23 @@
       "side_effect_ceiling": "read_only",
       "required_context": [],
       "verification_mode": "routing_only"
+    },
+    {
+      "id": "S40-implicit-claude-rule-domain",
+      "source_index": 40,
+      "source_kind": "derived_test_case",
+      "derived_from": "CSR-180 follow-up: the earlier corpus had implicit cold one-shot examples that did not require a native runner; this distinct Claude rule-ownership request adds an implicit, no-candidate-pin runner case.",
+      "variant": "implicit",
+      "request_verbatim": "请按领域建模的方式审视本仓全局共同规则、Claude 平台适配规则和项目 CLAUDE.md 引用之间的责任边界：指出最多三个上下文、不变量或命名问题，给出行号依据，并说明 Claude Code CLI、Desktop Code tab 和普通 Desktop Chat 分别能证明哪些层级。仅基于 AGENTS.md、rules/global/common.md、rules/global/platforms/claude.md、rules/global/claude/CLAUDE.md、src/model-orchestration/README.md；单轮只读，不创建或修改文件，不调用外部服务，不追问。",
+      "route_class": "cold_candidate",
+      "cold_discovery": "required",
+      "allowed_candidate_names": [],
+      "expected_native_agent": "cold-capability-runner",
+      "forbidden_events": ["second_discovery", "writes", "unadmitted_writes", "external_calls", "multi_turn_summary_substitution"],
+      "execution_contract": "one_shot",
+      "side_effect_ceiling": "read_only",
+      "required_context": ["AGENTS.md", "rules/global/common.md", "rules/global/platforms/claude.md", "rules/global/claude/CLAUDE.md", "src/model-orchestration/README.md"],
+      "verification_mode": "routing_only"
     }
   ]
 }
