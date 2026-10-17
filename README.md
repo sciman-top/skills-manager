@@ -1,6 +1,6 @@
 # skills-manager
 
-Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex、Claude、ZCode 等宿主。
+Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex、Claude Code、ZCode 等宿主。
 
 适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
 
@@ -171,7 +171,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### AI 编码快速用法
 
-日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。
+日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、Claude Code、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。Claude Desktop 内运行的 Code 会话按 Claude Code 支持面验收；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影不证明该聊天已加载。
 
 不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码效能手册](docs/product/ai-coding-playbook.md)。
 

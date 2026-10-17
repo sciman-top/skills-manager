@@ -8,7 +8,7 @@
 
 ## 2. 用户与任务
 
-主要用户是使用 ChatGPT Desktop/Codex 与 ZCode、按任务选择 GPT/GLM，并维护多个技能来源和 Windows 项目仓库的个人开发者；既有其他宿主适配继续保留。核心任务：
+主要用户是使用 ChatGPT Desktop/Codex、Claude Code、ZCode 或 Antigravity 等宿主，并维护多个技能来源和 Windows 项目仓库的个人开发者；他们按任务选择当前可用的模型与宿主，不预设固定接力链。这里的 Claude 支持面是 Claude Code 的本机配置与技能投影，包括 Claude Desktop 内的 Code 会话；普通 Claude Desktop 聊天使用账号同步 skills/plugins，不由本机 `.claude` 投影管理或验收。核心任务：
 
 1. 浏览、安装、卸载、更新和锁定技能。
 2. 管理 MCP server 清单及目标配置。
@@ -83,7 +83,7 @@
 
 ### 5.4 规则治理
 
-- `FR-RUL-001`：发现遵循宿主 global/repo/nested precedence，并区分 Codex/Claude surface。
+- `FR-RUL-001`：发现遵循宿主 global/repo/nested precedence，并区分 Codex 与 Claude Code 执行面；Claude Desktop 内的 Code 会话按 Claude Code 执行面处理，普通聊天的账号同步 skills/plugins 不由本机 `.claude` 投影证明已加载。
 - `FR-RUL-002`：审查默认只读；finding 必须定位到真实文件和可执行修复方向。
 - `FR-RUL-003`：单仓 apply 要求 Git 根、已知规则文件、reviewed desired file、before hash 和显式 token。
 - `FR-RUL-004`：rule-estate 只消费 `review_status=reviewed` 且非 AI self-approval 的 change-set。
