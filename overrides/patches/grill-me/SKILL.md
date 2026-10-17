@@ -39,9 +39,9 @@ silently fall back to a parent or shared-profile interview.
 1. Keep the parent task as the user-facing conversation. Return the child's
    single question to the user only after receiving its result, then route each
    accepted answer back to that exact child identifier until it emits its
-   decision capsule. An accepted answer is either attributable human verbatim
-   input or an explicitly authorized `authorized_ai_delegate_answer`; the latter
-   must retain authorization evidence and its SHA-256 and never counts as human
+   decision capsule. An accepted answer is attributable human verbatim input
+   only. An AI delegate answer is not accepted as an interview answer; a delegate
+   may test the continuation mechanism but never counts as human
    acceptance or `host_specific_live_accepted`. Before every later follow-up to the
    child (Codex `followup_task`; Claude `SendMessage` to the agent id), the parent must call
    `New-ExecutionAdmissionSuccessor` with the predecessor admission/plan,

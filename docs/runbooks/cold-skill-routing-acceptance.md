@@ -45,9 +45,14 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 
 ### 1.3 多轮回答归因
 
-- 设计访谈接受两类明确归因的回答：`human_verbatim_answer`，或永久合同允许的 `authorized_ai_delegate_answer`。
-- `authorized_ai_delegate_answer` 必须由 parent 携带授权证据、归因类型和回答 SHA-256；它可以推进同一 child 的问题链或 capsule，但不得被称为真人输入、真人接受，也不得单独提升到 `host_specific_live_accepted`。
+- 设计访谈只接受 `human_verbatim_answer` 作为访谈回答。`authorized_ai_delegate_answer` 不接受为访谈回答，只可用于测试续接机制，且不计为真人输入、真人接受或 `host_specific_live_accepted`。
 - parent 摘要、自动“继续”、未分类代答或缺少 successor 绑定的回答仍按 `human_decision_required` fail closed。
+
+### 1.4 续接验收状态（2026-10-17）
+
+- 单跳已验证：子代理接受了一次携带 provenance 的续接，回答为人工原话 `B`，并返回 decision capsule。
+- 多跳仅完成机制测试：一次 AI 代答探针完成了 5 跳，子代理接受了每跳的 provenance，并返回 capsule。这些代答不计为人工答案，也不计为人工验收。
+- 依据上述政策，多跳的验收需要人工答案。在此之前，多跳的结论只能写为“机制已测试，未验收”。
 
 不得通过重启、kill、修改 Cockpit、provider、auth、plugin cache 或 ~/.codex/config.toml 来让验收“通过”。出现这些需求时记录 blocker，停止本 run。
 
