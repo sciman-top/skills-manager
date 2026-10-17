@@ -29,6 +29,25 @@ function Resolve-CapabilitySurfaceLinkTarget($Directory) {
     return [IO.Path]::GetFullPath($value).TrimEnd('\', '/')
 }
 
+function Get-CapabilityLinkState([bool]$IsReparse, [string]$TargetText, [string]$ManagedExpected, [string]$ManagedSource, [bool]$ManagedName) {
+    $managedTargetMatches = $IsReparse -and $TargetText -and $ManagedExpected -and [string]::Equals($TargetText, ([IO.Path]::GetFullPath($ManagedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+    if ($ManagedName -and $managedTargetMatches) { return 'managed_current' }
+    if ($ManagedName) { return 'ownership_drift' }
+    if ($IsReparse -and $TargetText -and $ManagedSource -and (Test-SkillProjectionPathWithinRoot $TargetText $ManagedSource)) { return 'managed_stale' }
+    if ($IsReparse -and $TargetText) { return 'external_owned' }
+    return 'ownership_unknown'
+}
+
+# A reparse point whose target directory is gone has no SKILL.md to hash, so it
+# cannot be an inventory item; report it as a finding instead of skipping it.
+function Get-CapabilityDanglingLinkFinding([string]$Path, [string]$TargetText, [bool]$ManagedName, [string]$ManagedSource, [string]$Surface, [string]$ManagedSeverity) {
+    if ([string]::IsNullOrWhiteSpace($TargetText) -or [IO.Directory]::Exists($TargetText)) { return $null }
+    $inManagedSource = [bool]$ManagedSource -and (Test-SkillProjectionPathWithinRoot $TargetText $ManagedSource)
+    if (-not $ManagedName -and -not $inManagedSource) { return $null }
+    $severity = if ($ManagedName) { $ManagedSeverity } else { 'warning' }
+    return [pscustomobject]@{ code = 'managed_link_dangling'; severity = $severity; surface = $Surface; path = $Path; message = ('Skill link target is missing: {0} -> {1}' -f $Path, $TargetText) }
+}
+
 function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
     $metadata = Read-SkillMetadata $SkillPath -Observation
     $text = [string]$metadata.text
@@ -114,8 +133,9 @@ function New-SkillSurfaceView {
     $surfaces = [Collections.Generic.List[object]]::new()
     $findings = [Collections.Generic.List[object]]::new()
 
-    $repoSupplyRoot = Join-Path $root 'agent'
-    $repoItems = if (Test-Path -LiteralPath $repoSupplyRoot) { @(Get-ChildItem -LiteralPath $repoSupplyRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'repo_generated' 'repo_supply' $false }) } else { @() }
+    $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
+    $repoSupplyRoot = $managedSource
+    $repoItems = if ($repoSupplyRoot -and (Test-Path -LiteralPath $repoSupplyRoot)) { @(Get-ChildItem -LiteralPath $repoSupplyRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'repo_generated' 'repo_supply' $false }) } else { @() }
     $surfaces.Add((New-CapabilitySurfaceRecord 'repo_supply' 'repository_generated_supply' $repoSupplyRoot 'fresh' $(if ($repoItems.Count) { 'complete' } else { 'not_materialized' }) $repoItems)) | Out-Null
 
     $projectionPath = Resolve-CapabilitySurfacePath ([string]$projection.manifest_path) $root
@@ -147,7 +167,6 @@ function New-SkillSurfaceView {
     $surfaces.Add((New-CapabilitySurfaceRecord 'canonical_projection' 'projection_manifest' $projectionPath $projectionFreshness $projectionCoverage $projectionItems)) | Out-Null
 
     $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
-    $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
     $requestedProfile = ''
     if ($null -ne $manifest -and (Test-OperationObjectProperty $manifest 'projection_selection')) {
         $requestedProfile = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $manifest 'projection_selection') 'profile')
@@ -165,13 +184,17 @@ function New-SkillSurfaceView {
     $userRootExists = $userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)
     if ($userRootExists) {
         foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
-            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $entry = Join-Path $directory.FullName 'SKILL.md'
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
-            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
-            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+                $dangling = Get-CapabilityDanglingLinkFinding $directory.FullName $targetText $managedName $managedSource 'user_skill_root' 'error'
+                if ($null -ne $dangling) { $findings.Add($dangling) | Out-Null }
+                continue
+            }
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $state = Get-CapabilityLinkState $isReparse $targetText $managedExpected $managedSource $managedName
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {
@@ -215,13 +238,17 @@ function New-SkillSurfaceView {
             $hostManagedIncludeAll = $false
         }
         foreach ($directory in @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force)) {
-            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $entry = Join-Path $directory.FullName 'SKILL.md'
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
-            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
             $managedName = $hostManagedIncludeAll -or $hostManagedIncludes -contains $directory.Name
-            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
-            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-SkillProjectionPathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
+            if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+                $dangling = Get-CapabilityDanglingLinkFinding $directory.FullName $targetText $managedName $managedSource 'host_skill_roots' 'warning'
+                if ($null -ne $dangling) { $findings.Add($dangling) | Out-Null }
+                continue
+            }
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $state = Get-CapabilityLinkState $isReparse $targetText $managedExpected $managedSource $managedName
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $hostRootItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
             if ($state -eq 'ownership_drift') {
