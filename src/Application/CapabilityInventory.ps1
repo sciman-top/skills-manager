@@ -59,7 +59,7 @@ function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, 
 # Additive metadata-budget observation for the retirement policy's budget
 # trigger.  Rows are raw measurements only: no host budget model, no threshold
 # and no pass impact live here; interpretation stays with the documented
-# policy (docs/product/ai-coding-playbook.md).
+# policy (docs/product/ai-coding-workflow-guide.md).
 function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
     $measured = @($Items | Where-Object { $null -ne $_ -and $null -ne $_.PSObject.Properties['description_chars'] })
     $descriptionChars = @($measured | ForEach-Object { [int]$_.description_chars })

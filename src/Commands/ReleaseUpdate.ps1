@@ -134,10 +134,6 @@ function Test-ReleaseUpdatePristineInstallation([string]$InstallRoot, $Manifest)
     [void]$expectedPaths.Add('RELEASE-MANIFEST.json')
     $ownedRuntimeFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     [void]$ownedRuntimeFiles.Add('reports/release-update/last.json')
-    # release-update-scheduled-runner.ps1 persists its own receipt into the same
-    # directory; without this exemption every update after enabling the schedule
-    # is blocked by the scheduler's own bookkeeping.
-    [void]$ownedRuntimeFiles.Add('reports/release-update/scheduled-last.json')
     $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
             [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
         })
@@ -245,39 +241,4 @@ function Invoke-ReleaseUpdateCommand([string[]]$Tokens) {
         Remove-ReleaseUpdateStage $stage | Out-Null
         throw
     }
-}
-
-function Get-ReleaseUpdateScheduleTokens([string[]]$Tokens) {
-    $result = [ordered]@{ action = ''; time = '09:00'; auto_apply = $false; json = $false }
-    foreach ($token in @($Tokens)) {
-        $value = [string]$token
-        switch -Regex ($value.ToLowerInvariant()) {
-            '^--enable$' { $result.action = 'Enable'; continue }
-            '^--disable$' { $result.action = 'Disable'; continue }
-            '^--auto-apply$' { $result.auto_apply = $true; continue }
-            '^--json$' { $result.json = $true; continue }
-            '^--time=' { $result.time = $value.Substring(7); continue }
-            default { throw ("release-update-schedule 不支持参数：{0}" -f $value) }
-        }
-    }
-    Need ($result.action -in @('Enable','Disable')) 'release-update-schedule 必须指定 --enable 或 --disable'
-    Need ($result.time -match '^([01]\d|2[0-3]):[0-5]\d$') 'release-update-schedule --time 必须为 HH:mm'
-    Need ($result.action -eq 'Enable' -or (-not $result.auto_apply)) '--auto-apply 仅可与 --enable 一起使用'
-    return [pscustomobject]$result
-}
-
-function Invoke-ReleaseUpdateScheduleCommand([string[]]$Tokens) {
-    $options = Get-ReleaseUpdateScheduleTokens $Tokens
-    Get-ReleaseUpdateManifest | Out-Null
-    $scriptPath = Join-Path $Root 'scripts\release\register-release-update-task.ps1'
-    Need (Test-Path -LiteralPath $scriptPath -PathType Leaf) '当前安装缺少 Release 更新调度脚本；请手动安装新版本'
-    $pwsh = (Get-Command pwsh -ErrorAction Stop | Select-Object -First 1).Source
-    $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Action',$options.action,'-Root',$Root,'-Time',$options.time)
-    if ($options.auto_apply) { $args += '-AutoApply' }
-    $raw = & $pwsh @args
-    Need ($LASTEXITCODE -eq 0) ("Release 更新调度配置失败，exit={0}" -f $LASTEXITCODE)
-    $result = ($raw | Out-String | ConvertFrom-Json)
-    if ($options.json) { return ($result | ConvertTo-Json -Depth 8) }
-    Write-Host ("Release 更新调度已{0}：{1}" -f $(if ($options.action -eq 'Enable') { '启用' } else { '停用' }), $result.task) -ForegroundColor Green
-    return $result
 }

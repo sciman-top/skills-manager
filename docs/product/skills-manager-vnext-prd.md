@@ -13,7 +13,7 @@
 1. 浏览、安装、卸载、更新和锁定技能。
 2. 管理 MCP server 清单及目标配置。
 3. 扫描目标仓与当前技能/MCP，生成可审阅建议，并在显式授权后应用。
-4. 审查全局/项目规则，在 reviewed change-set 下计划、应用和回滚。
+4. 审查全局/项目规则：单仓规则在 reviewed desired file 下计划与应用；全局规则经 `global-rules-*` 投影与回滚。
 5. 把最小技能集合投影给宿主，同时保留完整可移植 catalog 供显式发现。
 
 ## 3. 范围
@@ -24,13 +24,10 @@
 - vendor/import/mapping/target 构建
 - MCP install/uninstall/profile/sync
 - target audit 三文件 bundle、recommendations preflight/dry-run/apply
-- rule audit、single-repo patch、rule-estate transaction
+- rule audit、single-repo patch、global rule projection
 - canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
 - host-selected `capability-router` cold discovery/policy validation when visible metadata is insufficient
-- 按任务显式启用的可选 core/secondary reference shelf refresh/verify
 - 可由宿主/operator 调度的 skills-only maintenance runner
-- 通过隔离 POC 证明后，向 Hermes 一类外部宿主提供可选、只读优先的 skill consumer contract；该 contract 复用现有 source、package hash、projection receipt 与 rollback 语义，不接管其 runtime
-- 通过 reviewed Git change-set 准入的受控 skill evolution：宿主 AI 可以提出、草拟、测试技能候选；skills-manager 只负责确定性检查、显式准入、受控投影与回滚
 - build、focused tests、contract/invariant checks、risk-triggered full gate；CI 与本地共用 `resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件参与同一分类：文档走 docs，规则走专项测试，已映射源码走行为测试；未知路径、未映射源码、风险变更或分类失败才选 full。main push 与 PR 共用策略，发布标签运行 full。
 
 ### 不包含
@@ -49,11 +46,8 @@
 
 下列能力仍在仓库中，但不属于 §2 的核心任务，也不是日常主链。修复真实故障可以做；新增功能、扩大范围或接入日常主链，须先由用户明确解冻：
 
-- 冷技能路由（`capability-router`、CSR 系列）：路线图状态为 `engineering-frozen`，见 [冷技能路由路线图](cold-skill-routing-roadmap.md)。
-- AI 风控分诊（`ai-risk-control`）：只读计划入口，不属于技能/MCP 管理。
+- 冷技能路由（`capability-router`、CSR 系列）：工程冻结。治理层（场景矩阵、receipt verifier、验收 runbook 与路线图）已移除，仅保留功能层（router、冷发现 catalog、native-agent bridge）。
 - 独立模型 preset 工具（`src/model-orchestration/`）：独立于主 CLI 构建链，不参与技能/MCP 构建。
-- 发行更新调度（`release-update-schedule`）：仅在用户显式 `--enable` 时注册计划任务。
-- Hermes 外部 consumer 与 skill evolution（§5.7）：尚未实现，需先通过 POC 门禁。
 
 ## 4. 产品原则
 
@@ -96,8 +90,6 @@
 - `FR-RUL-001`：发现遵循宿主 global/repo/nested precedence，并区分 Codex 与 Claude Code 执行面；Claude Desktop 内的 Code 会话按 Claude Code 执行面处理，普通聊天的账号同步 skills/plugins 不由本机 `.claude` 投影证明已加载。
 - `FR-RUL-002`：审查默认只读；finding 必须定位到真实文件和可执行修复方向。
 - `FR-RUL-003`：单仓 apply 要求 Git 根、已知规则文件、reviewed desired file、before hash 和显式 token。
-- `FR-RUL-004`：rule-estate 只消费 `review_status=reviewed` 且非 AI self-approval 的 change-set。
-- `FR-RUL-005`：全域 apply 为 `preflight-all -> apply-one-by-one -> receipt-after-each -> fail-fast`，不承诺跨仓原子性。
 
 ### 5.5 投影与发现
 
@@ -109,32 +101,10 @@
 - `FR-PRJ-006`：只读 inventory 使用公开 plugin CLI JSON 识别 plugin/system/standalone 同名能力，优先建议 native plugin source；finding 仅报告，不安装、卸载、启用 plugin 或读写 cache。
 - `FR-PRJ-007`：可选 native-agent bridge 只把仓库受控模板投影到固定 Codex `~/.codex/agents` 或 Claude Code `~/.claude/agents`；写入必须经过既有 host promotion（clean commit 或明确 unverified override）、模板 ownership/reparse 校验、receipt 与回滚。bridge 不负责 provider/auth、agent runtime、队列、会话、动态模型路由或跨宿主编排；但受管 Codex custom-agent template 可以声明静态 `model` / `model_reasoning_effort`，以避免无意继承全局 subagent 默认值。每个静态钉选必须有 source-template 测试、投影 hash receipt 与 fresh Codex child 验收。Claude 模板不钉选模型或 effort，沿用宿主当前选择；本机投影不覆盖普通 Desktop 聊天。
 - `FR-PRJ-008`：cold routing 的真值必须拆为 `host_visible`、`candidate_load_validated`、`skill_md_loading`、`native_child` 与 `host_specific_live_accepted`。router receipt 只能证明发现或精确闭包校验；ZCode 父任务代行、模板存在、投影成功、模型可列举或 AI 自述均不得证明 Codex native child 已启动或 `SKILL.md` 已加载。
-- `FR-PRJ-009`：冷路由验收保留一份 tracked 场景矩阵，覆盖用户批准的显式/隐式、可见直达、只发现、普通请求、target-bound、受控写与契约分流类型。隐式场景只声明允许结果集合与禁止行为，不用单个技能名充当 oracle；真实 live receipt 保持 ignored，并由确定性 verifier 校验，不新增长期运行状态库。
 
-### 5.6 Reference shelf
+### 5.6 外置参考仓
 
-- `FR-REF-001`：reference shelf 是可选只读开发缓存；`skills.json` 是 runtime 真源，外置 checkout 缺失或未刷新不得阻断普通 build/test/update/projection。
-- `FR-REF-002`：manifest 只在显式 refresh/verify 中适用，owned root 固定为 `D:\CODE\external\skills-manager-references`。
-- `FR-REF-003`：manifest 只保留 active core/secondary/conditional repo，name/path 唯一；每个 tier 都必须记录明确 consumer 与 retirement trigger，conditional 只显式刷新，default set 只引用 core。
-- `FR-REF-004`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
-- `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
-- `FR-REF-006`：每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；Git 只跟踪 manifest 和稳定说明，不跟踪动态 latest 状态。
-
-### 5.7 外部 AI consumer 与受控技能演进（未来、POC 门禁）
-
-本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/archive/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
-
-- `FR-HER-001`：外部 AI consumer 的最小 contract 只描述 `consumer_id`、受管 source identity/hash、target root、ownership mode、read/write policy、projection receipt 与 rollback entry。它不得描述模型、会话、任务、提示词、工具调用或调度语义。
-- `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。
-- `FR-HER-003`：Hermes 的 app-server/Codex runtime、MCP/plugin migration 与 `~/.codex/config.toml` 变更属于宿主授权域。skills-manager 不生成、不写入、不迁移该配置，只能在显式只读 probe 中报告观察结果与真值边界。
-- `FR-HER-004`：只有完成与拟议 consumer runtime 相匹配的隔离 POC、存在真实 consumer、且现有 native projection 无法承载所需差异时，才允许新增 consumer adapter。`native_openai_codex` 的 POC 证据不得证明 `codex_app_server` 的 host integration；只有一个假设 consumer 时，不创建泛化 host adapter framework。
-- `FR-HER-005`：受控协作可自动完成无共享宿主写入的 preflight、hash/inventory 对比、固定 marker 检查、package/schema/test 验证与 receipt 摘要；每次运行必须分类为 `auto_evidence`、`auto_stop` 或 `human_decision`。缺 marker、显式 provider/API 失败、共享 config/MCP/plugin 的非预期差异或 write-set 越界必须 `auto_stop`，不得自动重试、切换账户、改变 profile/config 或执行回滚。
-- `FR-EVO-001`：宿主 AI 可以在项目级 `.agents/skills` 或隔离 sandbox 草拟、修复和测试候选技能；候选必须以普通 Git change-set 或明确 source root 提交审核，不能直接写入全局受管 root。
-- `FR-EVO-002`：准入前必须验证 skill identity、path containment、reparse-point/special-file safety、来源/revision/license/provenance、内容 hash、受影响测试与兼容性。建议、扫描结果或 AI 自评不是准入授权。
-- `FR-EVO-003`：准入至少分为 `proposal -> reviewed -> admitted -> projected -> host_loaded -> live_accepted`。`reviewed` 与 `admitted` 必须有独立的人类或指定 owner 决策；AI 不能批准自己的候选。
-- `FR-EVO-004`：已准入技能仍遵循现有 `skills.json` / lock、build、projection receipt 与 rollback 规则。失败时只回滚本次候选的 source/mapping/projection，不删除 external-owned 或其他宿主资产。
-- `FR-EVO-005`：技能演进不新增长期候选数据库、自治 curator、hidden prompt memory 或自动发布链；动态 proposal/task state 属于 Hermes、目标仓 issue/PR 或 operator 工具，不是本仓 tracked runtime state。
-- `FR-EVO-006`：候选的 proposal、确定性验证与“保持未准入”可自动完成；只有从项目/sandbox 范围提升到共享 root、lock、projection、push/release 或 host probe 时才请求独立 owner 的单次决策。自动化不得把技术验证伪装成 `reviewed` 或 `admitted`。
+参考仓棚（manifest、refresh/verify、ACL 锁与基线）已移出本仓范围。外置目录属于其他项目，本仓不对其做任何读取、刷新或校验；普通 build、test、update 与 projection 不依赖外置路径。
 
 ## 6. 非功能需求
 
@@ -142,8 +112,7 @@
 - local-first；除显式 source refresh、MCP 或 live probe 外不依赖网络。
 - secret-redaction-first；日志和 receipt 不写 token、header value 或环境 secret。
 - 所有写路径有 containment、freshness、授权、rollback 或 compensation。
-- Hermes consumer 与 skill evolution 的任何宿主集成默认 fail closed：缺失 POC evidence、source/target hash、owner、write policy、review 或 rollback 时不得投影、更不得修改宿主配置。
-- generated sync、config 或公开契约失败即阻断；reference 只在显式 refresh/verify 时 fail closed，其他检查按当前风险触发。
+- generated sync、config 或公开契约失败即阻断；其他检查按当前风险触发。
 - 不新增只有一个 adapter 的 seam；不为历史兼容保留无 caller interface。
 
 ## 7. 验收
@@ -156,10 +125,5 @@ Repository closeout 至少满足：
 4. 若触发 runtime/安全/数据/迁移/公开契约/依赖/打包风险，在输入冻结后运行一次 full gate。
 5. 报告删除量、保留主链和未验证边界。
 
-Hermes consumer / skill evolution 的实现 closeout 还必须满足：
-
-6. 每个实际 consumer 都有 source/target/owner/write-policy/hash/receipt/rollback 的可核对 contract；没有 consumer 时不得以“未来兼容”为理由扩展 runtime。
-7. 候选技能的 proposal、review、admission、projection 与宿主验收状态可区分；任何低层证据不得跳级为 `host_loaded` 或 `live_accepted`。
-8. 受控 POC 在隔离 profile 或等效环境中证明：只有指定 worktree 与受管测试 root 被写入，主 `~/.codex`、主 `~/.agents/skills` 和生产凭据没有被改变。
 
 `host_loaded` 需要新宿主会话/投影事实；`live_accepted` 需要真实用户工作流。二者不属于 repository tests 的自动结论。

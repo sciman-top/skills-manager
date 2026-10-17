@@ -26,15 +26,13 @@
         "core-ops": {
           "include": [
             "ai-coding-workflow",
-            "antigravity-gemini-risk-triage",
             "capability-router",
             "code-review-and-quality",
             "custom-powershell-windows-automation",
             "research",
             "sandbox-slow-test-diagnosis",
             "systematic-debugging",
-            "verification-before-completion",
-            "workbuddy-risk-triage"
+            "verification-before-completion"
           ],
           "exclude": []
         },
@@ -157,10 +155,6 @@
         }
       },
       "domain_memberships": {
-        "ai-risk-control": [
-          "antigravity-gemini-risk-triage",
-          "workbuddy-risk-triage"
-        ],
         "browser": [
           "agent-browser",
           "playwright-best-practices",

@@ -54,7 +54,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             "更新" { 更新 }
             "check-updates" { Write-CommandResult (Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("发行更新", "release-update") } { $result = Invoke-ReleaseUpdateCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
-            { $_ -in @("发行更新调度", "release-update-schedule") } { $result = Invoke-ReleaseUpdateScheduleCommand $args; if ($result -is [string]) { Write-Output (ConvertTo-AsciiJson $result) } }
             "锁定" { 锁定 }
             { $_ -in @("验证锁定", "verify-lock") } { 验证锁定 }
             { $_ -in @("清理无效映射", "prune-invalid-mappings") } { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
@@ -80,14 +79,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             { $_ -in @("ai-coding", "AI编码") } { $result = Invoke-AiCodingCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Output $result.output } }
             { $_ -in @("能力清单", "capability-inventory") } { Write-CommandResult (Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("规则审查", "rule-audit") } { Write-CommandResult (Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域审查", "rule-estate-audit") } { Write-CommandResult (Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域计划", "rule-estate-plan") } { Write-CommandResult (Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域应用", "rule-estate-apply") } {
-                $tokens = Merge-FilterAndArgs $Filter $args
-                if ($RunPlan) { $tokens = @('--plan') + @($tokens) }
-                Write-CommandResult (Invoke-RuleEstateApplyCommand $tokens)
-            }
-            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { Write-CommandResult (Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则检查", "global-rules-check") } { Write-CommandResult (Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则计划", "global-rules-plan") } { Write-CommandResult (Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则应用", "global-rules-apply") } {
@@ -106,19 +97,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
             { $_ -in @("帮助", "help", "--help", "-h") } { 帮助 }
-            { $_ -in @("ai-risk-control", "风险控制") } {
-                $riskTokens = @()
-                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $riskTokens += $Filter }
-                # The top-level -Plan alias is shared by other commands; pass it
-                # through so ai-risk-control can keep its command-local plan API.
-                if ($RunPlan -and $PSBoundParameters.ContainsKey('RunPlan')) { $riskTokens += '--plan' }
-                $riskTokens += @($args)
-                $riskResult = Invoke-AiRiskControlCommand $riskTokens
-                Write-Output (ConvertTo-AsciiJson ($riskResult | ConvertTo-Json -Depth 30))
-                if ($riskResult -and $riskResult.PSObject.Properties.Match('exit_code').Count -gt 0 -and [int]$riskResult.exit_code -ne 0) {
-                    exit ([int]$riskResult.exit_code)
-                }
-            }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }

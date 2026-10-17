@@ -4,11 +4,11 @@
 
 架构只服务五条真实主链：技能配置与构建、MCP、目标仓审查、规则治理、原生技能投影。每条主链拥有一个清晰 interface；跨主链只共享配置、文件/Git 原语和 receipt，不建立中央 orchestrator。
 
-日常编码的默认路径是用户目标、宿主读取现场、最小实现、最低充分验证和交付，由一个适合当前任务的主执行者负责。技能投影、MCP、目标仓审查、规则治理、冷路由、native-agent bridge、模型 preset 与 reference shelf 仅在当前任务需要时调用，不成为每次编码的前置流程。
+日常编码的默认路径是用户目标、宿主读取现场、最小实现、最低充分验证和交付，由一个适合当前任务的主执行者负责。技能投影、MCP、目标仓审查、规则治理、冷路由、native-agent bridge 与模型 preset 仅在当前任务需要时调用，不成为每次编码的前置流程。
 
 宿主负责判断用户是否要求访谈、审查或实施；不通过关键词 hook 强制选择工作流。确定性检查只处理已经明确的参数、路径、所有权或执行合同，不能把关键词命中当作用户授权或语义裁决。
 
-日常编码方法复用 `overrides/custom/ai-coding-workflow/SKILL.md`，按原生技能投影进入宿主；场景、输入模板与实践取舍维护在 [AI 编码效能手册](ai-coding-playbook.md)。项目规则提供源文件、入口和验证命令，技能帮助宿主选择当前任务所需的方法，宿主执行读取、编辑与验证；CLI 不解释自然语言任务或调度模型/宿主执行者。工程终态保持 PowerShell 7 本地能力管理器；新增功能或模块须服务当前明确需求或真实失败，并在现有需求或 Git review 中说明当前调用方、现有接口缺口、精确写集、最低充分验证与回滚。换栈须有现有技术无法满足需求或可量化净收益的证据。
+日常编码方法复用 `overrides/custom/ai-coding-workflow/SKILL.md`，按原生技能投影进入宿主；场景、输入模板与实践取舍维护在 [AI 编码工作流与约束](ai-coding-workflow-guide.md)。项目规则提供源文件、入口和验证命令，技能帮助宿主选择当前任务所需的方法，宿主执行读取、编辑与验证；CLI 不解释自然语言任务或调度模型/宿主执行者。工程终态保持 PowerShell 7 本地能力管理器；新增功能或模块须服务当前明确需求或真实失败，并在现有需求或 Git review 中说明当前调用方、现有接口缺口、精确写集、最低充分验证与回滚。换栈须有现有技术无法满足需求或可量化净收益的证据。
 
 ## 2. 模块与 interface
 
@@ -44,7 +44,7 @@
 1. `src/Application/HostRegistry.ps1`：增删 fact；`tests/Unit/HostRegistry.Tests.ps1` 强制其与 `rules/` 树及各宿主参数 ValidateSet 全等
 2. `rules/global/<host>/<规则文件>` 与 `rules/global/platforms/<host>.md`：规则源
 3. `skills.json`：targets / skill_projection / mcp_targets 数据
-4. 适配器：全局规则投影与 RuleEstate 全域比对随注册表自动扩展（finding 文案按需补充）；`src/Commands/Mcp.HostAdapters.ps1` 配置形状；`src/Application/SkillProjection.ps1` 投影根
+4. 适配器：全局规则投影随注册表自动扩展（finding 文案按需补充）；`src/Commands/Mcp.HostAdapters.ps1` 配置形状；`src/Application/SkillProjection.ps1` 投影根
 5. 文档：宿主组合描述（本文件与根 `AGENTS.md` 视情况）
 
 本仓的 `claude` 宿主适配面是 Claude Code 的本机规则与技能配置。Claude Desktop 内运行的 Code 会话沿用该执行面；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影或加载证据不代表该聊天已加载。
@@ -95,7 +95,7 @@ repo scan -> scan-derived target profile + installed inventory
 
 ### Rule governance
 
-- Interface：`rule-audit`、`rule-plan/apply`、`rule-estate-*`
+- Interface：`rule-audit`、`rule-plan/apply`
 - Domain：RuleDocument、RuleFinding、RuleResponsibility、RulePatchPlan、OperationPlan/Receipt
 - Implementation：`src/Application/Rule*.ps1`
 
@@ -158,14 +158,9 @@ observed need
 
 配置继续使用兼容字段 `transport=http`，运行语义统一标注为 `streamable_http`。doctor 只做脱敏的静态诊断：HTTPS 标为 encrypted，loopback HTTP 标为 local plaintext，非 loopback HTTP 输出风险；这些结果不证明远端服务可用、Origin 校验或认证已由服务端执行。
 
-### Reference shelf
+### 外置参考仓
 
-- Role：主架构之外、按任务显式启用的可选只读开发缓存
-- Interface：`references/reference-shelf.manifest.json` 与 `scripts/refresh-reference-repos.ps1`
-- Verification：`scripts/verify-reference-governance.ps1`
-- Owned root：`D:\CODE\external\skills-manager-references`
-
-`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只保留 active core/secondary/conditional set，其中 conditional 必须绑定明确 consumer 且不进入默认刷新；manifest 只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state，并把单次结果写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；clone/fetch/pull 不改变 runtime config。候选 backlog 与动态 latest 状态都不持久化。
+参考仓棚（manifest、refresh、verify、ACL 锁与基线）已从本仓移除。`D:\CODE\external\` 下的仓库属于其他项目资产，本仓不再读取、刷新或校验它们；`skills.json` 与普通 build、test、projection 不依赖任何外置路径。
 
 ## 3. 真值与状态
 
@@ -174,7 +169,6 @@ observed need
 | 配置 | `skills.json` / lock | 仓库期望 |
 | 生成 | `skills.ps1` / `agent/` | source 与 generated 一致 |
 | audit/projection/quality | ignored `reports/` | 一次运行的 receipt |
-| reference（显式可选） | manifest + checkout Git state | 当前参考集合与 revision；不证明产品主链健康 |
 | external consumer（未来） | reviewed consumer contract + projection receipt | 一次受管副本/链接的结果；不证明 Hermes/Codex 已加载或任务完成 |
 | skill evolution（未来） | reviewed Git change-set / source root + admission decision | 候选已审查或已准入；不证明投影、宿主加载或业务验收 |
 | host | 宿主配置/可见 inventory/新会话 | `host_loaded` |
@@ -193,7 +187,7 @@ Tracked docs 只写稳定合同，不保存动态 task count、阶段状态或�
 5. rollback/compensation
 6. truthful status when rollback fails
 
-宿主目录、MCP、跨仓 rule estate 和 release 是不同授权域，不互相推导授权。
+宿主目录、MCP 和 release 是不同授权域，不互相推导授权。
 
 Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签发 GitHub OIDC build provenance attestation。它只证明资产摘要与仓库/workflow/tag 构建来源，不能证明宿主加载或业务验收。
 
@@ -205,8 +199,7 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 - build：生成 bundle 与 agent tree
 - test：受影响 Pester/E2E
-- contract：committed generated bundle、config、host scheduler ownership 与公开契约；reference contract 仅由显式 reference verify 触发
-- hotspot：仅在真实性能/安全/发布风险存在时执行
+- contract：committed generated bundle、config、host scheduler ownership 与公开契约；- hotspot：仅在真实性能/安全/发布风险存在时执行
 
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity、config contract 和 host scheduler ownership。可选的 MOR tuple matrix 只通过显式 `-Verifier mor` 验证；preset 实现行为已经由 `ModelPreset.Tests.ps1` 覆盖。普通改动使用受影响验证，不重复 full。
 

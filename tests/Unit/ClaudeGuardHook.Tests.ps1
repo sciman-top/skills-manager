@@ -8,6 +8,9 @@ BeforeAll {
     function New-EditEvent([string]$FilePath) {
         return (@{ tool_input = @{ file_path = $FilePath } } | ConvertTo-Json -Compress)
     }
+    function New-BashEvent([string]$Command) {
+        return (@{ tool_input = @{ command = $Command } } | ConvertTo-Json -Compress)
+    }
 }
 
 Describe 'Claude PreToolUse guard blocks direct edits to generated paths' {
@@ -54,5 +57,50 @@ Describe 'Claude PreToolUse guard fails open on input it cannot interpret' {
 
     It 'allows events without a file path' {
         Invoke-Guard '{}' | Should -Be 0
+    }
+}
+
+Describe 'Claude PreToolUse guard blocks Bash writes to generated paths' {
+    It 'blocks a redirection into a materialized directory' {
+        Invoke-Guard (New-BashEvent 'echo x > agent/demo/SKILL.md') | Should -Be 2
+    }
+
+    It 'blocks an in-place edit of the generated thin entry' {
+        Invoke-Guard (New-BashEvent "sed -i 's/a/b/' skills.ps1") | Should -Be 2
+    }
+
+    It 'blocks removing or copying generated directories' {
+        Invoke-Guard (New-BashEvent 'Remove-Item agent/demo -Recurse -Force') | Should -Be 2
+        Invoke-Guard (New-BashEvent 'git rm skills.lib/Core.ps1') | Should -Be 2
+        Invoke-Guard (New-BashEvent 'Copy-Item x.md vendor/demo/README.md') | Should -Be 2
+    }
+}
+
+Describe 'Claude PreToolUse guard allows Bash commands that do not write generated paths' {
+    It 'allows read-only access to generated files' {
+        Invoke-Guard (New-BashEvent 'cat skills.lib/Core.ps1') | Should -Be 0
+        Invoke-Guard (New-BashEvent 'git diff -- skills.lib/Core.ps1') | Should -Be 0
+    }
+
+    It 'allows the build and generated-tree verification commands' {
+        Invoke-Guard (New-BashEvent 'pwsh -NoProfile -File ./build.ps1 -Check') | Should -Be 0
+        Invoke-Guard (New-BashEvent 'pwsh -NoProfile -File ./skills.ps1 构建生效 > reports/out.log 2>&1') | Should -Be 0
+    }
+
+    It 'allows writes to unrelated paths' {
+        Invoke-Guard (New-BashEvent 'echo hi > docs/note.md') | Should -Be 0
+        Invoke-Guard (New-BashEvent 'Remove-Item reports/tmp -Recurse') | Should -Be 0
+    }
+
+    It 'fails open on a Bash event without a command' {
+        Invoke-Guard '{"tool_input":{}}' | Should -Be 0
+    }
+}
+
+Describe 'Claude guard registration covers Bash alongside Edit and Write' {
+    It 'matches the guard script on Bash as well as Edit, MultiEdit and Write' {
+        $settings = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.claude\settings.json') -Raw | ConvertFrom-Json
+        $matchers = @($settings.hooks.PreToolUse | ForEach-Object { [string]$_.matcher })
+        $matchers | Should -Contain 'Edit|MultiEdit|Write|Bash'
     }
 }
