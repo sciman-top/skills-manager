@@ -606,6 +606,16 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'binding failure'
     }
 
+    It 'documents Claude Agent-tool dispatch beside the Codex fork rule, not as Codex-only' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # A Claude child looked for a Codex-only `spawn_agent` tool because the
+        # handoff rule was written for Codex alone; both hosts must be named.
+        $skill | Should -Match 'Agent tool with `subagent_type`'
+        $skill | Should -Match 'Codex `fork_turns="none"`'
+        $skill | Should -Not -Match 'On Codex, a named specialist handoff must'
+    }
+
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
         $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')

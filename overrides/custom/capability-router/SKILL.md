@@ -166,13 +166,17 @@ router has returned all of the following for the same request:
 - one selected candidate plus its `validated_closure`, with validated paths and
   declared side effects for every member.
 
-On Codex, a named specialist handoff must explicitly set `fork_turns="none"`
-(or a positive number when that specific history is necessary). Never omit
-`fork_turns` or use `"all"` with a nondefault `agent_type`: full-history forks
-inherit the parent model and context. Put the complete admission and validated
-closure in the child message so isolation does not discard required inputs.
-Verify the actual spawn arguments and child events; a receipt alone cannot
-prove isolation or the model and effort that executed the task.
+Start the named specialist without inherited parent history. On Codex, set
+`fork_turns="none"` (or a positive number only when that specific history is
+necessary); never omit `fork_turns` or use `"all"` with a nondefault
+`agent_type`, because full-history forks inherit the parent model and context.
+On Claude, dispatch through the Agent tool with `subagent_type` set to the
+contract's `native_agent`; a fresh Agent call carries no parent history. A child
+that reports no `spawn_agent` tool on Claude is looking for the Codex name:
+use the Agent tool instead. In both hosts, put the complete admission and
+validated closure in the child message so isolation does not discard required
+inputs. Verify the actual spawn arguments and child events; a receipt alone
+cannot prove isolation or the model and effort that executed the task.
 
 For a supported specialist bridge contract, pass the complete validation result, original request, exact selected name, and
 an admission contract to the child. Once those conditions hold, dispatching to
@@ -240,8 +244,9 @@ before admission), passing the same `-OriginalRequest`, `-RepoRoot` and
 that is outside the task's read and write sets; a path outside `RepoRoot` fails
 closed as a write-set violation. This parent-owned transport file is separate
 from the child's task write set. Pass the returned path, SHA-256 and admission
-id, plus helper path/hash and both roots, explicitly in the child message with
-`fork_turns="none"`. If inline transport is required, serialize the returned
+id, plus helper path/hash and both roots, explicitly in the child message, with
+no inherited history (Codex `fork_turns="none"`; on Claude, a fresh Agent call).
+If inline transport is required, serialize the returned
 object with `ConvertTo-Json -Depth 60 -Compress` and place the complete JSON
 under one `bridge_payload` field in the child message; never abbreviate, omit,
 or hand-reconstruct fields. Do not rely on history inheritance or truncated
