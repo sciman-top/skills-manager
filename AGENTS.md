@@ -1,6 +1,6 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.88
+**全局规则复核**: 9.90
 **最后更新**: 2026-10-18
 
 ## 1. 产品边界与入口
@@ -41,8 +41,8 @@
 - 全面审查按比例止损：距上次「维持现状」结论不足 30 天且 src/config 变更不足 10 文件时，只做增量核对并引用该结论，不重开全量重审。
 
 ## D. 回滚与收口
-- Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 PR 与 required checks（`test`，strict），不要求额外批准人数；合入走 推分支 → PR → CI 绿 → merge。
+- Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 PR 与 required checks（`test`，strict），不要求额外批准人数；合入走 推分支 → PR → CI 绿 → merge。PR 的 required check 通过且 mergeStateStatus=CLEAN 时会话可自主合并并同步本地 main，无需逐次请示；操作者在任务中明示暂缓（如"暂不推送"）的，以其指令为准。
 - 本仓由两台电脑维护时，按 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md) 执行：开始 `status → fetch → review → integrate`，再 work、focused verify、commit；提交后再次 `fetch → review → integrate → final verify → push → post-push fetch/status`。PR 的完整 commits/files 只能属于本任务；合并后各电脑再将 `origin/main` fast-forward 到本地。`fetch` 不会把远端提交整合进工作树，另一台电脑未推送的提交也不可见。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
 - 收口报告含 `Removed:` 行；新增独立功能或治理面时列出删除或合并的测试、门禁、文档数，常规修复写 `N/A`。新增面准入时同步评估可替换项；不得因连续 0 单独触发减法复核。
-- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件。
+- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（global-rules-* 含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt/审计机制执行，无需逐次请示。

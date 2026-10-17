@@ -55,6 +55,10 @@ Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,claude_haiku55_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 4) 'AvailablePreset retains the whole selected pool including haiku rungs'
+Assert ([int]$policy.schema_version -eq 6 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v6 declares fallbacks for every slot'
+Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'glm-5.3-flash/xhigh,claude-haiku-5-5/xhigh') 'Resolve exposes the declared alternates of each route'
+Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
+Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
 $cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
 Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'claude_haiku55_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding and route profile'
 foreach ($legacyId in $policy.aliases.Keys) {
@@ -149,10 +153,10 @@ function global:codex {
 }
 try {
     foreach ($failedRoute in @(
-            @{ model = 'gpt-6-luna'; effort = 'max'; next = @('glm53_flash_only'); lower = @() },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; next = @('claude_haiku55_only'); lower = @() },
-            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; next = @('gemini38_flash_only'); lower = @('claude-haiku-5-5/high','claude-haiku-5-5/medium') },
-            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; next = @(); lower = @() }
+            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','claude-haiku-5-5/xhigh'); lower = @() },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('claude-haiku-5-5/xhigh'); lower = @() },
+            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; fallback = @('glm-5.3-flash/xhigh'); lower = @('claude-haiku-5-5/high','claude-haiku-5-5/medium') },
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('glm-5.3-flash/xhigh','claude-haiku-5-5/xhigh'); lower = @() }
     )) {
         $failureMessage = ''
         try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
@@ -165,7 +169,8 @@ try {
         Assert ($failure.failure_class -ceq 'rate_limit' -and $failure.failure_source -ceq 'structured_error_event') 'Failure class comes from structured error fields'
         Assert (((@($failure.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq ($failedRoute.lower -join ','))) 'Failure ladder follows the preset menu'
         Assert (@($failure.reselection.within_preset_higher_overload_only).Count -eq 0) 'Top-rung failure has no within-preset escalation'
-        Assert ((@($failure.reselection.cross_preset.preset) -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-model fallback never cycles'
+        Assert ((@($failure.reselection.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq ($failedRoute.fallback -join ',')) 'Declared alternates exclude the failed tuple and keep policy order'
+        Assert (-not ($failure.reselection.PSObject.Properties.Name -ccontains 'cross_preset')) 'Implicit cross-preset list is retired'
     }
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceFailureMode = 'timeout_message_only'
@@ -339,6 +344,7 @@ try {
     $expandedPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
     $expandedPolicy.slots += 'custom_task'
     $expandedPolicy.auto_routes.custom_task = 'glm53_flash_only'
+    $expandedPolicy.fallbacks.custom_task = @()
     foreach ($presetId in $expandedPolicy.presets.Keys) { $expandedPolicy.presets[$presetId].slot_map.custom_task = 0 }
     [IO.File]::WriteAllText($fixturePolicyPath, ($expandedPolicy | ConvertTo-Json -Depth 12))
     $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
@@ -411,6 +417,26 @@ try {
         Remove-Item Function:/global:codex -ErrorAction SilentlyContinue
         Remove-Variable HostMenuFailureCalls -Scope Global -ErrorAction SilentlyContinue
     }
+    # Declared alternates fail closed at load; each case starts from the shipped policy.
+    $fallbackCases = @(
+        @{ name = 'missing slot declaration'; mutate = { param($p) $p.fallbacks.Remove('documentation_review') } },
+        @{ name = 'alternate repeats the own route'; mutate = { param($p) $p.fallbacks.architecture_review = @(@{ preset = 'gpt6_luna_only'; model = 'gpt-6-luna'; effort = 'max' }) } },
+        @{ name = 'tuple absent from its preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'glm53_flash_only'; model = 'glm-5.3-flash'; effort = 'high' }) } },
+        @{ name = 'duplicate alternate'; mutate = { param($p) $p.fallbacks.standard_review = @(@{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }, @{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }) } },
+        @{ name = 'unknown preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'gpt61_sol_only'; model = 'gpt-6.1-sol'; effort = 'max' }) } },
+        @{ name = 'more than three alternates'; mutate = { param($p) $p.fallbacks.test_execution = @(1..4 | ForEach-Object { @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' } }) } },
+        @{ name = 'schema v5 policy'; mutate = { param($p) $p.schema_version = 5 } }
+    )
+    foreach ($fallbackCase in $fallbackCases) {
+        $casePolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+        & $fallbackCase.mutate $casePolicy
+        [IO.File]::WriteAllText($fixturePolicyPath, ($casePolicy | ConvertTo-Json -Depth 12))
+        $caseRejected = $false
+        try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $caseRejected = $true }
+        Assert $caseRejected "Invalid declared fallback fails closed: $($fallbackCase.name)"
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json).routes.architecture_review.declared_fallback.Count -eq 2) 'Restored shipped fallbacks resolve again'
 }
 finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
