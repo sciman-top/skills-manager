@@ -176,6 +176,7 @@
           "baoyu-url-to-markdown",
           "docx",
           "markdown-converter",
+          "pdf",
           "social",
           "xlsx"
         ],
@@ -352,6 +353,11 @@
     {
       "to": "xlsx",
       "from": "skills\\xlsx",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "to": "pdf",
+      "from": "skills\\pdf",
       "vendor": "anthropics-skills"
     },
     {
