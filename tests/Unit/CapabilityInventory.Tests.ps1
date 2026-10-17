@@ -340,4 +340,99 @@ Describe 'Read-only skill surface inventory' {
             if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }
         }
     }
+
+    It 'reads repo supply from the configured managed_source_path instead of a hard-coded agent directory' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $sourceRoot = Join-Path $fixture 'custom-agent'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $demoRoot = Join-Path $sourceRoot 'demo'; New-Item -ItemType Directory -Force -Path $demoRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $demoRoot 'SKILL.md'), "---`nname: demo`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'custom-agent'; user_skill_root = 'missing-user-skills'; managed_link_includes = @(); sources = @() }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $surface = @($view.surfaces | Where-Object name -eq 'repo_supply')[0]
+
+            $surface.source | Should -Be $sourceRoot
+            $surface.count | Should -Be 1
+            $surface.items[0].name | Should -Be 'demo'
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'reports a dangling managed user-root link as an error and fails the view' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $goneSource = Join-Path $agentRoot 'gone'; New-Item -ItemType Directory -Force -Path $goneSource, $userRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $goneSource 'SKILL.md'), "---`nname: gone`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Junction -Path (Join-Path $userRoot 'gone') -Target $goneSource | Out-Null
+            Remove-Item -LiteralPath $goneSource -Recurse -Force
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @('gone') }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $finding = @($view.findings | Where-Object code -eq 'managed_link_dangling')
+
+            $finding.Count | Should -Be 1
+            $finding[0].severity | Should -Be 'error'
+            $finding[0].surface | Should -Be 'user_skill_root'
+            $view.pass | Should -BeFalse
+            @(@($view.surfaces | Where-Object name -eq 'user_skill_root')[0].items).Count | Should -Be 0
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'reports a dangling non-managed host link into the managed source as a warning without failing the view' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $agentRoot = Join-Path $fixture 'agent'; $hostRoot = Join-Path $fixture 'zcode-skills'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $oldSource = Join-Path $agentRoot 'old-skill'; New-Item -ItemType Directory -Force -Path $oldSource, $hostRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $oldSource 'SKILL.md'), "---`nname: old-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Junction -Path (Join-Path $hostRoot 'old-skill') -Target $oldSource | Out-Null
+            Remove-Item -LiteralPath $oldSource -Recurse -Force
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{ manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = 'missing-user-skills'; managed_link_includes = @('alpha') }
+                targets = @([pscustomobject]@{ path = $hostRoot; host = 'claude'; managed_link_only = $true })
+                mcp_servers = @()
+            }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $finding = @($view.findings | Where-Object code -eq 'managed_link_dangling')
+
+            $finding.Count | Should -Be 1
+            $finding[0].severity | Should -Be 'warning'
+            $finding[0].surface | Should -Be 'host_skill_roots'
+            $view.pass | Should -BeTrue
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'ignores a dangling user-root link whose target lies outside the managed source' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $externalRoot = Join-Path $fixture 'external\ext-gone'; $userRoot = Join-Path $fixture 'user-skills'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            New-Item -ItemType Directory -Force -Path $externalRoot, $userRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $externalRoot 'SKILL.md'), "---`nname: ext-gone`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Junction -Path (Join-Path $userRoot 'ext-gone') -Target $externalRoot | Out-Null
+            Remove-Item -LiteralPath $externalRoot -Recurse -Force
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @() }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+
+            @($view.findings.code) | Should -Not -Contain 'managed_link_dangling'
+            $view.pass | Should -BeTrue
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
 }

@@ -2015,6 +2015,22 @@ function 构建生效(
                     $failures += ("native-agent-bridge => {0}" -f $_.Exception.Message)
                 }
             }
+            $projectClaudeAgents = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'claude', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            if (-not $SkipHostProjection -and $projectClaudeAgents -and @($failures).Count -eq 0) {
+                try {
+                    $claudeBridgeProjection = Sync-ClaudeNativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
+                    if ([bool]$claudeBridgeProjection.enabled) {
+                        Log ("Claude 原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f ((@($claudeBridgeProjection.changed_names) -join ','), [bool]$claudeBridgeProjection.persisted, [string]$claudeBridgeProjection.truth_boundary))
+                    }
+                }
+                catch {
+                    Write-Host ("❌ 同步 Claude 原生子代理 bridge 失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+                    $failures += ("claude-native-agent-bridge => {0}" -f $_.Exception.Message)
+                }
+            }
+            elseif (-not $SkipHostProjection -and $projectClaudeAgents) {
+                Log ("Claude 原生子代理 bridge 已跳过：前序失败 {0} 项，未写入 ~/.claude/agents" -f @($failures).Count)
+            }
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"

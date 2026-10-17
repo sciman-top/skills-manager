@@ -157,7 +157,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 `agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 10 项（`core-lean` 7 项加两份风控技能和一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
-当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
+当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge；选中 `claude` 才会投影受管 Claude 子代理定义到 `~/.claude/agents`。两者均要求正式宿主晋级，备份位于对应宿主的 `skills-manager-agent-backups`，不进入代理发现目录；加载和调用须单独验收。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
 
 `-ProjectionHosts` 只限制本次枚举和同步哪些 target，不提供宿主间的内容隔离：`agent/` 是共享生成源，当前 `managed_link_only` 技能目录是指向 `agent/<skill>` 的 junction。重建 `agent/` 后，未选中的宿主仍会通过既有 junction 看到其所链接技能的内容变化。需要确认实际影响时，应比较源与各 target 的内容哈希；不能仅凭参数筛选声称未选宿主字节不变。
 
@@ -194,7 +194,11 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 同步MCP
 ```
 
-本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。
+本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。同步会按已配置目标使用宿主原生格式：Claude Code 用户级 `~/.claude.json`、Claude Desktop 的 `%APPDATA%/Claude/claude_desktop_config.json`（仅在其配置目录已存在时纳入，当前只接受本地 `stdio` server）、Antigravity `~/.gemini/config/mcp_config.json`（远程地址使用 `serverUrl`），以及 Codex、ZCode、Gemini、Trae 和 WorkBuddy 各自配置。Claude Desktop 账号侧的远程 connectors 与普通桌面聊天的 skills/plugins 由 Claude 账号管理；ChatGPT Work 也没有本地 MCP/skill 投影入口，因此本机文件同步不代表这些账号侧能力已加载。
+
+运行 `同步MCP --plan --json` 可预览配置动作；计划只证明 `repo_verified`，实际同步才会写受管目标文件，仍不证明宿主已加载或真实调用。默认 MCP profile 为空时，不会新建缺失的配置文件；现有文件中本仓声明但当前 profile 未启用的 server 会被清理，其他宿主配置会保留。
+
+`卸载MCP <name>` 会显式清理各受管目标中的同名 server；dry-run 只预览并预检，不保存 `skills.json`。若直接从 `skills.json` 删除 server，工具无法确认已有同名宿主项是否属于本仓，因此会保留该项。Claude Desktop 配置目录存在且当前 profile 含非 `stdio` server 时，整批同步会在写入前失败关闭，不会只更新其他宿主。
 
 ### 目标仓审查
 

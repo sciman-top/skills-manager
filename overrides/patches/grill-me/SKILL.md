@@ -21,14 +21,17 @@ design-griller; gather evidence per question, never instead of asking it.
 ## Native-child dispatch invariant
 
 Before producing a user-facing question, conclusion, or delegation claim for a
-`multi_turn_user_decision` workflow, call the host-native `spawn_agent` tool
-for the custom `design-griller`. Pass the user's proposal, stated constraints,
-and exact request to grill it. A delegation is valid only when that tool returns
-a non-empty child task or thread identifier. Do not call `wait` until that
-identifier exists, and pass the same identifier to every later `wait` or
-follow-up call.
+`multi_turn_user_decision` workflow, call the host-native subagent tool for the
+custom `design-griller`. On Codex that is `spawn_agent`; on Claude it is the
+`Agent` tool with `subagent_type` set to `design-griller`. Pass the user's
+proposal, stated constraints, and exact request to grill it. A delegation is
+valid only when that call returns a non-empty child identifier (a Codex task or
+thread id, or a Claude agent id). Do not call `wait` until that identifier
+exists, and pass the same identifier to every later `wait` or follow-up call.
+On Claude, continue the same child with `SendMessage` to its agent id; never
+start a new child to stand in for it.
 
-If `spawn_agent` is unavailable, fails, or returns no identifier, stop with
+If the subagent tool is unavailable, fails, or returns no identifier, stop with
 `native_bridge_unavailable` and name the missing spawn evidence. Do not call a
 bare `wait`, simulate a child question, claim that a child was started, or
 silently fall back to a parent or shared-profile interview.
@@ -39,7 +42,8 @@ silently fall back to a parent or shared-profile interview.
    decision capsule. An accepted answer is either attributable human verbatim
    input or an explicitly authorized `authorized_ai_delegate_answer`; the latter
    must retain authorization evidence and its SHA-256 and never counts as human
-   acceptance or `host_specific_live_accepted`. Before every later `followup_task`, the parent must call
+   acceptance or `host_specific_live_accepted`. Before every later follow-up to the
+   child (Codex `followup_task`; Claude `SendMessage` to the agent id), the parent must call
    `New-ExecutionAdmissionSuccessor` with the predecessor admission/plan,
    current revalidation, original request, and the attributable answer;
    it must relay the returned successor `admission_id` and `plan_id`. A failed
