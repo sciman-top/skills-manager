@@ -401,3 +401,198 @@ Describe 'Native agent bridge' {
         $griller | Should -Match 'successor admission'
     }
 }
+
+Describe 'Claude bridge apply path against an in-memory host' {
+    # Complements the merged mock-based projection test above. Every host-side read and
+    # write goes through the mocks below, so nothing here can touch the real ~/.claude/agents.
+    BeforeAll {
+        $script:repoRootForApply = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+
+        function New-BridgeFixtureConfig {
+            $config = Get-ContentUtf8 (Join-Path $script:repoRootForApply 'skills.json') | ConvertFrom-Json
+            $config.skill_projection.claude_native_agent_bridge.receipt_path = 'reports/native-agent-bridge/claude-apply-test.json'
+            return $config
+        }
+
+        function New-BridgePromotionContext {
+            return [pscustomobject]@{ required = $true; source_revision = 'test'; promotion_mode = 'test' }
+        }
+
+        function New-BridgeOwnedBytes([string]$Name, [string]$Body) {
+            return [Text.Encoding]::UTF8.GetBytes(("---`n# skills-manager-native-agent-bridge: v1`nname: {0}`ndescription: test`ntools: Read`n---`n{1}`n" -f $Name, $Body))
+        }
+
+        function Get-BridgeHostKey([string]$Name) {
+            return [IO.Path]::GetFullPath((Join-Path $global:BridgeHomeTargetRoot ("{0}.md" -f $Name)))
+        }
+
+        function Set-BridgeHostFile([string]$Name, [byte[]]$Bytes) {
+            $global:BridgeHostStore[(Get-BridgeHostKey $Name)] = $Bytes
+        }
+
+        function Get-BridgeHostHash([string]$Name) {
+            return Get-NativeAgentBridgeBytesSha256 ([byte[]]$global:BridgeHostStore[(Get-BridgeHostKey $Name)])
+        }
+
+        function Invoke-BridgeApply($PromotionContext = (New-BridgePromotionContext)) {
+            try {
+                return [pscustomobject]@{ result = (Sync-ClaudeNativeAgentBridge (New-BridgeFixtureConfig) $PromotionContext -SkipLock); error = '' }
+            }
+            catch {
+                return [pscustomobject]@{ result = $null; error = [string]$_.Exception.Message }
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:previousRoot = $Root
+        $script:previousAgentDir = $AgentDir
+        $script:previousDryRun = $DryRun
+        $Root = $TestDrive
+        $AgentDir = Join-Path $TestDrive 'agent'
+        $DryRun = $false
+
+        $sourceRoot = Join-Path $AgentDir 'native-agent-bridge\claude'
+        New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'reports\native-agent-bridge') -Force | Out-Null
+        foreach ($name in @('design-griller', 'cold-capability-runner')) {
+            Copy-Item -LiteralPath (Join-Path $script:repoRootForApply ("overrides\resources\native-agent-bridge\claude\{0}.md" -f $name)) -Destination (Join-Path $sourceRoot ("{0}.md" -f $name)) -Force
+        }
+
+        $global:BridgeHostStore = @{}
+        $global:BridgeHostWrites = 0
+        $global:BridgeCorruptPath = $null
+        $global:BridgeTamperReceipt = $false
+        $global:BridgeTestRoot = [IO.Path]::GetFullPath($TestDrive).TrimEnd('\')
+        $global:BridgeHomeTargetRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude\agents')).TrimEnd('\')
+
+        Mock Get-NativeAgentBridgeFileState {
+            $full = [IO.Path]::GetFullPath([string]$Path)
+            if ($global:BridgeHostStore.ContainsKey($full)) {
+                $bytes = [byte[]]$global:BridgeHostStore[$full]
+            }
+            elseif ($full.StartsWith($global:BridgeTestRoot + '\', [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full -PathType Leaf)) {
+                $bytes = [IO.File]::ReadAllBytes($full)
+            }
+            else {
+                return [pscustomobject][ordered]@{ path = $full; exists = $false; kind = 'missing'; hash = ''; bytes = [byte[]]@() }
+            }
+            return [pscustomobject][ordered]@{ path = $full; exists = $true; kind = 'file'; hash = (Get-NativeAgentBridgeBytesSha256 $bytes); bytes = $bytes }
+        }
+
+        Mock Write-BytesAtomic {
+            $full = [IO.Path]::GetFullPath([string]$Path)
+            $global:BridgeHostWrites++
+            $content = [byte[]]$Bytes
+            if ($global:BridgeCorruptPath -and $full -eq $global:BridgeCorruptPath) {
+                $global:BridgeCorruptPath = $null
+                $content = [Text.Encoding]::UTF8.GetBytes('corrupted write landed')
+            }
+            if ($global:BridgeTamperReceipt -and $full.EndsWith('claude-apply-test.json', [StringComparison]::OrdinalIgnoreCase)) {
+                $global:BridgeTamperReceipt = $false
+                $content = [Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString($content) -replace '"applied"', '"tampered"'))
+            }
+            $global:BridgeHostStore[$full] = $content
+        }
+
+        Mock Get-NativeAgentBridgeItem {
+            $full = [IO.Path]::GetFullPath([string]$Path).TrimEnd('\')
+            if ($full.Equals($global:BridgeHomeTargetRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                return [pscustomobject]@{ FullName = $full; PSIsContainer = $true; Attributes = [IO.FileAttributes]::Directory }
+            }
+            if ($full.StartsWith($global:BridgeTestRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                return (Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue)
+            }
+            return $null
+        }
+
+        Mock New-Item {
+            $full = [IO.Path]::GetFullPath([string]$Path)
+            if ($full.StartsWith($global:BridgeTestRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                [IO.Directory]::CreateDirectory($full) | Out-Null
+            }
+        }
+
+        Mock Assert-NativeSkillProjectionPathHasNoReparseAncestor {}
+    }
+
+    AfterEach {
+        $Root = $script:previousRoot
+        $AgentDir = $script:previousAgentDir
+        $DryRun = $script:previousDryRun
+    }
+
+    It 'writes both files, verifies them, and records an applied receipt' {
+        Set-BridgeHostFile 'design-griller' (New-BridgeOwnedBytes 'design-griller' 'old')
+        Set-BridgeHostFile 'cold-capability-runner' (New-BridgeOwnedBytes 'cold-capability-runner' 'old')
+
+        $outcome = Invoke-BridgeApply
+        $outcome.error | Should -BeNullOrEmpty
+        $outcome.result.persisted | Should -BeTrue
+        @($outcome.result.changed_names) | Should -Be @('cold-capability-runner', 'design-griller')
+        foreach ($name in @('design-griller', 'cold-capability-runner')) {
+            $expected = ([string](Get-FileHash -LiteralPath (Join-Path $Root ("agent\native-agent-bridge\claude\{0}.md" -f $name)) -Algorithm SHA256).Hash).ToLowerInvariant()
+            Get-BridgeHostHash $name | Should -Be $expected
+        }
+        $receipt = [Text.Encoding]::UTF8.GetString($global:BridgeHostStore[[IO.Path]::GetFullPath((Join-Path $Root 'reports\native-agent-bridge\claude-apply-test.json'))]) | ConvertFrom-Json
+        $receipt.status | Should -Be 'applied'
+    }
+
+    It 'treats byte-identical owned files as unchanged and writes only the receipt' {
+        $sourceRoot = Join-Path $AgentDir 'native-agent-bridge\claude'
+        foreach ($name in @('design-griller', 'cold-capability-runner')) {
+            Set-BridgeHostFile $name ([IO.File]::ReadAllBytes((Join-Path $sourceRoot ("{0}.md" -f $name))))
+        }
+
+        $outcome = Invoke-BridgeApply
+        $outcome.error | Should -BeNullOrEmpty
+        @($outcome.result.changed_names).Count | Should -Be 0
+        $global:BridgeHostWrites | Should -Be 1
+    }
+
+    It 'refuses to overwrite a file skills-manager does not own and restores earlier writes' {
+        Set-BridgeHostFile 'cold-capability-runner' (New-BridgeOwnedBytes 'cold-capability-runner' 'old')
+        $handWritten = [Text.Encoding]::UTF8.GetBytes("---`nname: design-griller`ndescription: hand written`ntools: Read`n---`nmine`n")
+        Set-BridgeHostFile 'design-griller' $handWritten
+
+        $outcome = Invoke-BridgeApply
+        $outcome.error | Should -Match 'not owned by skills-manager'
+        # cold-capability-runner was written first and must be restored to its owned content.
+        Get-BridgeHostHash 'cold-capability-runner' | Should -Be (Get-NativeAgentBridgeBytesSha256 (New-BridgeOwnedBytes 'cold-capability-runner' 'old'))
+        Get-BridgeHostHash 'design-griller' | Should -Be (Get-NativeAgentBridgeBytesSha256 $handWritten)
+    }
+
+    It 'rolls back a landed write that fails verification instead of reporting rollback incomplete' {
+        Set-BridgeHostFile 'design-griller' (New-BridgeOwnedBytes 'design-griller' 'old')
+        Set-BridgeHostFile 'cold-capability-runner' (New-BridgeOwnedBytes 'cold-capability-runner' 'old')
+        $global:BridgeCorruptPath = Get-BridgeHostKey 'design-griller'
+
+        $outcome = Invoke-BridgeApply
+        $outcome.error | Should -Match 'claude agent target verification failed'
+        $outcome.error | Should -Not -Match 'rollback incomplete'
+        Get-BridgeHostHash 'design-griller' | Should -Be (Get-NativeAgentBridgeBytesSha256 (New-BridgeOwnedBytes 'design-griller' 'old'))
+        Get-BridgeHostHash 'cold-capability-runner' | Should -Be (Get-NativeAgentBridgeBytesSha256 (New-BridgeOwnedBytes 'cold-capability-runner' 'old'))
+    }
+
+    It 'replaces an applied receipt with rolled_back when receipt verification fails' {
+        Set-BridgeHostFile 'design-griller' (New-BridgeOwnedBytes 'design-griller' 'old')
+        Set-BridgeHostFile 'cold-capability-runner' (New-BridgeOwnedBytes 'cold-capability-runner' 'old')
+        $global:BridgeTamperReceipt = $true
+
+        $outcome = Invoke-BridgeApply
+        $outcome.error | Should -Match 'receipt verification failed'
+        $receiptKey = [IO.Path]::GetFullPath((Join-Path $Root 'reports\native-agent-bridge\claude-apply-test.json'))
+        $recorded = [Text.Encoding]::UTF8.GetString($global:BridgeHostStore[$receiptKey]) | ConvertFrom-Json
+        $recorded.status | Should -Be 'rolled_back'
+        Get-BridgeHostHash 'design-griller' | Should -Be (Get-NativeAgentBridgeBytesSha256 (New-BridgeOwnedBytes 'design-griller' 'old'))
+    }
+
+    It 'refuses a host write without a verified promotion context and writes nothing' {
+        Set-BridgeHostFile 'design-griller' (New-BridgeOwnedBytes 'design-griller' 'old')
+        Set-BridgeHostFile 'cold-capability-runner' (New-BridgeOwnedBytes 'cold-capability-runner' 'old')
+
+        $outcome = Invoke-BridgeApply -PromotionContext $null
+        $outcome.error | Should -Match 'verified host projection promotion context'
+        $global:BridgeHostWrites | Should -Be 0
+    }
+}
