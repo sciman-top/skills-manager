@@ -538,13 +538,37 @@ function Get-AuditRunIdHintText([string[]]$RequiredFiles = @()) {
     return (($parts.ToArray()) -join "; ")
 }
 
+function Get-AuditKeywordStopWords {
+    # 功能词与 skill 描述套话不携带能力语义。若保留在 description/trigger_summary
+    # 的分词结果里，它们会进入 keyword_trace 的可引用集合，使成员校验对 "the"、
+    # "use" 之类的引用形同虚设。
+    if ($null -eq $script:AuditKeywordStopWords) {
+        $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($word in @(
+                'across', 'also', 'any', 'all', 'and', 'are', 'but', 'can', 'could', 'does', 'each', 'every',
+                'etc', 'for', 'from', 'has', 'have', 'help', 'helps', 'include', 'includes', 'including', 'into',
+                'its', 'just', 'make', 'makes', 'may', 'might', 'more', 'most', 'must', 'need', 'needs', 'not',
+                'onto', 'other', 'over', 'request', 'requests', 'should', 'skill', 'skills', 'some', 'such',
+                'task', 'tasks', 'than', 'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this',
+                'those', 'through', 'under', 'use', 'used', 'user', 'users', 'uses', 'using', 'via', 'was', 'were',
+                'what', 'when', 'where', 'which', 'while', 'who', 'will', 'with', 'within', 'without', 'work',
+                'works', 'would'
+            )) {
+            $null = $set.Add($word)
+        }
+        $script:AuditKeywordStopWords = $set
+    }
+    return $script:AuditKeywordStopWords
+}
+
 function Get-AuditKeywordsFromText([string]$text, [int]$Limit = 120) {
     if ([string]::IsNullOrWhiteSpace($text)) { return @() }
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $ordered = New-Object System.Collections.Generic.List[string]
+    $stopWords = Get-AuditKeywordStopWords
     foreach ($match in [regex]::Matches($text, "(?i)\b[a-z][a-z0-9_-]{2,}\b")) {
         $token = ([string]$match.Value).Trim().ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ([string]::IsNullOrWhiteSpace($token) -or $stopWords.Contains($token)) { continue }
         if ($seen.Add($token)) {
             $ordered.Add($token) | Out-Null
             if ($ordered.Count -ge $Limit) { return @($ordered) }
@@ -888,14 +912,23 @@ function Normalize-AuditCoveragePhrase([string]$Text) {
 }
 
 function Get-AuditCoverageNeedTokens($Need) {
-    # Coverage is asserted from the subject phrase only.  The bare domain word
-    # ("workflow", "ai", "artifact", ...) matches too many descriptions to carry
-    # signal, and action verbs hit homographs ("read" in "read-only", "deliver"
-    # in "deliverable") that assert coverage the skill does not provide.
+    # Coverage is asserted from the subject phrase, plus format names for a
+    # workflow subject whose plugin descriptions name the formats instead of the
+    # workflow (the documents plugin says ".docx", not "document processing").
+    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
+    # descriptions to carry signal, and action verbs hit homographs ("read" in
+    # "read-only", "deliver" in "deliverable") that assert coverage the skill
+    # does not provide.
     $domain = [string](Get-CfgObjectProperty $Need "domain")
     $subject = Normalize-AuditCoveragePhrase ([string](Get-CfgObjectProperty $Need "subject"))
     if ([string]::IsNullOrWhiteSpace($subject) -or [string]::Equals($subject, (Normalize-AuditCoveragePhrase $domain), [System.StringComparison]::OrdinalIgnoreCase)) { return @() }
-    return @($subject)
+    $formatAliases = @{ 'document processing' = @('docx', 'pdf', 'pptx', 'xlsx') }
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $tokens.Add($subject) | Out-Null
+    if ($formatAliases.ContainsKey($subject)) {
+        foreach ($alias in @($formatAliases[$subject])) { $tokens.Add($alias) | Out-Null }
+    }
+    return @($tokens.ToArray())
 }
 
 function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {

@@ -781,6 +781,23 @@ function Test-AuditScannerSelfFile([string]$RelativePath) {
         [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets[^\\]*|SkillAudit[^\\]*|CapabilityInventory[^\\]*|ReadOnlyCli[^\\]*)\.Tests\.ps1$')
 }
 
+function Test-AuditSelfRepository([string]$ResolvedPath) {
+    # The scanner's own test suite exercises the scanner with format names; those
+    # strings describe the tool, not the target's product capabilities. Only a
+    # repository carrying all three of these markers counts as this tool.
+    foreach ($relative in @('skills.ps1', 'build.ps1', 'src\Commands\AuditTargets.ps1')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ResolvedPath $relative) -PathType Leaf)) { return $false }
+    }
+    return $true
+}
+
+function Test-AuditSelfUsageSurface([string]$RelativePath) {
+    # The CLI usage text lives in this file and names format examples (for instance
+    # "docx pdf" as filter arguments). It describes the tool's syntax, not a product need.
+    $normalized = ([string]$RelativePath).Replace('/', '\')
+    return [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Commands\\Utils\.ps1$')
+}
+
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
     if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
     $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
@@ -1057,6 +1074,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
     $sourceScanReadFailureCount = 0
     $sourceScanTextTruncatedCount = 0
     $sourceScanSelfReferentialCount = 0
+    $selfRepository = Test-AuditSelfRepository $resolvedPath
     foreach ($file in @($selectedSourceFiles)) {
         if ($file.Length -gt 1048576) { $sourceScanLargeFileCount++; continue }
         try {
@@ -1084,6 +1102,10 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
                 continue
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
+            if ($selfRepository -and ($kind -eq "test" -or (Test-AuditSelfUsageSurface $relativePath))) {
+                $sourceScanSelfReferentialCount++
+                continue
+            }
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
             # 大量源文件不包含任何能力信号。文件级预筛只跑一次，命中的候选集
             # 直接透传给两个提取器；行级提取在提取器内部用合并探测跳过无关
@@ -1178,8 +1200,12 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
             $text = Get-ContentUtf8 $fullPath
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $contents.Add($text) | Out-Null
-                Add-AuditArtifactFactsFromText $ArtifactCapabilities $text "documentation" $relativePath
-                Add-AuditRequirementFactsFromText $RequirementSignals $text "documentation" $relativePath
+                # A repository that is this tool describes its own skills in these docs; that
+                # is not target product evidence, so only other repositories keep it.
+                if (-not (Test-AuditSelfRepository $resolvedPath)) {
+                    Add-AuditArtifactFactsFromText $ArtifactCapabilities $text "documentation" $relativePath
+                    Add-AuditRequirementFactsFromText $RequirementSignals $text "documentation" $relativePath
+                }
                 if ($text -match "编码前设计包" -or $text -match "(?i)\bpre-implementation\b" -or $text -match "(?i)\bdesign package\b") {
                     $designRepoDetected = $true
                 }
