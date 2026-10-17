@@ -10,6 +10,7 @@ param(
     [switch]$RunPlan,
     [switch]$Upgrade,
     [string]$SkillProfile = "",
+    [string[]]$ProjectionHosts = @(),
     [string]$OnlySkill = "",
     [switch]$AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection,

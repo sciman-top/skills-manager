@@ -143,6 +143,30 @@ Describe 'Skill projection profiles' {
         { Get-SkillProjectionTargetHost ([pscustomobject]@{ path = '~/.other/skills'; managed_link_only = $true }) } | Should -Throw '*无法由 path 推导宿主*'
     }
 
+    It 'limits host projection to the explicit target set and preserves all-target default behavior' {
+        $targets = @(
+            [pscustomobject]@{ path = '~/.agents/skills'; host = 'codex'; managed_link_only = $true },
+            [pscustomobject]@{ path = '~/.claude/skills'; host = 'claude'; managed_link_only = $true },
+            [pscustomobject]@{ path = '~/.zcode/skills'; host = 'zcode'; managed_link_only = $true },
+            [pscustomobject]@{ path = '~/.gemini/config/skills'; host = 'antigravity'; managed_link_only = $true },
+            [pscustomobject]@{ path = '~/.workbuddy-ai/skills'; host = 'workbuddy'; managed_link_only = $true }
+        )
+
+        $selected = @(Get-SkillProjectionTargetsInScope -Targets $targets -ProjectionHosts @('codex,claude,zcode,antigravity'))
+        @($selected | ForEach-Object host) | Should -Be @('codex', 'claude', 'zcode', 'antigravity')
+        @(Get-SkillProjectionTargetsInScope -Targets $targets).Count | Should -Be 5
+        { Resolve-SkillProjectionHosts @('codex,unsupported') } | Should -Throw '*projection_hosts_invalid*'
+    }
+
+    It 'fails closed when an explicitly scoped target has no resolvable host identity' {
+        $targets = @(
+            [pscustomobject]@{ path = '~/.claude/skills'; host = 'claude'; managed_link_only = $true },
+            [pscustomobject]@{ path = '~/.unknown/skills'; managed_link_only = $true }
+        )
+
+        { Get-SkillProjectionTargetsInScope -Targets $targets -ProjectionHosts @('claude') } | Should -Throw '*无法由 path 推导宿主*'
+    }
+
     It 'resolves profile selections for the antigravity and workbuddy hosts' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         foreach ($hostName in @('antigravity', 'workbuddy')) {

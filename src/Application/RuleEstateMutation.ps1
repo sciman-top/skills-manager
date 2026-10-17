@@ -17,6 +17,11 @@ function Assert-RuleEstateSafeRoot([string]$Path, [string]$Label) {
     return $root
 }
 
+function Test-RuleEstateAllowedRepositoryRuleFile([string]$Path) {
+    $normalized = ([string]$Path).Replace('\', '/')
+    return @('AGENTS.md', 'CLAUDE.md', '.agents/rules/00-project.md') -ccontains $normalized
+}
+
 function Test-RuleEstateReparsePath([string]$Path,[string]$BoundaryRoot) {
     $cursor=[IO.Path]::GetFullPath($Path);$boundary=[IO.Path]::GetFullPath($BoundaryRoot).TrimEnd('\','/')
     while($true){
@@ -45,8 +50,7 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         if ($scope -in @('global_codex','global_claude')) { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' "$base.target_scope" 'Global user rules have a single write path through global-rules-plan/apply/rollback; rule-estate only writes repository rules.')) | Out-Null }
         elseif ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'target_scope_invalid' "$base.target_scope" 'Only repository targets are managed by rule estate.')) | Out-Null }
         $file = [string](Get-RuleEstateProperty $change 'target_file')
-        $allowed = @('AGENTS.md','CLAUDE.md')
-        if ($file -notin $allowed -or [IO.Path]::GetFileName($file) -cne $file) { $findings.Add((New-RuleEstateFinding 'target_file_forbidden' "$base.target_file" 'Only exact root rule filenames are accepted; provider, auth, model, sandbox and native host files are excluded.')) | Out-Null }
+        if (-not (Test-RuleEstateAllowedRepositoryRuleFile $file)) { $findings.Add((New-RuleEstateFinding 'target_file_forbidden' "$base.target_file" 'Only exact root rule files and the standard Antigravity project adapter are accepted; provider, auth, model, sandbox and native host files are excluded.')) | Out-Null }
         if ($scope -eq 'repository' -and [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'repository'))) { $findings.Add((New-RuleEstateFinding 'repository_missing' "$base.repository" 'Repository name is required.')) | Out-Null }
         if (-not [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'risk')) -and [string](Get-RuleEstateProperty $change 'risk') -notin @('low','medium','high')) { $findings.Add((New-RuleEstateFinding 'risk_invalid' "$base.risk" 'Risk must be low, medium, or high.')) | Out-Null }
         $desired = [string](Get-RuleEstateProperty $change 'desired_file')
@@ -181,8 +185,9 @@ function Test-RuleEstateApplyPreflight {
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
         $repositoryName=[string](Get-RuleEstateProperty $action 'repository')
         $expectedRoot=if($scope -eq 'repository' -and -not [string]::IsNullOrWhiteSpace($repositoryName)){[IO.Path]::GetFullPath((Join-Path $workspace $repositoryName))}else{$null}
+        $relativePath=if($null -ne $expectedRoot){[IO.Path]::GetRelativePath($root,$path).Replace('\','/')}else{''}
         if ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate plans may only contain repository targets; use global-rules-* for user-level rules.')) | Out-Null }
-        if ($null -eq $expectedRoot -or $root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
+        if ($null -eq $expectedRoot -or $root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or -not (Test-RuleEstateAllowedRepositoryRuleFile $relativePath)) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
         if(Test-RuleEstateReparsePath $path $root){$findings.Add((New-RuleEstateFinding 'target_reparse_forbidden' $path 'Reparse points are not accepted by rule estate.'))|Out-Null}
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
@@ -269,7 +274,8 @@ function Invoke-RuleEstateRollback {
     if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -notin @('applied','prepared')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied or prepared receipt target.'));writes=0}}
     $target=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path'));$root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root'));$scope=[string](Get-RuleEstateProperty $action 'target_scope')
     if($scope -ne 'repository'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate rollback only accepts repository actions; global user rules use global-rules-rollback.'));writes=0}}
-    $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
+    $relativeTarget=[IO.Path]::GetRelativePath($root,$target).Replace('\','/')
+    $repoValid=(([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and (Test-RuleEstateAllowedRepositoryRuleFile $relativeTarget))
     if(-not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     $currentHash=Get-RuleEstateTextHashAtPath $target
     # status='applied' 且目标已物理回到 before 状态（如上次回滚还原成功但收据

@@ -504,6 +504,46 @@ function Get-SkillProjectionTargetHost($TargetConfig) {
     throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
 }
 
+function Resolve-SkillProjectionHosts {
+    param([string[]]$ProjectionHosts = @())
+
+    $allowedHosts = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($hostName in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { [void]$allowedHosts.Add($hostName) }
+    $selectedHosts = [Collections.Generic.List[string]]::new()
+    foreach ($inputValue in $ProjectionHosts) {
+        foreach ($part in ([string]$inputValue -split '[,;\s]+')) {
+            $hostName = $part.Trim().ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($hostName)) { continue }
+            if (-not $allowedHosts.Contains($hostName)) { throw ("projection_hosts_invalid: {0}" -f $hostName) }
+            if (-not $selectedHosts.Contains($hostName)) { $selectedHosts.Add($hostName) }
+        }
+    }
+    return $selectedHosts.ToArray()
+}
+
+function Get-SkillProjectionTargetsInScope {
+    param(
+        [object[]]$Targets = @(),
+        [string[]]$ProjectionHosts = @()
+    )
+
+    $ProjectionHosts = @(Resolve-SkillProjectionHosts $ProjectionHosts)
+    if (@($ProjectionHosts).Count -eq 0) { return @($Targets) }
+
+    $selectedHosts = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($hostName in $ProjectionHosts) { [void]$selectedHosts.Add(([string]$hostName).Trim()) }
+
+    $selectedTargets = [Collections.Generic.List[object]]::new()
+    foreach ($target in $Targets) {
+        if ($null -eq $target) { continue }
+        # Explicit host scoping must be provable for every configured target;
+        # an unknown path cannot be silently included or guessed.
+        $targetHost = Get-SkillProjectionTargetHost $target
+        if ($selectedHosts.Contains([string]$targetHost)) { $selectedTargets.Add($target) }
+    }
+    return $selectedTargets.ToArray()
+}
+
 function Get-SkillProjectionHostRootDeclarations($Config) {
     # A managed-link target is the authoritative declaration of a host skill
     # root.  host_skill_roots is retained only as a compatibility input for

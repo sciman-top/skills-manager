@@ -28,7 +28,7 @@
 约束：
 
 - `desired_file` 必须位于 change-set 所在目录或其子目录。
-- `repository` 只接受动态发现的直属 Git 仓根 `AGENTS.md` 或 `CLAUDE.md`。
+- `repository` 只接受动态发现的直属 Git 仓根 `AGENTS.md`、`CLAUDE.md`，或精确路径 `.agents/rules/00-project.md`；该 Antigravity 适配器只能内联引用根 `AGENTS.md`，不得承载独立项目语义。
 - `global_codex`、`global_claude` 和任何其他用户级目标均被拒绝；全局用户规则只能通过 `global-rules-plan/apply/rollback/check` 从 tracked `rules/global/` 源投影。
 - 每个项目 desired file 都应由“当前全局规则 + 当前项目规则 + 项目代码/脚本/CI/README 事实 + 已核依据”独立推导，不能从控制仓模板直接复制覆盖。
 - 仓内无关 dirty paths 会记录在 plan/receipt 中并原样保留；只有目标规则文件的 before hash 参与 freshness 阻断，流程不暂存、不提交、不回滚其他文件。

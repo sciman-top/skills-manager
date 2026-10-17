@@ -52,14 +52,37 @@ Describe 'Execution admission' {
     It 'delivers complete objects by immutable hash and rejects tampering or drift in a portable process' {
         $root = Join-Path $TestDrive 'handoff'
         $fixture = New-ExecutionAdmissionFixture $root
-        $admission = New-ExecutionAdmission -OriginalRequest 'Review this proposal' -AdmittedGoal 'Ask one question' -Validation $fixture.validation -AllowedReadSet @($fixture.fixture_path) -AuthorityBasis current_user_request -IssuedAt '2026-09-12T08:00:00Z' -RepoRoot $root
+        $request = 'Review this proposal'
+        $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal 'Ask one question' -Validation $fixture.validation -AllowedReadSet @($fixture.fixture_path) -AuthorityBasis current_user_request -IssuedAt '2026-09-12T08:00:00Z' -RepoRoot $root
         $plan = New-ExecutionPlan -Admission $admission
+        $payload = New-ExecutionAdmissionBridgePayload -OriginalRequest $request -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root
+        $payload.schema_version | Should -Be 1
+        $payload.kind | Should -Be 'execution_admission_bridge_payload'
+        $payload.original_request | Should -Be $request
+        $payload.validated_skill_name | Should -Be 'grill-with-docs'
+        $payload.validated_skill_path | Should -Be $fixture.skill_path
+        @($payload.validated_closure).Count | Should -Be 2
+        $payload.effective_execution_contract.native_agent | Should -Be 'design-griller'
+        $payload.admission.admission_id | Should -Be $admission.admission_id
+        $payload.plan.plan_id | Should -Be $plan.plan_id
+
         $path = Join-Path $root 'handoff.json'
-        $handoff = Export-ExecutionAdmissionHandoff -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path
+        $handoff = Export-ExecutionAdmissionHandoff -OriginalRequest $request -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path
         $loaded = Import-ExecutionAdmissionHandoff -Path $path -Sha256 $handoff.sha256 -AdmissionId $admission.admission_id -RepoRoot $root
         $loaded.plan.plan_id | Should -Be $plan.plan_id
-        @($loaded.validation.validated_closure).Count | Should -Be 2
-        { Export-ExecutionAdmissionHandoff -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path } | Should -Throw '*handoff_path_exists*'
+        $loaded.original_request | Should -Be $request
+        $loaded.validated_skill_name | Should -Be 'grill-with-docs'
+        $loaded.validated_skill_path | Should -Be $fixture.skill_path
+        @($loaded.validated_closure).Count | Should -Be 2
+        $loaded.effective_execution_contract.native_agent | Should -Be 'design-griller'
+        $tamperedPath = Join-Path $root 'handoff-tampered.json'
+        $tampered = [Text.UTF8Encoding]::new($false, $true).GetString([IO.File]::ReadAllBytes($path)) | ConvertFrom-Json -Depth 60
+        $tampered.validated_skill_name = 'different-skill'
+        $tamperedBytes = [Text.UTF8Encoding]::new($false).GetBytes(($tampered | ConvertTo-Json -Depth 60 -Compress))
+        [IO.File]::WriteAllBytes($tamperedPath, $tamperedBytes)
+        $tamperedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($tamperedBytes)).ToLowerInvariant()
+        { Import-ExecutionAdmissionHandoff -Path $tamperedPath -Sha256 $tamperedHash -AdmissionId $admission.admission_id -RepoRoot $root } | Should -Throw '*handoff_payload_mismatch*'
+        { Export-ExecutionAdmissionHandoff -OriginalRequest $request -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root -Path $path } | Should -Throw '*handoff_path_exists*'
         { Import-ExecutionAdmissionHandoff -Path $path -Sha256 ('0' * 64) -AdmissionId $admission.admission_id -RepoRoot $root } | Should -Throw '*handoff_hash_mismatch*'
         { Import-ExecutionAdmissionHandoff -Path $path -Sha256 $handoff.sha256 -AdmissionId 'wrong' -RepoRoot $root } | Should -Throw '*handoff_identity_mismatch*'
         $helperPath = Join-Path $root 'runtime.ps1'
@@ -78,6 +101,20 @@ catch { Write-Output $_.Exception.Message; exit 1 }
         $output = & pwsh -NoProfile -File $probePath $helperPath $path $handoff.sha256 $admission.admission_id $root
         $LASTEXITCODE | Should -Be 1
         ($output -join "`n") | Should -Match 'read_set_hash_drift'
+    }
+
+    It 'fails closed when a bridge payload has a different request or ambiguous selection' {
+        $root = Join-Path $TestDrive 'bridge-payload-reject'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $request = 'Review this proposal'
+        $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal 'Ask one question' -Validation $fixture.validation -AllowedReadSet @($fixture.fixture_path) -AuthorityBasis current_user_request -IssuedAt '2026-09-12T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+
+        { New-ExecutionAdmissionBridgePayload -OriginalRequest 'different request' -Admission $admission -Plan $plan -Validation $fixture.validation -RepoRoot $root -SkillRoot $root } | Should -Throw '*bridge_request_mismatch*'
+
+        $ambiguous = $fixture.validation | ConvertTo-Json -Depth 30 | ConvertFrom-Json -Depth 30
+        $ambiguous.selected = @($ambiguous.selected) + @($ambiguous.selected[0])
+        { New-ExecutionAdmissionBridgePayload -OriginalRequest $request -Admission $admission -Plan $plan -Validation $ambiguous -RepoRoot $root -SkillRoot $root } | Should -Throw '*bridge_selected_candidate_count_invalid*'
     }
 
     It 'admits exact controlled writes and rejects drift before execution' {

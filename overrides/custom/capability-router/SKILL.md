@@ -205,19 +205,32 @@ verify that helper hash and execute `Test-ExecutionAdmissionRevalidation` with
 the original admission, plan, validation and roots immediately before writing.
 The parent check does not replace this child check. Record its actual tool
 result bound to the admission id; never infer it from the child's final prose.
-Deliver full objects with `Export-ExecutionAdmissionHandoff` into a unique file
-in the authorized run directory (create that directory before admission).
-`Export-ExecutionAdmissionHandoff` is called with the same `-RepoRoot` and
-`-SkillRoot` values as the creation call, and the handoff path must be a new
-file inside `RepoRoot` that is outside the task's read and write sets; a path
-outside `RepoRoot` fails closed as a write-set violation.
-This parent-owned transport file is separate from the child's task write set.
-Pass the returned path, SHA-256 and admission id, plus helper path/hash and both
-roots, explicitly in the child message with `fork_turns="none"`. Do not rely on
-history inheritance, truncated terminal output, or reconstructing JSON by hand.
-The child verifies the helper hash, dot-sources it, and calls
-`Import-ExecutionAdmissionHandoff -Path $path -Sha256 $hash -AdmissionId $id -RepoRoot $root`.
-Import verifies exact bytes, identity and current snapshots. The child must
+Create one canonical bridge payload with
+`New-ExecutionAdmissionBridgePayload -OriginalRequest $request -Admission $admission -Plan $plan -Validation $result -RepoRoot $taskRoot -SkillRoot $supplyRoot`.
+This helper revalidates the admission and returns the original request,
+`validated_skill_name`, validated path, complete validation and dependency
+closure, effective root execution contract, admission, plan and both roots.
+Do not hand-build parallel child fields or rename `validated_skill_name`.
+
+For file transport, deliver that payload with `Export-ExecutionAdmissionHandoff`
+into a unique file in the authorized run directory (create that directory
+before admission), passing the same `-OriginalRequest`, `-RepoRoot` and
+`-SkillRoot` used above. The handoff path must be a new file inside `RepoRoot`
+that is outside the task's read and write sets; a path outside `RepoRoot` fails
+closed as a write-set violation. This parent-owned transport file is separate
+from the child's task write set. Pass the returned path, SHA-256 and admission
+id, plus helper path/hash and both roots, explicitly in the child message with
+`fork_turns="none"`. If inline transport is required, serialize the returned
+object with `ConvertTo-Json -Depth 60 -Compress` and place the complete JSON
+under one `bridge_payload` field in the child message; never abbreviate, omit,
+or hand-reconstruct fields. Do not rely on history inheritance or truncated
+terminal output. With file transport, the child verifies the helper hash,
+dot-sources it and calls `Import-ExecutionAdmissionHandoff -Path $path -Sha256
+$hash -AdmissionId $id -RepoRoot $root`; Import verifies exact bytes, identity
+and current snapshots. With inline transport, the child binds the fields from
+`bridge_payload` directly. Both paths bind every execution field, including
+`$validatedSkillName = $bridgePayload.validated_skill_name`; an absent or
+mismatched field stops before reading or invoking the skill. The child must
 still execute the explicit write-time revalidation immediately before mutation.
 Never dispatch when `$check.pass` is false. These are parent-side checks, not
 an OS sandbox; actual tools must still enforce the task's write boundary.

@@ -1783,10 +1783,11 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target, [switch]$
     }
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '', [switch]$SkipLock) {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '', [string[]]$ProjectionHosts = @(), [switch]$SkipLock) {
+    $ProjectionHosts = @(Resolve-SkillProjectionHosts $ProjectionHosts)
     if (-not $SkipLock) {
         return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
-            应用到ClaudeCodex $cfg -SkipPreflight:$SkipPreflight -PromotionContext $PromotionContext -SkillProfile $SkillProfile -SkipLock
+            应用到ClaudeCodex $cfg -SkipPreflight:$SkipPreflight -PromotionContext $PromotionContext -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts -SkipLock
         })
     }
     return (& {
@@ -1796,7 +1797,11 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
         if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "link" }
         $failures = New-Object System.Collections.Generic.List[string]
 
-        foreach ($t in $cfg.targets) {
+        $projectionTargets = @(Get-SkillProjectionTargetsInScope -Targets @($cfg.targets) -ProjectionHosts $ProjectionHosts)
+        if (@($ProjectionHosts).Count -gt 0) {
+            Log ("已限定宿主投影范围：{0}" -f (@($ProjectionHosts | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique) -join ','))
+        }
+        foreach ($t in $projectionTargets) {
                 try {
                     $target = Resolve-TargetDir $t.path
                     if (-not $target) { continue }
@@ -1830,7 +1835,11 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
         }
-        if ($DryRun) {
+        $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if (-not $projectCodex) {
+            Log "已按 ProjectionHosts 跳过 Codex native skill projection。"
+        }
+        elseif ($DryRun) {
             Log "DRYRUN：native skill projection 依赖完整 agent/ staging，已跳过投影规划；正式构建将在映射物化后事务性生成并应用。"
         }
         else {
@@ -1867,18 +1876,21 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 
 function 构建生效(
     [string]$SkillProfile = '',
+    [string[]]$ProjectionHosts = @(),
     [string]$OnlySkill = $OnlySkill,
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection,
     [switch]$SkipLock
 ) {
+    $ProjectionHosts = @(Resolve-SkillProjectionHosts $ProjectionHosts)
     if (-not [string]::IsNullOrWhiteSpace($OnlySkill)) {
-        Need ([string]::IsNullOrWhiteSpace($SkillProfile) -and -not $SkipHostProjection) "-OnlySkill 仅重建 agent/ 中的指定 override 技能，并刷新发现 catalog 与已配置的 Codex/native 技能投影，不能与 -SkillProfile 或 -SkipHostProjection 并用。"
+        Need ([string]::IsNullOrWhiteSpace($SkillProfile) -and -not $SkipHostProjection -and @($ProjectionHosts).Count -eq 0) "-OnlySkill 仅重建 agent/ 中的指定 override 技能，并刷新发现 catalog 与已配置的 Codex/native 技能投影，不能与 -SkillProfile、-ProjectionHosts 或 -SkipHostProjection 并用。"
         return (更新单技能 -SkillName $OnlySkill -AllowUnverifiedProjection:$AllowUnverifiedProjection)
     }
+    Need (-not $SkipHostProjection -or @($ProjectionHosts).Count -eq 0) "-ProjectionHosts 不能与 -SkipHostProjection 并用。"
     if (-not $SkipLock) {
         return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
-            构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipHostProjection:$SkipHostProjection -SkipLock
+            构建生效 -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts -AllowUnverifiedProjection:$AllowUnverifiedProjection -SkipHostProjection:$SkipHostProjection -SkipLock
         })
     }
     & {
@@ -1951,7 +1963,7 @@ function 构建生效(
                 Log "已按显式请求跳过宿主目标与 native skill projection；保留 agent/ 与 cold-discovery catalog 构建产物。"
             }
             elseif ($DryRun) {
-                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -SkillProfile $SkillProfile
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts
                 if ($syncFailures) { $failures += $syncFailures }
             }
             else {
@@ -1986,11 +1998,12 @@ function 构建生效(
                 }
                 if (@($failures).Count -eq 0) {
                     $hostProjectionAttempted = $true
-                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
-            if (-not $SkipHostProjection -and @($failures).Count -eq 0) {
+            $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            if (-not $SkipHostProjection -and $projectCodex -and @($failures).Count -eq 0) {
                 try {
                     $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
                     if ([bool]$bridgeProjection.enabled) {
@@ -2028,7 +2041,7 @@ function 构建生效(
                 if ($hostProjectionAttempted -and -not $DryRun) {
                     try {
                         $restoreContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$true
-                        $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile
+                        $restoreFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $restoreContext -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts
                         if (@($restoreFailures).Count -gt 0) {
                             throw ("补偿投影仍失败 {0} 项：{1}" -f @($restoreFailures).Count, [string]@($restoreFailures)[0])
                         }
