@@ -2028,6 +2028,9 @@ function 构建生效(
                     $failures += ("claude-native-agent-bridge => {0}" -f $_.Exception.Message)
                 }
             }
+            elseif (-not $SkipHostProjection -and $projectClaudeAgents) {
+                Log ("Claude 原生子代理 bridge 已跳过：前序失败 {0} 项，未写入 ~/.claude/agents" -f @($failures).Count)
+            }
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"

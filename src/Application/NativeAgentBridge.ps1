@@ -343,6 +343,7 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
     $after = @{}
     $changed = New-Object System.Collections.Generic.List[string]
     $backups = New-Object System.Collections.Generic.List[string]
+    $receiptWritten = $false
     try {
         if (-not $targetRootExisted) {
             New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
@@ -380,8 +381,10 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
             }
             Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$definition.bytes)
             $written = Get-NativeAgentBridgeFileState $targetPath
-            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("claude agent target verification failed: {0}" -f $targetPath)
+            # Record the landed state before verifying it: a write that succeeds but fails
+            # verification must still be restorable by the rollback below.
             $after[$targetPath] = $written
+            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("claude agent target verification failed: {0}" -f $targetPath)
             $changed.Add([string]$definition.name) | Out-Null
         }
 
@@ -417,6 +420,7 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
             New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null
         }
         Write-Utf8FileAtomic -Path $receiptPath -Content ($receipt | ConvertTo-Json -Depth 12)
+        $receiptWritten = $true
         $persistedReceipt = Get-NativeAgentBridgeFileState $receiptPath
         Need ($persistedReceipt.kind -eq 'file') ('claude native agent bridge receipt was not persisted: {0}' -f $receiptPath)
         Need ([string](Get-NativeAgentBridgeTextFromBytes $persistedReceipt.bytes $receiptPath | ConvertFrom-Json).status -eq 'applied') ('claude native agent bridge receipt verification failed: {0}' -f $receiptPath)
@@ -441,6 +445,22 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
                 else { throw ("claude agent rollback cannot restore a non-file state: {0}" -f $targetPath) }
             }
             catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
+        }
+        # The receipt was persisted as applied before the failure. Replace it with the
+        # real outcome so the evidence never claims a state the disk no longer has.
+        if ($receiptWritten) {
+            try {
+                $outcome = [ordered]@{
+                    schema_version = 1
+                    status = if ($rollbackErrors.Count -eq 0) { 'rolled_back' } else { 'rollback_incomplete' }
+                    owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
+                    recorded_at = [DateTimeOffset]::UtcNow.ToString('o')
+                    target_root = $targetRoot
+                    failure = [string]$failure.Exception.Message
+                }
+                Write-Utf8FileAtomic -Path $receiptPath -Content ($outcome | ConvertTo-Json -Depth 4)
+            }
+            catch { $rollbackErrors.Add(('receipt outcome rewrite failed: {0}' -f $_.Exception.Message)) | Out-Null }
         }
         if ($rollbackErrors.Count -gt 0) {
             throw ('{0}; rollback incomplete: {1}' -f $failure.Exception.Message, ($rollbackErrors -join '; '))
