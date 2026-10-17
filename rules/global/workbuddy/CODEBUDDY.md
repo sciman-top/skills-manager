@@ -1,5 +1,5 @@
-# CODEBUDDY.md - Universal Agent Protocol v9.88 | WorkBuddy / CodeBuddy
-**版本**: 9.88
+# CODEBUDDY.md - Universal Agent Protocol v9.89 | WorkBuddy / CodeBuddy
+**版本**: 9.89
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引

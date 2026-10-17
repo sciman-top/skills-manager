@@ -19,6 +19,7 @@
 - path rules 与 permissions 的 matcher 语义不同，不能互相替代；deny/allow 必须用正反例实测。
 - Claude 内建 Bash sandbox 不支持 native Windows，只支持 macOS、Linux 与 WSL2；native Windows 按 `platform_na` 留痕，并以 permissions、`PreToolUse`、外部隔离和 CI 补位。
 - bypass permissions 不提供 prompt-injection 防护，也不取消 R4/R8；只在明确授权或外部隔离边界内使用。
+- 终端命令默认用内置 `Bash`/`PowerShell` 工具；Desktop 终端面板的 `run_in_terminal` 逐条弹确认且 bypass 不豁免，仅当用户明确要求操作可见终端面板时使用。
 - 修改 auth、provider、MCP 或权限前，先区分登录链路、执行权限、模型能力与仓库代码问题。
 - 未经当前任务明确确认，不得重启、停止、杀掉或自动拉起 Claude Code / Claude Desktop / `claude` 进程；先做文件级投影、dry-run、连通性探针与回滚证据。
 ### B.3 回退
