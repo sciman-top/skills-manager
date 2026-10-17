@@ -40,7 +40,9 @@ build.log.*
 acl-backup-git-*.txt
 
 # local agent / IDE state
-/.claude/
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
 /.codex/*
 !/.codex/config.toml
 !/.codex/rules/
