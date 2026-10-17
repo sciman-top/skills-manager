@@ -207,9 +207,6 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 rule-audit --repo <repo-root> --host codex|claude|zcode --json
 .\skills.ps1 rule-plan --target <AGENTS.md> --desired-file <reviewed.md> --repo-root <repo> --out <plan.json> --json
 .\skills.ps1 rule-apply --plan <plan.json> --repo-root <repo> --token APPLY_RULE_REPO_PATCH --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
-.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --json
 ```
 
 全局 Codex/Claude/ZCode/Antigravity/Gemini/WorkBuddy 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
@@ -228,7 +225,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会按 ZCode profile 把受管 Skills 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
 
-审查默认只读。`rule-estate-audit` 默认排除 `external`、`docs` 与 `文档`，并在已配置的 ZCode/Antigravity/WorkBuddy 用户目录中同时呈现五宿主的静态加载面；缺少受管用户规则会 fail closed。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode/Antigravity/WorkBuddy 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
+审查默认只读。全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。单仓规则写入只经 `rule-plan/rule-apply`：apply 需要 reviewed desired file、before hash 与显式 token。多仓（全域）规则事务已随本分支移除。
 
 ### 技能投影与 fallback
 
@@ -248,20 +245,6 @@ Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安
 ```
 
 默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；对仍会被 Codex `full-compatible` 投影的仓库技能，另输出 `retirement_candidates` 的 host-profile 排除候选。候选只保留精确重叠、目标配置路径和不改变的跨宿主/冷目录范围，不能自行卸载，也不把插件存在推断成成功调用。它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
-
-## 外置参考仓
-
-外置参考棚只是按任务显式启用的只读开发缓存，不是产品运行时、普通编码主链或质量门禁。`skills.json` 始终是 runtime 真源；即使外置 checkout 不存在或没有刷新，普通 build、test、update 和 projection 也应继续工作。
-
-需要源码对比时，`references/reference-shelf.manifest.json` 才登记本次可用的 core/secondary 集合，owned root 为 `D:\CODE\external\skills-manager-references`。以下命令只在显式 refresh/verify 工作流中运行：
-
-```powershell
-.\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
-.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
-.\scripts\verify-reference-governance.ps1
-```
-
-refresh/verify 失败只阻断该次参考研究，不外推为产品主链失败。每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`，不在 Git 中维护动态 latest 状态。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`；没有当前消费者的候选不进入 manifest。
 
 ## 开发与验证
 

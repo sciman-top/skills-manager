@@ -17,11 +17,6 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 动态 HSM 执行状态、运行模式、commit 与 receipt 必须保存在相应 POC 仓的任务 brief/receipt 中；本目录只保留稳定的目标、边界、进入条件和最低证明，不复制阶段快照。
 
-两个附属合同：
-
-- [Reviewed rule-estate change-set](rule-estate-reviewed-change-set.md)：多目标规则写入的唯一 reviewed input 格式。
-- [Reference shelf](../EXTERNAL_REFERENCE_REPO_TIERS.md)：外置参考仓的 owned-root 与刷新边界。
-
 附属参考件：
 
 - [Cold-skill routing acceptance runbook](../runbooks/cold-skill-routing-acceptance.md)：host-specific 验收的输入、receipt 和停止条件；它不替代仓库测试。
@@ -32,7 +27,6 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - 配置：`skills.json` / `skills.lock.json`
 - 生成：`skills.ps1` / `agent/`
 - 审查与 receipt：ignored `reports/`
-- reference inventory：`references/reference-shelf.manifest.json`
 - 门禁：`scripts/quality/run-local-quality-gates.ps1`
 
 仓库结果只证明 `repo_verified`。宿主新会话加载与真实业务验收分别属于 `host_loaded`、`live_accepted`，不得由文档或 synthetic corpus 推导。

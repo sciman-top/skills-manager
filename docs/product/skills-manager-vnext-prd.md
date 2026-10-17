@@ -13,7 +13,7 @@
 1. 浏览、安装、卸载、更新和锁定技能。
 2. 管理 MCP server 清单及目标配置。
 3. 扫描目标仓与当前技能/MCP，生成可审阅建议，并在显式授权后应用。
-4. 审查全局/项目规则，在 reviewed change-set 下计划、应用和回滚。
+4. 审查全局/项目规则：单仓规则在 reviewed desired file 下计划与应用；全局规则经 `global-rules-*` 投影与回滚。
 5. 把最小技能集合投影给宿主，同时保留完整可移植 catalog 供显式发现。
 
 ## 3. 范围
@@ -24,10 +24,9 @@
 - vendor/import/mapping/target 构建
 - MCP install/uninstall/profile/sync
 - target audit 三文件 bundle、recommendations preflight/dry-run/apply
-- rule audit、single-repo patch、rule-estate transaction
+- rule audit、single-repo patch、global rule projection
 - canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
 - host-selected `capability-router` cold discovery/policy validation when visible metadata is insufficient
-- 按任务显式启用的可选 core/secondary reference shelf refresh/verify
 - 可由宿主/operator 调度的 skills-only maintenance runner
 - build、focused tests、contract/invariant checks、risk-triggered full gate；CI 与本地共用 `resolve-gate-profile.ps1`，本地默认 auto。未跟踪文件参与同一分类：文档走 docs，规则走专项测试，已映射源码走行为测试；未知路径、未映射源码、风险变更或分类失败才选 full。main push 与 PR 共用策略，发布标签运行 full。
 
@@ -91,8 +90,6 @@
 - `FR-RUL-001`：发现遵循宿主 global/repo/nested precedence，并区分 Codex 与 Claude Code 执行面；Claude Desktop 内的 Code 会话按 Claude Code 执行面处理，普通聊天的账号同步 skills/plugins 不由本机 `.claude` 投影证明已加载。
 - `FR-RUL-002`：审查默认只读；finding 必须定位到真实文件和可执行修复方向。
 - `FR-RUL-003`：单仓 apply 要求 Git 根、已知规则文件、reviewed desired file、before hash 和显式 token。
-- `FR-RUL-004`：rule-estate 只消费 `review_status=reviewed` 且非 AI self-approval 的 change-set。
-- `FR-RUL-005`：全域 apply 为 `preflight-all -> apply-one-by-one -> receipt-after-each -> fail-fast`，不承诺跨仓原子性。
 
 ### 5.5 投影与发现
 
@@ -106,14 +103,9 @@
 - `FR-PRJ-008`：cold routing 的真值必须拆为 `host_visible`、`candidate_load_validated`、`skill_md_loading`、`native_child` 与 `host_specific_live_accepted`。router receipt 只能证明发现或精确闭包校验；ZCode 父任务代行、模板存在、投影成功、模型可列举或 AI 自述均不得证明 Codex native child 已启动或 `SKILL.md` 已加载。
 - `FR-PRJ-009`：冷路由验收保留一份 tracked 场景矩阵，覆盖用户批准的显式/隐式、可见直达、只发现、普通请求、target-bound、受控写与契约分流类型。隐式场景只声明允许结果集合与禁止行为，不用单个技能名充当 oracle；真实 live receipt 保持 ignored，并由确定性 verifier 校验，不新增长期运行状态库。
 
-### 5.6 Reference shelf
+### 5.6 外置参考仓
 
-- `FR-REF-001`：reference shelf 是可选只读开发缓存；`skills.json` 是 runtime 真源，外置 checkout 缺失或未刷新不得阻断普通 build/test/update/projection。
-- `FR-REF-002`：manifest 只在显式 refresh/verify 中适用，owned root 固定为 `D:\CODE\external\skills-manager-references`。
-- `FR-REF-003`：manifest 只保留 active core/secondary/conditional repo，name/path 唯一；每个 tier 都必须记录明确 consumer 与 retirement trigger，conditional 只显式刷新，default set 只引用 core。
-- `FR-REF-004`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
-- `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
-- `FR-REF-006`：每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；Git 只跟踪 manifest 和稳定说明，不跟踪动态 latest 状态。
+参考仓棚（manifest、refresh/verify、ACL 锁与基线）已移出本仓范围。外置目录属于其他项目，本仓不对其做任何读取、刷新或校验；普通 build、test、update 与 projection 不依赖外置路径。
 
 ## 6. 非功能需求
 
@@ -121,7 +113,7 @@
 - local-first；除显式 source refresh、MCP 或 live probe 外不依赖网络。
 - secret-redaction-first；日志和 receipt 不写 token、header value 或环境 secret。
 - 所有写路径有 containment、freshness、授权、rollback 或 compensation。
-- generated sync、config 或公开契约失败即阻断；reference 只在显式 refresh/verify 时 fail closed，其他检查按当前风险触发。
+- generated sync、config 或公开契约失败即阻断；其他检查按当前风险触发。
 - 不新增只有一个 adapter 的 seam；不为历史兼容保留无 caller interface。
 
 ## 7. 验收

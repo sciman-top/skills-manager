@@ -69,7 +69,7 @@ function Write-PublicReleaseConfig([string]$PackageRoot) {
 
 function Get-TrackedReleaseFiles([string]$Kind) {
     $roots = @('config', 'src')
-    if ($Kind -eq 'Source') { $roots += @('tests', 'scripts', 'docs', '.github', 'references', 'rules') }
+    if ($Kind -eq 'Source') { $roots += @('tests', 'scripts', 'docs', '.github', 'rules') }
     $tracked = @(& git -C $repoRoot ls-files -- @roots)
     if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed while collecting release inputs.' }
     return @($tracked | Where-Object {
@@ -289,8 +289,7 @@ function New-ReleasePackage([string]$Kind) {
     $rootFiles = @(
         'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
         'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.ps1',
-        'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1',
-        'references\README.md', 'references\reference-shelf.manifest.json', 'references\updates\README.md'
+        'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md', 'scripts\release\release-update-worker.ps1'
     )
     # All three host rule wrappers travel together: a Source package without
     # CLAUDE.md/GEMINI.md loses the multi-host project rule entrypoints that

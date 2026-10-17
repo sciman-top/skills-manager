@@ -79,14 +79,6 @@ if ($MyInvocation.InvocationName -ne '.') {
             { $_ -in @("ai-coding", "AI编码") } { $result = Invoke-AiCodingCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output (ConvertTo-AsciiJson $result.output) } else { Write-Output $result.output } }
             { $_ -in @("能力清单", "capability-inventory") } { Write-CommandResult (Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("规则审查", "rule-audit") } { Write-CommandResult (Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域审查", "rule-estate-audit") } { Write-CommandResult (Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域计划", "rule-estate-plan") } { Write-CommandResult (Invoke-RuleEstatePlanCommand (Merge-FilterAndArgs $Filter $args)) }
-            { $_ -in @("规则全域应用", "rule-estate-apply") } {
-                $tokens = Merge-FilterAndArgs $Filter $args
-                if ($RunPlan) { $tokens = @('--plan') + @($tokens) }
-                Write-CommandResult (Invoke-RuleEstateApplyCommand $tokens)
-            }
-            { $_ -in @("规则全域回滚", "rule-estate-rollback") } { Write-CommandResult (Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则检查", "global-rules-check") } { Write-CommandResult (Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则计划", "global-rules-plan") } { Write-CommandResult (Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args)) }
             { $_ -in @("全局规则应用", "global-rules-apply") } {

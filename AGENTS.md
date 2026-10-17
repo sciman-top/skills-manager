@@ -23,7 +23,7 @@
 - 新增文件、模块、门禁或文档前，须说明当前调用方、替代或删除了什么、最小证明。任一答不上即不做。
 - 宿主配置、用户目录、MCP、远端等外部写入须有当前授权、预演和回滚入口。
 - 请求指代不清时，先向用户确认目标，不以"最新文件"等启发式自选。
-- 外置参考仓（`D:\CODE\external\`）的解锁、锁定与 ACL 流程见 [外置参考仓 Runbook](docs/EXTERNAL_REFERENCE_REPO_TIERS.md)；AI 会话不得自行改 ACL 或重钉基线。
+- 外置参考仓（`D:\CODE\external\`）属于其他项目的资产，本仓不再管理其刷新或基线；AI 会话不得修改其内容、ACL 或基线。
 - 元治理测试（ResolveGateProfile、QualityGateAuto、CiWorkflow、TestRunner、BuildScript）冻结：仅真实故障时维护。
 
 ## 4. 最低门禁

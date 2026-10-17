@@ -472,9 +472,9 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
     }
 
     It 'selects existing behavior suites for frequent read and planning modules' -TestCases @(
-        @{ Source = 'src/Application/RuleAdvisor.ps1'; Expected = @('ReadOnlyCli', 'RuleAdvisor', 'RuleEstate') }
-        @{ Source = 'src/Application/RuleDiscovery.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleDiscovery', 'RuleEstate') }
-        @{ Source = 'src/Application/RuleAudit.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleEstate') }
+        @{ Source = 'src/Application/RuleAdvisor.ps1'; Expected = @('ReadOnlyCli', 'RuleAdvisor'); ExpectedLocked = $true }
+        @{ Source = 'src/Application/RuleDiscovery.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit', 'RuleDiscovery'); ExpectedLocked = $true }
+        @{ Source = 'src/Application/RuleAudit.ps1'; Expected = @('ReadOnlyCli', 'RuleAudit'); ExpectedLocked = $true }
          @{ Source = 'src/Application/CapabilityInventory.ps1'; Expected = @('CapabilityInventory', 'ReadOnlyCli') }
          @{ Source = 'src/Commands/AuditTargets.Bundle.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
          @{ Source = 'src/Commands/AuditTargets.Template.ps1'; Expected = @('AuditTargets', 'AuditTargetsHardening') }
@@ -492,7 +492,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r = Invoke-Resolver $repo @{}
         $r.result.profile | Should -Be 'focused'
         @($r.result.focused_test_paths) | Should -Be @($Expected | ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ })
-        $expectedMaterialization = if ($null -eq $ExpectedLocked) { $Expected -contains 'RuleEstate' } else { [bool]$ExpectedLocked }
+        $expectedMaterialization = if ($null -eq $ExpectedLocked) { $false } else { [bool]$ExpectedLocked }
         $r.result.requires_locked_sources | Should -Be $expectedMaterialization
     }
 
@@ -526,7 +526,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Application/NativeAgentBridge.ps1'
             'src/Application/NativeSkillProjection.ps1'
             'src/Application/NativeSkillProjectionCoordinator.ps1'
-            'src/Application/RuleEstateMutation.ps1'
             'src/Application/RulePatchExecutor.ps1'
             'src/Application/RulePatchGuard.ps1'
             'src/Commands/AuditTargets.Apply.ps1'
@@ -536,7 +535,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Commands/Mcp.NativeSync.ps1'
             'src/Commands/Mcp.ProfileAndSafety.ps1'
             'src/Commands/Mcp.ps1'
-            'src/Commands/RuleEstate.ps1'
             'src/Commands/RulePatch.ps1'
             'src/Commands/SkillProjection.ps1'
             'src/Commands/Update.ps1'

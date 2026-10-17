@@ -93,9 +93,6 @@ Release installations can check for a newer skills-manager release and, only aft
 
 # Rule audit and reviewed mutation
 .\skills.ps1 rule-audit --repo <repo-root> --host codex --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
-.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --json
 ```
 
 Target-audit runtime bundles and receipts live under ignored `reports/skill-audit/<run-id>/`. Only explicit `--apply --yes` persists recommendations. Rule mutation additionally requires reviewed input, exact roots and hashes, a token, a receipt, and rollback data.
@@ -115,18 +112,6 @@ Host-native metadata is the normal selection surface. `capability-router` is an 
 ```
 
 By default the inventory returns repository and projected skill surfaces only. `--host-probe` opts into public Codex CLI JSON for plugins, MCP servers, and doctor facts; the result is redacted and read-only. When an enabled plugin and a standalone/system skill share a name, it emits a report-only native-source preference. It never installs, removes, or enables plugins, never reads or writes plugin caches, and does not prove host loading or actual skill invocation.
-
-## Reference shelf
-
-`references/reference-shelf.manifest.json` contains only the current core and secondary reference set below `D:\CODE\external\skills-manager-references`. Refreshing is read-only comparison; it never authorizes adoption, installation, execution, or runtime-import removal.
-
-```powershell
-.\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
-.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
-.\scripts\verify-reference-governance.ps1
-```
-
-Each refresh writes an ignored `reports/reference-refresh/<run-id>/receipt.md`; no dynamic latest state is tracked. Candidates without a current consumer are rediscovered when needed instead of being kept in a permanent backlog.
 
 ## Development and verification
 

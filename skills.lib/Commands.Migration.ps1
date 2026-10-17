@@ -390,7 +390,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
             restore_ready = ($options.mode -ne 'rescan')
             git_history_included = $false
             license_file = if ($options.mode -ne 'rescan' -and (Test-Path -LiteralPath (Join-Path $Root 'LICENSE') -PathType Leaf)) { 'LICENSE' } else { $null }
-            source_directories = if ($options.mode -ne 'rescan') { @('src','skills.lib','config','tests','scripts','docs','rules','overrides','vendor','imports','agent','references','.github') } else { @() }
+            source_directories = if ($options.mode -ne 'rescan') { @('src','skills.lib','config','tests','scripts','docs','rules','overrides','vendor','imports','agent','.github') } else { @() }
             credential_file = $credentialFileName
             apply = if ($options.mode -eq 'rescan') {
                 @('先在新电脑安装同版本的 skills-manager', '在新电脑运行 skills.ps1 发现', '按需运行 skills.ps1 安装 和 同步MCP')
@@ -411,7 +411,7 @@ function Invoke-MigrationCommand([string[]]$Tokens) {
                 $source = Join-Path $Root $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name) -Force }
             }
-            foreach ($directory in @('src','skills.lib','config','tests','scripts','docs','rules','references','.github')) {
+            foreach ($directory in @('src','skills.lib','config','tests','scripts','docs','rules','.github')) {
                 $source = Join-Path $Root $directory
                 # The independent preset tool stores host-config backups under src/.
                 $excluded = if ($directory -eq 'src') { @('model-orchestration/.state', 'model-orchestration/.generated') } else { @() }

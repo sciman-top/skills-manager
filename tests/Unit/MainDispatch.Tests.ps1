@@ -1,8 +1,5 @@
 Describe 'CLI alias dispatch' {
     It 'routes <Command> once and preserves its arguments' -ForEach @(
-        @{ Command = '规则全域应用'; Expected = 'apply'; Tokens = @('--plan', 'fixture', '--json') }
-        @{ Command = 'rule-estate-apply'; Expected = 'apply'; Tokens = @('--plan', 'fixture', '--json') }
-        @{ Command = 'RULE-ESTATE-APPLY'; Expected = 'apply'; Tokens = @('--plan', 'fixture', '--json') }
         @{ Command = '安装MCP'; Expected = 'install'; Tokens = @('fixture', '--json') }
         @{ Command = 'mcp-install'; Expected = 'install'; Tokens = @('fixture', '--json') }
         # release-update returns a string only on its --json branch (the non-JSON branch
@@ -30,13 +27,6 @@ Describe 'CLI alias dispatch' {
                 # The dispatch seam escapes non-ASCII JSON for stdout; this runspace is
                 # bare, so stub it — routing is what this test pins, not the escaping.
                 function ConvertTo-AsciiJson([string]$Json) { return $Json }
-                function Invoke-RuleEstateApplyCommand($Tokens) {
-                    return [pscustomobject]@{
-                        json = $true
-                        output = (@{ handler = 'apply'; tokens = @($Tokens) } | ConvertTo-Json -Compress)
-                        exit_code = 0
-                    }
-                }
                 function 安装MCP($Tokens) { @{ handler = 'install'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
                 function Invoke-ReleaseUpdateCommand($Tokens) { @{ handler = 'release'; tokens = @($Tokens) } | ConvertTo-Json -Compress }
                 function Invoke-AiCodingCommand($Tokens) { [pscustomobject]@{ handler = 'ai-coding'; tokens = @($Tokens); json = $true; output = (@{ handler = 'ai-coding'; tokens = @($Tokens) } | ConvertTo-Json -Compress); exit_code = 0 } }
