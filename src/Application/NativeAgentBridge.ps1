@@ -254,6 +254,11 @@ function Get-NativeAgentBridgeTemplateRecord($SourcePath, [string]$Name) {
     }
 }
 
+function Test-ClaudeNativeAgentOwnership([string]$Content) {
+    $frontmatter = [regex]::Match($Content.TrimStart([char]0xFEFF), '\A---\r?\n(?<header>.*?)\r?\n---\r?\n', [Text.RegularExpressions.RegexOptions]::Singleline)
+    return ($frontmatter.Success -and $frontmatter.Groups['header'].Value -match '(?m)^# skills-manager-native-agent-bridge: v1\s*$')
+}
+
 function Assert-ClaudeNativeAgentTemplateContent([string]$Content, [string]$SourcePath, [string]$Name) {
     $content = $Content.TrimStart([char]0xFEFF)
     $frontmatter = [regex]::Match($content, '\A---\r?\n(?<header>.*?)\r?\n---\r?\n', [Text.RegularExpressions.RegexOptions]::Singleline)
@@ -263,6 +268,13 @@ function Assert-ClaudeNativeAgentTemplateContent([string]$Content, [string]$Sour
     if ($header -notmatch ('(?m)^name:\s*{0}\s*$' -f [regex]::Escape($Name))) { throw ("claude agent template name mismatch: {0}" -f $SourcePath) }
     foreach ($field in @('description', 'tools')) {
         if ($header -notmatch ('(?m)^{0}:\s*\S' -f $field)) { throw ("claude agent template lacks {0}: {1}" -f $field, $SourcePath) }
+    }
+    # Shipped templates use only flat, unquoted scalar fields; reject other YAML syntax rather than partially interpreting it.
+    foreach ($line in ($header -split '\r?\n')) {
+        if ($line -match '^\s*(#.*)?$') { continue }
+        if ($line -cnotmatch '^(name|description|tools|maxTurns):[ \t]+[^\r\n]+$') {
+            throw ("claude agent template has unsupported frontmatter syntax or field: {0}" -f $SourcePath)
+        }
     }
     # Model and effort follow the active route, so a shipped template must not pin them (roadmap CSR-R1).
     if ($header -match '(?m)^(model|effort|provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:') {
@@ -339,6 +351,7 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
         throw ('claude agent target root is not a regular directory: {0}' -f $targetRoot)
     }
     $backupRoot = Get-NativeAgentBridgeBackupRoot $targetRoot
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot (Split-Path -Parent $targetRoot)
     $before = @{}
     $after = @{}
     $changed = New-Object System.Collections.Generic.List[string]
@@ -361,7 +374,7 @@ function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switc
             if ($current.kind -eq 'reparse' -or $current.kind -eq 'directory') { throw ("claude agent target must be a regular file: {0}" -f $targetPath) }
             if ($current.kind -eq 'file') {
                 $existing = Get-NativeAgentBridgeTextFromBytes $current.bytes $targetPath
-                if ($existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("claude agent target is not owned by skills-manager: {0}" -f $targetPath) }
+                if (-not (Test-ClaudeNativeAgentOwnership $existing)) { throw ("claude agent target is not owned by skills-manager: {0}" -f $targetPath) }
             }
             if ($current.kind -eq 'file' -and [string]::Equals([string]$current.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) {
                 continue

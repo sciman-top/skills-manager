@@ -2773,17 +2773,41 @@ Describe "Audit git evidence fail-closed" {
         finally { Pop-Location }
     }
 
+    It "Skips redundant changed-path Git queries for a clean repository" {
+        $repo = Join-Path $TestDrive "audit-git-clean-fast-path"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        Set-ContentUtf8 (Join-Path $repo "clean.txt") "clean"
+        & git -C $repo add clean.txt
+        & git -C $repo commit -q -m init
+        Push-Location $repo
+        try {
+            Mock Get-AuditGitChangedPaths { throw "clean repository must not query changed paths" }
+
+            $clean = Get-AuditGitInfo $repo
+
+            $clean.dirty | Should -Be $false
+            $clean.status_count | Should -Be 0
+            Should -Invoke Get-AuditGitChangedPaths -Times 0 -Exactly -Scope It
+        }
+        finally { Pop-Location }
+    }
+
     It "Fingerprints plain untracked directories by content and nested repos by head" {
         $repo = Join-Path $TestDrive "audit-git-dir-evidence"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         & git -C $repo init -q 2>$null
         Set-ContentUtf8 (Join-Path $repo "root.txt") "root"
-        & git -C $repo add root.txt
+        Set-ContentUtf8 (Join-Path $repo ".gitignore") "plain-dir/ignored-cache/"
+        & git -C $repo add root.txt .gitignore
         & git -C $repo commit -q -m init
         # 普通未跟踪目录（父仓内）与嵌套仓各一。
         $plainDir = Join-Path $repo "plain-dir"
         New-Item -ItemType Directory -Path $plainDir -Force | Out-Null
         Set-ContentUtf8 (Join-Path $plainDir "note.txt") "v1"
+        $ignoredCache = Join-Path $plainDir "ignored-cache"
+        New-Item -ItemType Directory -Path $ignoredCache -Force | Out-Null
+        Set-ContentUtf8 (Join-Path $ignoredCache "cache.bin") "ignored-v1"
         $nestedPath = Join-Path $repo "nested"
         New-Item -ItemType Directory -Path $nestedPath -Force | Out-Null
         & git -C $nestedPath init -q 2>$null
@@ -2804,6 +2828,12 @@ Describe "Audit git evidence fail-closed" {
             $pairsAfter = @(Get-AuditGitPathStatePairs @("plain-dir"))
             $plainAfter = [regex]::Match($pairsAfter[0], 'directory:([0-9a-f]{64})').Groups[1].Value
             $plainAfter | Should -Not -Be $plainBefore
+
+            # Git 忽略的缓存变化不属于工作树漂移，也不能令扫描触碰缓存子树。
+            Set-ContentUtf8 (Join-Path $ignoredCache "cache.bin") "ignored-v2"
+            $ignoredChangedPairs = @(Get-AuditGitPathStatePairs @("plain-dir"))
+            $ignoredChangedFingerprint = [regex]::Match($ignoredChangedPairs[0], 'directory:([0-9a-f]{64})').Groups[1].Value
+            $ignoredChangedFingerprint | Should -Be $plainAfter
 
             # 嵌套仓按 head|status 对取证（head 进入指纹）。
             $nestedPair = @($pairs | Where-Object { $_ -like 'path|nested|*' })[0]
