@@ -45,6 +45,16 @@
 - 无当前消费者的 reference candidate backlog
 - tracked task/evidence/archive 作为第二状态数据库
 
+### 3.1 冻结面（仅真实故障修复，不新增能力）
+
+下列能力仍在仓库中，但不属于 §2 的核心任务，也不是日常主链。修复真实故障可以做；新增功能、扩大范围或接入日常主链，须先由用户明确解冻：
+
+- 冷技能路由（`capability-router`、CSR 系列）：路线图状态为 `engineering-frozen`，见 [冷技能路由路线图](cold-skill-routing-roadmap.md)。
+- AI 风控分诊（`ai-risk-control`）：只读计划入口，不属于技能/MCP 管理。
+- 独立模型 preset 工具（`src/model-orchestration/`）：独立于主 CLI 构建链，不参与技能/MCP 构建。
+- 发行更新调度（`release-update-schedule`）：仅在用户显式 `--enable` 时注册计划任务。
+- Hermes 外部 consumer 与 skill evolution（§5.7）：尚未实现，需先通过 POC 门禁。
+
 ## 4. 产品原则
 
 - 原生优先：宿主能完成的语义选择与执行不在仓库复制。

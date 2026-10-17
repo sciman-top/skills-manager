@@ -1,12 +1,13 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.87
-**最后更新**: 2026-10-15
+**最后更新**: 2026-10-17
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 原生读取它，已有 `.agents/rules/00-project.md` 以合法 frontmatter 和内联引用承接同一真源。
 - 主 CLI 管理本地技能/MCP、目标仓规则审查、原生技能投影及 `rules/global/` 的受控投影，不接管模型或宿主 runtime。独立的 `src/model-orchestration/` 仅提供显式 preset 配置和受控启动，遵循其局部 `AGENTS.md`，不进入主 CLI 构建链；两者均不接管 auth、provider、权限、会话或插件缓存。
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
+- 冻结面（仅真实故障修复，解冻须用户明确授权）：清单见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
 
 ## A. 仓库真值与领域不变量
 - `build.ps1` 从 `src/` 生成根 `skills.ps1`（薄入口）与 `skills.lib/`（按源文件 1:1 的库文件；base 常载，命令包按分发闭包惰性加载），并从 `rules/global/common.md` 与 `platforms/*.md` 生成五份全局宿主规则；`-Check` 只读核对全部生成物漂移。`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
@@ -24,7 +25,7 @@
 - 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。
 - 更新 vendor/import/MCP 前记录来源、锁定、影响与回滚；宿主/provider/auth/session/plugin/MCP mutation 需要当前明确授权。
 - `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
-- `D:\CODE\external\` 当前经用户授权长期保持解锁，以支持受控参考仓更新；不自动重新加 deny-write ACL。锁脚本无参数只读报告，重新锁定必须显式 `-Lock`，`-Unlock` 只清理历史 ACL；以 `-Status -Deep` 验收全树 deny 残留为 0、顶层写探针通过。解锁态由 `references/external-readonly-baselines.json` 的 HEAD、origin 与 cleanliness 检查兜底；只通过显式 `-RefreshBaseline` 接受干净仓库的 fast-forward 更新。AI 会话不得自行改 ACL 或重钉基线。
+- 外置参考仓（`D:\CODE\external\`）的解锁、锁定、基线与 ACL 操作流程见 [外置参考仓 Runbook](docs/EXTERNAL_REFERENCE_REPO_TIERS.md)；AI 会话不得自行改 ACL 或重钉基线。
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
 - 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。准入三问（当前调用方 / 替代或删除了什么 / 最小验证）任一答不上即拒绝，PR 模板同栏。
 - 元治理测试五套（ResolveGateProfile / QualityGateAuto / CiWorkflow / TestRunner / BuildScript）冻结：仅真实故障触发式维护，不做主动性增强或扩面。
@@ -34,6 +35,7 @@
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
 - 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；2026-10-04 的 WorkBuddy 桌面会话记录过小时级膨胀，且命中 `docs/runbooks/agent-sandbox-instrumentation.md` 所列指纹，不能外推到无指纹的 ZCode 或其他宿主，也不能单独证明全部延迟都由删除 shim 造成 ⇒ 门禁按指纹拦截此类宿主的非 CI full（`-AllowShimmedFull` 显式豁免），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
+- 生成物守卫（辅助，非唯一防线）：`.claude/hooks/guard-generated.ps1` 与 `.githooks/pre-commit` 阻断手改生成物及其与源不同批提交；Bash 写入不受 hook 覆盖，最终裁决是 CI `-CheckGenerated`。
 - 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
 - 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
 - 全面审查按比例止损：距上次「维持现状」结论不足 30 天且 src/config 变更不足 10 文件时，只做增量核对并引用该结论，不重开全量重审。
