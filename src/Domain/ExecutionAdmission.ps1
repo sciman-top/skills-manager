@@ -399,12 +399,18 @@ function New-ExecutionAdmission {
         [string[]]$ExactWriteSet = @(),
         [string]$MinimumProof = '',
         [string]$PriorAdmissionId = '',
-        [string]$AttributableUserAnswer = ''
+        [string]$AttributableUserAnswer = '',
+        [ValidateSet('', 'human_verbatim_answer', 'authorized_ai_delegate_answer')][string]$AnswerProvenance = '',
+        [string]$AuthorizationEvidence = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($OriginalRequest) -or [string]::IsNullOrWhiteSpace($AdmittedGoal) -or [string]::IsNullOrWhiteSpace($AuthorityBasis)) { throw 'admission_required_field_missing' }
     if (-not (Test-OperationRfc3339 $IssuedAt)) { throw 'admission_issued_at_invalid' }
     if (-not [string]::IsNullOrWhiteSpace($PriorAdmissionId) -and $PriorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { throw 'prior_admission_id_invalid' }
+    # An answer must say where it came from. Only a human verbatim answer may advance a design interview:
+    # an AI delegate answer is refused outright, whatever evidence accompanies it (see the interview policy).
+    if (-not [string]::IsNullOrWhiteSpace($AttributableUserAnswer) -and [string]::IsNullOrWhiteSpace($AnswerProvenance)) { throw 'answer_provenance_missing' }
+    if ($AnswerProvenance -eq 'authorized_ai_delegate_answer') { throw 'delegate_answer_not_accepted' }
 
     $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     $profile = Get-ExecutionAdmissionProfile ([string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $validationSnapshot 'effective_execution_contract') 'mode'))
@@ -434,6 +440,8 @@ function New-ExecutionAdmission {
         validation_snapshot = $validationSnapshot
         prior_admission_id = $PriorAdmissionId
         attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
+        answer_provenance = $AnswerProvenance
+        authorization_evidence_sha256 = if ([string]::IsNullOrWhiteSpace($AuthorizationEvidence)) { '' } else { Get-OperationSha256 $AuthorizationEvidence }
     }
     if ($RequestedOperation -eq 'controlled_write') {
         $admission | Add-Member -NotePropertyName workspace_root -NotePropertyValue ([IO.Path]::GetFullPath($RepoRoot))
@@ -734,7 +742,9 @@ function New-ExecutionAdmissionSuccessor {
         [Parameter(Mandatory = $true)]$Validation,
         [Parameter(Mandatory = $true)][string]$IssuedAt,
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [string]$SkillRoot = $RepoRoot
+        [string]$SkillRoot = $RepoRoot,
+        [ValidateSet('', 'human_verbatim_answer', 'authorized_ai_delegate_answer')][string]$AnswerProvenance = '',
+        [string]$AuthorizationEvidence = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { throw 'attributable_user_answer_missing' }
@@ -744,7 +754,7 @@ function New-ExecutionAdmissionSuccessor {
     if (-not $priorRevalidation.pass) { throw ('continuation_predecessor_not_revalidated: {0}' -f ((@($priorRevalidation.findings | ForEach-Object code) -join ','))) }
     if ((Get-OperationSha256 $OriginalRequest) -ne [string](Get-ExecutionAdmissionProperty $PriorAdmission 'request_sha256')) { throw 'continuation_request_mismatch' }
 
-    $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -SkillRoot $SkillRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer
+    $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -SkillRoot $SkillRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer -AnswerProvenance $AnswerProvenance -AuthorizationEvidence $AuthorizationEvidence
     $successorPlan = New-ExecutionPlan -Admission $successor
     $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $successorPlan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     if (-not $continuation.pass) { throw ('execution_admission_continuation_invalid: {0}' -f ((@($continuation.findings | ForEach-Object code) -join ','))) }

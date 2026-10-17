@@ -164,7 +164,11 @@ child checks those constraints in the payload it was given and cannot recompute
 hashes without a shell; the parent's revalidation remains the content check
 for the file. Each later answer needs
 `New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
-with a new attempt identity and a later `issued_at`. A predecessor that existed
+with a new attempt identity and a later `issued_at`. Pass `-AnswerProvenance`
+as `human_verbatim_answer`. `authorized_ai_delegate_answer` is not accepted for a
+multi-turn interview: a delegate answer may only test the continuation mechanism
+and never counts as a user answer. The successor records the provenance and the
+evidence hash; a child refuses an answer whose provenance is absent. A predecessor that existed
 only in a finished PowerShell process cannot be rebuilt, so do not forward an
 answer to the same child without a successor; restart with a new root admission
 and say so in the report, rather than forging a continuation.

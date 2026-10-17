@@ -22,9 +22,8 @@ call a bare `wait`, simulate a child, or run this interview in the parent.
 Ask exactly one high-leverage question at a time. State the question, the
 smallest useful set of choices or decision boundary, and a recommended answer.
 Wait for an accepted answer before asking the next question. An accepted answer
-is attributable human verbatim input or an explicitly authorized
-`authorized_ai_delegate_answer` with preserved authorization evidence and
-SHA-256; the delegate form never establishes human acceptance or
+is attributable human verbatim input only; an AI delegate answer is not
+accepted, and it never establishes human acceptance or
 `host_specific_live_accepted`. Re-evaluate the
 remaining decision tree after each answer; do not ask downstream questions
 before their prerequisites are settled.

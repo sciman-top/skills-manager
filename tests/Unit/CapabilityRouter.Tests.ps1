@@ -626,6 +626,9 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'cannot\s+recompute\s+hashes'
         # A live child rejected identifiers alone; the full successor payload must travel inline.
         $skill | Should -Match 'complete successor bridge payload inline'
+        # Live children refuse an answer without its provenance. A delegate answer is not accepted for an interview.
+        $skill | Should -Match '-AnswerProvenance'
+        $skill | Should -Match 'is not accepted for a\s+multi-turn interview'
     }
 
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
