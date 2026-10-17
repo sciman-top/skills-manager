@@ -40,19 +40,33 @@ context supplies one. Stop and ask the user for the target (the
 loading. Inventing a substitute task to route around the missing payload is
 fail-open on an unknown target, not routing.
 
+Bash tool (Git Bash on Windows, the usual Claude shell). Pass one or two
+functional domains as a literal comma-separated token, and single-quote the
+request so a `$skill-name` inside it is not expanded:
+
+```bash
+pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint decision,engineering
+```
+
+PowerShell (one or two functional domains, not task keywords):
+
 ```powershell
-$domainHints = @('decision') # one or two functional domains, not task keywords
-$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint $domainHints | ConvertFrom-Json
+$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint decision,engineering | ConvertFrom-Json
 $result.retrieval.candidates
 ```
 
-Run this from a PowerShell shell, not `cmd.exe`: under `cmd.exe /c`, the
+Do not paste a PowerShell `$variable` into a Bash command. An unset
+`$domainHints` leaves `-DomainHint` without a value, so `pwsh` exits with a
+parameter-binding error before the router runs (exit 1, no JSON). That is a
+binding failure, not a semantic miss and not an empty catalog: correct the
+argument and run the same single discovery once. Do not treat it as
+"cold discovery unavailable".
+
+Prefer PowerShell 7 with `-File` from either shell. Under `cmd.exe /c`, the
 `-File` form breaks on quoting when `-Query` contains spaces or non-ASCII
-text, and repeated failed attempts look like a broken router. If the host
-shell is `cmd.exe` anyway, pass the whole invocation through
+text. If the host shell is `cmd.exe`, pass the whole invocation through
 `pwsh -NoProfile -Command "& { ... }"` or `-EncodedCommand`, and treat a
-non-zero exit as "the router did not run" — retry once with the robust form
-instead of concluding cold discovery is unavailable.
+non-zero exit as "the router did not run" rather than as an empty catalog.
 
 The router writes a pure-ASCII JSON document: every non-ASCII character in a
 skill description is emitted as a `\uXXXX` escape. Keep the plain

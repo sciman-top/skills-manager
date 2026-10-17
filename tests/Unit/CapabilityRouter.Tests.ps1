@@ -576,6 +576,36 @@ Describe 'Capability router fallback' {
         $result.execution_authorization.status | Should -Be 'not_granted'
     }
 
+    It 'accepts the Bash-form comma-separated domain hint from a child process' {
+        # Claude's Bash tool on Windows is Git Bash; the documented form passes
+        # `-DomainHint decision,engineering` as one literal token. A child pwsh
+        # must bind that token as a two-element list, not one unknown domain.
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.domains += [pscustomobject][ordered]@{name='decision';purpose='Decision';skill_names=@()}
+        Write-TestCatalog $document $catalog
+
+        $child = Invoke-RouterInChildProcess $router @(
+            '-Query', 'design',
+            '-CatalogPath', $catalog,
+            '-DomainHint', 'decision,engineering'
+        )
+
+        $child.result.routing_receipt.status | Should -Be 'candidates_returned'
+        @($child.result.retrieval.candidates.name) | Should -Be @('codebase-design')
+    }
+
+    It 'documents shell-neutral discovery commands that do not expand PowerShell variables in Bash' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # `$domainHints` is PowerShell-only. Pasted into Git Bash it expands to
+        # nothing, so `-DomainHint` loses its value and pwsh fails before the
+        # router runs (exit 1, no JSON), which a host reads as "router broken".
+        $skill | Should -Not -Match '-DomainHint \$domainHints'
+        $skill | Should -Match '-DomainHint decision,engineering'
+        $skill | Should -Match 'Git Bash'
+        $skill | Should -Match 'binding failure'
+    }
+
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
         $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
