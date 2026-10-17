@@ -55,7 +55,7 @@ function ThrowCapabilityBlock($Status, $Reason, $SupportedEfforts = @()) {
     $capability.upstream_contacted = $false
     $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 8 -Compress
     $doc
-    throw "Capability preflight blocked dispatch; no upstream request was sent. $doc"
+    throw "Capability preflight blocked dispatch; no model request was sent. $doc"
 }
 function Get-CodexCatalog([string]$Path) {
     if ($Path) {
@@ -105,6 +105,54 @@ function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$
         source = $source
     }
 }
+function Get-CodexRetryControl([string]$ProfileName) {
+    $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        [IO.Path]::GetFullPath($env:CODEX_HOME)
+    }
+    else {
+        Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex'
+    }
+    $basePath = Join-Path $codexRoot 'config.toml'
+    $profilePath = Join-Path $codexRoot ($ProfileName + '.config.toml')
+    $baseText = if (Test-Path -LiteralPath $basePath -PathType Leaf) { [IO.File]::ReadAllText($basePath) } else { '' }
+    $profileText = if (Test-Path -LiteralPath $profilePath -PathType Leaf) { [IO.File]::ReadAllText($profilePath) } else { '' }
+
+    function Get-RootTomlString([string]$Text, [string]$Key) {
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        $rootText = [regex]::Split($Text, '(?m)^\s*\[[^\]]+\]\s*(?:#.*)?$')[0]
+        $keyPattern = [regex]::Escape($Key)
+        $pattern = '(?m)^\s*' + $keyPattern + '\s*=\s*(?:"(?<double>[^"]+)"|''(?<single>[^'']+)'')\s*(?:#.*)?$'
+        $matches = [regex]::Matches($rootText, $pattern)
+        if ($matches.Count -gt 1) { throw "Codex TOML has duplicate root key '$Key'." }
+        if ($matches.Count -eq 0) { return $null }
+        if ($matches[0].Groups['double'].Success) { return $matches[0].Groups['double'].Value }
+        return $matches[0].Groups['single'].Value
+    }
+
+    $providerId = Get-RootTomlString $profileText 'model_provider'
+    if ([string]::IsNullOrWhiteSpace($providerId)) { $providerId = Get-RootTomlString $baseText 'model_provider' }
+    if ([string]::IsNullOrWhiteSpace($providerId) -or $providerId -ceq 'openai') {
+        throw 'The effective Codex provider is built-in or unset; the documented per-provider retry cap is unavailable.'
+    }
+    if ($providerId -cnotmatch '^[A-Za-z0-9_-]+$') { throw 'The effective Codex provider id cannot be safely addressed by a CLI config override.' }
+
+    $sectionPattern = '(?m)^\s*\[model_providers\.' + [regex]::Escape($providerId) + '\]\s*(?:#.*)?$'
+    if ($baseText -notmatch $sectionPattern -and $profileText -notmatch $sectionPattern) {
+        throw 'The effective Codex provider has no declared custom model_providers table for a per-invocation retry override.'
+    }
+    return [ordered]@{
+        provider_id = $providerId
+        request_max_retries = 0
+        stream_max_retries = 0
+        scope = 'this_codex_cli_invocation'
+    }
+}
+$codexRetryControl = $null
+if (-not $Plan -and $targetHost -eq 'codex') {
+    try { $codexRetryControl = Get-CodexRetryControl $routePreset.Replace('_','-') }
+    catch { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
+    $capability.retry_control = $codexRetryControl
+}
 if (-not $Plan) {
     if ($CapabilityMode -eq 'provider_override') {
         try { $capability.evidence = Get-ProviderCapabilityEvidence $CapabilityProbePath ([string]$route.model) ([string]$route.effort) }
@@ -129,6 +177,10 @@ if ($targetHost -eq 'codex') {
     $cliArgs = @('exec','--profile',$routePreset.Replace('_','-'),'--strict-config','--json','--skip-git-repo-check','-C',$WorkingDirectory,
         '-c',('model="'+$route.model+'"'),'-c',('review_model="'+$route.model+'"'),
         '-c',('model_reasoning_effort="'+$route.effort+'"'),'-c','agents.enabled=false','--disable','multi_agent')
+    if ($null -ne $codexRetryControl) {
+        $providerId = [string]$codexRetryControl.provider_id
+        $cliArgs += @('-c',("model_providers.$providerId.request_max_retries=0"),'-c',("model_providers.$providerId.stream_max_retries=0"))
+    }
     if ($Ephemeral) { $cliArgs += '--ephemeral' }
     if ($readOnlyTask) { $cliArgs += @('--sandbox','read-only') }
     $executable = 'codex'

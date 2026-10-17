@@ -53,7 +53,7 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 
 ## 2. 前置条件与输入冻结
 
-1. 记录当前 repo HEAD、git status、host 名称、执行表面（Codex/ZCode）、模型与 reason effort。
+1. 记录当前 repo HEAD、git status、host 名称、执行表面（Codex/ZCode）、模型、reason effort 与 parent session sandbox。只读场景必须从 parent read-only sandbox 运行；Codex custom-agent 文件不能降低 parent 权限。
 2. 完成当前切片对应的 repo gate。junction 基线至少包含：
 
        pwsh -NoProfile -File .\tests\run.ps1 -TestPath tests/Unit/CapabilityRouterCrossRepo.Tests.ps1
@@ -202,10 +202,23 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 1. 执行 pwsh -NoProfile -File .\skills.ps1 构建生效。
 2. 读取 reports/native-agent-bridge/current.json。
 3. 对 design-griller 和 cold-capability-runner，比较 source_sha256 与 target_sha256；确认 source_revision 是本次提交，backup_paths 精确、无意外 definitions。
-4. 只读检查 ~/.codex/agents 下两文件：均无 model/effort/provider/auth/base_url/secret/fallback，避免覆盖 active preset。
+4. 只读检查 ~/.codex/agents 下两文件：均无 model/effort/provider/auth/base_url/secret/fallback、`sandbox_mode` 或 `[agents]` table，避免把 parent-session 设置误当作 per-agent 限制。
 5. 将 receipt 的 source revision、source/target hash 和 backup path 写进本 run metadata。
 
 成功仅为 filesystem_projected；不得在此时报告 host_loaded 或 live acceptance。
+
+Codex custom-agent 文件继承 parent sandbox、approval、provider 与 MCP；`[agents].enabled` 只属于 root config。`Never spawn subagents` 是 runner 指令，不是硬工具禁用。live run 必须在 parent sandbox 内执行，并从 host event 确认 runner 没有创建嵌套 child。
+
+### 6.1.1 Codex CLI 单请求上限
+
+Codex 官方配置参考为命名 custom provider 提供 `request_max_retries` 与 `stream_max_retries`（默认值分别为 4 与 5）。对 Codex CLI 的 controlled live run，确认所选 profile 的 `model_provider`；未设置时再读基础 config。若它指向已声明的 custom provider，在同一次命令中加入：
+
+```powershell
+-c 'model_providers.<provider-id>.request_max_retries=0' `
+-c 'model_providers.<provider-id>.stream_max_retries=0'
+```
+
+这会关闭 Codex CLI 针对该 provider 的自动 HTTP/SSE 重试，不改持久配置；它不控制下游 gateway 自己的重试。provider 为内置 `openai`、未设置或无法核实 custom table 时，停止该 one-attempt live probe；不要创建 provider、改 auth 或修改全局 config。当前 Codex CLI 0.159.2 的 `codex debug prompt-input -c ...` 可用于离线检查覆盖字段能被解析，但不证明实际请求行为。参见 [官方多代理指南](https://developers.openai.com/codex/multi-agent/) 和[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
 ### 6.2 设计审问多轮路径
 
@@ -218,7 +231,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 ### 6.3 单轮只读 runner 路径
 
-1. 在独立 fresh Codex session 运行 S31-live-derived；需要显式委派意图时使用矩阵中对应的 runner dispatch 请求，保存实际原文，不把改写请求计作原样通过。
+1. 在独立 fresh Codex session 运行 S31-live-derived；read-only admission 必须使用 parent read-only sandbox。Codex CLI 按 6.1.1 对有效 custom provider 显式设 retry 上限为 0。需要显式委派意图时使用矩阵中对应的 runner dispatch 请求，保存实际原文，不把改写请求计作原样通过。
 2. parent 必须用确定性的 `ExecutionAdmission` helper 生成并重验证 schema-v2 `execution_admission` 与 `execution_plan`；两者绑定原始请求、完整 router validation、唯一 selected entry、validated closure、entrypoint/package hash、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop、同一 admission id 与 `run_once` action。raw router JSON 或手写 prose contract 不算 admission。
 3. native spawn 前检查实际 child message：必须显式携带 `validated_skill_name`、`validated_skill_path`、完整 router validation、完整 `validated_closure`、原始请求、effective execution contract、schema-v2 admission 和 plan、`RepoRoot` 与 `SkillRoot`。仅有路由 receipt、父级 admission 成功或“使用该技能”的文字不够。若使用 handoff file，另传并验证其 path、SHA-256 和 admission id；read-only 验收若禁止文件写入，则在 child message 中直接传完整对象。缺少任一项时按 `bridge_admission_required` 停止，不重试、不替换 agent，也不调用 `wait`。
 4. 仅在 `spawn_agent` 返回非空 child id 后等待同一 child；记录 child id、实际 model/effort、active preset 与所选槽位、completed 事件、输入/输出 evidence reference。若宿主事件流未暴露 child id，则用与 host thread 绑定的 child rollout 作为证据；两者都没有时记 `native_child=not_observable`。
@@ -262,7 +275,7 @@ Skill 可见、目录存在或最终文本声称“已校验”均不足；必�
 | --- | --- | --- | --- |
 | catalog invalid、junction physical counterpart 缺失 | deterministic router failure | 保留 receipt，复现 focused test，定位 path/hash | 取消 reparse/containment |
 | model/effort 不属于 active preset 所选槽位 | deployment mismatch | 保存 child/config evidence，检查 preset/slot 与 spawn 参数 | 改 global default 或声称历史数据通过 |
-| 503/auth/provider | host availability blocker | 记录 host-specific fail，停止当次 live acceptance | 重启/改 auth/provider 或将失败改为 not_applicable |
+| 429/quota/rate-limit/503/auth/provider | host availability blocker | 记录 host-specific fail，停止当次 live acceptance | 重发、自动换模型、重启/改 auth/provider 或将失败改为 not_applicable |
 | child 不可观测 | observability blocker | assertion=not_observable，保留较低边界 | 由 parent prose 推断 child |
 | multi-turn 被摘要 | contract violation | assertion=fail，检查 parent/bridge contract | 让 runner 给一次性结论 |
 | unexpected write/external call | admission violation | 停止、保存精确 write/call evidence，走本次 rollback | 继续扩展 write set |

@@ -259,7 +259,7 @@ foreach ($entry in $enabledRoutes) {
     $rolePath = Join-Path $PSScriptRoot ".generated/codex/pool/$($entry.role).toml"
     $description = "Model pool role $($entry.role), $($entry.model)/$($entry.effort). Parent assigns the task slot, exact scope, write set, proof and stop; use only when this exact tuple is supported by the current host."
     $instructions = 'Execute the assigned bounded task and obey its read-only or write scope. Preserve unrelated work. Do not delegate, change models or replay completed writes. Return verification evidence and unresolved uncertainty to the parent, then stop.'
-    $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '', '[agents]', 'enabled = false', '') -join "`n"
+    $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
     AddFile $rolePath $roleText
     $tupleBlocks.Add("[agents.$($entry.role)]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
 }
@@ -350,7 +350,7 @@ foreach ($id in $codexIds) {
         $description = "Execution slot $slot, $($entry.model)/$($entry.effort). " + $(if ($readOnly) { 'Read-only evidence work. ' } else { 'Bounded implementation with proportionate verification. ' }) + $guidance + ' This is a default route; choose a supported model pool role for a different model/effort on this task.'
         $instructions = "Execute only the assigned $slot task within the supplied scope. Preserve unrelated changes. Do not delegate or change models. Return concrete evidence and any unresolved uncertainty for parent re-selection before a new bounded task. Do not replay completed writes. Stop at the assigned boundary."
         if ($readOnly) { $instructions += ' Do not modify files or external state.' }
-        $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '', '[agents]', 'enabled = false', '') -join "`n"
+        $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
         AddFile $rolePath $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }

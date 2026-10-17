@@ -110,6 +110,21 @@ $providerEvidence = [ordered]@{
 }
 [IO.File]::WriteAllText($providerEvidencePath, ($providerEvidence | ConvertTo-Json -Depth 8))
 if (Test-Path Function:/global:codex) { throw 'Cannot install acceptance mock over an existing global codex function.' }
+$previousCodexHome = $env:CODEX_HOME
+$testCodexHome = Join-Path ([IO.Path]::GetTempPath()) ('model-preset-codex-home-'+[guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($testCodexHome) | Out-Null
+$codexConfigPath = Join-Path $testCodexHome 'config.toml'
+$codexConfigText = @'
+model_provider = "fixture_provider"
+
+[model_providers.fixture_provider]
+name = "fixture"
+base_url = "https://fixture.invalid/v1"
+request_max_retries = 4
+stream_max_retries = 5
+'@
+[IO.File]::WriteAllText($codexConfigPath, $codexConfigText)
+$env:CODEX_HOME = $testCodexHome
 $global:ModelSlotAcceptanceCalls = [Collections.Generic.List[object]]::new()
 $global:ModelSlotAcceptanceExitCode = 1
 $global:ModelSlotAcceptanceFailureMode = 'rate_limit'
@@ -164,11 +179,36 @@ try {
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and (($call -ccontains 'model_reasoning_effort="max"') -or ($call -ccontains 'model_reasoning_effort="xhigh"'))) 'All launches preserve read-only, fixed tuple and no nested delegation'
+        Assert ($call -ccontains 'model_providers.fixture_provider.request_max_retries=0' -and $call -ccontains 'model_providers.fixture_provider.stream_max_retries=0') 'Codex CLI retries are capped for the selected custom provider'
     }
+
+    $profileConfigPath = Join-Path $testCodexHome 'glm53-flash-only.config.toml'
+    $profileConfigText = @'
+model_provider = "fixture_profile_provider"
+
+[model_providers.fixture_profile_provider]
+name = "profile-fixture"
+base_url = "https://profile-fixture.invalid/v1"
+'@
+    [IO.File]::WriteAllText($profileConfigPath, $profileConfigText)
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Profile provider wins' | Out-Null
+    $profileCall = $global:ModelSlotAcceptanceCalls[$global:ModelSlotAcceptanceCalls.Count - 1]
+    Assert ($profileCall -ccontains 'model_providers.fixture_profile_provider.request_max_retries=0' -and $profileCall -ccontains 'model_providers.fixture_profile_provider.stream_max_retries=0' -and -not ($profileCall -ccontains 'model_providers.fixture_provider.request_max_retries=0')) 'Profile provider takes precedence over base config for retry control'
+
+    Remove-Item -LiteralPath $profileConfigPath
+    [IO.File]::WriteAllText($codexConfigPath, 'model = "gpt-6-luna"' + [Environment]::NewLine)
+    $beforeRetryControlBlock = $global:ModelSlotAcceptanceCalls.Count
+    $retryControlFailure = ''
+    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode native -Prompt 'Must block without retry control' | Out-Null }
+    catch { $retryControlFailure = $_.Exception.Message }
+    Assert ($retryControlFailure -like '*retry_control_unavailable*' -and $retryControlFailure -like '*upstream_contacted*false*') 'Missing custom-provider retry control blocks before dispatch'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq $beforeRetryControlBlock) 'Retry-control blocker makes no model call'
 }
 finally {
     Remove-Item Function:/global:codex
     Remove-Variable ModelSlotAcceptanceCalls,ModelSlotAcceptanceExitCode -Scope Global -ErrorAction SilentlyContinue
+    if ($null -eq $previousCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } else { $env:CODEX_HOME = $previousCodexHome }
+    Remove-Item -LiteralPath $testCodexHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('model-preset-test-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
@@ -228,7 +268,8 @@ try {
     foreach ($entry in $defaultResolved.enabled_routes) {
         Assert ($subagentConfig.Contains("[agents.$($entry.role)]")) 'All tuple roles coexist in the shared config'
         $roleText = Get-Content -LiteralPath (Join-Path $fixture ".generated/codex/pool/$($entry.role).toml") -Raw
-        Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and $roleText.Contains('enabled = false')) 'Tuple role pins its exact route and disables nested delegation'
+        Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and -not $roleText.Contains('[agents]') -and -not $roleText.Contains('sandbox_mode')) 'Tuple role pins its route without embedding parent-session settings'
+        Assert ($roleText.Contains('Do not delegate')) 'Tuple role instructs the child not to delegate'
     }
     Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
@@ -256,12 +297,12 @@ try {
     try {
         $blocked = $false
         try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort xhigh -CapabilityProbePath $catalogPath -Prompt 'blocked native tuple' | Out-Null }
-        catch { $blocked = $_.Exception.Message -like '*no upstream request was sent*' }
+        catch { $blocked = $_.Exception.Message -like '*no model request was sent*' }
         Assert $blocked 'Unsupported native tuple is blocked before upstream contact'
         Assert ($global:CapabilityCalls.Count -eq 0) 'Capability block makes no launch call'
         $missingEvidence = $false
         try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort xhigh -CapabilityMode provider_override -Prompt 'missing provider evidence must block' | Out-Null }
-        catch { $missingEvidence = $_.Exception.Message -like '*provider_evidence_invalid*' -and $_.Exception.Message -like '*no upstream request was sent*' }
+        catch { $missingEvidence = $_.Exception.Message -like '*provider_evidence_invalid*' -and $_.Exception.Message -like '*no model request was sent*' }
         Assert $missingEvidence 'Provider override without current evidence fails closed'
         Assert ($global:CapabilityCalls.Count -eq 0) 'Missing provider evidence makes no launch call'
         & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort xhigh -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'explicit one-shot provider override' | Out-Null

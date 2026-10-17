@@ -19,11 +19,11 @@ Describe 'Native agent bridge' {
             $template | Should -Match ("(?m)^name = `"{0}`"$" -f [regex]::Escape($name))
             $template | Should -Match '(?m)^description = '
             $template | Should -Match '(?m)^developer_instructions = '
-            $template | Should -Match '(?m)^enabled = false$'
+            $template | Should -Not -Match '(?m)^\[agents\]$'
+            $template | Should -Not -Match '(?m)^sandbox_mode\s*='
         }
 
-        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml') | Should -Match '(?m)^sandbox_mode = "read-only"$'
-        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml') | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
+        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml') | Should -Match 'Never spawn subagents'
     }
 
     It 'lets both managed bridge templates use the active preset route' {
