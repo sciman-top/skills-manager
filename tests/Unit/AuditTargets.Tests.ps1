@@ -5,6 +5,9 @@ BeforeAll {
     Initialize-TestGitIdentity
     # Dot-source the main script to load functions
     . $PSScriptRoot\..\..\skills.ps1
+    # Snapshot tests must not depend on a host Codex CLI: pin its plugin listing to an empty,
+    # warning-free result. Tests that need plugins mock Invoke-CodexCliJson themselves.
+    Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
     $script:Root = $Root
     $script:CfgPath = $CfgPath
     $script:LogPath = $LogPath
