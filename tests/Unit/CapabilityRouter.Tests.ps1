@@ -598,6 +598,11 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'high-confidence conclusion'
         $skill | Should -Match 'Treat metadata as insufficient when a request combines an interactive workflow verb'
         $metadata | Should -Match 'interview-style verb'
+        $skill | Should -Match 'valid but semantically wrong hint can'
+        $skill | Should -Match 'domain-driven/domain modeling, bounded contexts,\s+entities, aggregates, and invariants map to `engineering`'
+        $skill | Should -Match 'Reserve `design`\s+for visual, UX, art-direction'
+        $metadata | Should -Match 'domain modeling, bounded contexts, entities, aggregates, and invariants map to engineering'
+        $metadata | Should -Match 'design is for visual/UX/art direction'
     }
 
     It 'does not echo the raw query in the routing receipt' {

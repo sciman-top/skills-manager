@@ -241,4 +241,20 @@ Describe 'Cold skill routing scenario matrix' {
         @($byId['S36-live-derived'].allowed_candidate_names) | Should -Be @('grill-me')
         $byId['S36-live-derived'].execution_contract | Should -Be 'multi_turn_user_decision'
     }
+
+    It 'tracks implicit one-shot cold execution without preselecting a candidate skill' {
+        $cases = @($matrix.scenarios | Where-Object {
+            $_.variant -eq 'implicit' -and
+            $_.route_class -eq 'cold_candidate' -and
+            $_.execution_contract -eq 'one_shot' -and
+            $_.expected_native_agent -eq 'cold-capability-runner'
+        })
+        @($cases).Count | Should -BeGreaterThan 0
+        foreach ($case in $cases) {
+            $case.cold_discovery | Should -Be 'required'
+            @($case.allowed_candidate_names).Count | Should -Be 0 -Because ("implicit case {0} must leave semantic candidate selection to the host" -f $case.id)
+            $case.request_verbatim | Should -Not -Match 'domain-modeling|cold-capability-runner' -Because ("implicit case {0} must not name its skill or adapter" -f $case.id)
+            $case.side_effect_ceiling | Should -Be 'read_only'
+        }
+    }
 }
