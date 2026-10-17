@@ -114,6 +114,14 @@ Describe "Audit Targets" {
         Should -Invoke Get-AuditGitPathStatePairs -Times 0 -Exactly
     }
 
+    It "Fails closed instead of recording a partial external inventory when the plugin list is unavailable" {
+        $cfg = [pscustomobject]@{ skill_projection = [pscustomobject]@{ user_skill_root = (Join-Path $TestDrive "no-user-skills") } }
+        Mock Get-CodexExternalSkillInventory {
+            [pscustomobject]@{ enabled = $true; skills = @(); warnings = @([pscustomobject]@{ code = "codex_plugin_inventory_unavailable"; subject = "codex plugin list --json"; message = "codex unavailable" }) }
+        }
+        { Get-AuditExternalSkillFacts $cfg } | Should -Throw "*外部插件清单不可用*"
+    }
+
     It "Excludes dependency files while retaining nested source in pruned enumeration" {
         $repo = Join-Path $TestDrive 'pruned-enumeration'
         $null = New-Item -ItemType Directory -Path "$repo/src/nested", "$repo/node_modules/deep" -Force
