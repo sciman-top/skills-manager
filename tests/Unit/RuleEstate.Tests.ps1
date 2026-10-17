@@ -431,6 +431,24 @@ verify drift
         foreach ($fact in $facts) { @($fact.evidence).Count | Should -Be 1; $fact.evidence[0].line | Should -BeGreaterThan 0 }
     }
 
+    It 'recognizes a counted Chinese entrypoint declaration in a project contract' {
+        $path = Join-Path $TestDrive 'entrypoint-contract.md'
+        $nl = [Environment]::NewLine
+        [IO.File]::WriteAllText($path, ("# Project{0}- 七个入口：prep.ps1、report.ps1 和其他受控命令。{0}" -f $nl))
+
+        $fact = @(Get-RuleEstateProjectContractFacts $path | Where-Object id -eq 'entrypoint')[0]
+
+        $fact.covered | Should -BeTrue
+        $fact.evidence[0].text | Should -Match '七个入口'
+    }
+
+    It 'parses adjacent Git profile fields separated by whitespace' {
+        $line = 'Git profile: baseline=main upstream=origin/main'
+
+        Get-RuleEstateInlineField $line 'baseline' | Should -Be 'main'
+        Get-RuleEstateInlineField $line 'upstream' | Should -Be 'origin/main'
+    }
+
     It 'returns a single JSON envelope and only writes an explicit report' {
         $f = New-RuleEstateFixture; $out = Join-Path $f.workspace 'estate.json'
         $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--antigravity-user-root',$f.antigravity,'--out',$out,'--json')

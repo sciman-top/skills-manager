@@ -19,3 +19,5 @@
 投影只写约定的宿主规则文件，保留 source/target hash、token、备份和回滚 receipt。文件相等最多证明 `filesystem_projected`；加载与实际验收仍需独立宿主证据。
 
 项目根 `AGENTS.md` 继续由每个仓库独立维护。Claude 用 `CLAUDE.md` 的 `@AGENTS.md` 引用承接；Antigravity 原生读取 `AGENTS.md`，不要求另建适配器。已有 `.agents/rules/00-project.md` 必须包含合法 `trigger: always_on` 前言，内联内容用 `@[Project contract](../../AGENTS.md)`；裸 `@文件` 只表示路径引用。依据：[Antigravity Rules](https://antigravity.google/docs/rules)（2026-10-08 读取）。WorkBuddy 静态报告列出候选文件、遮蔽和独立目录组，明确未检查的仓外祖先、imports、解析及条件激活，不宣称完整加载。
+
+Claude Desktop 的 Code tab 使用 Claude Code 本机规则；普通 Chat 与 Cowork 的 Customize instructions 是独立 profile 配置，不属于本文件投影。依据：[Claude Code memory](https://code.claude.com/docs/en/memory)、[Claude Desktop](https://code.claude.com/docs/en/desktop)（2026-10-17 读取）。

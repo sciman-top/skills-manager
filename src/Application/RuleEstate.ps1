@@ -99,7 +99,7 @@ function Get-RuleEstateMarkdownSection([string]$Text, [string]$SectionName) {
 }
 
 function Get-RuleEstateInlineField([string]$Line, [string]$Name) {
-    $match = [regex]::Match($Line, '(?i)(?:^|[`、,，;；\s])' + [regex]::Escape($Name) + '\s*=\s*(?:`(?<quoted>[^`]+)`|(?<plain>[^`、,，;；\r\n]+))')
+    $match = [regex]::Match($Line, '(?i)(?:^|[`、,，;；\s])' + [regex]::Escape($Name) + '\s*=\s*(?:`(?<quoted>[^`]+)`|(?<plain>[^`、,，;；\r\n]+?)(?=\s+[A-Za-z_][A-Za-z0-9_.-]*\s*=|[、,，;；\r\n]|$))')
     if (-not $match.Success) { return '' }
     $value = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['plain'].Value }
     return $value.Trim()
@@ -433,7 +433,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
 function Get-RuleEstateProjectContractFacts([string]$AgentsPath) {
     $definitions = [ordered]@{
         source_of_truth = '(?i)(source\s+of\s+truth|真(?:源|值|相)|唯一.{0,16}真(?:源|值)|fresh\s+(?:read|query))'
-        entrypoint = '(?i)(entry\s*point|entrypoint|(?:用户|解决方案|CLI|主|真实)入口|主链|watchctl|skills\.ps1|run\.cmd|connect\.cmd|\.slnx?|cli\.py)'
+        entrypoint = '(?i)(entry\s*point|entrypoint|(?:用户|解决方案|CLI|主|真实|[一二三四五六七八九十\d]+个)入口|主链|watchctl|skills\.ps1|run\.cmd|connect\.cmd|\.slnx?|cli\.py)'
         domain_invariants = '(?i)(domain\s+(?:invariant|rule)|领域.{0,16}(?:不变量|规则)|不变量|invariant|兼容|必须|禁止|不得|fail\s+closed)'
         minimum_gate = '(?i)(最低(?:充分)?门禁|最低层|fixed\s+order|门禁|gates?|build\s*[:：]|test\s*[:：]|verify|pytest|dotnet\s+(?:build|test)|npm\s+[^\r\n]*(?:test|validate)|python\s+-m)'
         rollback_entrypoint = '(?i)(回滚|rollback|restore|备份|backup)'

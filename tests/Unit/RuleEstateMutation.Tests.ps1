@@ -88,6 +88,41 @@ function New-EstateMutationFixture {
         $review.changes[0].target_file = '.codex/config.toml'
         $validation = Test-RuleEstateReviewContract $review ([IO.Path]::GetDirectoryName($f.review))
         @($validation.findings.code) | Should -Contain 'target_file_forbidden'
+
+        $review.changes[0].target_file = '.agents/rules/other.md'
+        $validation = Test-RuleEstateReviewContract $review ([IO.Path]::GetDirectoryName($f.review))
+        @($validation.findings.code) | Should -Contain 'target_file_forbidden'
+    }
+
+    It 'plans, applies, and rolls back the exact Antigravity project adapter through the reviewed rule estate' {
+        $f = New-EstateMutationFixture
+        $adapterDirectory = Join-Path $f.repo_a '.agents/rules'
+        New-Item -ItemType Directory -Path $adapterDirectory -Force | Out-Null
+        $adapterPath = Join-Path $adapterDirectory '00-project.md'
+        [IO.File]::WriteAllText($adapterPath, '@../../AGENTS.md')
+        $reviewRoot = [IO.Path]::GetDirectoryName($f.review)
+        $nl = [Environment]::NewLine
+        $desiredAdapter = ('---{0}trigger: always_on{0}---{0}@[Project contract](../../AGENTS.md){0}' -f $nl)
+        [IO.File]::WriteAllText((Join-Path $reviewRoot 'adapter.desired.md'), $desiredAdapter)
+        $review = [IO.File]::ReadAllText($f.review) | ConvertFrom-Json
+        $review.changes[0].target_file = '.agents/rules/00-project.md'
+        $review.changes[0].desired_file = 'adapter.desired.md'
+        [IO.File]::WriteAllText($f.review, ($review | ConvertTo-Json -Depth 20))
+
+        $validation = Test-RuleEstateReviewContract $review $reviewRoot
+        $validation.pass | Should -BeTrue
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $plan.actions[0].target_path | Should -Be $adapterPath
+        $receiptPath = Join-Path $f.workspace 'adapter-receipt.json'
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $plan.apply.required_token -ReceiptPath $receiptPath
+
+        $result.pass | Should -BeTrue
+        [IO.File]::ReadAllText($adapterPath) | Should -Be $desiredAdapter
+        $rollbackToken = 'ROLLBACK_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 ([string]$result.receipt.operation_id)).Substring(0,16).ToUpperInvariant()
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId $result.receipt.actions[0].action_id -Token $rollbackToken -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $rollback.pass | Should -BeTrue
+        [IO.File]::ReadAllText($adapterPath) | Should -Be '@../../AGENTS.md'
     }
 
     It 'rejects global user-rule scopes and keeps the dedicated projection writer authoritative' {
