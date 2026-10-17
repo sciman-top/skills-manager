@@ -387,19 +387,82 @@ function Get-AuditGeneratedPathSegments([string]$resolvedPath) {
     return @($resolvedSegments)
 }
 
+function Get-AuditGitIgnoredPaths([string]$resolvedPath) {
+    # A configured target can live below a worktree root, so locate its .git
+    # metadata by walking up before asking Git for ignored paths. This keeps
+    # non-Git fixtures and folders on the existing filesystem-only path.
+    $probePath = [System.IO.Path]::GetFullPath($resolvedPath)
+    $isGitWorktree = $false
+    while (-not [string]::IsNullOrWhiteSpace($probePath)) {
+        if (Test-Path -LiteralPath (Join-Path $probePath '.git')) {
+            $isGitWorktree = $true
+            break
+        }
+        $parentPath = [System.IO.Directory]::GetParent($probePath)
+        if ($null -eq $parentPath -or $parentPath.FullName -eq $probePath) { break }
+        $probePath = $parentPath.FullName
+    }
+    if (-not $isGitWorktree) { return @() }
+
+    Push-Location $resolvedPath
+    try {
+        $output = @(Invoke-AuditGitLines @('ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z') 'ignored-path listing')
+        $raw = -join $output
+        if ([string]::IsNullOrEmpty($raw)) { return @() }
+
+        $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($entry in $raw.Split([char[]]@([char]0), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            $normalized = $entry.Replace('/', '\')
+            while ($normalized.EndsWith('\', [System.StringComparison]::Ordinal)) {
+                $normalized = $normalized.Substring(0, $normalized.Length - 1)
+            }
+            if ($normalized.Length -gt 0) { $null = $paths.Add($normalized) }
+        }
+        return @($paths)
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Test-AuditGitIgnoredPath([string]$resolvedPath, [string]$fullPath, $ignoredPaths) {
+    if ($null -eq $ignoredPaths -or $ignoredPaths.Count -eq 0) { return $false }
+    $relativePath = [System.IO.Path]::GetRelativePath($resolvedPath, $fullPath).Replace('/', '\')
+    $relativePath = $relativePath.TrimEnd([char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar))
+    while (-not [string]::IsNullOrEmpty($relativePath) -and $relativePath -ne '.') {
+        if ($ignoredPaths.Contains($relativePath)) { return $true }
+        $separator = $relativePath.LastIndexOf([System.IO.Path]::DirectorySeparatorChar)
+        if ($separator -lt 0) { break }
+        $relativePath = $relativePath.Substring(0, $separator)
+    }
+    return $false
+}
+
 function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
     $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($segment in @(Get-AuditGeneratedPathSegments $resolvedPath)) { $null = $ignored.Add($segment) }
+    # Respect the target repository's own ignore rules before descending. This
+    # avoids treating local profiles and third-party/runtime payloads as product
+    # evidence, and avoids enumerating their contents altogether.
+    $ignoredGitPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @(Get-AuditGitIgnoredPaths $resolvedPath)) { $null = $ignoredGitPaths.Add([string]$path) }
     $pending = [Collections.Generic.Stack[string]]::new()
     $pending.Push($resolvedPath)
     while ($pending.Count -gt 0) {
         $directory = $pending.Pop()
         # Prune before descending, so excluded dependency trees are never enumerated.
-        Get-ChildItem -LiteralPath $directory -Filter $filter -File -ErrorAction SilentlyContinue |
-            Where-Object { -not $ignored.Contains($_.Name) }
+        $files = @(Get-ChildItem -LiteralPath $directory -Filter $filter -File -ErrorAction SilentlyContinue |
+            Where-Object { -not $ignored.Contains($_.Name) })
+        if ($ignoredGitPaths.Count -gt 0) {
+            $files = @($files | Where-Object { -not (Test-AuditGitIgnoredPath $resolvedPath $_.FullName $ignoredGitPaths) })
+        }
+        $files
         $children = @(Get-ChildItem -LiteralPath $directory -Directory -ErrorAction SilentlyContinue |
             Where-Object { -not $ignored.Contains($_.Name) -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
             Sort-Object Name -Descending)
+        if ($ignoredGitPaths.Count -gt 0) {
+            $children = @($children | Where-Object { -not (Test-AuditGitIgnoredPath $resolvedPath $_.FullName $ignoredGitPaths) })
+        }
         foreach ($child in $children) { $pending.Push($child.FullName) }
     }
 }
