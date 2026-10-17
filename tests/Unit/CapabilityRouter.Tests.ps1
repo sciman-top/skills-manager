@@ -621,6 +621,9 @@ Describe 'Capability router fallback' {
         # successor could not be built and the interview stalled on question one.
         $skill | Should -Match 'persist'
         $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
+        # Run files must sit in the git-ignored work area, never %TEMP% or a tracked path.
+        $skill | Should -Match 'artifacts/work/cold-routing/<run-id>/'
+        $skill | Should -Match 'cannot recompute hashes'
     }
 
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {

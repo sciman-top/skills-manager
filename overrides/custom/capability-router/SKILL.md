@@ -149,8 +149,17 @@ execution. A skill requiring a multi-turn decision must preserve its questions
 and wait points; never replace it with a one-shot summary.
 
 For a multi-turn decision, the parent persists the admission and plan objects
-(for example with `ConvertTo-Json -Depth 60` into the authorized run directory)
-before the first child spawn. Each later answer needs
+(for example with `ConvertTo-Json -Depth 60`) into a run directory such as
+`artifacts/work/cold-routing/<run-id>/` before the first child spawn. That path
+is git-ignored; never use `%TEMP%` or a tracked path, because a run file outside
+the repository cannot be named in an admission read set. Persist each successor
+the same way. `New-ExecutionAdmissionSuccessor` reuses the predecessor's
+allowed_read_set, and a successor file cannot be hashed into the admission it
+produces, so the child cannot check a successor's content by reading the file.
+The parent carries the successor's `admission_id`, `plan_id`, and a
+revalidation result to the child. The child compares the identifiers it was
+given with its own admission text; it cannot recompute hashes without a shell,
+so the parent's revalidation is the only content check. Each later answer needs
 `New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
 with a new attempt identity and a later `issued_at`. A predecessor that existed
 only in a finished PowerShell process cannot be rebuilt, so do not forward an
