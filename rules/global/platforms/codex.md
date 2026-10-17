@@ -16,6 +16,5 @@
 - Work Web 不继承本机 sandbox/approval；分别核对当前执行环境的文件系统、sandbox 与 approval 边界。never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
 - 修改 auth/provider/MCP/权限前区分登录、权限、模型与代码；未经确认不得重启/停止/杀掉/拉起 Codex，只做投影、dry-run、探针与回滚证据。
 - Skills 的 `file:` locator 必须原样读取，不猜路径或回退；失败报 locator/错误并停，仅按清单另一明确 locator 重试。
-- 模型编排真源 `src/model-orchestration/`；`429/quota/rate-limit/auth/risk/billing` 与 provider 故障停止当前任务，等待 operator 或 fresh parent selection；仅确认 overload/unavailable 时，下一 bounded task 最多允许一次显式重选，而且目标 tuple 必须经过当前宿主能力验证。禁热切换、静默别名、effort 替换、重复 prompt、重复并行请求或自动重试；重选须记录失败 tuple、失败分类、已选 tuple 与剩余范围。槽位数 ≠ 并行数（`max_concurrent_threads_per_session`）。
 ### B.3 回退
 - 其余命令或非交互差异按 `platform_na` 留痕；替代证据不改变共同规则和门禁语义。

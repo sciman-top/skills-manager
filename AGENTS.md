@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.88
-**最后更新**: 2026-10-17
+**最后更新**: 2026-10-18
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 原生读取它，已有 `.agents/rules/00-project.md` 以合法 frontmatter 和内联引用承接同一真源。
@@ -19,7 +19,7 @@
 - runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
 
 ## B. 执行边界
-- 默认主代理串行完成；子代理须有用户或适用项目/技能规则的明确委派授权，并限定独立切片、互斥 write set、最低证明与 stop；“继续”或要求深入分析不构成授权。
+- 默认主代理串行完成；子代理委派与并行已获用户常驻授权（见全局规则 A.2），无需逐次请示；每次委派仍须限定独立切片、互斥 write set、最低证明与 stop。
 - 日常合同只冻结 `Goal / Exact write set / Minimum proof / Stop`；覆盖当前明确需求或真实失败，验收满足即停止，不把额外优化吸收为任务。
 - 先用 `git diff` 分界用户/并发改动；不回退、不重排、不混入本次回滚，禁止批量改写第三方 import。
 - 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。
