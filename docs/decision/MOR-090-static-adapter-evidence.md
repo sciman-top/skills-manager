@@ -1,0 +1,120 @@
+# MOR-090：静态 Adapter 事实证据包（Codex / ZCode / Claude+DeepSeek / Antigravity）
+
+**状态**：static-fact evidence；采集日期 2026-08-28（C8/D5 为 2026-09-12 增量直抓，C12/Z7 为 2026-10-13 复核，Z8 为 2026-10-13 本机 fresh 会话增量）。不是 `host_loaded`/`live_accepted`，不证明模型当前可用或参数被当前 gateway 接受——例外：Z8 为定义加载/调用面 host_loaded 观测，见该行边界
+**证据状态词表**：`verified`（官方文档/本机 help 直证）｜`operator_declared`（操作者一手声明/界面证据，无独立附件复核）｜`inferred`（由命名/公告推断的精确值）｜`unknown`（无一手来源）。**只有 `verified` 条目可进 Adapter allowlist**。
+**消费方**：未来 `<runtime-root>` runtime 的 Adapter contract/fixture（MOR-100/MOR-300/MOR-400）；runtime 未选定前 fixtures 不创建
+**方法边界**：来源=官方产品文档 + 本机只读 `--help`/版本；未读取用户配置、凭据或运行状态（`~/.codex`、`~/.zcode` 配置、`CLAUDE_CONFIG_DIR` 等均未触碰）；Z3 引用的 UI 截图为**操作者提供的 artifact**，不属读取用户目录运行状态；未发送任何模型请求；社区资料仅作结构启发/secondary corroboration，不作为能力证据
+
+## 1. codex_cli（本机 `codex-cli 0.150.1`）
+
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| C1 | config 字段 `model`（string）、`model_reasoning_effort` 官方词表 `minimal \| low \| medium \| high \| xhigh`，xhigh 为 model-dependent | Codex Configuration Reference（learn.chatgpt.com/docs/config-file/config-reference），2026-08-28 | verified（官方文档） |
+| C2 | `max` 不在 `model_reasoning_effort` 词表内；security 扫描面官方文档另列 "minimal, low, medium, high, xhigh, and max" | 同上 + Codex Security CLI quickstart（learn.chatgpt.com/docs/security/cli），2026-08-28 | verified；`max` 记为 `surface=security_cli` 候选，禁止进入 config 面合同 |
+| C3 | launch 面：`codex exec -m <MODEL>`、`-c <key=value>`（dotted path 覆盖 config.toml 值） | 本机 `codex exec --help`（0.150.1），2026-08-28 | verified（本机只读 help） |
+| C4 | profile 机制：`$CODEX_HOME/profile-name.config.toml` 独立文件 + `--profile` 选择；project-scoped config 不可覆盖 provider/auth/profile selection | Configuration Reference，2026-08-28 | verified；additive profile 为投影 POC 首选候选 |
+| C5 | 原生挂点：`review_model`（/review 模型覆盖）、`agents.default_subagent_model`、`agents.default_subagent_reasoning_effort`、`agents.max_concurrent_threads_per_session`（不含主线程） | Configuration Reference，2026-08-28 | verified；供未来 review route key / subagent 映射复用，本版不启用 |
+| C6 | GPT-5.6 三档 slug 全部经官方 exact model page 直证：`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna`，且 **openai_api 面**（Responses/Chat Completions）`Reasoning.effort supports: none, low, medium (default), high, xhigh, and max`（sol/luna 页 2026-08-28 本轮抓取；terra 页同型） | developers.openai.com/api/docs/models/gpt-5.6-{sol,terra,luna} + Security workbench | `verified`（openai_api 面逐项）；注意：**API 面词表不外推到 codex_config_surface**（后者仍以 C1 为准） |
+| C7 | 本机 `codex-cli 0.150.1` 的 `codex debug models` 对 Sol/Terra/Luna 均列出 `max`；九个独立 profile（Sol high/medium/low、Terra max/xhigh/high、Luna max/xhigh/high）均通过 `codex --profile <name> --strict-config --version` | 本机只读 model catalog + strict profile load，2026-08-31 | `partial`（current-host config acceptance）；证明当前 profile 文件可加载，不证明 provider 调用或其他 host |
+| C8 | GPT-6-Astra（2026-09-02/03 发布）官方模型页存在，slug `gpt-6-astra`；openai_api（Responses）`reasoning.effort` 词表 `low / medium / high / xhigh / max`——**无 `none`**（与 GPT-5.6 系页面的 none..max 不同） | developers.openai.com/api/docs/models/gpt-6-astra，2026-09-12 直连抓取（curl 旁路，WebSearch 配额外） | `verified`（openai_api 面逐项）；不外推到 codex_config_surface（仍以 C1 为准，fixture 待 MOR-100）；chat_completions 面未抓，不做跨 surface 外推 |
+| C9 | codex CLI 经本机 cockpit provider（`[model_providers.codex_local_access]`，`localhost:4163/v1`，`wire_api=responses`）发送最小请求（`codex exec --sandbox read-only -c model=… -c model_reasoning_effort=… "Reply with exactly: OK"`）：`glm-5.3-flash` {low, high, max} 与 `deepseek-flash` {high, max} 全部 exit 0 且返回 OK——slug 与 effort 经该通道逐项 live 接受（亦证明 2026-09-15 的中转 503 已恢复）；ChatGPT Desktop 同通道可见两模型（操作者截图 2026-09-17，`选择模型`菜单含 deepseek-flash/glm-5.3-flash/deepseek-v4-pro，effort 滑杆档位由 `[desktop] enabled-reasoning-efforts = low..max` 供给） | 本机 live 最小请求探针 + 操作者截图，2026-09-17 | `verified`（`codex_provider_channel` 面，逐项实测）；只证明该通道最小负载接受，不证明其他 provider、更长任务负载或非本机通道 |
+| C10 | codex 通道迁至远端中转（`codex_local_access`/`fq_sciman_top` 两 provider base_url 均为 `https://fq.sciman.top:8443/…/v1`，4163 本地 sidecar 退役）后按 C9 同法逐项复测：`glm-5.3-flash`/max 与 `deepseek-v4.1-flash`/max 各 1 次 exit 0 返回 OK；通道模型目录（`cockpit-model-catalog.json`）投影的 DeepSeek 精确 slug 为 `deepseek-v4.1-flash`，其 `supported_reasoning_levels` 只列到 xhigh 但 CLI `-c model_reasoning_effort=max` 覆写实测接受（glm 同象）——目录词表≠CLI 覆写真相；旧 slug `deepseek-flash` 未在新通道复测，不再使用 | 本机 live 最小请求探针 ×2（read-only sandbox），2026-10-11 | `verified`（`codex_provider_channel` 面，逐项实测）；只证明这两元组在当前通道的最小负载接受，不证明其他 provider、更长任务负载或目录全部档位 |
+| C11 | 2026-10-12 日常子代理池改版（`gpt_terra_only`/gpt-5.6-terra xhigh 移除、`gpt6_luna_only`/gpt-6-luna max 回池，GLM/DeepSeek max 不变，429 链按声明序更新为 luna→glm→deepseek）后按 C9/C10 同法复测：`gpt-6-luna`/max 经当前远端中转通道 `codex exec` 最小请求 1 次 exit 0 返回 OK（read-only sandbox，input≈22.5k tok）；luna 精确 slug 沿用 2026-10-07 池时代的通道投影与 live 记录，未与 C6 的 `gpt-5.6-luna`（OpenAI API 模型页 slug）混用 | 本机 live 最小请求探针 ×1（read-only sandbox），2026-10-12 | `verified`（`codex_provider_channel` 面，逐项实测）；只证明该元组在当前通道的最小负载接受，不证明其他 provider、更长任务负载或目录全部档位 |
+| C12 | 2026-10-13 schema v5 宿主分面档位修订（本机 Codex 原生目录对 glm/deepseek 仅声明 low/medium/high/xhigh、未声明 max → Codex 面菜单钉 xhigh，GLM 的 ZCode 分面保留 max，luna 维持 max；新增 native catalog 启动前预检与 provider_override receipt 门）后按 C9/C10/C11 同法复测：`glm-5.3-flash`/xhigh 与 `deepseek-v4.1-flash`/xhigh 各 1 次 exit 0 返回 OK（read-only sandbox，input≈22.3k/23.2k tok，预检通过） | 本机 live 最小请求探针 ×2（read-only sandbox），2026-10-13 | `verified`（`codex_provider_channel` 面，逐项实测）；只证明这两元组在当前通道的最小负载接受，不证明其他 provider、更长任务负载或目录全部档位 |
+
+**未决**：`~/.codex/config.toml` 实际 shape/ownership/rollback entry（属 projection POC 采集，需独立授权）；`--profile` 在本机版本对 config profile vs permission profile 的精确语义。
+
+**Fixture 优先级（2026-08-31 修订；2026-09-15 再修订）**：MOR-100 逐项 fixture 优先验证默认 preset `gpt56_sol_terra` 实际使用的三个 Codex config tuple：**Terra/high、Terra/xhigh、Sol/medium**。其中 `deep` 槽与 high-risk 提升路径固定使用 Sol/medium（操作者直证整套最强档）；Sol/high 随 Sol-only preset 退役退出日常使用集，仍保留在 surface Adapter 候选集合中，不阻断该 preset 的准入。三项 fixture 未全部通过前，Sol-Terra 仍只能是 intended policy default，不能外推为实际 host default。
+
+**后续 preset fixture（2026-09-15 修订；2026-09-18 二次更新；2026-10-12 现行集合再修订）**：~~现行集合为 `gpt56_sol_terra`（Sol/medium、Terra/high、Terra/xhigh）、`gpt56_luna_only`（high/xhigh）、`glm53_flash_only`（high/max）、`deepseek_flash_only`（high/max）~~（2026-09-18 时点，保留为历史）；~~**2026-10-11 起现行集合为 `glm53_flash_only`（glm-5.3-flash/max）与 `deepseek_flash_only`（deepseek-v4.1-flash/max）**~~（2026-10-11 时点，保留为历史）；**2026-10-12 起现行集合为 `gpt6_luna_only`（gpt-6-luna/max）、`glm53_flash_only`（glm-5.3-flash/max）与 `deepseek_flash_only`（deepseek-v4.1-flash/max）三元组**，hosts 见 MOR-000-brief 2026-10-12 节。C7 已证明当前机器可 strict-load 旧集合（Terra/max、Luna/max 等）profile，因此该机器曾达到 `filesystem_projected` / config-load acceptance；tuple 仍保持 `partial`，直到 MOR-100 记录独立 current-host fixture。C7 结论只覆盖旧集合的 profile 文件，新集合 profile 投影后须重新 strict-load。其他 host 不得复用该结论，也不得将 API/security surface 的 max 证据外推。
+
+## 2. zcode（GLM / bigmodel）
+
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| Z1 | GLM Coding Plan 当前阵容 GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo；无 `GLM-3.5-Flash`（旧模板名，未见于当前阵容） | z.ai/subscribe + docs.bigmodel.cn 新品页，2026-08-28 | verified；旧名退出 static default |
+| Z2 | 候选 slug `glm-5.3-flash`（GLM-5.3-Flash，2026-08-26 发布，Coding Plan 已全面放开） | docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash，2026-08-28 | verified |
+| Z3 | surface 词表：Chat Completion API `reasoning_effort` 为枚举，GLM-5.2+ 支持 `low / high / max`（默认 `max`）——`verified`（官方文档）；ZCode 选择面提供 低/高/最高 三档与之对应——`operator_declared`（操作者界面截图，2026-08-28，artifact：`~/.zcode/cli/image-cache/sess_fe51fa41-48ad-4999-a591-903968c6fe16/image-c09cf0b5b9c0de7bf52238a342b48f13.png`，SHA-256 `6b79b0e22cd9c37fc8569cd5ff9631f77edefd5c5df663cd7585556f8d1514a5`；image-cache 为易失缓存，附件留存前该半边证据按 operator_declared 计） | docs.bigmodel.cn API 参考/核心参数/GLM-5.3 页 + 操作者截图 | 拆分：文档半边 verified；UI 半边 operator_declared |
+| Z4 | `thinking` 不可关闭：GLM-5.3+ 始终启用思考，不再支持 `thinking.type: "disabled"`；默认 max 档 token 消耗显著 | GLM-5.3 模型页，2026-08-28 | verified；light 档语义须在 MOR-030 明示"low effort 仍思考" |
+| Z5 | **投影面未取证**：ZCode 档位选择位于桌面 UI/计划层；控制面能否表达/投影该选择未知，预期 manual handoff | 无一手来源 | unknown → MOR-090 后续采集项；取证前 GLM route 一律 `manual_mapping_required` |
+| Z6 | **历史（2026-10-03）：dynamic workflow 工具面 run 级模型指定生效**——`CreateWorkflow` 的 `subagent_model` 接受 `account:bigmodel-individual-coding-plan/GLM-5.3$high`（非会话模型），run `dwfrun-83c7c2c1` completed，确认回执明示 "Subagents run on ...GLM-5.3$high (the main agent stays on the session model)"；当时为 **run 级**粒度：facade `agent(name, persona)` 无 per-child 模型参数（dynamic-workflows 技能 §2 明文 "no per-subagent tool profile or model choice"），单发 Agent 工具（general-purpose/Explore）无模型参数走会话模型。模型面（ListModels）：GLM-5.3 / GLM-5.3-Flash ×（individual-coding-plan、start-plan、offpeak-idle-plan）共 5 条，effort=low/high/max；无 GPT 系 | 本机 ZCode 实测（CreateWorkflow run dwfrun-83c7c2c1-da26-4bb0-ac60-c49e0a606de9，证据 `artifacts/work/cold-routing/20261003-005256/zcode-subagent-model-probe.md`） | verified（当时的 run 级指定 + per-child 不存在为合同面事实）；该事实已由 Z7 的官方当前能力记录覆盖，不能继续作为当前产品能力结论；ZCode 投影面仍 resolve-only（本工具不写宿主控制面） |
+| Z7 | **2026-10-13 官方资料复核：ZCode Beta 自定义子智能体与 workflow 已支持按子智能体选择模型/思考档位**——子智能体定义可单独配置 `model` 与大小写敏感的 `thoughtLevel`；主 Agent 可按 `description` 自动选择；前台多个子智能体可并行，另支持后台执行；ZCode 3.15.1 更新日志补充 workflow 中每个 sub-agent 的独立模型选择、可调 concurrency 与保存 run 供 replay。该条只证明官方产品能力与文档表述，不证明当前账号、当前会话已加载这些定义，不证明 `skills-manager` 已投影 ZCode definitions/workflow/replay 控件，也不把宿主原生 replay/concurrency 纳入本工具的一次尝试策略 | 官方 [ZCode subagents](https://zcode.z.ai/cn/docs/subagents) 与 [ZCode 3.15.1 更新日志](https://zcode.z.ai/en/changelog)，2026-10-13 复核 | verified（官方产品能力；surface=host_native）；定义加载/调用面已由 Z8 闭环（2026-10-13）；workflow/replay 控件仍 Resolve-only，待独立取证 |
+| Z8 | **2026-10-13 本机 fresh 会话实测：ZCode 用户级 agent 定义加载与钉定调用闭环**——2026-10-09 放置的 `~/.zcode/agents/model-preset-probe.md`（frontmatter `model: account:bigmodel-individual-coding-plan/GLM-5.3-Flash` + `thoughtLevel: max`）被当日 fresh 会话载入可用 agent 类型列表（frontmatter description 逐字渲染）；经原生 Agent 工具按名调用成功：钉定 model id 通过宿主模型工厂解析（无 Model creation failed / clamp 报错），按指令返回 `PROBE-OK`（subagent≈21.4k tok，与 Z4 max 档思考量级一致）。只证明：用户级定义加载、description 选择面注册与钉定元组调用在当前账号/当前会话面被接受；不证明该元组长任务负载、模型权重归属的密码学级归因、workflow/replay 控件，也不改变本工具对 ZCode 的 Resolve-only 边界 | 本机 ZCode fresh 会话观测 + 原生 Agent 工具调用（agentId agent_7dc76559-668d-4897-af52-7188ab1a26a3，tool_uses=0），2026-10-13 | verified（宿主定义加载/调用面，逐项单次实测）；定义文件留存于 `~/.zcode/agents/`（宿主本地，不入库） |
+
+**未决**：ZCode identity surface（`builtin:bigmodel-coding-plan/<model>` 标识与选择面的关系）；第三方网关对 `reasoning_effort` 的映射差异（如经非官方端点，须按 surface 另立合同）。
+
+## 3. claude_code（宿主面；本机 `Claude Code 2.1.247`）
+
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| A1 | 模型选择优先级：`/model` > `--model` > `ANTHROPIC_MODEL` > settings `"model"` > `ANTHROPIC_DEFAULT_MODEL`；`/model` 自 v2.1.153 可持久写入用户 settings | code.claude.com/docs/en/model-config，2026-08-28 | verified；settings `"model"` 为候选投影字段 |
+| A2a | model_effort_capability：effort 词表 `low..max` **按具体 model 分列**，model-dependent（Opus 4.6/Sonnet 4.6 上限 high；默认 high，Opus 4.7 默认 xhigh）；不支持的档位向下 clamp | code.claude.com/docs/en/model-config，2026-08-28 | verified（行为）；逐项 (model, effort) 随 MOR-400 fixture |
+| A2b | effort_persistence_surface：`max` 默认仅作用于当前 session，持久化方式与 low/medium/high/xhigh 不同；settings `"effortLevel"`/env/flag 的持久化语义须逐档记录 | 同上 | verified（行为级）；逐档持久化细节进 MOR-400 fixture，不得把 max 假设为可持久化 settings 值 |
+| A3 | **clamp 行为**：不支持的档位静默向下降档（"xhigh runs as high on Opus 4.6"） | 同上 | verified；fixture 必须留痕，请求≠观察不得标 `host_loaded` |
+| A4 | **fallback 触发矩阵**：`fallbackModel` 链上限 3 个模型（去重），subagents 继承；触发限于 overload/unavailable/non-retryable server error——auth、billing、rate-limit、request-size、transport 等错误**不**触发 fallback | Claude model-config 官方文档，2026-08-28（issue #65782 仅作 secondary corroboration，不参与 verified 证明） | verified；fixture 须按错误类别记录 fallback 触发原因矩阵 |
+| A4a | **fallback receipt 归属规则（2026-08-29 修订，供 MOR-400 合同采纳）**：若宿主配置了 fallback 链，单 turn 内宿主可能静默换模型执行；route receipt 记录的是 **requested model**，宿主层 fallback 属宿主行为，**不算 route 违规**，receipt verifier 不得据此判 violated；但 applied-model 留痕（如宿主日志可取）应作为 observed 侧辅助证据分列，不并入 route 合同判据 | 官方 model-config 文档（fallback 只持续当前 turn、subagent 继承、触发矩阵见 A4），2026-08-29 复核一致 | verified（行为级）；逐项落地进 MOR-400 fixture |
+| A5 | 自定义模型串经 flag/env/settings 不做前缀校验；`ANTHROPIC_CUSTOM_MODEL_OPTION`、`ANTHROPIC_DEFAULT_*_MODEL` 可重指向别名 | 同上 | verified |
+| A6 | 第三方 provider（自定义 base URL）上**自动模型 fallback 被禁用**；桌面应用路由读其自身 third-party inference 配置而**不是** `ANTHROPIC_BASE_URL`/settings.json（CLI 与桌面投影面必须分列） | code.claude.com/docs/en/env-vars + /llm-gateway-connect，2026-08-28 | verified；对 DeepSeek 场景利好（fallback 面收窄），但桌面宿主的投影/表达面未取证 |
+
+## 4. deepseek_provider_dialect（provider 面）
+
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| D1 | Anthropic 兼容端点 `https://api.deepseek.com/anthropic`（`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`） | api-docs.deepseek.com/guides/anthropic_api + Claude Code 集成指南，2026-08-28 | verified |
+| D2 | exact 模型名 `deepseek-v4-flash` / `deepseek-v4-pro`；未识别模型名**自动回落 flash**；`claude-opus*`→pro、`claude-haiku/sonnet*`→flash | 同上 | verified；回落行为必须建 fixture，模型串钉死精确拼写 |
+| D3 | effort 透传：`output_config` "Only effort is supported"；`thinking` 支持但 `budget_tokens` 被忽略；`redacted_thinking` 不支持 | 同上 | verified |
+| D4 | 原生 API `reasoning_effort` 词表 `low / high / max`（legacy `deepseek-chat`/`deepseek-reasoner` 名 2026-07-24 停用） | api-docs.deepseek.com updates + V4 公告，2026-08-28 | verified |
+| D5 | **2026-09-12 增量**：Anthropic 兼容端点示例与 claude-* 映射均改用 `deepseek-flash`（claude-opus*→`deepseek-v4-pro`、claude-haiku/sonnet*→`deepseek-flash`；`output_config` 仍 "Only `effort` is supported"）；pricing 页确认 `deepseek-flash`=V4.1-Flash，旧名 `deepseek-v4-flash`/`-vision-exp` 退役（请求按 Flash 价承接），`v4-pro`（V4-Pro-0813）2026-09-14 后继续供 API | api-docs.deepseek.com/guides/anthropic_api + /quick_start/pricing，2026-09-12 直连抓取（pricing 记录另见 ai-coding-playbook 第三方景观） | verified（slug/映射/退役事实）；V4.1-Flash 的 effort 取值词表未逐项直证——`deepseek-flash` tuple 列 candidate |
+
+**未决**：Claude Code `effortLevel` 是否向自定义 base URL 透传为 `output_config.effort`（A2×D3 的端到端链路，官方无明文）——维持"集成时 fixture 验证"，不得按"应当透传"写合同；组织策略 clamp（无法静态取证，归入 observed 证据纪律）；Claude 桌面应用（非 CLI）的模型选择/投影面（A6）。
+
+## 5. antigravity（Google Antigravity 宿主面）
+
+| # | 事实 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| G1 | `invoke_subagent` 支持并发调用与上下文隔离；自定义 agent 可放在工作区 `.agents/agents/` 或用户 `~/.gemini/config/agents/`；agent 的 `model` 字段是 `inherit`、`flash`、`pro` tier，不是精确模型 slug 或 effort 枚举 | [Antigravity subagents](https://antigravity.google/docs/subagents?tab=cli)，2026-10-13 复核 | verified（官方产品能力；surface=host_native） |
+| G2 | `/boost` 与 `/teamwork-preview` 提供更高层的宿主编排入口；其并发、重放、失败重试和模型选择语义不等同于 `Start-ModelSlot.ps1` 的受控单次入口，须另取当前宿主会话证据 | 同上，2026-10-13 复核 | verified（入口存在）；host_loaded/live acceptance 未取证 |
+
+**Antigravity 边界**：当前没有经过验证的 exact model/effort adapter，故不进入 Codex tuple allowlist、不映射到 `gpt-6-luna/max`、`glm-5.3-flash/xhigh` 或 `deepseek-v4.1-flash/xhigh`，也不声称本工具能治理 Antigravity 原生的 retry/replay/concurrency。
+
+## 6. 采纳决定
+
+### 6.1 逐项 (surface, exact_model, exact_effort) tuple 矩阵
+
+**三类证据分离**：字段词表（某 surface 接受哪些 effort 值）≠ 模型存在性（slug 真实）≠ 逐项 tuple（surface×exact_model×exact_effort）。**协议面按 wire contract 分列**（`output_config.effort` / `reasoning_effort` / `reasoning.effort` 是三个不同字段，不合并）。
+
+canonical source 为 **[MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json)**（严格枚举、唯一键、无占位符，含 `field_path` 与 `contract_layer=host_adapter|provider_dialect` 列）。校验脚本：`pwsh -NoProfile -File scripts/quality/validate-mor-tuple-matrix.ps1`（状态枚举/唯一性/占位符/计数）。当前 93 tuples，verified 56（openai_responses 23 + openai_chat_completions 18 + deepseek_anthropic_messages 3 + deepseek_chat_completions 3 + codex_provider_channel 9（C9 五行 2026-09-17 增量 + C10 一行 2026-10-11 增量：deepseek-v4.1-flash/max 经迁移后远端中转通道实测 + C11 一行 2026-10-12 增量：gpt-6-luna/max 池改版后同通道复测 + C12 两行 2026-10-13 增量：glm/deepseek xhigh schema v5 池改版后各 1 次最小探针）；2026-09-12 增量：Astra 5 行入 openai_responses allowlist、deepseek-v4-flash 6 行因旧名退役降 candidate）。`claude_host` tuples 尚未生成（exact model 未钉定，未来实现时再取证）。allowlist = status=verified 行，最终 route 候选另须宿主侧与 provider 侧同时 verified（交集）；非 verified 行一律 `manual_mapping_required`；跨 surface 外推禁止。
+
+- Adapter allowlist = [MOR-090-tuple-matrix.json](MOR-090-tuple-matrix.json) 中 `status=verified` 的行（当前 56 行；由 validate 脚本计算，不人工写死；包含 2026-10-11 的 C10、2026-10-12 的 C11 与 2026-10-13 的 C12 增量）；evidence fact 编号（C*/Z*/A*/D*）只作溯源，不作 allowlist 依据。
+- 不进 allowlist（矩阵中非 verified 行）：codex_config_surface 15 行 partial + 3 行 gpt-6-astra candidate（含 C7 当前宿主 strict-load 的三条 max tuple，MOR-100 再逐项确认）、security 面 max candidate、zcode_ui 3 行 operator_declared（附件留存后复评）、deepseek-v4-flash 6 行 candidate（2026-09-12 旧名退役，D5）、deepseek-flash 3 行 candidate（slug/透传已证，effort 取值词表未逐项直证）、deepseek_responses 6 行 unknown（无直接一手页面）、claude_host pending（MOR-400 生成）、Z5/A×D 交叉项。
+
+## 7. 来源 URL 清单（2026-08-28；末三条为 2026-09-12；Z7/G1-G2 为 2026-10-13）
+
+- Codex Configuration Reference：https://learn.chatgpt.com/docs/config-file/config-reference
+- Codex Security CLI quickstart：https://learn.chatgpt.com/docs/security/cli
+- Codex Security workbench：https://learn.chatgpt.com/docs/security/plugin/workbench
+- GPT-5.6 官方公告：https://openai.com/index/gpt-5-6/
+- gpt-5.6-sol 官方模型页（2026-08-28 抓取）：https://developers.openai.com/api/docs/models/gpt-5.6-sol
+- gpt-5.6-terra 官方模型页：https://developers.openai.com/api/docs/models/gpt-5.6-terra
+- gpt-5.6-luna 官方模型页（2026-08-28 抓取）：https://developers.openai.com/api/docs/models/gpt-5.6-luna
+- GLM Coding Plan：https://z.ai/subscribe
+- GLM-5.3-Flash 模型页：https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash
+- GLM-5.3 模型页：https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3
+- bigmodel Chat Completion API：https://docs.bigmodel.cn/api-reference/模型-api/对话补全
+- bigmodel 核心参数说明：https://docs.bigmodel.cn/cn/guide/start/concept-param
+- Claude Code model configuration：https://code.claude.com/docs/en/model-config
+- Claude Code environment variables：https://code.claude.com/docs/en/env-vars
+- Claude Code LLM gateway connect：https://code.claude.com/docs/en/llm-gateway-connect
+- DeepSeek Anthropic API：https://api-docs.deepseek.com/guides/anthropic_api/
+- DeepSeek Thinking Mode：https://api-docs.deepseek.com/guides/thinking_mode/
+- DeepSeek Claude Code 集成：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/
+- DeepSeek 更新日志：https://api-docs.deepseek.com/updates/
+- claude-code issue #65782（fallbackModel）：https://github.com/anthropics/claude-code/issues/65782
+- gpt-6-astra 官方模型页（C8，2026-09-12 直连）：https://developers.openai.com/api/docs/models/gpt-6-astra
+- DeepSeek Anthropic API（D5，2026-09-12 直连）：https://api-docs.deepseek.com/guides/anthropic_api/
+- DeepSeek Models & Pricing（D5，2026-09-12 直连）：https://api-docs.deepseek.com/quick_start/pricing
+- ZCode subagents（Z7，2026-10-13 复核）：https://zcode.z.ai/cn/docs/subagents
+- ZCode 更新日志（Z7，2026-10-13 复核）：https://zcode.z.ai/en/changelog
+- Antigravity subagents（G1-G2，2026-10-13 复核）：https://antigravity.google/docs/subagents?tab=cli
+- 拒绝：GLM-3.5-Flash 旧名；把 provider 方言可表达性当作宿主生效证明；以社区配置补齐任何 token。
+- fixtures（`tests/fixtures/<host>-static/`）待 `<runtime-root>` 选定后随 MOR-100/300/400 创建；本证据包为其唯一输入底稿。

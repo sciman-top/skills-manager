@@ -77,11 +77,13 @@ $Files = @(
 )
 
 # 清单完整性守卫：新增 src 文件漏登记时 bundle 内容不变，-Check 漂移检测对
-# 清单外的输入天然失明，所有 .ps1 必须全部登记在 $Files。
+# 清单外的输入天然失明。src/model-orchestration/ 按仓库契约独立于主构建链，
+# 其余 .ps1 必须全部登记在 $Files。
 $buildListed = @($Files | ForEach-Object { $_.Replace('\', '/') } | Sort-Object)
 $buildActual = @(
     Get-ChildItem -LiteralPath $Src -Recurse -Filter '*.ps1' -File |
         ForEach-Object { [IO.Path]::GetRelativePath($Src, $_.FullName).Replace('\', '/') } |
+        Where-Object { $_ -notlike 'model-orchestration/*' } |
         Sort-Object
 )
 $buildUnlisted = @($buildActual | Where-Object { $buildListed -notcontains $_ })

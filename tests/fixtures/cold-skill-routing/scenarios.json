@@ -958,7 +958,7 @@
       "forbidden_events": ["second_discovery", "writes", "unadmitted_writes", "external_calls", "multi_turn_summary_substitution"],
       "execution_contract": "one_shot",
       "side_effect_ceiling": "read_only",
-      "required_context": ["AGENTS.md", "rules/global/common.md", "rules/global/platforms/claude.md", "rules/global/claude/CLAUDE.md"],
+      "required_context": ["AGENTS.md", "rules/global/common.md", "rules/global/platforms/claude.md", "rules/global/claude/CLAUDE.md", "src/model-orchestration/README.md"],
       "verification_mode": "routing_only"
     }
   ]

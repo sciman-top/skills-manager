@@ -6,7 +6,7 @@ param(
     [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
     [string[]]$TestName = @(),
-    [ValidateSet('lock', 'integrity', 'config', 'scheduler')]
+    [ValidateSet('lock', 'integrity', 'config', 'scheduler', 'mor')]
     [string[]]$Verifier = @(),
     [string]$DiffBase = '',
     # Explicit escape hatch for the shimmed-sandbox full block below.
@@ -157,7 +157,9 @@ try {
         throw 'Focused profile requires -TestPath or -TestName.'
     }
     # Local builds regenerate the bundle; CI checks the submitted bytes before tests.
-    if ($requiresBuild) {
+    $modelPresetOnly = $Profile -eq 'focused' -and $Verifier.Count -eq 0 -and $TestPath.Count -eq 1 -and
+        $TestPath[0].Replace('\', '/') -eq 'tests/Unit/ModelPreset.Tests.ps1'
+    if (-not $modelPresetOnly -and $requiresBuild) {
         Invoke-QualityGate 'build' { & .\build.ps1 -Check:($CheckGenerated -or $docsSupplemented) }
     }
     if ($Profile -eq 'focused') {
@@ -184,6 +186,8 @@ try {
         @('lock', 'integrity', 'config', 'scheduler')
     }
     else {
+        # 'mor' validates the optional design tuple matrix. Implemented preset
+        # behavior is covered by ModelPreset.Tests.ps1 in focused/full tests.
         @('lock', 'integrity', 'config', 'scheduler')
     }
     foreach ($verifier in $selectedVerifiers) {
@@ -192,6 +196,12 @@ try {
             'integrity' { Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 } }
             'config' { Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce } }
             'scheduler' { Invoke-QualityGate 'host-scheduler-ownership' { Assert-HostSchedulerOwnershipContract } }
+            'mor' {
+                Invoke-QualityGate 'model-orchestration-contract' {
+                    & .\scripts\quality\validate-mor-tuple-matrix.ps1
+                    & .\src\model-orchestration\Test-ModelPreset.ps1
+                }
+            }
         }
     }
     Write-Host ("Local quality gates passed ({0}). elapsed={1:n1}s" -f $Profile, $suiteStopwatch.Elapsed.TotalSeconds)

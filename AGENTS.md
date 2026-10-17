@@ -5,7 +5,7 @@
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。
-- 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。
+- 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。独立的 `src/model-orchestration/` preset 工具遵循其局部 `AGENTS.md`，不进入主 CLI 构建链。
 - 项目根 `AGENTS.md` 是各宿主共同的项目规则源；`CLAUDE.md`、`GEMINI.md` 与 `.agents/rules/00-project.md` 只做引用。
 - 冻结面（仅真实故障修复，解冻须用户明确授权）见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。新增能力前先读该节。
 - 真值层级 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`，低层证据不得外推。

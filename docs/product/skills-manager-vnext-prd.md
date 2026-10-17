@@ -48,6 +48,7 @@
 下列能力仍在仓库中，但不属于 §2 的核心任务，也不是日常主链。修复真实故障可以做；新增功能、扩大范围或接入日常主链，须先由用户明确解冻：
 
 - 冷技能路由（`capability-router`、CSR 系列）：路线图状态为 `engineering-frozen`，见 [冷技能路由路线图](cold-skill-routing-roadmap.md)。
+- 独立模型 preset 工具（`src/model-orchestration/`）：独立于主 CLI 构建链，不参与技能/MCP 构建。
 
 ## 4. 产品原则
 

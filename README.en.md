@@ -6,7 +6,7 @@ It is aimed at individuals and teams that want the same skill set across Windows
 
 Claude integration targets Claude Code's local configuration and skill surface. A Code session launched inside Claude Desktop uses that same surface; regular Claude Desktop chats use account-synced skills/plugins, so a local `.claude` projection does not prove those chats loaded them.
 
-The main CLI does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
+The main CLI does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. The [independent preset tool](src/model-orchestration/README.md) provides explicit model configuration and controlled launches; it is outside the skills/MCP build and does not automate failover or task replay. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
 
 This project is licensed under the [MIT License](LICENSE). Third-party skills and dependencies remain subject to their original licenses.
 
