@@ -34,8 +34,57 @@ function Get-ExecutionAdmissionProfile([string]$Mode) {
     return $script:ExecutionAdmissionProfiles[$Mode]
 }
 
+function New-ExecutionAdmissionBridgePayload {
+    param(
+        [Parameter(Mandatory)][string]$OriginalRequest,
+        [Parameter(Mandatory)]$Validation,
+        [Parameter(Mandatory)]$Admission,
+        [Parameter(Mandatory)]$Plan,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$SkillRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($OriginalRequest)) { throw 'bridge_original_request_missing' }
+    if ((Get-OperationSha256 $OriginalRequest) -cne [string](Get-ExecutionAdmissionProperty $Admission 'request_sha256')) { throw 'bridge_request_mismatch' }
+
+    $selected = @(Get-ExecutionAdmissionProperty $Validation 'selected')
+    if ($selected.Count -ne 1) { throw 'bridge_selected_candidate_count_invalid' }
+    $selectedName = [string](Get-ExecutionAdmissionProperty $selected[0] 'name')
+    $selectedPath = [string](Get-ExecutionAdmissionProperty $selected[0] 'path')
+    if ([string]::IsNullOrWhiteSpace($selectedName) -or [string]::IsNullOrWhiteSpace($selectedPath)) { throw 'bridge_selected_candidate_invalid' }
+
+    $snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
+    if ($selectedName -cne [string](Get-ExecutionAdmissionProperty $snapshot 'selected_candidate')) { throw 'bridge_selected_candidate_mismatch' }
+    $closure = @(Get-ExecutionAdmissionProperty $Validation 'validated_closure')
+    $rootMatches = @($closure | Where-Object {
+        [string](Get-ExecutionAdmissionProperty $_ 'name') -ceq $selectedName -and
+        [string](Get-ExecutionAdmissionProperty $_ 'path') -ceq $selectedPath
+    })
+    if ($rootMatches.Count -ne 1) { throw 'bridge_selected_root_missing_from_closure' }
+
+    $check = Test-ExecutionAdmissionRevalidation -Admission $Admission -Plan $Plan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
+    if (-not $check.pass) { throw ('bridge_admission_not_revalidated: ' + (($check.findings | ForEach-Object code) -join ',')) }
+
+    $contract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $Validation 'execution_contract')
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        kind = 'execution_admission_bridge_payload'
+        original_request = $OriginalRequest
+        validated_skill_name = $selectedName
+        validated_skill_path = [IO.Path]::GetFullPath($selectedPath)
+        validation = $Validation
+        validated_closure = $closure
+        effective_execution_contract = $contract
+        admission = $Admission
+        plan = $Plan
+        repo_root = [IO.Path]::GetFullPath($RepoRoot)
+        skill_root = [IO.Path]::GetFullPath($SkillRoot)
+    }
+}
+
 function Export-ExecutionAdmissionHandoff {
     param(
+        [Parameter(Mandatory)][string]$OriginalRequest,
         [Parameter(Mandatory)]$Admission,
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Validation,
@@ -43,13 +92,11 @@ function Export-ExecutionAdmissionHandoff {
         [Parameter(Mandatory)][string]$SkillRoot,
         [Parameter(Mandatory)][string]$Path
     )
-    $check = Test-ExecutionAdmissionRevalidation -Admission $Admission -Plan $Plan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
-    if (-not $check.pass) { throw 'handoff_admission_not_revalidated' }
+    $bundle = New-ExecutionAdmissionBridgePayload -OriginalRequest $OriginalRequest -Admission $Admission -Plan $Plan -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     $state = @(Get-ExecutionAdmissionWriteSnapshots -Paths @($Path) -RepoRoot $RepoRoot)[0]
     if ($state.exists) { throw 'handoff_path_exists' }
     $taskPaths = @($Admission.exact_write_set) + @($Admission.allowed_read_set | ForEach-Object path)
     if ($taskPaths -contains $state.path) { throw 'handoff_overlaps_task_scope' }
-    $bundle = [ordered]@{ admission = $Admission; plan = $Plan; validation = $Validation; repo_root = [IO.Path]::GetFullPath($RepoRoot); skill_root = [IO.Path]::GetFullPath($SkillRoot) }
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($bundle | ConvertTo-Json -Depth 60 -Compress))
     # CreateNew preserves existing handoffs; the hash binds the exact serialized bytes.
     $stream = [IO.File]::Open($state.path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
@@ -72,10 +119,16 @@ function Import-ExecutionAdmissionHandoff {
     $actual = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
     if ($actual -cne $Sha256) { throw 'handoff_hash_mismatch' }
     $bundle = [Text.UTF8Encoding]::new($false, $true).GetString($bytes) | ConvertFrom-Json -Depth 60
+    if ([int]$bundle.schema_version -ne 1 -or [string]$bundle.kind -cne 'execution_admission_bridge_payload') { throw 'handoff_schema_invalid' }
     if ($bundle.admission.admission_id -cne $AdmissionId -or $bundle.repo_root -ne [IO.Path]::GetFullPath($RepoRoot)) { throw 'handoff_identity_mismatch' }
-    $check = Test-ExecutionAdmissionRevalidation -Admission $bundle.admission -Plan $bundle.plan -Validation $bundle.validation -RepoRoot $RepoRoot -SkillRoot $bundle.skill_root
-    if (-not $check.pass) { throw ('handoff_revalidation_failed: ' + (($check.findings | ForEach-Object code) -join ',')) }
-    return $bundle
+    $expected = New-ExecutionAdmissionBridgePayload -OriginalRequest ([string]$bundle.original_request) -Admission $bundle.admission -Plan $bundle.plan -Validation $bundle.validation -RepoRoot $RepoRoot -SkillRoot ([string]$bundle.skill_root)
+    if ([string]$bundle.validated_skill_name -cne [string]$expected.validated_skill_name -or
+        [string]$bundle.validated_skill_path -cne [string]$expected.validated_skill_path -or
+        (ConvertTo-ExecutionAdmissionCanonicalJson $bundle.validated_closure) -cne (ConvertTo-ExecutionAdmissionCanonicalJson $expected.validated_closure) -or
+        (ConvertTo-ExecutionAdmissionCanonicalJson $bundle.effective_execution_contract) -cne (ConvertTo-ExecutionAdmissionCanonicalJson $expected.effective_execution_contract)) {
+        throw 'handoff_payload_mismatch'
+    }
+    return $expected
 }
 
 function New-ExecutionAdmissionFinding([string]$Code, [string]$Path, [string]$Message) {

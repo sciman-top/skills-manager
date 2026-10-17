@@ -37,8 +37,10 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 
 ### 1.2 宿主能力差异
 
-- Codex Desktop、CLI、IDE：支持 custom agent / native child 时，只有可观察 child id、model、effort、lifecycle 才能达到 host_specific_live_accepted。
-- Claude Code 与 ZCode 也支持原生子代理；必须按当前工具/schema 检查具体 agent、model、effort 与 lifecycle，不把 Codex 的 TOML 自定义角色当作跨宿主通用配置。确实不支持或不暴露 lifecycle 的入口才记录 not_supported 或 not_observable；parent 代行时只报告 parent-mediated observation。
+- ChatGPT Work / Codex App、CLI、IDE：支持 native child 的当前 surface 才能验收；host-specific live acceptance 必须有 child id、实际 model/effort 和 lifecycle。Hosted Work 的宿主能力不由本机 Codex 配置证明。
+- Claude Code：使用 Code surface 的本地 `.claude/skills` 与 `.claude/agents`；按当前工具/schema 检查实际 Agent、model、effort 与 lifecycle。Claude Desktop 普通聊天使用其 account-synced skills/plugins；本机 `.claude` 投影不能证明该聊天已加载。若 Desktop 会话实际运行 Claude Code，应按 Claude Code 验收，并单独记录该 surface。
+- ZCode 与 Antigravity App/CLI 也有原生子代理；必须按当前 surface 的工具/schema 和技能根检查实际 Agent、model、effort 与 lifecycle。Antigravity App/IDE 的全局技能根是 `~/.gemini/config/skills`，CLI 的全局技能根是 `~/.gemini/antigravity-cli/skills`；投影到一处不证明另一处可见。不得把 Codex TOML 自定义角色当作跨宿主通用配置。确实不支持或不暴露 lifecycle 的入口才记录 `not_supported` 或 `not_observable`；parent 代行时只报告 parent-mediated observation。
+- 只投影明确授权的宿主子集时，`skills.ps1 构建生效 -ProjectionHosts codex,claude,zcode,antigravity` 会过滤配置中的其他宿主目标；选中 `codex` 才更新 Codex native skill root 与 custom-agent bridge。当前 Antigravity target 只覆盖 App/IDE，不覆盖 CLI root。遗漏该选项保留旧的全目标行为。
 - 工具、catalog reader、测试 harness 或 assistant prose：只可当较低层证据，不能作为 native host evidence。
 
 ### 1.3 多轮回答归因
@@ -218,8 +220,9 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 1. 在独立 fresh Codex session 运行 S31-live-derived；需要显式委派意图时使用矩阵中对应的 runner dispatch 请求，保存实际原文，不把改写请求计作原样通过。
 2. parent 必须用确定性的 `ExecutionAdmission` helper 生成并重验证 schema-v2 `execution_admission` 与 `execution_plan`；两者绑定原始请求、完整 router validation、唯一 selected entry、validated closure、entrypoint/package hash、effective execution contract、requested_operation=read_only、empty exact write set、minimum proof、stop、同一 admission id 与 `run_once` action。raw router JSON 或手写 prose contract 不算 admission。
-3. 记录 cold-capability-runner child id、实际 model/effort、active preset 与所选槽位、completed 事件、输入/输出 evidence reference。
-4. 最后用文件变更/工具 event 核对实际 write set 为空。任何写入、外部调用、第二候选或 contract mismatch 都是 fail。
+3. native spawn 前检查实际 child message：必须显式携带 `validated_skill_name`、`validated_skill_path`、完整 router validation、完整 `validated_closure`、原始请求、effective execution contract、schema-v2 admission 和 plan、`RepoRoot` 与 `SkillRoot`。仅有路由 receipt、父级 admission 成功或“使用该技能”的文字不够。若使用 handoff file，另传并验证其 path、SHA-256 和 admission id；read-only 验收若禁止文件写入，则在 child message 中直接传完整对象。缺少任一项时按 `bridge_admission_required` 停止，不重试、不替换 agent，也不调用 `wait`。
+4. 仅在 `spawn_agent` 返回非空 child id 后等待同一 child；记录 child id、实际 model/effort、active preset 与所选槽位、completed 事件、输入/输出 evidence reference。若宿主事件流未暴露 child id，则用与 host thread 绑定的 child rollout 作为证据；两者都没有时记 `native_child=not_observable`。
+5. 最后用文件变更/工具 event 核对实际 write set 为空。任何写入、外部调用、第二候选或 contract mismatch 都是 fail。
 
 ### 6.4 可见直达对照
 

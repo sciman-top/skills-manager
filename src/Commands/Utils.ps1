@@ -183,6 +183,7 @@ Skills 管理器（中文菜单）
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
   - `构建生效 -OnlySkill <name>` 只重建唯一匹配的 override 技能目录，并刷新发现 catalog 与当前 Codex profile 的受管技能投影（含已配置的 native skill target）；不重建其他 override 包或 MCP
+  - `构建生效 -ProjectionHosts codex,claude,zcode,antigravity` 只同步指定宿主的配置目标，并仅在包含 `codex` 时刷新 Codex native skill/agent 投影；省略时保留全部配置目标的既有行为
 
 常用命令：
   .\skills.ps1 ai-coding [--template implementation|review|failure|handoff|checklist] [--json]
@@ -194,6 +195,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -ProjectionHosts codex,claude,zcode,antigravity
   .\skills.ps1 构建生效 -OnlySkill ai-coding-workflow
   .\skills.ps1 构建生效 -SkillProfile full-compatible
   .\skills.ps1 构建生效 -AllowUnverifiedHostProjection
