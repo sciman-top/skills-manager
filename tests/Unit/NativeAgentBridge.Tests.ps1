@@ -73,6 +73,67 @@ Describe 'Native agent bridge' {
         }
     }
 
+    It 'ships Claude subagent templates that keep the ownership marker and pin no route or credential' {
+        foreach ($name in @('design-griller', 'cold-capability-runner')) {
+            $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\claude\{0}.md" -f $name)
+
+            $template | Should -Match '(?m)^---$'
+            $template | Should -Match '(?m)^# skills-manager-native-agent-bridge: v1$'
+            $template | Should -Match ("(?m)^name: {0}$" -f [regex]::Escape($name))
+            $template | Should -Match '(?m)^description: '
+            $template | Should -Match '(?m)^tools: '
+            $template | Should -Not -Match '(?m)^(model|effort|provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:'
+        }
+        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\claude\cold-capability-runner.md') | Should -Match '(?m)^tools: Read, Glob, Grep$'
+        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\claude\design-griller.md') | Should -Match '(?m)^tools: Read, Glob, Grep, WebFetch, WebSearch$'
+    }
+
+    It 'validates the Claude bridge block against ~/.claude/agents only' {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $block = $config.skill_projection.claude_native_agent_bridge
+
+        @(Get-NativeAgentBridgeConfigErrors $block '~/.claude/agents' 'claude_native_agent_bridge') | Should -BeNullOrEmpty
+        $wrongTarget = [pscustomobject]@{
+            enabled = $true; owner = 'skills-manager'; source_root = 'agent/native-agent-bridge/claude'
+            target_root = '~/.codex/agents'; receipt_path = 'reports/native-agent-bridge/claude-x.json'; definitions = @('design-griller')
+        }
+        (@(Get-NativeAgentBridgeConfigErrors $wrongTarget '~/.claude/agents' 'claude_native_agent_bridge') -join ' ') | Should -Match 'claude_native_agent_bridge\.target_root 必须等于 ~/\.claude/agents'
+    }
+
+    It 'plans Claude bridge projection without writing the host agents directory during dry run' {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $previousRoot = $Root
+        $previousAgentDir = $AgentDir
+        $previousDryRun = $DryRun
+        try {
+            $Root = $TestDrive
+            $AgentDir = Join-Path $Root 'agent'
+            $sourceRoot = Join-Path $AgentDir 'native-agent-bridge\claude'
+            New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+            foreach ($name in @('design-griller', 'cold-capability-runner')) {
+                Copy-Item -LiteralPath (Join-Path $repoRoot ("overrides\resources\native-agent-bridge\claude\{0}.md" -f $name)) -Destination (Join-Path $sourceRoot ("{0}.md" -f $name))
+            }
+            $config.skill_projection.claude_native_agent_bridge.receipt_path = 'reports/native-agent-bridge/claude-fixture.json'
+            $DryRun = $true
+            $result = Sync-ClaudeNativeAgentBridge $config
+
+            $result.enabled | Should -BeTrue
+            $result.persisted | Should -BeFalse
+            $result.truth_boundary | Should -Be 'planned'
+            @($result.changed_names) | Should -Be @('cold-capability-runner', 'design-griller')
+            foreach ($definition in @($result.definitions)) {
+                $definition.target_path | Should -Match ([regex]::Escape((Join-Path $HOME '.claude\agents')))
+                $definition.target_path | Should -Match ('\.md$')
+                $definition.source_sha256 | Should -Be (([string](Get-FileHash -LiteralPath $definition.source_path -Algorithm SHA256).Hash).ToLowerInvariant())
+            }
+        }
+        finally {
+            $Root = $previousRoot
+            $AgentDir = $previousAgentDir
+            $DryRun = $previousDryRun
+        }
+    }
+
     It 'treats a bridge-only host projection as requiring promotion' {
         $previousRoot = $Root
         try {
