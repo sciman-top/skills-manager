@@ -159,6 +159,8 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
 
+`-ProjectionHosts` 只限制本次枚举和同步哪些 target，不提供宿主间的内容隔离：`agent/` 是共享生成源，当前 `managed_link_only` 技能目录是指向 `agent/<skill>` 的 junction。重建 `agent/` 后，未选中的宿主仍会通过既有 junction 看到其所链接技能的内容变化。需要确认实际影响时，应比较源与各 target 的内容哈希；不能仅凭参数筛选声称未选宿主字节不变。
+
 | 宿主 | 默认 profile | `full-compatible` 的宿主适配 |
 | --- | --- | --- |
 | ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |

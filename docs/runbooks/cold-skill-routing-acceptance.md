@@ -40,7 +40,7 @@ router 永远保持 writes_performed=false 与 execution_authorization.status=no
 - ChatGPT Work / Codex App、CLI、IDE：支持 native child 的当前 surface 才能验收；host-specific live acceptance 必须有 child id、实际 model/effort 和 lifecycle。Hosted Work 的宿主能力不由本机 Codex 配置证明。
 - Claude Code：使用 Code surface 的本地 `.claude/skills` 与 `.claude/agents`；按当前工具/schema 检查实际 Agent、model、effort 与 lifecycle。Claude Desktop 普通聊天使用其 account-synced skills/plugins；本机 `.claude` 投影不能证明该聊天已加载。若 Desktop 会话实际运行 Claude Code，应按 Claude Code 验收，并单独记录该 surface。
 - ZCode 与 Antigravity App/CLI 也有原生子代理；必须按当前 surface 的工具/schema 和技能根检查实际 Agent、model、effort 与 lifecycle。Antigravity App/IDE 的全局技能根是 `~/.gemini/config/skills`，CLI 的全局技能根是 `~/.gemini/antigravity-cli/skills`；投影到一处不证明另一处可见。不得把 Codex TOML 自定义角色当作跨宿主通用配置。确实不支持或不暴露 lifecycle 的入口才记录 `not_supported` 或 `not_observable`；parent 代行时只报告 parent-mediated observation。
-- 只投影明确授权的宿主子集时，`skills.ps1 构建生效 -ProjectionHosts codex,claude,zcode,antigravity` 会过滤配置中的其他宿主目标；选中 `codex` 才更新 Codex native skill root 与 custom-agent bridge。当前 Antigravity target 只覆盖 App/IDE，不覆盖 CLI root。遗漏该选项保留旧的全目标行为。
+- 只同步明确授权的宿主子集时，`skills.ps1 构建生效 -ProjectionHosts codex,claude,zcode,antigravity` 会过滤配置中的其他宿主 target；选中 `codex` 才更新 Codex native skill root 与 custom-agent bridge。筛选只限制本次 target reconciliation，不隔离共享源内容：`agent/` 重建后，未选宿主已有的 `managed_link_only` junction 也会看到关联技能变化。必须按源/target hash 记录实际影响，不能声称未选宿主字节不变。当前 Antigravity target 只覆盖 App/IDE，不覆盖 CLI root。遗漏该选项保留旧的全目标行为。
 - 工具、catalog reader、测试 harness 或 assistant prose：只可当较低层证据，不能作为 native host evidence。
 
 ### 1.3 多轮回答归因
