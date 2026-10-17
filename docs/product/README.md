@@ -4,7 +4,6 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 - [PRD](skills-manager-vnext-prd.md)：用户、范围、功能、非功能和验收边界。
 - [Architecture](skills-manager-vnext-architecture.md)：模块、接口、数据流、真值与删除原则。
-- [Cold-skill routing roadmap](cold-skill-routing-roadmap.md)：冷目录发现、原生执行 bridge、host 验收与专项工件验收的阶段、依赖和退出条件。**当前状态：engineering-frozen（core-lean 常态主发现路径，不再扩展演进，见文内 §0）。** 已闭卷的 CSR-100–170 实施计划见 `docs/archive/`。
 
 模型能力分为两部分：已实现的[独立 preset 工具](../../src/model-orchestration/README.md)负责显式配置与受控启动；完整跨宿主编排、自动故障切换仍是 deferred design。独立工具不进入技能/MCP 主 CLI，不作为日常编码的必经入口：
 
@@ -19,7 +18,6 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 附属参考件：
 
-- [Cold-skill routing acceptance runbook](../runbooks/cold-skill-routing-acceptance.md)：host-specific 验收的输入、receipt 和停止条件；它不替代仓库测试。
 - [AI 编码工作流与约束](ai-coding-workflow-guide.md)：合并后的单一参考件，含工作流、强制层级与外部依据；不是规则或门禁。
 
 运行真值不写入本目录：
