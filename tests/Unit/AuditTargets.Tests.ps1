@@ -48,6 +48,17 @@ BeforeAll {
 
 }
 Describe "Audit Targets" {
+    It "Drops English function words from keyword traces so description boilerplate cannot satisfy membership" {
+        $keywords = @(Get-AuditKeywordsFromText "Use when the task needs ocr for pdf and docx, with proportionate checks.")
+        $keywords | Should -Contain "ocr"
+        $keywords | Should -Contain "pdf"
+        $keywords | Should -Contain "docx"
+        $keywords | Should -Contain "proportionate"
+        foreach ($word in @("use", "when", "the", "and", "for", "with", "task")) {
+            $keywords | Should -Not -Contain $word
+        }
+    }
+
     It "Excludes dependency files while retaining nested source in pruned enumeration" {
         $repo = Join-Path $TestDrive 'pruned-enumeration'
         $null = New-Item -ItemType Directory -Path "$repo/src/nested", "$repo/node_modules/deep" -Force
