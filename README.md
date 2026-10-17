@@ -147,7 +147,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、Claude Code、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。Claude Desktop 内运行的 Code 会话按 Claude Code 支持面验收；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影不证明该聊天已加载。
 
-不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码效能手册](docs/product/ai-coding-playbook.md)。
+不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码工作流与约束](docs/product/ai-coding-workflow-guide.md)。
 
 工作流技能按受影响行为选择观察证据：Web 交互、桌面输入、服务交付、自动化与数据迁移各有不同验收路径；项目类型本身不触发全量测试或外部访问。日常执行方式、项目观察矩阵和工程终态见该手册第 7–9 节。[可复用编码验收样例](tests/fixtures/ai-coding-workflow/)及手册第 10 节用于在独立副本中验证宿主的修复、测试和审查流程，不直接修复 tracked 样例，也不替代真实项目验收。修改技能源后通过既有 `构建生效` 流程物化和投影；源码落盘不等于宿主已加载，也不等于真实任务已验收。
 
