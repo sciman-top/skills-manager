@@ -83,10 +83,16 @@ Describe "Audit Targets" {
             $null = New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force
             Set-ContentUtf8 $path "# fixture marker"
         }
+        # The README and the CLI usage text describe this tool, so they are excluded for it too.
+        Set-ContentUtf8 (Join-Path $selfRepo "README.md") "Filter examples: docx pdf for sample.docx files."
+        Set-ContentUtf8 (Join-Path $selfRepo "src\Commands\Utils.ps1") "Usage: skills.ps1 find docx pdf"
+        Set-ContentUtf8 (Join-Path $otherRepo "README.md") "Filter examples: docx pdf for sample.docx files."
         $selfScan = New-AuditRepoScan "self" $selfRepo "..\self-scanner-repo"
         $otherScan = New-AuditRepoScan "other" $otherRepo "..\other-target-repo"
         (@($otherScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" })).Count | Should -BeGreaterThan 0
         (@($selfScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" })).Count | Should -Be 0
+        (@($otherScan.detected.requirement_signals | Where-Object { $_.domain -eq "workflow" -and $_.subject -eq "document_processing" })).Count | Should -BeGreaterThan 0
+        (@($selfScan.detected.requirement_signals | Where-Object { $_.domain -eq "workflow" -and $_.subject -eq "document_processing" })).Count | Should -Be 0
     }
 
     It "Excludes dependency files while retaining nested source in pruned enumeration" {

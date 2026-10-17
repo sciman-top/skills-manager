@@ -791,6 +791,13 @@ function Test-AuditSelfRepository([string]$ResolvedPath) {
     return $true
 }
 
+function Test-AuditSelfUsageSurface([string]$RelativePath) {
+    # The CLI usage text lives in this file and names format examples (for instance
+    # "docx pdf" as filter arguments). It describes the tool's syntax, not a product need.
+    $normalized = ([string]$RelativePath).Replace('/', '\')
+    return [regex]::IsMatch($normalized, '(?i)(^|\\)src\\Commands\\Utils\.ps1$')
+}
+
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
     if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
     $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
@@ -1095,7 +1102,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
                 continue
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
-            if ($selfRepository -and $kind -eq "test") {
+            if ($selfRepository -and ($kind -eq "test" -or (Test-AuditSelfUsageSurface $relativePath))) {
                 $sourceScanSelfReferentialCount++
                 continue
             }
@@ -1193,8 +1200,12 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
             $text = Get-ContentUtf8 $fullPath
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $contents.Add($text) | Out-Null
-                Add-AuditArtifactFactsFromText $ArtifactCapabilities $text "documentation" $relativePath
-                Add-AuditRequirementFactsFromText $RequirementSignals $text "documentation" $relativePath
+                # A repository that is this tool describes its own skills in these docs; that
+                # is not target product evidence, so only other repositories keep it.
+                if (-not (Test-AuditSelfRepository $resolvedPath)) {
+                    Add-AuditArtifactFactsFromText $ArtifactCapabilities $text "documentation" $relativePath
+                    Add-AuditRequirementFactsFromText $RequirementSignals $text "documentation" $relativePath
+                }
                 if ($text -match "编码前设计包" -or $text -match "(?i)\bpre-implementation\b" -or $text -match "(?i)\bdesign package\b") {
                     $designRepoDetected = $true
                 }
