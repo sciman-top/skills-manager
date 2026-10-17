@@ -194,7 +194,11 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 同步MCP
 ```
 
-本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。
+本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。同步会按已配置目标使用宿主原生格式：Claude Code 用户级 `~/.claude.json`、Claude Desktop 的 `%APPDATA%/Claude/claude_desktop_config.json`（仅在其配置目录已存在时纳入，当前只接受本地 `stdio` server）、Antigravity `~/.gemini/config/mcp_config.json`（远程地址使用 `serverUrl`），以及 Codex、ZCode、Gemini、Trae 和 WorkBuddy 各自配置。Claude Desktop 账号侧的远程 connectors 与普通桌面聊天的 skills/plugins 由 Claude 账号管理；ChatGPT Work 也没有本地 MCP/skill 投影入口，因此本机文件同步不代表这些账号侧能力已加载。
+
+运行 `同步MCP --plan --json` 可预览配置动作；计划只证明 `repo_verified`，实际同步才会写受管目标文件，仍不证明宿主已加载或真实调用。默认 MCP profile 为空时，不会新建缺失的配置文件；现有文件中本仓声明但当前 profile 未启用的 server 会被清理，其他宿主配置会保留。
+
+`卸载MCP <name>` 会显式清理各受管目标中的同名 server；dry-run 只预览并预检，不保存 `skills.json`。若直接从 `skills.json` 删除 server，工具无法确认已有同名宿主项是否属于本仓，因此会保留该项。Claude Desktop 配置目录存在且当前 profile 含非 `stdio` server 时，整批同步会在写入前失败关闭，不会只更新其他宿主。
 
 ### 目标仓审查
 

@@ -76,18 +76,36 @@ function Get-McpCliVerificationWorkingDir([string]$cli) {
 }
 
 function Get-McpServerNamesFromJsonText([string]$jsonText) {
-    if ([string]::IsNullOrWhiteSpace($jsonText)) { return @() }
+    Need (-not [string]::IsNullOrWhiteSpace($jsonText)) 'MCP JSON 配置为空，拒绝按空服务器清单通过校验。'
+    $options = [System.Text.Json.JsonDocumentOptions]::new()
+    $options.MaxDepth = 100
+    $document = $null
     try {
-        $obj = $jsonText | ConvertFrom-Json -Depth 100
+        $document = [System.Text.Json.JsonDocument]::Parse($jsonText, $options)
     }
     catch {
-        return @()
+        throw 'MCP JSON 配置无效，拒绝按空服务器清单通过校验。'
     }
-    if ($null -eq $obj) { return @() }
-    if ($obj.PSObject.Properties.Match("mcpServers").Count -eq 0 -or $null -eq $obj.mcpServers) {
-        return @()
+    try {
+        $root = $document.RootElement
+        Need ($root.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) 'MCP JSON 根值必须是对象。'
+        $serverMembers = @($root.EnumerateObject() | Where-Object { [string]::Equals($_.Name, 'mcpServers', [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($serverMembers.Count -eq 0) { return @() }
+        Need ($serverMembers.Count -eq 1) 'MCP JSON 含有大小写重复的 mcpServers 属性。'
+        Need ([string]::Equals($serverMembers[0].Name, 'mcpServers', [System.StringComparison]::Ordinal)) 'MCP JSON 的 mcpServers 属性大小写不匹配。'
+        $servers = $serverMembers[0].Value
+        Need ($servers.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) 'MCP JSON 的 mcpServers 必须是对象。'
+
+        $names = New-Object System.Collections.Generic.List[string]
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($server in $servers.EnumerateObject()) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$server.Name)) 'MCP JSON 含有空的 MCP 服务名。'
+            Need ($seen.Add([string]$server.Name)) 'MCP JSON 含有忽略大小写后重复的 MCP 服务名。'
+            $names.Add([string]$server.Name) | Out-Null
+        }
+        return @($names.ToArray())
     }
-    return @($obj.mcpServers.PSObject.Properties | ForEach-Object { [string]$_.Name })
+    finally { if ($null -ne $document) { $document.Dispose() } }
 }
 
 function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
@@ -130,23 +148,25 @@ function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
     return @($set | Sort-Object)
 }
 
-function Get-McpExpectedServersByCli($roots) {
+function Get-McpExpectedServersByCli($roots, [string]$ClaudeUserRoot = '', [string]$ClaudeUserConfigPath = '') {
     $expected = [ordered]@{
         claude = @()
         codex = @()
         gemini = @()
     }
+    $ClaudeUserRoot = Get-ClaudeUserConfigRoot $ClaudeUserRoot
+    $ClaudeUserConfigPath = Get-ClaudeUserMcpConfigPath $ClaudeUserConfigPath
     foreach ($root in @($roots)) {
         if ([string]::IsNullOrWhiteSpace([string]$root)) { continue }
         $leaf = (Split-Path ([string]$root) -Leaf).ToLowerInvariant()
-        if ($leaf -eq ".claude") {
-            $mcpPath = Join-Path $root ".mcp.json"
-            if (Test-Path $mcpPath) {
-                $names = Get-McpServerNamesFromJsonText (Get-ContentUtf8 $mcpPath)
+        if (Test-IsClaudeUserConfigRoot ([string]$root) $ClaudeUserRoot) {
+            if (Test-Path -LiteralPath $ClaudeUserConfigPath -PathType Leaf) {
+                $names = Get-McpServerNamesFromJsonText (Get-ContentUtf8 $ClaudeUserConfigPath)
                 if ($names.Count -gt 0) { $expected.claude += $names }
             }
             continue
         }
+        if ($leaf -eq ".claude") { continue }
         if ($leaf -eq ".gemini") {
             $settingsPath = Join-Path $root "settings.json"
             if (Test-Path $settingsPath) {
@@ -367,8 +387,8 @@ function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     }
 }
 
-function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$intervalSeconds = 3) {
-    $expected = Get-McpExpectedServersByCli $roots
+function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$intervalSeconds = 3, [string]$ClaudeUserRoot = '', [string]$ClaudeUserConfigPath = '') {
+    $expected = Get-McpExpectedServersByCli $roots $ClaudeUserRoot $ClaudeUserConfigPath
     $targets = @(
         [pscustomobject]@{ cli = "claude"; names = @($expected.claude) },
         [pscustomobject]@{ cli = "codex"; names = @($expected.codex) },
@@ -420,11 +440,11 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
 
 function Invoke-NativeMcpSync($servers) {
     if (-not (Should-RunNativeMcpSync)) {
-        Log "原生 Claude MCP 注册默认跳过；已写入配置文件。如需执行 claude mcp add/remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" "INFO"
+        Log "原生 Claude MCP 注册默认跳过；受管配置文件由 skills-manager 维护。如需执行 claude mcp add/remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" "INFO"
         return
     }
     if (-not (Get-Command "claude" -ErrorAction SilentlyContinue)) {
-        Log "未检测到 claude 命令，已跳过原生 MCP 同步（仅写入 .mcp.json）。" "WARN"
+        Log "未检测到 claude 命令，已跳过原生 MCP CLI 同步；受管配置文件由 skills-manager 维护。" "WARN"
         return
     }
     if ($script:SkipNativeMcpForSession) {

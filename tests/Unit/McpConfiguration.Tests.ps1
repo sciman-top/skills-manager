@@ -236,7 +236,8 @@ Describe 'MCP configuration and host transactions' {
             $existing = @'
 {
   "tools": { "allowed": ["run_shell_command(git status)"] },
-  "experimental": { "skills": true }
+  "experimental": { "skills": true },
+  "mcpServers": { "host-owned": { "command": "kept" } }
 }
 '@
             $payload = Build-GeminiSettingsPayload $existing $servers
@@ -245,6 +246,7 @@ Describe 'MCP configuration and host transactions' {
             $payload.mcpServers.fetch.command | Should -Be "python"
             $payload.mcpServers.fetch.args.Count | Should -Be 2
             $payload.mcpServers.fetch.PSObject.Properties.Name -contains "transport" | Should -Be $false
+            $payload.mcpServers['host-owned'].command | Should -Be 'kept'
         }
 
         It "Builds minimal payload when existing settings is empty" {
@@ -275,6 +277,63 @@ Describe 'MCP configuration and host transactions' {
             )
             { Build-GenericMcpPayload '{ "mcpServers": { broken' $servers } | Should -Throw '*拒绝最小化重建*'
         }
+
+        It "Fails closed on case-ambiguous MCP configuration keys" {
+            { Build-GenericMcpPayload '{"mcpServers":{},"McpServers":{}}' @() } | Should -Throw '*大小写冲突*'
+        }
+    }
+
+    Context "Claude native MCP payloads" {
+        It "Projects Claude Code stdio and remote server shapes while preserving other user settings" {
+            $existing = '{"theme":"dark","projects":{"C:/work":{"hasTrustDialogAccepted":true}}}'
+            $servers = @(
+                [pscustomobject]@{ name = 'local'; transport = 'stdio'; command = 'node'; args = @('server.js') },
+                [pscustomobject]@{ name = 'remote'; transport = 'http'; url = 'https://example.invalid/mcp'; bearer_token_env_var = 'MCP_TOKEN' }
+            )
+
+            $payload = Build-ClaudeMcpPayload $existing $servers
+
+            $payload.theme | Should -Be 'dark'
+            $payload.projects['C:/work'].hasTrustDialogAccepted | Should -Be $true
+            $payload.mcpServers.local.type | Should -Be 'stdio'
+            $payload.mcpServers.local.command | Should -Be 'node'
+            $payload.mcpServers.remote.type | Should -Be 'http'
+            $payload.mcpServers.remote.url | Should -Be 'https://example.invalid/mcp'
+            $payload.mcpServers.remote.headers.Authorization | Should -Be 'Bearer ${MCP_TOKEN}'
+        }
+
+        It "Projects Claude Desktop's local stdio shape without losing host settings" {
+            $existing = '{"theme":"dark","mcpServers":{"host-owned":{"command":"kept"}}}'
+            $server = [pscustomobject]@{ name = 'local'; transport = 'stdio'; command = 'node'; args = @('server.js') }
+
+            $payload = Build-ClaudeDesktopMcpPayload $existing @($server)
+
+            $payload.theme | Should -Be 'dark'
+            $payload.mcpServers['host-owned'].command | Should -Be 'kept'
+            $payload.mcpServers.local.command | Should -Be 'node'
+            $payload.mcpServers.local.args | Should -Be @('server.js')
+            $payload.mcpServers.local.PSObject.Properties.Name | Should -Not -Contain 'type'
+        }
+
+        It "Rejects unsupported Claude Desktop remote connectors and unresolved environment templates" {
+            $remote = [pscustomobject]@{ name = 'remote'; transport = 'http'; url = 'https://example.invalid/mcp' }
+            $template = [pscustomobject]@{ name = 'templated'; transport = 'stdio'; command = 'node'; env = [pscustomobject]@{ TOKEN = '${MCP_TOKEN}' } }
+
+            { Build-ClaudeDesktopMcpPayload '' @($remote) } | Should -Throw '*只投影已验证的 stdio*'
+            { Build-ClaudeDesktopMcpPayload '' @($template) } | Should -Throw '*环境展开*'
+        }
+
+        It "Uses Antigravity serverUrl for remote MCP and rejects unverified bearer templates" {
+            $server = [pscustomobject]@{ name = 'remote'; transport = 'http'; url = 'https://example.invalid/mcp'; headers = [pscustomobject]@{ Accept = 'application/json' } }
+            $payload = Build-AntigravityMcpPayload '{"theme":"dark"}' @($server)
+
+            $payload.theme | Should -Be 'dark'
+            $payload.mcpServers.remote.serverUrl | Should -Be 'https://example.invalid/mcp'
+            $payload.mcpServers.remote.headers.Accept | Should -Be 'application/json'
+            $payload.mcpServers.remote.PSObject.Properties.Name | Should -Not -Contain 'url'
+            $bad = [pscustomobject]@{ name = 'remote'; transport = 'http'; url = 'https://example.invalid/mcp'; bearer_token_env_var = 'MCP_TOKEN' }
+            { Build-AntigravityMcpPayload '' @($bad) } | Should -Throw '*不接受未验证的环境变量模板*'
+        }
     }
 
     Context "Build-ZCodeMcpPayload" {
@@ -283,6 +342,16 @@ Describe 'MCP configuration and host transactions' {
                 [pscustomobject]@{ name = "fetch"; transport = "stdio"; command = "python" }
             )
             { Build-ZCodeMcpPayload '{ "mcp": { broken' $servers } | Should -Throw '*拒绝最小化重建*'
+        }
+
+        It "Replaces declared servers and preserves undeclared host-owned server entries" {
+            $existing = '{"theme":"dark","mcp":{"servers":{"host-owned":{"command":"kept"},"context7":{"command":"old"}}}}'
+
+            $payload = Build-ZCodeMcpPayload $existing @() @('context7') @('context7')
+
+            $payload.theme | Should -Be 'dark'
+            $payload.mcp.servers['host-owned'].command | Should -Be 'kept'
+            $payload.mcp.servers.Contains('context7') | Should -Be $false
         }
     }
 
@@ -590,6 +659,17 @@ sandbox = "elevated"
             $toml | Should -Match "\[mcp_servers\.old\]"
         }
 
+        It "Rejects profile-disabled GitHub entries because planning removes them by managed name" {
+            $server = [pscustomobject]@{
+                name = 'github'
+                transport = 'http'
+                url = 'https://api.githubcopilot.com/mcp/readonly'
+                enabled = $false
+            }
+
+            { Build-CodexConfigToml '' @($server) } | Should -Throw '*只接受已由 profile 解析为启用状态*'
+        }
+
         It "Preserves host-owned node_repl and its child tables" {
             $existing = @'
 model = "gpt-5.6-sol"
@@ -845,14 +925,14 @@ args = ["/c", "echo", "stale"]
                     name          = "github"
                     transport     = "http"
                     url           = "https://api.githubcopilot.com/mcp/"
-                    enabled       = $false
+                    enabled       = $true
                     enabled_tools = @("get_file_contents")
                 }
 
                 $toml = Build-CodexConfigToml "" @($server)
 
                 $toml | Should -Match "\[mcp_servers\.github\]"
-                $toml | Should -Match "enabled = false"
+                $toml | Should -Match "enabled = true"
                 $toml | Should -Match 'enabled_tools = \["get_file_contents"\]'
             }
             finally {
@@ -861,40 +941,6 @@ args = ["/c", "echo", "stale"]
                 }
                 else {
                     Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                }
-            }
-        }
-
-        It "Keeps an explicitly disabled GitHub MCP when no token is available" {
-            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
-            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
-            try {
-                Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                $server = [pscustomobject]@{
-                    name      = "github"
-                    transport = "http"
-                    url       = "https://api.githubcopilot.com/mcp/"
-                    enabled   = $false
-                }
-
-                $toml = Build-CodexConfigToml "" @($server)
-
-                $toml | Should -Match "\[mcp_servers\.github\]"
-                $toml | Should -Match "enabled = false"
-            }
-            finally {
-                if ($null -ne $oldToken) {
-                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
-                }
-                else {
-                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                }
-                if ($null -ne $oldGithubToken) {
-                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
-                }
-                else {
-                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -1123,45 +1169,6 @@ args = ["/c", "echo", "stale"]
 
     }
 
-    Context "Resolve-GeminiAntigravityRootsFromCandidates" {
-        It "Extracts antigravity roots from resolved candidate paths" {
-            $paths = @(
-                "C:\Users\sciman\.gemini\skills",
-                "C:\Users\sciman\.gemini\antigravity\skills",
-                "C:\Users\sciman\.trae\skills"
-            )
-            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
-            $roots.Count | Should -Be 1
-            $roots[0] | Should -Be "C:\Users\sciman\.gemini\antigravity"
-        }
-
-        It "Ignores lookalike paths that are not antigravity directory" {
-            $paths = @(
-                "C:\Users\sciman\.gemini\antigravity-backup\skills",
-                "C:\Users\sciman\.gemini\antigravity2\skills"
-            )
-            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
-            @($roots).Count | Should -Be 0
-        }
-
-        It "Finds valid antigravity root even when an earlier lookalike appears in path" {
-            $paths = @(
-                "C:\tmp\.gemini\antigravity-backup\foo\.gemini\antigravity\skills"
-            )
-            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
-            $roots.Count | Should -Be 1
-            $roots[0] | Should -Be "C:\tmp\.gemini\antigravity-backup\foo\.gemini\antigravity"
-        }
-
-        It "Requires directory boundary before .gemini token" {
-            $paths = @(
-                "C:\tmp\foo.gemini\antigravity\skills"
-            )
-            $roots = @(Resolve-GeminiAntigravityRootsFromCandidates $paths)
-            @($roots).Count | Should -Be 0
-        }
-    }
-
     Context "Get-TraeProjectMcpConfigPath" {
         It "Builds project-level Trae MCP config path under repo root" {
             $repoRoot = Join-Path $TestDrive "skills-manager"
@@ -1382,49 +1389,6 @@ args = ["/c", "echo", "stale"]
             finally { $lock.Dispose(); Remove-Item -LiteralPath $lockPath -Force }
 
             Get-ContentUtf8 $path | Should -Be 'before'
-        }
-    }
-
-    Context "Remove-McpServersFromPayload" {
-        It "Removes legacy MCP servers from merged payloads" {
-            $payload = [pscustomobject]@{
-                mcpServers = [pscustomobject]@{
-                    context7 = [pscustomobject]@{ type = "stdio" }
-                    fetch = [pscustomobject]@{ type = "stdio" }
-                    filesystem = [pscustomobject]@{ type = "stdio" }
-                    microsoft_learn = [pscustomobject]@{ type = "http" }
-                }
-            }
-
-            $updated = Remove-McpServersFromPayload $payload @("fetch", "filesystem")
-            $updated.mcpServers.PSObject.Properties.Name -contains "context7" | Should -Be $true
-            $updated.mcpServers.PSObject.Properties.Name -contains "fetch" | Should -Be $false
-            $updated.mcpServers.PSObject.Properties.Name -contains "filesystem" | Should -Be $false
-            $updated.mcpServers.PSObject.Properties.Name -contains "microsoft_learn" | Should -Be $true
-        }
-    }
-
-    Context "Get-LegacyMcpServersToPrune" {
-        It "Returns fetch and filesystem as legacy MCP names" {
-            $names = Get-LegacyMcpServersToPrune
-            @($names).Count | Should -Be 2
-            ($names -contains "fetch") | Should -Be $true
-            ($names -contains "filesystem") | Should -Be $true
-        }
-
-        It "Does not prune legacy names that are explicitly managed" {
-            $servers = @(
-                [pscustomobject]@{
-                    name = "filesystem"
-                    transport = "stdio"
-                    command = "npx"
-                    args = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE")
-                }
-            )
-
-            $names = Get-McpServersToPrune $servers
-            ($names -contains "fetch") | Should -Be $true
-            ($names -contains "filesystem") | Should -Be $false
         }
     }
 
@@ -1666,10 +1630,11 @@ exit 3
             $root = Join-Path $TestDrive "mcp-fast-verify"
             $claudeRoot = Join-Path $root ".claude"
             New-Item -ItemType Directory -Path $claudeRoot -Force | Out-Null
-            Set-ContentUtf8 (Join-Path $claudeRoot ".mcp.json") '{"mcpServers":{"context7":{"transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}}'
+            $claudeConfig = Join-Path $root '.claude.json'
+            Set-ContentUtf8 $claudeConfig '{"mcpServers":{"context7":{"type":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}}'
             Mock Invoke-ExternalCommandCapture { throw "live cli list should not be called by default" }
 
-            Verify-McpAcrossCliWithRetry @($claudeRoot) 1 1
+            Verify-McpAcrossCliWithRetry @($claudeRoot) 1 1 $claudeRoot $claudeConfig
 
             Should -Invoke Invoke-ExternalCommandCapture -Times 0 -Scope It
         }
@@ -1756,6 +1721,19 @@ exit 3
             ($names -contains "context7") | Should -Be $true
             ($names -contains "github") | Should -Be $true
         }
+
+        It "Rejects invalid JSON and ambiguous mcpServers or server-name casing" {
+            { Get-McpServerNamesFromJsonText '{"mcpServers":{' } | Should -Throw '*JSON 配置无效*'
+            { Get-McpServerNamesFromJsonText '{"McpServers":{"github":{}}}' } | Should -Throw '*属性大小写不匹配*'
+            { Get-McpServerNamesFromJsonText '{"mcpServers":{},"McpServers":{}}' } | Should -Throw '*大小写重复*'
+            { Get-McpServerNamesFromJsonText '{"mcpServers":{"GitHub":{},"github":{}}}' } | Should -Throw '*忽略大小写后重复*'
+            { Get-McpServerNamesFromJsonText ' ' } | Should -Throw '*配置为空*'
+        }
+
+        It "Returns an empty list only for a valid object without MCP servers" {
+            @(Get-McpServerNamesFromJsonText '{"theme":"dark"}').Count | Should -Be 0
+            @(Get-McpServerNamesFromJsonText '{"mcpServers":{}}').Count | Should -Be 0
+        }
     }
 
     Context "Get-CodexMcpServerNamesFromTomlText" {
@@ -1808,7 +1786,8 @@ enabled = true
             $codexRoot = Join-Path $root ".codex"
             New-Item -ItemType Directory -Path $claudeRoot -Force | Out-Null
             New-Item -ItemType Directory -Path $codexRoot -Force | Out-Null
-            Set-ContentUtf8 (Join-Path $claudeRoot ".mcp.json") '{"mcpServers":{"context7":{"transport":"stdio"}}}'
+            $claudeConfig = Join-Path $root '.claude.json'
+            Set-ContentUtf8 $claudeConfig '{"mcpServers":{"context7":{"type":"stdio"}}}'
             Set-ContentUtf8 (Join-Path $codexRoot "config.toml") @'
 [mcp_servers.context7]
 command = "npx"
@@ -1816,7 +1795,7 @@ command = "npx"
 
             Mock Get-Content { throw "legacy raw read should not be used for projected mcp config reads" }
 
-            $expected = Get-McpExpectedServersByCli @($claudeRoot, $codexRoot)
+            $expected = Get-McpExpectedServersByCli @($claudeRoot, $codexRoot) $claudeRoot $claudeConfig
 
             ($expected.claude -contains "context7") | Should -Be $true
             ($expected.codex -contains "context7") | Should -Be $true

@@ -450,15 +450,15 @@ function Get-AuditPrunedFiles([string]$resolvedPath, [string]$filter = '*') {
     $pending.Push($resolvedPath)
     while ($pending.Count -gt 0) {
         $directory = $pending.Pop()
-        # Prune before descending, so excluded dependency trees are never enumerated.
-        $files = @(Get-ChildItem -LiteralPath $directory -Filter $filter -File -ErrorAction SilentlyContinue |
-            Where-Object { -not $ignored.Contains($_.Name) })
+        # Enumerate each directory once, then split files from child directories.
+        # Reparse points and ignored directories are pruned before they enter the stack.
+        $entries = @(Get-ChildItem -LiteralPath $directory -ErrorAction SilentlyContinue)
+        $files = @($entries | Where-Object { -not $_.PSIsContainer -and $_.Name -like $filter -and -not $ignored.Contains($_.Name) })
         if ($ignoredGitPaths.Count -gt 0) {
             $files = @($files | Where-Object { -not (Test-AuditGitIgnoredPath $resolvedPath $_.FullName $ignoredGitPaths) })
         }
         $files
-        $children = @(Get-ChildItem -LiteralPath $directory -Directory -ErrorAction SilentlyContinue |
-            Where-Object { -not $ignored.Contains($_.Name) -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        $children = @($entries | Where-Object { $_.PSIsContainer -and -not $ignored.Contains($_.Name) -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
             Sort-Object Name -Descending)
         if ($ignoredGitPaths.Count -gt 0) {
             $children = @($children | Where-Object { -not (Test-AuditGitIgnoredPath $resolvedPath $_.FullName $ignoredGitPaths) })
@@ -1305,22 +1305,36 @@ function Get-AuditGitChangedPaths {
 function Get-AuditPlainDirectoryFingerprint([string]$dirPath) {
     # 父仓内普通未跟踪目录的内容指纹：git status 对整个目录只报一行，
     # 内部变化只能靠逐文件哈希进入取证（嵌套仓则走 head|status 对，不经过这里）。
+    # 遵守父仓 ignore 规则并按目录剪枝：ignored cache 不属于 Git 工作树状态，
+    # 递归穿过它既会把无关运行文件算进指纹，也会因拒绝访问而中止 dirty-skip。
     $fullBase = [IO.Path]::GetFullPath($dirPath)
+    $ignoredGitPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @(Get-AuditGitIgnoredPaths $fullBase)) { $null = $ignoredGitPaths.Add([string]$path) }
     $pairs = New-Object System.Collections.Generic.List[string]
-    foreach ($file in @(Get-ChildItem -LiteralPath $fullBase -Recurse -File -Force)) {
-        $relative = [string]$file.FullName.Substring($fullBase.Length).TrimStart('\', '/').Replace('/', '\')
-        # 目录里常含正在写入的运行日志（并发会话/计划任务）。读不了的文件
-        # 把不可读状态连同长度与最后写入时间计入指纹：单靠异常类型会让持续
-        # 被锁的追加型日志在两次扫描间得到相同指纹、掩盖真实 drift；长度/时
-        # 间仍随内容追加变化，保持 drift 敏感。单个被占文件不再炸掉整次扫描
-        # （实测 artifacts\work 下的活动日志以写锁持有，OpenRead 直接抛）。
-        try {
-            $hash = [string](Get-FileContentHash $file.FullName)
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($fullBase)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        # Do not use -Recurse here: ignored subtrees must be pruned before they
+        # are enumerated, while access failures in non-ignored paths stay fail-closed.
+        $entries = @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
+        foreach ($entry in $entries) {
+            if (Test-AuditGitIgnoredPath $fullBase $entry.FullName $ignoredGitPaths) { continue }
+            if ($entry.PSIsContainer) {
+                if (-not ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $pending.Push($entry.FullName) }
+                continue
+            }
+            $relative = [string]$entry.FullName.Substring($fullBase.Length).TrimStart('\', '/').Replace('/', '\')
+            # 目录里常含正在写入的运行日志（并发会话/计划任务）。读不了的文件
+            # 把不可读状态连同长度与最后写入时间计入指纹，保持 drift 敏感。
+            try {
+                $hash = [string](Get-FileContentHash $entry.FullName)
+            }
+            catch {
+                $hash = "unreadable:{0}:{1}:{2}" -f $_.Exception.GetType().Name, $entry.Length, $entry.LastWriteTimeUtc.Ticks
+            }
+            $pairs.Add(("file|{0}|{1}" -f $relative, $hash)) | Out-Null
         }
-        catch {
-            $hash = "unreadable:{0}:{1}:{2}" -f $_.Exception.GetType().Name, $file.Length, $file.LastWriteTimeUtc.Ticks
-        }
-        $pairs.Add(("file|{0}|{1}" -f $relative, $hash)) | Out-Null
     }
     $ordered = $pairs.ToArray()
     [Array]::Sort($ordered, [System.StringComparer]::Ordinal)
@@ -1401,7 +1415,9 @@ function Get-AuditGitInfo([string]$resolvedPath) {
             }
             $info.branch = ([string]$branchLines[0]).Trim()
             $info.commit = ([string]$commitLines[0]).Trim()
-            $changedPaths = @(Get-AuditGitChangedPaths)
+            # A clean `git status` proves there are no changed paths to fingerprint.
+            # Skip three redundant Git child processes on every clean target.
+            $changedPaths = if ($statusLines.Count -gt 0) { @(Get-AuditGitChangedPaths) } else { @() }
             $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
             $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
             $info.dirty = ($statusLines.Count -gt 0)
