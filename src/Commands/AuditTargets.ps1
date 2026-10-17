@@ -912,14 +912,23 @@ function Normalize-AuditCoveragePhrase([string]$Text) {
 }
 
 function Get-AuditCoverageNeedTokens($Need) {
-    # Coverage is asserted from the subject phrase only.  The bare domain word
-    # ("workflow", "ai", "artifact", ...) matches too many descriptions to carry
-    # signal, and action verbs hit homographs ("read" in "read-only", "deliver"
-    # in "deliverable") that assert coverage the skill does not provide.
+    # Coverage is asserted from the subject phrase, plus format names for a
+    # workflow subject whose plugin descriptions name the formats instead of the
+    # workflow (the documents plugin says ".docx", not "document processing").
+    # The bare domain word ("workflow", "ai", "artifact", ...) matches too many
+    # descriptions to carry signal, and action verbs hit homographs ("read" in
+    # "read-only", "deliver" in "deliverable") that assert coverage the skill
+    # does not provide.
     $domain = [string](Get-CfgObjectProperty $Need "domain")
     $subject = Normalize-AuditCoveragePhrase ([string](Get-CfgObjectProperty $Need "subject"))
     if ([string]::IsNullOrWhiteSpace($subject) -or [string]::Equals($subject, (Normalize-AuditCoveragePhrase $domain), [System.StringComparison]::OrdinalIgnoreCase)) { return @() }
-    return @($subject)
+    $formatAliases = @{ 'document processing' = @('docx', 'pdf', 'pptx', 'xlsx') }
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $tokens.Add($subject) | Out-Null
+    if ($formatAliases.ContainsKey($subject)) {
+        foreach ($alias in @($formatAliases[$subject])) { $tokens.Add($alias) | Out-Null }
+    }
+    return @($tokens.ToArray())
 }
 
 function Get-AuditCoverageKeywordMatches($NeedTokens, $Skills) {

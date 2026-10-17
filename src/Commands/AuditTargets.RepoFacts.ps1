@@ -781,6 +781,16 @@ function Test-AuditScannerSelfFile([string]$RelativePath) {
         [regex]::IsMatch($normalized, '(?i)(^|\\)tests\\(Unit|E2E)\\(AuditTargets[^\\]*|SkillAudit[^\\]*|CapabilityInventory[^\\]*|ReadOnlyCli[^\\]*)\.Tests\.ps1$')
 }
 
+function Test-AuditSelfRepository([string]$ResolvedPath) {
+    # The scanner's own test suite exercises the scanner with format names; those
+    # strings describe the tool, not the target's product capabilities. Only a
+    # repository carrying all three of these markers counts as this tool.
+    foreach ($relative in @('skills.ps1', 'build.ps1', 'src\Commands\AuditTargets.ps1')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ResolvedPath $relative) -PathType Leaf)) { return $false }
+    }
+    return $true
+}
+
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
     if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
     $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
@@ -1057,6 +1067,7 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
     $sourceScanReadFailureCount = 0
     $sourceScanTextTruncatedCount = 0
     $sourceScanSelfReferentialCount = 0
+    $selfRepository = Test-AuditSelfRepository $resolvedPath
     foreach ($file in @($selectedSourceFiles)) {
         if ($file.Length -gt 1048576) { $sourceScanLargeFileCount++; continue }
         try {
@@ -1084,6 +1095,10 @@ function Add-AuditArtifactSourceFacts([string]$resolvedPath, $Accumulator, [Syst
                 continue
             }
             $kind = Get-AuditSourceEvidenceKind $relativePath
+            if ($selfRepository -and $kind -eq "test") {
+                $sourceScanSelfReferentialCount++
+                continue
+            }
             if ($sourceScanKindCounts.ContainsKey($kind)) { $sourceScanKindCounts[$kind]++ }
             # 大量源文件不包含任何能力信号。文件级预筛只跑一次，命中的候选集
             # 直接透传给两个提取器；行级提取在提取器内部用合并探测跳过无关

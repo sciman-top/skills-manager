@@ -59,6 +59,36 @@ Describe "Audit Targets" {
         }
     }
 
+    It "Counts plugin skills that name document formats as coverage for the document processing need" {
+        $needs = [pscustomobject]@{
+            primary_needs = @([pscustomobject]@{ key = "workflow/document_processing"; domain = "workflow"; subject = "document_processing"; priority_band = "primary" })
+            secondary_needs = @()
+            supporting_artifacts = @()
+        }
+        $external = @([pscustomobject]@{ name = "documents"; description = "Create, edit, redline, and comment on .docx and Word document artifacts."; trigger_summary = "" })
+        $statement = @(New-AuditCoverageStatement $needs @() @() $external @())
+        $row = @($statement | Where-Object { $_.need -eq "workflow/document_processing" })[0]
+        $row.external_covered_by | Should -Contain "documents"
+    }
+
+    It "Excludes format names in test files of this tool's own repository but keeps them for other repositories" {
+        $selfRepo = Join-Path $TestDrive "self-scanner-repo"
+        $otherRepo = Join-Path $TestDrive "other-target-repo"
+        foreach ($repo in @($selfRepo, $otherRepo)) {
+            $null = New-Item -ItemType Directory -Path (Join-Path $repo "tests\Unit") -Force
+            Set-ContentUtf8 (Join-Path $repo "tests\Unit\Core.Tests.ps1") "Describe 'files' { It 'reads the sample.docx file' { } }"
+        }
+        foreach ($marker in @("skills.ps1", "build.ps1", "src\Commands\AuditTargets.ps1")) {
+            $path = Join-Path $selfRepo $marker
+            $null = New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force
+            Set-ContentUtf8 $path "# fixture marker"
+        }
+        $selfScan = New-AuditRepoScan "self" $selfRepo "..\self-scanner-repo"
+        $otherScan = New-AuditRepoScan "other" $otherRepo "..\other-target-repo"
+        (@($otherScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" })).Count | Should -BeGreaterThan 0
+        (@($selfScan.detected.artifact_capabilities | Where-Object { $_.artifact -eq "docx" })).Count | Should -Be 0
+    }
+
     It "Excludes dependency files while retaining nested source in pruned enumeration" {
         $repo = Join-Path $TestDrive 'pruned-enumeration'
         $null = New-Item -ItemType Directory -Path "$repo/src/nested", "$repo/node_modules/deep" -Force
