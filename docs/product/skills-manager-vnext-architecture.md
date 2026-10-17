@@ -8,7 +8,7 @@
 
 宿主负责判断用户是否要求访谈、审查或实施；不通过关键词 hook 强制选择工作流。确定性检查只处理已经明确的参数、路径、所有权或执行合同，不能把关键词命中当作用户授权或语义裁决。
 
-日常编码方法复用 `overrides/custom/ai-coding-workflow/SKILL.md`，按原生技能投影进入宿主；场景、输入模板与实践取舍维护在 [AI 编码效能手册](ai-coding-playbook.md)。项目规则提供源文件、入口和验证命令，技能帮助宿主选择当前任务所需的方法，宿主执行读取、编辑与验证；CLI 不解释自然语言任务或调度 GPT/GLM。工程终态保持 PowerShell 7 本地能力管理器；新增功能或模块须服务当前明确需求或真实失败，并在现有需求或 Git review 中说明当前调用方、现有接口缺口、精确写集、最低充分验证与回滚。换栈须有现有技术无法满足需求或可量化净收益的证据。
+日常编码方法复用 `overrides/custom/ai-coding-workflow/SKILL.md`，按原生技能投影进入宿主；场景、输入模板与实践取舍维护在 [AI 编码效能手册](ai-coding-playbook.md)。项目规则提供源文件、入口和验证命令，技能帮助宿主选择当前任务所需的方法，宿主执行读取、编辑与验证；CLI 不解释自然语言任务或调度模型/宿主执行者。工程终态保持 PowerShell 7 本地能力管理器；新增功能或模块须服务当前明确需求或真实失败，并在现有需求或 Git review 中说明当前调用方、现有接口缺口、精确写集、最低充分验证与回滚。换栈须有现有技术无法满足需求或可量化净收益的证据。
 
 ## 2. 模块与 interface
 
@@ -46,6 +46,8 @@
 3. `skills.json`：targets / skill_projection / mcp_targets 数据
 4. 适配器：全局规则投影与 RuleEstate 全域比对随注册表自动扩展（finding 文案按需补充）；`src/Commands/Mcp.HostAdapters.ps1` 配置形状；`src/Application/SkillProjection.ps1` 投影根
 5. 文档：宿主组合描述（本文件与根 `AGENTS.md` 视情况）
+
+本仓的 `claude` 宿主适配面是 Claude Code 的本机规则与技能配置。Claude Desktop 内运行的 Code 会话沿用该执行面；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影或加载证据不代表该聊天已加载。
 
 ### Config and source materialization
 
