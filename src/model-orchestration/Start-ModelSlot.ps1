@@ -29,6 +29,9 @@ if (-not [string]::IsNullOrWhiteSpace($Model)) {
     $Preset = $route.preset
 }
 $routePreset = [string]$route.preset
+# The slot's declared overload alternates (presets.json fallbacks), restricted to the resolved host pool.
+# The tuple being launched is removed; on a confirmed overload the parent takes the first alternate it can currently support.
+$declaredFallback = @($resolved.routes[$Slot].declared_fallback | Where-Object { -not ($_.model -ceq [string]$route.model -and $_.effort -ceq [string]$route.effort) })
 $readOnlyTask = $ReadOnly -or $Slot -cin @($resolved.read_only_slots)
 $presetHosts = @($policy.presets[$routePreset].hosts)
 # Launch on the first declared facet with a verified native interface, so the
@@ -211,7 +214,7 @@ else {
     $executable = 'claude'
 }
 if ($Plan) {
-    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;dispatch_policy=$resolved.dispatch_policy} | ConvertTo-Json -Depth 8
+    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;declared_fallback=$declaredFallback;dispatch_policy=$resolved.dispatch_policy} | ConvertTo-Json -Depth 8
     return
 }
 if ([string]::IsNullOrWhiteSpace($Prompt)) { throw 'Prompt is required to execute a slot.' }
@@ -291,19 +294,6 @@ try {
         }
         if ($failedIndex -gt 0) { $withinLower = @($menuByPreset[$routePreset])[($failedIndex - 1)..0] }
         if ($failedIndex -ge 0 -and $failedIndex -lt ($menuByPreset[$routePreset].Count - 1)) { $withinHigher = @($menuByPreset[$routePreset])[($failedIndex + 1)..($menuByPreset[$routePreset].Count - 1)] }
-        # Cross-preset fallback follows the declared active order without
-        # wrapping around to entries that precede the failed preset.  A failed
-        # final preset therefore has no implicit cross-model retry; the parent
-        # must make a fresh operator choice instead of silently cycling back.
-        $crossPreset = @()
-        $failedPresetIndex = [array]::IndexOf([string[]]@($resolved.active_presets), $routePreset)
-        if ($failedPresetIndex -ge 0) {
-            for ($j = $failedPresetIndex + 1; $j -lt @($resolved.active_presets).Count; $j++) {
-                $id = @($resolved.active_presets)[$j]
-                $crossPreset += @{ preset = $id; options = $menuByPreset[$id] }
-                if (@($crossPreset).Count -ge [int]$resolved.dispatch_policy.max_explicit_reselections) { break }
-            }
-        }
         $classification = Classify-Failure $launchOutput
         $failureClass = [string]$classification.class
         $nextAction = switch ($failureClass) {
@@ -328,7 +318,7 @@ try {
                 }
                 reselection = [ordered]@{
                     within_preset_lower = $withinLower
-                    cross_preset = $crossPreset
+                    declared_fallback = $declaredFallback
                     within_preset_higher_overload_only = $withinHigher
                     prohibition = 'One upstream attempt per bounded task; no automatic replay, duplicate parallel request, or identical-prompt resend. For 429/quota/rate-limit/auth/risk stop and wait for operator or fresh parent selection. A confirmed overload permits at most one explicit reselection, only when the alternate tuple is currently supported. Record failed tuple, failure, selected tuple and remaining scope.'
                 }

@@ -90,6 +90,34 @@ foreach ($slot in $slotNames) {
         throw "auto_routes[$slot] must point to a preset available on host $ExecutionHost`: $autoPreset"
     }
 }
+# Schema v6: every slot declares its overload alternates explicitly. An empty list
+# is an explicit "no automatic alternate", never an implicit fallback.
+if ([int]$policy.schema_version -ne 6) { throw 'presets.json must use schema_version 6 (explicit per-slot fallbacks).' }
+if (-not $policy.fallbacks) { throw 'fallbacks must declare every slot.' }
+if ((@($policy.fallbacks.Keys | Sort-Object) -join ',') -cne $slotKey) { throw 'fallbacks must declare exactly all slots.' }
+foreach ($slot in $slotNames) {
+    $alternates = @($policy.fallbacks[$slot])
+    if ($alternates.Count -gt 3) { throw "fallbacks[$slot] lists more than three alternates." }
+    $autoPresetId = [string]$policy.auto_routes[$slot]
+    $primaryKeys = @(foreach ($hostName in @($policy.presets[$autoPresetId].hosts)) {
+        $primaryEntry = @(Get-PresetMenu $policy.presets[$autoPresetId] $hostName)[$policy.presets[$autoPresetId].slot_map[$slot]]
+        "$autoPresetId|$($primaryEntry.model)|$($primaryEntry.effort)"
+    })
+    $seenKeys = @{}
+    foreach ($alternate in $alternates) {
+        $alternatePreset = [string]$alternate.preset
+        if (-not $policy.presets.Contains($alternatePreset)) { throw "fallbacks[$slot] references an unknown preset: $alternatePreset" }
+        $inMenu = $false
+        foreach ($hostName in @($policy.presets[$alternatePreset].hosts)) {
+            if (@(Get-PresetMenu $policy.presets[$alternatePreset] $hostName | Where-Object { $_.model -ceq [string]$alternate.model -and $_.effort -ceq [string]$alternate.effort }).Count -gt 0) { $inMenu = $true }
+        }
+        if (-not $inMenu) { throw "fallbacks[$slot] tuple is not in preset ${alternatePreset}: $($alternate.model)/$($alternate.effort)" }
+        $tupleKey = "$alternatePreset|$($alternate.model)|$($alternate.effort)"
+        if ($tupleKey -cin $primaryKeys) { throw "fallbacks[$slot] repeats the slot's own route: $tupleKey" }
+        if ($seenKeys.ContainsKey($tupleKey)) { throw "fallbacks[$slot] lists a duplicate: $tupleKey" }
+        $seenKeys[$tupleKey] = $true
+    }
+}
 $aliases = if ($policy.aliases) { $policy.aliases } else { @{} }
 foreach ($alias in $aliases.Keys) {
     if ($policy.presets.Contains($alias) -or -not $policy.presets.Contains($aliases[$alias])) { throw "Invalid preset alias: $alias" }
@@ -153,7 +181,17 @@ foreach ($slot in $slotNames) {
     $routeMenu = @(Get-PresetMenu $routePolicy $ExecutionHost)
     $entry = $routeMenu[$routePolicy.slot_map[$slot]]
     $routePresetIds[$slot] = $routePreset
-    $routes[$slot] = @{ preset = $routePreset; requested_preset = $requestedRoutePreset; fallback_from = $fallbackFrom; model = [string]$entry.model; effort = [string]$entry.effort }
+    # Declared alternates restricted to the active host pool, with the route's own tuple removed.
+    $declaredFallback = @()
+    foreach ($alternate in @($policy.fallbacks[$slot])) {
+        $alternatePreset = [string]$alternate.preset
+        if ($alternatePreset -cnotin $activePresets) { continue }
+        if ($alternatePreset -ceq $routePreset -and [string]$alternate.model -ceq [string]$entry.model -and [string]$alternate.effort -ceq [string]$entry.effort) { continue }
+        $alternateFound = @(Get-PresetMenu $policy.presets[$alternatePreset] $ExecutionHost | Where-Object { $_.model -ceq [string]$alternate.model -and $_.effort -ceq [string]$alternate.effort })
+        if ($alternateFound.Count -eq 0) { continue }
+        $declaredFallback += @{ preset = $alternatePreset; model = [string]$alternate.model; effort = [string]$alternate.effort }
+    }
+    $routes[$slot] = @{ preset = $routePreset; requested_preset = $requestedRoutePreset; fallback_from = $fallbackFrom; model = [string]$entry.model; effort = [string]$entry.effort; declared_fallback = $declaredFallback }
 }
 $enabledRoutes = @()
 $roleNames = @($slotNames)

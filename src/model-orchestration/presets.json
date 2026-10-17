@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "default_preset": "glm53_flash_only",
   "active_presets": [
     "gpt6_luna_only",
@@ -55,6 +55,41 @@
     "documentation_review",
     "architecture_review"
   ],
+  "fallbacks": {
+    "quick_triage": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "routine_maintenance": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "standard_review": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "medium" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "bounded_implementation": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "deep_investigation_or_implementation": [
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
+    ],
+    "test_execution": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "documentation_review": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+    ],
+    "architecture_review": [
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
+    ]
+  },
   "presets": {
     "gpt6_luna_only": {
       "hosts": [
