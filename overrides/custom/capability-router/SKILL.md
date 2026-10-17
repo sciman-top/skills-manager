@@ -148,6 +148,15 @@ admission. Report this path as `parent_mediated`; it is not native runner
 execution. A skill requiring a multi-turn decision must preserve its questions
 and wait points; never replace it with a one-shot summary.
 
+For a multi-turn decision, the parent persists the admission and plan objects
+(for example with `ConvertTo-Json -Depth 60` into the authorized run directory)
+before the first child spawn. Each later answer needs
+`New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
+with a new attempt identity and a later `issued_at`. A predecessor that existed
+only in a finished PowerShell process cannot be rebuilt, so do not forward an
+answer to the same child without a successor; restart with a new root admission
+and say so in the report, rather than forging a continuation.
+
 For independently bounded work, prefer an available host-native subagent when
 the user or applicable instructions authorize delegation. Pass the exact
 validated closure and task scope. Do not assume a named custom agent exists

@@ -616,6 +616,16 @@ Describe 'Capability router fallback' {
         $skill | Should -Not -Match 'On Codex, a named specialist handoff must'
     }
 
+    It 'requires the parent to persist the predecessor admission before a multi-turn successor' {
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        # A live probe lost its admission inside a finished pwsh process, so the
+        # successor could not be built and the interview stalled on question one.
+        $skill | Should -Match 'persists the admission and plan objects'
+        $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
+        $skill | Should -Match 'cannot be rebuilt'
+    }
+
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
         $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
