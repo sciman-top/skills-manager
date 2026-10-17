@@ -119,7 +119,8 @@ function Get-CodexRetryControl([string]$ProfileName) {
 
     function Get-RootTomlString([string]$Text, [string]$Key) {
         if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
-        $rootText = [regex]::Split($Text, '(?m)^\s*\[[^\]]+\]\s*(?:#.*)?$')[0]
+        # Matches both [table] and [[array-of-tables]] headers; keys after either are not root keys.
+        $rootText = [regex]::Split($Text, '(?m)^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$')[0]
         $keyPattern = [regex]::Escape($Key)
         $pattern = '(?m)^\s*' + $keyPattern + '\s*=\s*(?:"(?<double>[^"]+)"|''(?<single>[^'']+)'')\s*(?:#.*)?$'
         $matches = [regex]::Matches($rootText, $pattern)
@@ -148,7 +149,8 @@ function Get-CodexRetryControl([string]$ProfileName) {
     }
 }
 $codexRetryControl = $null
-if (-not $Plan -and $targetHost -eq 'codex') {
+# Plan mode reads the same retry config, so a blocked retry control is reported before dispatch.
+if ($targetHost -eq 'codex') {
     try { $codexRetryControl = Get-CodexRetryControl $routePreset.Replace('_','-') }
     catch { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
     $capability.retry_control = $codexRetryControl
