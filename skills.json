@@ -109,6 +109,17 @@
         "cold-capability-runner"
       ]
     },
+    "claude_native_agent_bridge": {
+      "enabled": true,
+      "owner": "skills-manager",
+      "source_root": "agent/native-agent-bridge/claude",
+      "target_root": "~/.claude/agents",
+      "receipt_path": "reports/native-agent-bridge/claude-current.json",
+      "definitions": [
+        "design-griller",
+        "cold-capability-runner"
+      ]
+    },
     "discovery_catalog": {
       "catalog_path": "agent/.skills-manager/catalog.json",
       "fallback_domain": "other",

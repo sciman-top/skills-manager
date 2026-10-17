@@ -254,6 +254,210 @@ function Get-NativeAgentBridgeTemplateRecord($SourcePath, [string]$Name) {
     }
 }
 
+function Assert-ClaudeNativeAgentTemplateContent([string]$Content, [string]$SourcePath, [string]$Name) {
+    $content = $Content.TrimStart([char]0xFEFF)
+    $frontmatter = [regex]::Match($content, '\A---\r?\n(?<header>.*?)\r?\n---\r?\n', [Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $frontmatter.Success) { throw ("claude agent template lacks YAML frontmatter: {0}" -f $SourcePath) }
+    $header = $frontmatter.Groups['header'].Value
+    if ($header -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("claude agent template lacks ownership marker: {0}" -f $SourcePath) }
+    if ($header -notmatch ('(?m)^name:\s*{0}\s*$' -f [regex]::Escape($Name))) { throw ("claude agent template name mismatch: {0}" -f $SourcePath) }
+    foreach ($field in @('description', 'tools')) {
+        if ($header -notmatch ('(?m)^{0}:\s*\S' -f $field)) { throw ("claude agent template lacks {0}: {1}" -f $field, $SourcePath) }
+    }
+    # Model and effort follow the active route, so a shipped template must not pin them (roadmap CSR-R1).
+    if ($header -match '(?m)^(model|effort|provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:') {
+        throw ("claude agent template pins a route or credential field: {0}" -f $SourcePath)
+    }
+}
+
+function Get-ClaudeNativeAgentTemplateRecord($SourcePath, [string]$Name) {
+    $state = Get-NativeAgentBridgeFileState $SourcePath
+    Need ($state.kind -eq 'file') ("claude agent template is not a regular file: {0}" -f $SourcePath)
+    $content = Get-NativeAgentBridgeTextFromBytes $state.bytes $SourcePath
+    Assert-ClaudeNativeAgentTemplateContent $content $SourcePath $Name
+    return [pscustomobject][ordered]@{
+        path = [string]$state.path
+        content = $content
+        bytes = [byte[]]$state.bytes
+        sha256 = [string]$state.hash
+    }
+}
+
+function Sync-ClaudeNativeAgentBridge($Config, $PromotionContext = $null, [switch]$SkipLock) {
+    if (-not $SkipLock -and -not $DryRun) {
+        return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
+            Sync-ClaudeNativeAgentBridge $Config $PromotionContext -SkipLock
+        })
+    }
+
+    $bridge = Get-NativeAgentBridgeValue (Get-NativeAgentBridgeValue $Config 'skill_projection') 'claude_native_agent_bridge'
+    if ($null -eq $bridge -or -not [bool](Get-NativeAgentBridgeValue $bridge 'enabled')) {
+        return [pscustomobject]@{ enabled = $false; persisted = $false; changed_names = @(); receipt_path = ''; truth_boundary = 'not_configured' }
+    }
+
+    $sourceRoot = Resolve-NativeAgentBridgePath ([string](Get-NativeAgentBridgeValue $bridge 'source_root'))
+    $targetRoot = Resolve-NativeAgentBridgePath ([string](Get-NativeAgentBridgeValue $bridge 'target_root'))
+    $receiptPath = Resolve-NativeAgentBridgePath ([string](Get-NativeAgentBridgeValue $bridge 'receipt_path'))
+    $managedRoot = [IO.Path]::GetFullPath($AgentDir)
+    if (-not (Test-NativeAgentBridgeWithin $sourceRoot $managedRoot)) { throw 'claude_native_agent_bridge.source_root must stay under generated agent/.' }
+    $expectedTargetRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude\agents'))
+    if (-not [string]::Equals($targetRoot, $expectedTargetRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'claude_native_agent_bridge.target_root must be ~/.claude/agents.' }
+    $receiptRoot = Join-Path $Root 'reports\native-agent-bridge'
+    if (-not (Test-NativeAgentBridgeWithin $receiptPath $receiptRoot) -or [string]::Equals($receiptPath, [IO.Path]::GetFullPath($receiptRoot), [StringComparison]::OrdinalIgnoreCase)) { throw 'claude_native_agent_bridge.receipt_path must be a file under reports/native-agent-bridge/.' }
+    if (-not $DryRun -and ($null -eq $PromotionContext -or -not [bool](Get-NativeAgentBridgeValue $PromotionContext 'required'))) {
+        throw 'claude_native_agent_bridge host write requires a verified host projection promotion context.'
+    }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $sourceRoot $managedRoot
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
+    $receiptItem = Get-NativeAgentBridgeItem $receiptPath
+    if ($null -ne $receiptItem -and ($receiptItem.PSIsContainer -or [bool]($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw 'claude native agent bridge receipt must be a regular file.' }
+
+    $names = @((Get-NativeAgentBridgeValue $bridge 'definitions') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($names.Count -eq 0) { throw 'claude_native_agent_bridge.definitions must not be empty.' }
+    $planned = New-Object System.Collections.Generic.List[object]
+    foreach ($name in $names) {
+        if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { throw ("claude_native_agent_bridge definition is invalid: {0}" -f $name) }
+        $sourcePath = Join-Path $sourceRoot ($name + '.md')
+        $template = Get-ClaudeNativeAgentTemplateRecord $sourcePath $name
+        $planned.Add([pscustomobject][ordered]@{
+                name = $name
+                source_path = $sourcePath
+                target_path = (Join-Path $targetRoot ($name + '.md'))
+                bytes = [byte[]]$template.bytes
+                source_sha256 = [string]$template.sha256
+            }) | Out-Null
+    }
+
+    if ($DryRun) {
+        return [pscustomobject]@{ enabled = $true; persisted = $false; changed_names = @($planned | ForEach-Object name); receipt_path = $receiptPath; truth_boundary = 'planned'; definitions = @($planned | Select-Object name, source_path, target_path, source_sha256) }
+    }
+
+    $targetRootItem = Get-NativeAgentBridgeItem $targetRoot
+    $targetRootExisted = $null -ne $targetRootItem
+    if ($targetRootExisted -and (-not $targetRootItem.PSIsContainer -or [bool]($targetRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw ('claude agent target root is not a regular directory: {0}' -f $targetRoot)
+    }
+    $backupRoot = Get-NativeAgentBridgeBackupRoot $targetRoot
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot (Split-Path -Parent $targetRoot)
+    $before = @{}
+    $after = @{}
+    $changed = New-Object System.Collections.Generic.List[string]
+    $backups = New-Object System.Collections.Generic.List[string]
+    try {
+        if (-not $targetRootExisted) {
+            New-Item -ItemType Directory -Path $targetRoot -Force -ErrorAction Stop | Out-Null
+        }
+        Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
+        foreach ($definition in $planned.ToArray()) {
+            $targetPath = [string]$definition.target_path
+            Need (Test-NativeAgentBridgeWithin $targetPath $targetRoot) ("claude agent target escaped its owned root: {0}" -f $targetPath)
+            Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $targetPath) $targetRoot
+
+            $sourceState = Get-NativeAgentBridgeFileState ([string]$definition.source_path)
+            Need ($sourceState.kind -eq 'file' -and [string]::Equals([string]$sourceState.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("claude agent template changed after planning: {0}" -f $definition.source_path)
+            $current = Get-NativeAgentBridgeFileState $targetPath
+            $before[$targetPath] = $current
+            if ($current.kind -eq 'reparse' -or $current.kind -eq 'directory') { throw ("claude agent target must be a regular file: {0}" -f $targetPath) }
+            if ($current.kind -eq 'file') {
+                $existing = Get-NativeAgentBridgeTextFromBytes $current.bytes $targetPath
+                if ($existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("claude agent target is not owned by skills-manager: {0}" -f $targetPath) }
+            }
+            if ($current.kind -eq 'file' -and [string]::Equals([string]$current.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+
+            $beforeWrite = Get-NativeAgentBridgeFileState $targetPath
+            Need (Test-NativeAgentBridgeFileStateEquivalent $current $beforeWrite) ("claude agent target changed while it was being planned: {0}" -f $targetPath)
+            if ($current.kind -eq 'file') {
+                if ($null -eq (Get-NativeAgentBridgeItem $backupRoot)) {
+                    New-Item -ItemType Directory -Path $backupRoot -Force -ErrorAction Stop | Out-Null
+                }
+                $backupPath = Join-Path $backupRoot ('claude-{0}.{1}.{2}.md' -f $definition.name, (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), ([guid]::NewGuid().ToString('N')))
+                Write-BytesAtomic -Path $backupPath -Bytes ([byte[]]$current.bytes)
+                $backupState = Get-NativeAgentBridgeFileState $backupPath
+                Need ($backupState.kind -eq 'file' -and [string]::Equals([string]$backupState.hash, [string]$current.hash, [StringComparison]::OrdinalIgnoreCase)) ("claude agent backup verification failed: {0}" -f $backupPath)
+                $backups.Add($backupPath) | Out-Null
+            }
+            Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$definition.bytes)
+            $written = Get-NativeAgentBridgeFileState $targetPath
+            Need ($written.kind -eq 'file' -and [string]::Equals([string]$written.hash, [string]$definition.source_sha256, [StringComparison]::OrdinalIgnoreCase)) ("claude agent target verification failed: {0}" -f $targetPath)
+            $after[$targetPath] = $written
+            $changed.Add([string]$definition.name) | Out-Null
+        }
+
+        $receipt = [ordered]@{
+            schema_version = 1
+            status = 'applied'
+            owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source_root = $sourceRoot
+            target_root = $targetRoot
+            source_revision = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'source_revision') } else { '' }
+            promotion_mode = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'promotion_mode') } else { 'dry_run' }
+            changed_names = @($changed.ToArray() | Sort-Object)
+            backup_root = $backupRoot
+            backup_paths = @($backups.ToArray())
+            definitions = @($planned | ForEach-Object {
+                    $targetState = Get-NativeAgentBridgeFileState ([string]$_.target_path)
+                    $beforeState = if ($before.ContainsKey([string]$_.target_path)) { $before[[string]$_.target_path] } else { $null }
+                    [ordered]@{
+                        name = $_.name
+                        source_sha256 = $_.source_sha256
+                        before_sha256 = if ($null -eq $beforeState) { '' } else { [string]$beforeState.hash }
+                        target_sha256 = [string]$targetState.hash
+                    }
+                })
+            provider_calls = 0
+            native_mutations = $changed.Count
+            writes = $changed.Count
+            truth_boundary = 'filesystem_projected'
+        }
+        $receiptDirectory = Split-Path -Parent $receiptPath
+        if ($null -eq (Get-NativeAgentBridgeItem $receiptDirectory)) {
+            New-Item -ItemType Directory -Path $receiptDirectory -Force -ErrorAction Stop | Out-Null
+        }
+        Write-Utf8FileAtomic -Path $receiptPath -Content ($receipt | ConvertTo-Json -Depth 12)
+        $persistedReceipt = Get-NativeAgentBridgeFileState $receiptPath
+        Need ($persistedReceipt.kind -eq 'file') ('claude native agent bridge receipt was not persisted: {0}' -f $receiptPath)
+        Need ([string](Get-NativeAgentBridgeTextFromBytes $persistedReceipt.bytes $receiptPath | ConvertFrom-Json).status -eq 'applied') ('claude native agent bridge receipt verification failed: {0}' -f $receiptPath)
+    }
+    catch {
+        $failure = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        foreach ($definition in @($planned | Sort-Object target_path -Descending)) {
+            $targetPath = [string]$definition.target_path
+            if (-not $before.ContainsKey($targetPath)) { continue }
+            try {
+                $previous = $before[$targetPath]
+                $current = Get-NativeAgentBridgeFileState $targetPath
+                if (Test-NativeAgentBridgeFileStateEquivalent $previous $current) { continue }
+                Need ($after.ContainsKey($targetPath) -and (Test-NativeAgentBridgeFileStateEquivalent $after[$targetPath] $current)) ("claude agent target changed concurrently; rollback refused: {0}" -f $targetPath)
+                if ($previous.kind -eq 'missing') {
+                    [IO.File]::Delete($targetPath)
+                }
+                elseif ($previous.kind -eq 'file') {
+                    Write-BytesAtomic -Path $targetPath -Bytes ([byte[]]$previous.bytes)
+                }
+                else { throw ("claude agent rollback cannot restore a non-file state: {0}" -f $targetPath) }
+            }
+            catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            throw ('{0}; rollback incomplete: {1}' -f $failure.Exception.Message, ($rollbackErrors -join '; '))
+        }
+        throw $failure
+    }
+
+    return [pscustomobject]@{
+        enabled = $true
+        persisted = $true
+        changed_names = @($changed.ToArray() | Sort-Object)
+        receipt_path = $receiptPath
+        truth_boundary = 'filesystem_projected'
+    }
+}
+
 function Sync-NativeAgentBridge($Config, $PromotionContext = $null, [switch]$SkipLock) {
     if (-not $SkipLock -and -not $DryRun) {
         return (Invoke-WithSkillManagerProjectionLock -ScriptBlock {
