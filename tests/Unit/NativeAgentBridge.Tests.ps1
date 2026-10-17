@@ -88,6 +88,18 @@ Describe 'Native agent bridge' {
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\claude\design-griller.md') | Should -Match '(?m)^tools: Read, Glob, Grep, WebFetch, WebSearch$'
     }
 
+    It 'recognizes ownership only inside opening frontmatter' {
+        Test-ClaudeNativeAgentOwnership "---`nname: user-agent`n---`n# skills-manager-native-agent-bridge: v1`n" | Should -BeFalse
+        Test-ClaudeNativeAgentOwnership "# skills-manager-native-agent-bridge: v1`n" | Should -BeFalse
+        Test-ClaudeNativeAgentOwnership "---`n# skills-manager-native-agent-bridge: v1`nname: managed`n---`nbody" | Should -BeTrue
+    }
+
+    It 'rejects quoted route keys in Claude frontmatter (<Field>)' -ForEach @(@{ Field = '"model": opus' }, @{ Field = "'effort': high" }) {
+        $template = Get-BridgeTemplateText 'overrides/resources/native-agent-bridge/claude/design-griller.md'
+        $template = $template.Replace('name: design-griller', "name: design-griller`n$Field")
+        { Assert-ClaudeNativeAgentTemplateContent $template 'fixture.md' 'design-griller' } | Should -Throw '*unsupported frontmatter*'
+    }
+
     It 'validates the Claude bridge block against ~/.claude/agents only' {
         $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
         $block = $config.skill_projection.claude_native_agent_bridge
@@ -151,7 +163,7 @@ Describe 'Native agent bridge' {
                 $source = Join-Path $AgentDir ('native-agent-bridge/claude/{0}.md' -f $name)
                 $target = Join-Path $targetRoot ($name + '.md')
                 $sourceBytes = [IO.File]::ReadAllBytes((Join-Path $repoRoot ('overrides/resources/native-agent-bridge/claude/{0}.md' -f $name)))
-                $oldBytes = [Text.Encoding]::UTF8.GetBytes("# skills-manager-native-agent-bridge: v1`nold $name")
+                $oldBytes = [Text.Encoding]::UTF8.GetBytes("---`n# skills-manager-native-agent-bridge: v1`nname: $name`n---`nold $name")
                 foreach ($entry in @(@{ path = $source; bytes = $sourceBytes }, @{ path = $target; bytes = $oldBytes })) {
                     $script:claudeBridgeStates[[IO.Path]::GetFullPath($entry.path)] = [pscustomobject]@{
                         path = $entry.path; exists = $true; kind = 'file'; bytes = $entry.bytes
