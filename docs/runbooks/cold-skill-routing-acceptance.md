@@ -207,7 +207,7 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 1. 执行 pwsh -NoProfile -File .\skills.ps1 构建生效。
 2. 读取 reports/native-agent-bridge/current.json。
 3. 对 design-griller 和 cold-capability-runner，比较 source_sha256 与 target_sha256；确认 source_revision 是本次提交，backup_paths 精确、无意外 definitions。
-4. 只读检查 ~/.codex/agents 下两文件：均无 model/effort/provider/auth/base_url/secret/fallback、`sandbox_mode` 或 `[agents]` table，避免把 parent-session 设置误当作 per-agent 限制。
+4. 只读检查 ~/.codex/agents 下两文件：均无 model/effort/provider/auth/base_url/secret/fallback；并且必须含 per-agent 的 `sandbox_mode`（design-griller 为 read-only，cold-capability-runner 为 workspace-write）与 `[agents] enabled = false`。二者以仓库模板为准，不得由父会话设置代替，否则子代理只靠提示词保持只读。
 5. 将 receipt 的 source revision、source/target hash 和 backup path 写进本 run metadata。
 
 成功仅为 filesystem_projected；不得在此时报告 host_loaded 或 live acceptance。

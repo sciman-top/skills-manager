@@ -407,10 +407,10 @@ function New-ExecutionAdmission {
     if ([string]::IsNullOrWhiteSpace($OriginalRequest) -or [string]::IsNullOrWhiteSpace($AdmittedGoal) -or [string]::IsNullOrWhiteSpace($AuthorityBasis)) { throw 'admission_required_field_missing' }
     if (-not (Test-OperationRfc3339 $IssuedAt)) { throw 'admission_issued_at_invalid' }
     if (-not [string]::IsNullOrWhiteSpace($PriorAdmissionId) -and $PriorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { throw 'prior_admission_id_invalid' }
-    # An answer must say where it came from. A delegate answer must carry the authorization it relies on,
-    # so the child can see the provenance instead of inferring it from a paraphrase.
+    # An answer must say where it came from. Only a human verbatim answer may advance a design interview:
+    # an AI delegate answer is refused outright, whatever evidence accompanies it (see the interview policy).
     if (-not [string]::IsNullOrWhiteSpace($AttributableUserAnswer) -and [string]::IsNullOrWhiteSpace($AnswerProvenance)) { throw 'answer_provenance_missing' }
-    if ($AnswerProvenance -eq 'authorized_ai_delegate_answer' -and [string]::IsNullOrWhiteSpace($AuthorizationEvidence)) { throw 'delegate_authorization_evidence_missing' }
+    if ($AnswerProvenance -eq 'authorized_ai_delegate_answer') { throw 'delegate_answer_not_accepted' }
 
     $validationSnapshot = Get-ExecutionAdmissionValidationSnapshot -Validation $Validation -RepoRoot $RepoRoot -SkillRoot $SkillRoot
     $profile = Get-ExecutionAdmissionProfile ([string](Get-ExecutionAdmissionProperty (Get-ExecutionAdmissionProperty $validationSnapshot 'effective_execution_contract') 'mode'))
