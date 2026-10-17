@@ -5,6 +5,9 @@ BeforeAll {
     Initialize-TestGitIdentity
     # Dot-source the main script to load functions
     . $PSScriptRoot\..\..\skills.ps1
+    # Snapshot tests must not depend on a host Codex CLI: pin its plugin listing to an empty,
+    # warning-free result. Tests that need plugins mock Invoke-CodexCliJson themselves.
+    Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
     $script:Root = $Root
     $script:CfgPath = $CfgPath
     $script:LogPath = $LogPath
@@ -112,6 +115,14 @@ Describe "Audit Targets" {
         $info = Get-AuditGitInfo $repo
         $info.dirty | Should -Be $false
         Should -Invoke Get-AuditGitPathStatePairs -Times 0 -Exactly
+    }
+
+    It "Fails closed instead of recording a partial external inventory when the plugin list is unavailable" {
+        $cfg = [pscustomobject]@{ skill_projection = [pscustomobject]@{ user_skill_root = (Join-Path $TestDrive "no-user-skills") } }
+        Mock Get-CodexExternalSkillInventory {
+            [pscustomobject]@{ enabled = $true; skills = @(); warnings = @([pscustomobject]@{ code = "codex_plugin_inventory_unavailable"; subject = "codex plugin list --json"; message = "codex unavailable" }) }
+        }
+        { Get-AuditExternalSkillFacts $cfg } | Should -Throw "*外部插件清单不可用*"
     }
 
     It "Excludes dependency files while retaining nested source in pruned enumeration" {

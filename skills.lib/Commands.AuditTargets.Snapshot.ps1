@@ -225,6 +225,13 @@ function Get-AuditExternalSkillFacts($cfg = $null) {
     }
 
     $inventory = Get-CodexExternalSkillInventory $projection
+    # When the plugin inventory cannot be read, the scan would otherwise record only system
+    # skills and report them as the complete external set; the later live read then differs
+    # and the snapshot goes stale. Fail closed here and ask for a rescan instead.
+    $unavailable = @($inventory.warnings | Where-Object { [string]$_.code -in @('codex_plugin_inventory_unavailable', 'codex_plugin_inventory_contract_invalid') })
+    if ($unavailable.Count -gt 0) {
+        throw ("外部插件清单不可用（{0}），拒绝生成不完整的审查快照；请稍后重新运行审查目标 扫描。" -f [string]$unavailable[0].message)
+    }
     foreach ($item in @($inventory.skills)) {
         $qualifiedName = [string]$item.qualified_name
         if ([string]::IsNullOrWhiteSpace($qualifiedName) -or -not $seen.Add(('plugin::{0}' -f $qualifiedName))) { continue }
