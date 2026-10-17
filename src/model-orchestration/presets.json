@@ -115,18 +115,26 @@
       "menu": [
         {
           "model": "claude-haiku-5-5",
+          "effort": "medium"
+        },
+        {
+          "model": "claude-haiku-5-5",
+          "effort": "high"
+        },
+        {
+          "model": "claude-haiku-5-5",
           "effort": "xhigh"
         }
       ],
       "slot_map": {
-        "quick_triage": 0,
-        "routine_maintenance": 0,
-        "standard_review": 0,
-        "bounded_implementation": 0,
-        "deep_investigation_or_implementation": 0,
-        "test_execution": 0,
-        "documentation_review": 0,
-        "architecture_review": 0
+        "quick_triage": 2,
+        "routine_maintenance": 2,
+        "standard_review": 2,
+        "bounded_implementation": 2,
+        "deep_investigation_or_implementation": 2,
+        "test_execution": 2,
+        "documentation_review": 2,
+        "architecture_review": 2
       }
     },
     "gemini38_flash_only": {
