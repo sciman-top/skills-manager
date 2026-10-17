@@ -6,17 +6,22 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $slots = @($policy.slots)
 $expected = @{
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    deepseek_flash_only = @{ menu = @(,@('deepseek-v4.1-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    claude_haiku55_only = @{ menu = @(,@('claude-haiku-5-5','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
-Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three single-tier models and multiple slots'
+Assert ($policy.presets.Count -eq 4 -and $slots.Count -gt 3) 'Four single-tier models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
+Assert (('codex' -in $policy.presets['claude_haiku55_only'].hosts) -and ('claude' -in $policy.presets['claude_haiku55_only'].hosts)) 'Haiku declares the codex and claude facets'
+Assert (@($policy.presets['gemini38_flash_only'].hosts).Count -eq 1 -and 'codex' -in $policy.presets['gemini38_flash_only'].hosts) 'Gemini stays codex-only'
 $zcodeResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset glm53_flash_only | ConvertFrom-Json -AsHashtable
 Assert ($zcodeResolved.host -ceq 'zcode' -and $zcodeResolved.routes.quick_triage.model -ceq 'glm-5.3-flash' -and $zcodeResolved.routes.quick_triage.effort -ceq 'max') 'ZCode keeps the native GLM max facet'
 Assert (@($zcodeResolved.enabled_routes | Where-Object { $_.model -ceq 'glm-5.3-flash' -and $_.effort -ceq 'max' }).Count -eq 1) 'ZCode exposes only the reviewed GLM max tuple'
-$zcodeDeepseekRejected = $false
-try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset deepseek_flash_only | Out-Null } catch { $zcodeDeepseekRejected = $true }
-Assert $zcodeDeepseekRejected 'Unverified ZCode DeepSeek facet stays blocked'
+foreach ($foreignPreset in @('claude_haiku55_only','gemini38_flash_only')) {
+    $zcodeForeignRejected = $false
+    try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset $foreignPreset | Out-Null } catch { $zcodeForeignRejected = $true }
+    Assert $zcodeForeignRejected "Unverified ZCode facet stays blocked: $foreignPreset"
+}
 foreach ($id in $expected.Keys) {
     $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $id | ConvertFrom-Json -AsHashtable
     foreach ($slot in $slots) {
@@ -26,31 +31,31 @@ foreach ($id in $expected.Keys) {
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'glm53_flash_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Luna max plus GLM/DeepSeek xhigh tuples jointly active'
+Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 4) 'Luna max plus GLM/Haiku xhigh and Gemini high tuples jointly active'
 $autoRoutes = @{
     quick_triage = 'glm53_flash_only'
     routine_maintenance = 'glm53_flash_only'
-    standard_review = 'deepseek_flash_only'
+    standard_review = 'claude_haiku55_only'
     bounded_implementation = 'glm53_flash_only'
     deep_investigation_or_implementation = 'gpt6_luna_only'
     test_execution = 'glm53_flash_only'
-    documentation_review = 'deepseek_flash_only'
+    documentation_review = 'gemini38_flash_only'
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
 $reselection = $defaultResolved.reselection
-Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
+Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 4) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'xhigh') 'Codex GLM menu uses the exact native xhigh tuple'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('risk') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit and risk semantics'
 Assert ($defaultResolved.dispatch_policy.max_upstream_attempts_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'One-attempt upstream safety policy'
-Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
+Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 4) 'Pool includes distinct model families'
 Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
 Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
-$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,deepseek_flash_only | ConvertFrom-Json
+$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,claude_haiku55_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
-$cliSelection = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,deepseek_flash_only' -Plan | ConvertFrom-Json
-Assert ($LASTEXITCODE -eq 0 -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'deepseek_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding and route profile'
+$cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
+Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'claude_haiku55_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding and route profile'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
@@ -76,6 +81,8 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='gpt-5.6-terra';Effort='max'},
     @{Slot='standard_review';Model='gpt-5.6-terra';Effort='high'},
     @{Slot='standard_review';Model='deepseek-flash';Effort='high'},
+    @{Slot='standard_review';Model='deepseek-v4.1-flash';Effort='xhigh'},
+    @{Slot='standard_review';Model='gemini-3.8-flash';Effort='high'},
     @{Slot='standard_review';Model='glm-5.3-flash';Effort='high'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='max'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='low'},
@@ -91,7 +98,7 @@ foreach ($invalidSelection in @(
     try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') @invalidSelection -Plan | Out-Null } catch { $rejected = $true }
     Assert $rejected 'Reject removed, incomplete or out-of-pool selection'
 }
-$deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation_or_implementation -ReadOnly -Model deepseek-v4.1-flash -Effort xhigh -Plan | ConvertFrom-Json
+$deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation_or_implementation -ReadOnly -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
 Assert $deepReadOnly.read_only 'Deep cross-model review supports explicit read-only scope'
 $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Raw
 Assert ($launcher.Contains('no replay or preset substitution performed') -and $launcher.Contains('No arbitrary CLI pass-through')) 'Failed task must not replay'
@@ -105,7 +112,8 @@ $providerEvidence = [ordered]@{
     tuples = @(
         @{ model = 'gpt-6-luna'; effort = 'max'; status = 'verified' },
         @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
-        @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; status = 'verified' }
+        @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; status = 'verified' },
+        @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
     )
 }
 [IO.File]::WriteAllText($providerEvidencePath, ($providerEvidence | ConvertTo-Json -Depth 8))
@@ -140,8 +148,9 @@ function global:codex {
 try {
     foreach ($failedRoute in @(
             @{ model = 'gpt-6-luna'; effort = 'max'; next = @('glm53_flash_only') },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; next = @('deepseek_flash_only') },
-            @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; next = @() }
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; next = @('claude_haiku55_only') },
+            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; next = @('gemini38_flash_only') },
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; next = @() }
     )) {
         $failureMessage = ''
         try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
@@ -155,7 +164,7 @@ try {
         Assert (@($failure.reselection.within_preset_lower).Count -eq 0 -and @($failure.reselection.within_preset_higher_overload_only).Count -eq 0) 'Fixed max has no effort fallback'
         Assert ((@($failure.reselection.cross_preset.preset) -join ',') -ceq ($failedRoute.next -join ',')) 'Cross-model fallback never cycles'
     }
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Failures never automatically retry'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceFailureMode = 'timeout_message_only'
     $timeoutFailure = ''
     try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Output contains timeout text but no structured code' | Out-Null }
@@ -169,16 +178,16 @@ try {
     try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -ReselectionCount 1 -Prompt 'Budget must block before launch' | Out-Null }
     catch { $budgetMessage = $_.Exception.Message }
     Assert ($budgetMessage -like '*Reselection budget exhausted*' -and $budgetMessage -like '*no upstream request was sent*') 'Exhausted reselection budget blocks dispatch'
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Exhausted reselection budget makes no launch call'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Exhausted reselection budget makes no launch call'
     $budgetJson = [regex]::Match($budgetMessage, '\{.*\}')
     Assert $budgetJson.Success 'Budget block emits structured evidence'
     $budget = ($budgetJson.Value | ConvertFrom-Json).reselection_budget_exhausted
     Assert ($budget.reselection_count -eq 1 -and $budget.max_explicit_reselections -eq 1 -and $budget.upstream_contacted -eq $false) 'Budget evidence records the hard stop'
     $global:ModelSlotAcceptanceExitCode = 0
     & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Explicit remaining read-only work' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Parent can explicitly select the next supported model'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 6) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
-        Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and (($call -ccontains 'model_reasoning_effort="max"') -or ($call -ccontains 'model_reasoning_effort="xhigh"'))) 'All launches preserve read-only, fixed tuple and no nested delegation'
+        Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and (($call -ccontains 'model_reasoning_effort="max"') -or ($call -ccontains 'model_reasoning_effort="xhigh"') -or ($call -ccontains 'model_reasoning_effort="high"'))) 'All launches preserve read-only, fixed tuple and no nested delegation'
         Assert ($call -ccontains 'model_providers.fixture_provider.request_max_retries=0' -and $call -ccontains 'model_providers.fixture_provider.stream_max_retries=0') 'Codex CLI retries are capped for the selected custom provider'
     }
 
@@ -223,12 +232,13 @@ try {
     $projectionCatalog = @{ models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
-        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) }
+        @{ slug = 'claude-haiku-5-5'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
+        @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
     ) }
     [IO.File]::WriteAllText($projectionCapabilityPath, ($projectionCatalog | ConvertTo-Json -Depth 8))
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
-    Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 3) 'Apply records the verified native tuple set'
+    Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 4) 'Apply records the verified native tuple set'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
     $projectedConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($projectedConfig.Contains('# availability-rules: ') -and $projectedConfig.Contains('429/quota/rate-limit/auth/risk: stop and wait') -and $projectedConfig.Contains('No hot-swap, aliasing, effort substitution')) 'Shared config carries the stop-and-wait availability rules'
@@ -279,7 +289,7 @@ try {
     $catalog = @{ models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) },
-        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) }
+        @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'max' }) }
     ) }
     [IO.File]::WriteAllText($catalogPath, ($catalog | ConvertTo-Json -Depth 8))
     $blockedProjectionBefore = (Get-FileHash -LiteralPath $cfg).Hash
@@ -328,8 +338,8 @@ try {
     $expandedPolicy.auto_routes.custom_task = 'glm53_flash_only'
     foreach ($presetId in $expandedPolicy.presets.Keys) { $expandedPolicy.presets[$presetId].slot_map.custom_task = 0 }
     [IO.File]::WriteAllText($fixturePolicyPath, ($expandedPolicy | ConvertTo-Json -Depth 12))
-    $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model deepseek-v4.1-flash -Effort xhigh -Plan | ConvertFrom-Json
-    Assert ($customPlan.slot -ceq 'custom_task' -and $customPlan.model -ceq 'deepseek-v4.1-flash') 'Additional configured slot can use another model without launcher edits'
+    $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
+    Assert ($customPlan.slot -ceq 'custom_task' -and $customPlan.model -ceq 'gemini-3.8-flash-high') 'Additional configured slot can use another model without launcher edits'
     $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('[agents.custom_task]')) 'Additional configured slot projects to a native role'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
@@ -375,7 +385,7 @@ try {
         tuples = @(
             @{ model = 'glm-5.3-flash'; effort = 'high'; status = 'verified' },
             @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
-            @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; status = 'verified' }
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
         )
     }
     [IO.File]::WriteAllText($hostMenuEvidencePath, ($hostMenuEvidence | ConvertTo-Json -Depth 8))
