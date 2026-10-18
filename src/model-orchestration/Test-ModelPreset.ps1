@@ -359,7 +359,8 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
-    $descendingPolicy.presets.glm53_flash_only.menu += @{model='glm-5.3-flash';effort='high'}
+    # Haiku's allowed tuples are medium/high/xhigh; appending medium after xhigh violates the order check with an allowed tuple.
+    $descendingPolicy.presets.claude_haiku55_only.menu += @{model='claude-haiku-5-5';effort='medium'}
     [IO.File]::WriteAllText($fixturePolicyPath, ($descendingPolicy | ConvertTo-Json -Depth 12))
     $orderRejected = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null }
@@ -386,7 +387,7 @@ try {
     Assert $threw 'Out-of-range slot index must fail closed'
     $hostMenuPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
     $hostMenus = if ($hostMenuPolicy.presets['glm53_flash_only']['host_menus']) { $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] } else { @{} }
-    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'high' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' })
+    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'max' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' })
     $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] = $hostMenus
     [IO.File]::WriteAllText($fixturePolicyPath, ($hostMenuPolicy | ConvertTo-Json -Depth 12))
     $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
@@ -397,7 +398,7 @@ try {
         expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
         source = 'test-host-menu-reselection'
         tuples = @(
-            @{ model = 'glm-5.3-flash'; effort = 'high'; status = 'verified' },
+            @{ model = 'glm-5.3-flash'; effort = 'max'; status = 'verified' },
             @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
             @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
         )
@@ -415,7 +416,7 @@ try {
         catch { $hostMenuFailure = $_.Exception.Message }
         Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') 'Host-menu failure returns control without replay'
         $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
-        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'glm-5.3-flash/high') 'Failure reselection menus follow the codex host menu'
+        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'glm-5.3-flash/max') 'Failure reselection menus follow the codex host menu'
         Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
     }
     finally {
@@ -430,6 +431,7 @@ try {
         @{ name = 'duplicate alternate'; mutate = { param($p) $p.fallbacks.standard_review = @(@{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }, @{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }) } },
         @{ name = 'unknown preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'gpt61_sol_only'; model = 'gpt-6.1-sol'; effort = 'max' }) } },
         @{ name = 'more than three alternates'; mutate = { param($p) $p.fallbacks.test_execution = @(1..4 | ForEach-Object { @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' } }) } },
+        @{ name = 'menu tuple outside the strict subagent allowlist'; mutate = { param($p) $p.presets.gpt6_luna_only.menu = @(@{ model = 'gpt-6-luna'; effort = 'xhigh' }) } },
         @{ name = 'schema v5 policy'; mutate = { param($p) $p.schema_version = 5 } }
     )
     foreach ($fallbackCase in $fallbackCases) {
