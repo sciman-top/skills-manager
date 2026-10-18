@@ -20,20 +20,6 @@
     "gemini38_flash_only"
   ],
   "aliases": {},
-  "subagent_allowlist": {
-    "codex": {
-      "gpt-6-luna": ["max"],
-      "glm-5.3-flash": ["xhigh"],
-      "claude-haiku-5-5": ["medium", "high", "xhigh"],
-      "gemini-3.8-flash-high": ["high"]
-    },
-    "claude": {
-      "claude-haiku-5-5": ["medium", "high", "xhigh"]
-    },
-    "zcode": {
-      "glm-5.3-flash": ["max"]
-    }
-  },
   "auto_routes": {
     "quick_triage": "claude_haiku55_only",
     "routine_maintenance": "glm53_flash_only",

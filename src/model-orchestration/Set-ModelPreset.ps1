@@ -45,12 +45,24 @@ function Get-PresetMenu {
     }
     return @($PresetPolicy['menu'])
 }
+# Strict subagent allowlist (user requirement, 2026-10-18), per host: every menu and host menu
+# tuple must be one of these. Codex GLM is xhigh only; ZCode GLM is max only.
+# gemini-3.8-flash is the relay slug gemini-3.8-flash-high.
+$allowedSubagentTuples = @{
+    codex = @{ 'gpt-6-luna' = @('max'); 'glm-5.3-flash' = @('xhigh'); 'claude-haiku-5-5' = @('medium','high','xhigh'); 'gemini-3.8-flash-high' = @('high') }
+    claude = @{ 'claude-haiku-5-5' = @('medium','high','xhigh') }
+    zcode = @{ 'glm-5.3-flash' = @('max') }
+}
 function Assert-PresetMenu {
     param([string]$PresetId, [string]$HostName, $Menu)
     $menu = @($Menu)
     if ($menu.Count -eq 0) { throw "Preset $PresetId has an empty menu for host $HostName." }
     foreach ($entry in $menu) {
         if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $PresetId for host $HostName." }
+        $hostAllow = $allowedSubagentTuples[$HostName]
+        if (-not $hostAllow -or -not $hostAllow.ContainsKey([string]$entry.model) -or $entry.effort -cnotin @($hostAllow[[string]$entry.model])) {
+            throw "Tuple outside the allowed subagent set in preset ${PresetId} for host ${HostName}: $($entry.model)/$($entry.effort)"
+        }
     }
     # Failure re-selection uses menu indices as effort order.
     $effortOrder = @('low','medium','high','max','xhigh')
@@ -63,7 +75,7 @@ function Assert-PresetMenu {
 }
 foreach ($id in $policy.presets.Keys) {
     $p = $policy.presets[$id]
-    Assert-PresetMenu $id 'default' $p.menu
+    foreach ($menuHost in @($p.hosts)) { Assert-PresetMenu $id $menuHost @(Get-PresetMenu $p $menuHost) }
     $hosts = @($p.hosts)
     if ($hosts.Count -eq 0 -or ($hosts | Where-Object { $_ -cnotin @('codex','claude','zcode') })) { throw "Preset $id has invalid hosts." }
     if ($p.host_menus) {
@@ -95,21 +107,6 @@ foreach ($slot in $slotNames) {
 if ([int]$policy.schema_version -ne 6) { throw 'presets.json must use schema_version 6 (explicit per-slot fallbacks).' }
 if (-not $policy.fallbacks) { throw 'fallbacks must declare every slot.' }
 if ((@($policy.fallbacks.Keys | Sort-Object) -join ',') -cne $slotKey) { throw 'fallbacks must declare exactly all slots.' }
-# Strict subagent allowlist (user-specified): every menu and fallback tuple must be declared per host.
-if (-not $policy.subagent_allowlist) { throw 'presets.json must declare subagent_allowlist (strict per-host subagent tuples).' }
-function Assert-Allowlisted([string]$HostName, [string]$Model, [string]$Effort, [string]$Where) {
-    $hostAllow = $policy.subagent_allowlist[$HostName]
-    if (-not $hostAllow -or -not $hostAllow.Contains($Model) -or @($hostAllow[$Model]) -cnotcontains $Effort) {
-        throw "$Where is not in the subagent allowlist for host ${HostName}: $Model/$Effort"
-    }
-}
-foreach ($id in $policy.presets.Keys) {
-    foreach ($hostName in @($policy.presets[$id].hosts)) {
-        foreach ($entry in @(Get-PresetMenu $policy.presets[$id] $hostName)) {
-            Assert-Allowlisted $hostName ([string]$entry.model) ([string]$entry.effort) "preset $id menu"
-        }
-    }
-}
 foreach ($slot in $slotNames) {
     $alternates = @($policy.fallbacks[$slot])
     if ($alternates.Count -gt 3) { throw "fallbacks[$slot] lists more than three alternates." }
@@ -127,7 +124,6 @@ foreach ($slot in $slotNames) {
             if (@(Get-PresetMenu $policy.presets[$alternatePreset] $hostName | Where-Object { $_.model -ceq [string]$alternate.model -and $_.effort -ceq [string]$alternate.effort }).Count -gt 0) { $inMenu = $true }
         }
         if (-not $inMenu) { throw "fallbacks[$slot] tuple is not in preset ${alternatePreset}: $($alternate.model)/$($alternate.effort)" }
-        Assert-Allowlisted 'codex' ([string]$alternate.model) ([string]$alternate.effort) "fallbacks[$slot]"
         $tupleKey = "$alternatePreset|$($alternate.model)|$($alternate.effort)"
         if ($tupleKey -cin $primaryKeys) { throw "fallbacks[$slot] repeats the slot's own route: $tupleKey" }
         if ($seenKeys.ContainsKey($tupleKey)) { throw "fallbacks[$slot] lists a duplicate: $tupleKey" }
