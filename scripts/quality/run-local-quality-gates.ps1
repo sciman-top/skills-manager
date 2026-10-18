@@ -174,6 +174,12 @@ try {
         }
     }
     elseif ($Profile -eq 'full') {
+        # ci.yml rebuilds locked sources before the full gate; mirror it when the
+        # git-ignored materialized directories are absent (clean checkout).
+        $missingLocked = @('agent', 'vendor', 'imports') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Container) }
+        if (@($missingLocked).Count -gt 0) {
+            Invoke-QualityGate 'locked-sources' { & .\skills.ps1 更新 -Locked -SkipHostProjection }
+        }
         Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
     }
     $selectedVerifiers = if ($Verifier.Count -gt 0) {
