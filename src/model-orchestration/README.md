@@ -76,7 +76,7 @@ Schema v6 declares each slot's overload alternates explicitly in `presets.json` 
 | `deep_implementation` | `gemini-3.8-flash-high/high` | `gpt-6-luna/max`, `glm-5.3-flash/xhigh`, `claude-haiku-5-5/xhigh` |
 | `test_execution` | `glm-5.3-flash/xhigh` | `claude-haiku-5-5/high`, `gemini-3.8-flash-high/high`, `gpt-6-luna/max` |
 | `documentation_review` | `gemini-3.8-flash-high/high` | `claude-haiku-5-5/high`, `glm-5.3-flash/xhigh`, `gpt-6-luna/max` |
-| `architecture_review` | `gpt-6-luna/max` | `claude-haiku-5-5/xhigh`, `gemini-3.8-flash-high/high`, `glm-5.3-flash/xhigh` |
+| `architecture_review` | `gpt-6-luna/max` | `claude-haiku-5-5/xhigh`, `gemini-3.8-flash-high/high` |
 
 Migration from v5: fallback candidates were inferred across presets; schema v6 declares each slot's exact alternate tuples in `fallbacks`. The table above is the current contract. Edit the slot's list to change its supported alternates or order.
 
