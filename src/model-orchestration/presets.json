@@ -23,7 +23,7 @@
   "auto_routes": {
     "quick_triage": "claude_haiku55_only",
     "routine_maintenance": "glm53_flash_only",
-    "standard_review": "gpt6_luna_only",
+    "standard_review": "claude_haiku55_only",
     "bounded_implementation": "glm53_flash_only",
     "deep_investigation": "gpt6_luna_only",
     "deep_implementation": "gemini38_flash_only",
@@ -69,7 +69,7 @@
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "standard_review": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
@@ -179,7 +179,7 @@
       "slot_map": {
         "quick_triage": 0,
         "routine_maintenance": 1,
-        "standard_review": 2,
+        "standard_review": 1,
         "bounded_implementation": 2,
         "deep_investigation": 2,
         "deep_implementation": 2,
