@@ -14,7 +14,7 @@
 
 可选宿主通过 `--zcode-user-root`、`--antigravity-user-root`、`--workbuddy-user-root` 指定既有用户规则目录。WorkBuddy 默认仅在选定用户根已有 `CODEBUDDY.md` 或 `CODEBUDDY.mdc` 时启用；创建首个文件须显式指定根目录。apply、resume 和 rollback 必须提供与 plan/receipt 相同的根目录。
 
-`rule-estate-audit` 检查 WorkBuddy 时必须显式传入 `--workbuddy-user-root`；该审查入口不自动读取 `CODEBUDDY_CONFIG_DIR` 或当前用户的 `~/.codebuddy`。
+`global-rules-check` 检查 WorkBuddy 时可通过 `--workbuddy-user-root` 显式指定用户根。
 
 投影只写约定的宿主规则文件，保留 source/target hash、token、备份和回滚 receipt。文件相等最多证明 `filesystem_projected`；加载与实际验收仍需独立宿主证据。
 

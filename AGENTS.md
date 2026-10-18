@@ -4,45 +4,42 @@
 **最后更新**: 2026-10-18
 
 ## 1. 产品边界与入口
-- `skills.ps1` 是技能/MCP 管理的唯一 CLI entrypoint；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的 runtime source of truth。项目根 `AGENTS.md` 是 Codex、Claude、ZCode、Antigravity 与 WorkBuddy 的共同项目级规则源；Antigravity 原生读取它，已有 `.agents/rules/00-project.md` 以合法 frontmatter 和内联引用承接同一真源。
-- 主 CLI 管理本地技能/MCP、目标仓规则审查、原生技能投影及 `rules/global/` 的受控投影，不接管模型或宿主 runtime。独立的 `src/model-orchestration/` 仅提供显式 preset 配置和受控启动，遵循其局部 `AGENTS.md`，不进入主 CLI 构建链；两者均不接管 auth、provider、权限、会话或插件缓存。
-- 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
-- 冻结面（仅真实故障修复，解冻须用户明确授权）：清单见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+- `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。
+- 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。独立的 `src/model-orchestration/` preset 工具遵循其局部 `AGENTS.md`，不进入主 CLI 构建链。
+- 项目根 `AGENTS.md` 是各宿主共同的项目规则源；`CLAUDE.md`、`GEMINI.md` 与 `.agents/rules/00-project.md` 只做引用。
+- 冻结面（仅真实故障修复，解冻须用户明确授权）见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。新增能力前先读该节。
+- 真值层级 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`，低层证据不得外推。
 
-## A. 仓库真值与领域不变量
-- `build.ps1` 从 `src/` 生成根 `skills.ps1`（薄入口）与 `skills.lib/`（按源文件 1:1 的库文件；base 常载，命令包按分发闭包惰性加载），并从 `rules/global/common.md` 与 `platforms/*.md` 生成五份全局宿主规则；`-Check` 只读核对全部生成物漂移。`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
-- `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
-- 交付物目录契约固定为：`artifacts/deliveries/<version>/{standard-install,portable,source,private-snapshot}/` 是同版本四类交付物；前三项公共包不含 skills/MCP，私用快照仅限可信私有介质；`rescan/<run-id>/` 只是辅助清单，`artifacts/history/<kind>/<version-or-date>/` 是人工历史留存，`artifacts/work/<kind>/<run-id>/` 是临时构建/验证/evidence；`artifacts/` 根层不得放生成文件，正式公共下载以 GitHub Release 为准。
-- AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。
-- `audit-targets.json` 是共享目标清单；可选的 ignored `audit-targets.local.json` 按目标名覆盖本机 `enabled`/`path`，只影响列表与扫描，CRUD 只写共享文件，非法覆盖 fail closed。
-- Rule Estate 写入必须绑定 reviewed input、精确 scope/token/before-hash、receipt 与回滚；全局规则投影必须绑定 source/target hash、plan token、备份与精确回滚。
-- runtime 为 PowerShell 7-only。没有真实调用方、当前失败或可量化净收益的抽象、兼容层、候选清单、遥测、门禁与历史状态库应删除。
+## 2. 构建与生成物
+- `build.ps1` 从 `src/` 生成根 `skills.ps1` 与 `skills.lib/`，并从 `rules/global/` 生成五份全局宿主规则。`-Check` 只读核对漂移。禁止手改生成物。
+- `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录：先改 source、config 或 override，再构建。
+- `skills.ps1 构建生效` 会写宿主目录，属于外部投影动作；仓库内开发验证只运行 `build.ps1` 与测试。
+- runtime 为 PowerShell 7-only，Windows 优先。
 
-## B. 执行边界
-- 默认主代理串行完成；子代理委派与并行已获用户常驻授权（见全局规则 A.2），无需逐次请示；每次委派仍须限定独立切片、互斥 write set、最低证明与 stop。
-- 日常合同只冻结 `Goal / Exact write set / Minimum proof / Stop`；覆盖当前明确需求或真实失败，验收满足即停止，不把额外优化吸收为任务。
-- 先用 `git diff` 分界用户/并发改动；不回退、不重排、不混入本次回滚，禁止批量改写第三方 import。
-- 无指代载荷（“这个X”类指代且会话与仓库上下文均无锚点）必须停在 parent_user_input 索要目标；以“最新文件”等启发式自选目标、读取用户个人目录或跨仓文件替代提问，均视为 fail-open。
-- 更新 vendor/import/MCP 前记录来源、锁定、影响与回滚；宿主/provider/auth/session/plugin/MCP mutation 需要当前明确授权。
-- `references/reference-shelf.manifest.json` 仅服务显式 refresh/verify 的可选只读开发缓存；缺失或未刷新不得阻断普通 build/test/update/projection，也不得自动采纳、安装、执行或影响 runtime projection。
-- 外置参考仓（`D:\CODE\external\`）的解锁、锁定、基线与 ACL 操作流程见 [外置参考仓 Runbook](docs/EXTERNAL_REFERENCE_REPO_TIERS.md)；AI 会话不得自行改 ACL 或重钉基线。
-- 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
-- 新增功能或 module 必须服务当前明确需求或真实失败，并明确调用方、现有 interface 为何不足、write set、最低充分 proof 与 rollback；需求内必要文件不算额外扩范围，不以未来可能需要增加抽象或治理。准入三问（当前调用方 / 替代或删除了什么 / 最小验证）任一答不上即拒绝，PR 模板同栏。
-- 元治理测试五套（ResolveGateProfile / QualityGateAuto / CiWorkflow / TestRunner / BuildScript）冻结：仅真实故障触发式维护，不做主动性增强或扩面。
+## 3. 执行边界
+- 默认由一个主执行者串行完成。子代理委派已获用户常驻授权，但每次委派须限定独立切片、互斥写集、最低证明与停止条件，不并行写同一文件。
+- 日常合同为 `Goal / Exact write set / Minimum proof / Stop`。覆盖当前明确需求或真实失败，验收满足即停止。
+- 先用 `git diff` 分界用户或并发改动；不回退、不重排、不混入本次提交，不批量改写第三方 import。
+- 新增文件、模块、门禁或文档前，须说明当前调用方、替代或删除了什么、最小证明。任一答不上即不做。
+- 宿主配置、用户目录、MCP、远端等外部写入须有当前授权、预演和回滚入口。
+- 请求指代不清时，先向用户确认目标，不以"最新文件"等启发式自选。
+- 外置参考仓（`D:\CODE\external\`）属于其他项目的资产，本仓不再管理其刷新或基线；AI 会话不得修改其内容、ACL 或基线。
+- 元治理测试（ResolveGateProfile、QualityGateAuto、CiWorkflow、TestRunner、BuildScript）冻结：仅真实故障时维护。
 
-## C. 最低门禁
-- 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，检查 `HEAD` 后编辑（含未跟踪文件）；集成范围显式用 `-DiffBase <revision>`。具体选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；可用 `-TestPath` 追加回归证明，显式 focused 用于已确定范围。
-- 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
-- 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
-- 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`。本地构建允许未提交生成物；CI 加 `-CheckGenerated` 在测试前只读核对提交的生成物。full 在普通终端/CI 实测 ≈3–5 分钟（分片并行，约 1267 用例）；2026-10-04 的 WorkBuddy 桌面会话记录过小时级膨胀，且命中 `docs/runbooks/agent-sandbox-instrumentation.md` 所列指纹，不能外推到无指纹的 ZCode 或其他宿主，也不能单独证明全部延迟都由删除 shim 造成 ⇒ 门禁按指纹拦截此类宿主的非 CI full（`-AllowShimmedFull` 显式豁免），full 交 CI。门禁输出 profile/elapsed 作为成本信号，新门禁须声明替代了什么。
-- 生成物守卫（辅助，非唯一防线）：`.claude/hooks/guard-generated.ps1` 与 `.githooks/pre-commit` 阻断手改生成物及其与源不同批提交；Bash 写入不受 hook 覆盖，最终裁决是 CI `-CheckGenerated`。
-- 全局规则文件相等最多证明 `repo_verified/filesystem_projected`；`doctor --strict` 不证明 `host_loaded`，后者必须使用 fresh host probe。
-- 证明覆盖当前独立失败后立即停止；不得为了“更全面”重复运行同层门禁或新增旁路审计。
-- 全面审查按比例止损：距上次「维持现状」结论不足 30 天且 src/config 变更不足 10 文件时，只做增量核对并引用该结论，不重开全量重审。
+## 4. 最低门禁
+- 本地默认 `scripts/quality/run-local-quality-gates.ps1 -Profile auto`，选档以 `scripts/quality/resolve-gate-profile.ps1` 为准；集成范围加 `-DiffBase <revision>`。
+- 文档或规则：`git diff --check` 加受影响 verifier。
+- 源码或配置：`build.ps1` 后跑受影响测试，并核对生成物无漂移。
+- 只有 runtime、安全、数据、迁移、公开契约、依赖或打包风险，才在输入冻结后运行一次 `-Profile full`（约 3–5 分钟）。
+- 证明覆盖当前独立失败后即停止；不为"更全面"重复同层门禁。
+- CI 以 `-CheckGenerated` 只读核对已提交的生成物。
+- 生成物 hook（[guard-generated.ps1](.claude/hooks/guard-generated.ps1)、[pre-commit](.githooks/pre-commit)）只是辅助；Bash 写入不受 hook 覆盖，最终裁决是 CI。
+- 全局规则文件相等只证明 `filesystem_projected`；`host_loaded` 需要 fresh host probe。
 
-## D. 回滚与收口
-- Git baseline=`main`，upstream=`origin/main`；默认按 focused 或风险触发的一次 full gate 收口。远端 ruleset 强制 PR 与 required checks（`test`，strict），不要求额外批准人数；合入走 推分支 → PR → CI 绿 → merge。PR 的 required check 通过且 mergeStateStatus=CLEAN 时会话可自主合并并同步本地 main，无需逐次请示；操作者在任务中明示暂缓（如"暂不推送"）的，以其指令为准。
-- 本仓由两台电脑维护时，按 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md) 执行：开始 `status → fetch → review → integrate`，再 work、focused verify、commit；提交后再次 `fetch → review → integrate → final verify → push → post-push fetch/status`。PR 的完整 commits/files 只能属于本任务；合并后各电脑再将 `origin/main` fast-forward 到本地。`fetch` 不会把远端提交整合进工作树，另一台电脑未推送的提交也不可见。
+## 5. 收口
+- 基线分支 `main`，upstream `origin/main`。远端 ruleset 要求 PR 与 `test` 检查（strict），不要求额外批准人数。合入走：推分支 → PR → CI 绿 → merge。禁止 force push。PR 的 required check 通过且 mergeStateStatus=CLEAN 时会话可自主合并并同步本地 main，无需逐次请示；操作者在任务中明示暂缓（如"暂不推送"）的，以其指令为准。
+- 新增 `src/`、`scripts/`、`tests/`（fixtures 除外）或 `.github/` 文件的 PR 须由人加 `new-surface` 标签；CI 的 `verify-new-surface.ps1` 据此判定。文档新增不计入。
+- 收口报告写明：验证命令与结果、未验证项，以及 `Removed:` 行（常规修复写 `N/A`）。
+- 两台电脑同步见 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md)。`fetch` 不会把远端提交整合进工作树。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
-- 收口报告含 `Removed:` 行；新增独立功能或治理面时列出删除或合并的测试、门禁、文档数，常规修复写 `N/A`。新增面准入时同步评估可替换项；不得因连续 0 单独触发减法复核。
-- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（global-rules-* 含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt/审计机制执行，无需逐次请示。
+- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt 机制执行，无需逐次请示。

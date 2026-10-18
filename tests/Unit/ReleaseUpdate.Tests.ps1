@@ -89,33 +89,13 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *skills-manager
         $manifest = [pscustomobject]@{ files = @([pscustomobject]@{ path = 'skills.ps1'; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }) }
         New-Item -ItemType Directory -Path (Join-Path $root 'reports/release-update') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $root 'reports/release-update/last.json') -Value '{}' -Encoding utf8
-        Set-Content -LiteralPath (Join-Path $root 'reports/release-update/scheduled-last.json') -Value '{}' -Encoding utf8
         (Test-ReleaseUpdatePristineInstallation $root $manifest) | Should -BeTrue
         Set-Content -LiteralPath (Join-Path $root 'local-not-managed.txt') -Value 'must not be dropped' -Encoding utf8
         { Test-ReleaseUpdatePristineInstallation $root $manifest } | Should -Throw '*未受管理文件*'
     }
 
-    It 'requires an explicit schedule action and rejects auto-apply on disable' {
-        { Get-ReleaseUpdateScheduleTokens @() } | Should -Throw '*必须指定*'
-        (Get-ReleaseUpdateScheduleTokens @('--enable','--time=08:30','--auto-apply')).auto_apply | Should -BeTrue
-        { Get-ReleaseUpdateScheduleTokens @('--disable','--auto-apply') } | Should -Throw '*仅可与 --enable*'
-    }
-
-    It 'keeps --sync-mcp foreground-only: the unattended scheduler must not carry MCP sync' {
-        { Get-ReleaseUpdateScheduleTokens @('--enable','--sync-mcp') } | Should -Throw '*不支持参数*'
+    It 'keeps --sync-mcp as an explicit foreground-only option of release-update' {
         (Get-ReleaseUpdateTokens @('--apply','--yes','--sync-mcp')).sync_mcp | Should -BeTrue
-        $registerScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\register-release-update-task.ps1') -Raw
-        $registerScript | Should -Not -Match '(?i)SyncMcp'
-        $runner = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\release-update-scheduled-runner.ps1') -Raw
-        $runner | Should -Not -Match '(?i)SyncMcp'
-    }
-
-    It 'keeps the only scheduler mutation in the constrained Release updater entrypoint' {
-        $scheduler = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\release\register-release-update-task.ps1') -Raw
-        $scheduler | Should -Match "\$taskName = 'skills-manager-release-update'"
-        $scheduler | Should -Match '-LogonType Interactive -RunLevel Limited'
-        $scheduler | Should -Not -Match '(?i)-RunLevel\s+Highest'
-        (Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\run-local-quality-gates.ps1') -Raw) | Should -Match 'approvedSchedulerPath'
     }
 
     It 'quotes hidden worker handoff arguments so whitespace paths survive' {

@@ -208,7 +208,6 @@ Skills 管理器（中文菜单）
   .\skills.ps1 migration-unlock [--credentials <MIGRATION-MCP-CREDENTIALS.json|.enc.json>] [--yes]
   .\skills.ps1 migration-apply [--skip-mcp] [--json]
   .\skills.ps1 release-update --check|--apply --yes [--sync-mcp] [--json]
-  .\skills.ps1 release-update-schedule --enable|--disable [--time HH:mm] [--auto-apply]
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
@@ -221,12 +220,6 @@ MCP：
 
 规则治理：
   .\skills.ps1 rule-audit --repo <repo-root> [--user-root <path>] [--host codex|claude|zcode] --json
-  .\skills.ps1 rule-estate-audit --workspace-root D:\CODE [--out <report.json>] --json
-  全域审查自动发现工作区直属 Git 仓；默认排除 external、docs 与文档。可选 --registry 只比较外部快照 drift，不改变目标集合；仅显式 --out 写报告。
-  .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-  .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
-  .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH_<sha256(receipt.operation_id) 前16位大写> --json
-  全域写入只接受 reviewed change-set 中的直属 Git 仓库 AGENTS.md/CLAUDE.md；用户级 Codex/Claude/ZCode 规则被拒绝，必须走 rules/global 的 global-rules-* 单写入入口。plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
   .\skills.ps1 global-rules-plan --antigravity-user-root "$env:USERPROFILE\.gemini" --out .\reports\global-rule-projection\plan.json --json
   .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --antigravity-user-root "$env:USERPROFILE\.gemini" --json
   .\skills.ps1 global-rules-check --json
@@ -256,10 +249,6 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
-  .\skills.ps1 ai-risk-control [--platform all|antigravity|workbuddy] [--event <incident>] [--plan] [--retry-after <seconds|HTTP-date>] [--reset-at <ISO8601>] [--json] [--out <file>]
-  风控入口默认只读，列出 Antigravity/Gemini 与 WorkBuddy 风控技能资产并生成分诊计划；不运行宿主自检脚本、不读写宿主配置，也不会切号、轮换凭据或重启进程。
-  --plan 输出日常防范/恢复/停止条件；--event 输出一次事件的合规分诊计划（两者可独立使用）。
-  --event 取值：antigravity-ban|antigravity-rate-limit|antigravity-degradation|workbuddy-account-risk|workbuddy-rate-limit|workbuddy-degradation
   机器消费请用 --out（显式 UTF-8），不要依赖 stdout 重定向的编码。
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
