@@ -111,28 +111,6 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效 -SkillProfile full-compatible
 ```
 
-### Antigravity / Gemini 与 WorkBuddy 风控控制
-
-仓库把两份风控技能和统一分诊入口收在同一条链路中。默认命令只读，不修改账号、凭据、代理、客户端或进程：
-
-```powershell
-# 查看仓库资产与内置安全政策
-.\skills.ps1 ai-risk-control --json
-
-# 输出日常防范、恢复和停止条件
-.\skills.ps1 ai-risk-control --plan --json
-
-# 针对一次已观察到的事件生成分诊计划
-.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-account-risk --plan --json
-.\skills.ps1 ai-risk-control --platform antigravity --event antigravity-rate-limit --plan --json
-
-# 有服务端 Retry-After/reset 提示时只计算最早复查时间，不会自动重试
-.\skills.ps1 ai-risk-control --platform workbuddy --event workbuddy-rate-limit --retry-after 60 --plan --json
-
-```
-
-事件计划只给出官方合规的停手、留证、等待、分段、申诉和低频观察步骤。项目明确阻断多账号轮换、OAuth 反代、Token 提取、请求指纹伪造、设备标识伪造、配额绕过和重试风暴；这些动作会放大封号风险，不能作为“修复”。`--retry-after` 和 `--reset-at` 只接受服务端提示，入口按较晚时间计算最早复查时刻，不会替用户重试，也不保证到期后请求会被接受。该入口只核对仓库内的风控策略文件，不运行宿主自检脚本，也不能证明账号、配额、网络或模型服务状态。
-
 `check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。报告增加 `complete/failed` 与逐源 `reason`：超时、查询失败、未命中 ref 分别为 `timeout/query_failed/ref_not_found`，目标为 `unknown`，不代表已是最新；部分失败仍输出 JSON，调用方必须检查 `complete`，每周 runner 遇到不完整检查会停止。每次远端 Git 查询默认限时 30 秒，可通过 `SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS` 设置为 1–300 秒；同一 repo/ref 的失败在本次检查内缓存，其他源继续检查。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
 
@@ -143,19 +121,11 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 release-update --apply --yes
 # 自动更新成功后才同步 MCP；默认不会同步 MCP
 .\skills.ps1 release-update --apply --yes --sync-mcp
-
-# 每天 09:00 检查并弹出更新提示
-.\skills.ps1 release-update-schedule --enable --time=09:00
-# 每天 09:00 检查、通知并自动启动已校验更新
-.\skills.ps1 release-update-schedule --enable --time=09:00 --auto-apply
-.\skills.ps1 release-update-schedule --disable
 ```
-
-调度任务仅在用户显式运行 `--enable` 时创建，使用当前交互用户和非提权权限；更新后的 `reports/release-update/last.json` 保存结果。下载、checksum、解压、安装或切换任一步失败都会保持或回滚到旧目录。它仍不迁移登录态、provider/auth/session、插件缓存，也不证明 `host_loaded` 或 `live_accepted`。
 
 ### Skills 投影档位
 
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 10 项（`core-lean` 7 项加两份风控技能和一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 8 项（`core-lean` 7 项加一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
 
 当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge；选中 `claude` 才会投影受管 Claude 子代理定义到 `~/.claude/agents`。两者均要求正式宿主晋级，备份位于对应宿主的 `skills-manager-agent-backups`，不进入代理发现目录；加载和调用须单独验收。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
 
@@ -166,8 +136,8 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 | ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
 | Claude | `core-lean`：7 个默认技能 | 全量受管技能 |
 | ZCode | `core-lean`：7 个默认技能 | 排除原生 `documents`/`presentations`/`spreadsheets` 插件已覆盖的 `docx`、`pptx`、`xlsx`，以及 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
-| Antigravity | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
-| WorkBuddy | `core-ops`：10 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| Antigravity | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
+| WorkBuddy | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
 
 表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
 
@@ -177,7 +147,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、Claude Code、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。Claude Desktop 内运行的 Code 会话按 Claude Code 支持面验收；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影不证明该聊天已加载。
 
-不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码效能手册](docs/product/ai-coding-playbook.md)。
+不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码工作流与约束](docs/product/ai-coding-workflow-guide.md)。
 
 工作流技能按受影响行为选择观察证据：Web 交互、桌面输入、服务交付、自动化与数据迁移各有不同验收路径；项目类型本身不触发全量测试或外部访问。日常执行方式、项目观察矩阵和工程终态见该手册第 7–9 节。[可复用编码验收样例](tests/fixtures/ai-coding-workflow/)及手册第 10 节用于在独立副本中验证宿主的修复、测试和审查流程，不直接修复 tracked 样例，也不替代真实项目验收。修改技能源后通过既有 `构建生效` 流程物化和投影；源码落盘不等于宿主已加载，也不等于真实任务已验收。
 
@@ -237,9 +207,6 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 rule-audit --repo <repo-root> --host codex|claude|zcode --json
 .\skills.ps1 rule-plan --target <AGENTS.md> --desired-file <reviewed.md> --repo-root <repo> --out <plan.json> --json
 .\skills.ps1 rule-apply --plan <plan.json> --repo-root <repo> --token APPLY_RULE_REPO_PATCH --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
-.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --json
 ```
 
 全局 Codex/Claude/ZCode/Antigravity/Gemini/WorkBuddy 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
@@ -258,7 +225,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会按 ZCode profile 把受管 Skills 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
 
-审查默认只读。`rule-estate-audit` 默认排除 `external`、`docs` 与 `文档`，并在已配置的 ZCode/Antigravity/WorkBuddy 用户目录中同时呈现五宿主的静态加载面；缺少受管用户规则会 fail closed。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode/Antigravity/WorkBuddy 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
+审查默认只读。全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。单仓规则写入只经 `rule-plan/rule-apply`：apply 需要 reviewed desired file、before hash 与显式 token。多仓（全域）规则事务已随本分支移除。
 
 ### 技能投影与 fallback
 
@@ -278,20 +245,6 @@ Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安
 ```
 
 默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；对仍会被 Codex `full-compatible` 投影的仓库技能，另输出 `retirement_candidates` 的 host-profile 排除候选。候选只保留精确重叠、目标配置路径和不改变的跨宿主/冷目录范围，不能自行卸载，也不把插件存在推断成成功调用。它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
-
-## 外置参考仓
-
-外置参考棚只是按任务显式启用的只读开发缓存，不是产品运行时、普通编码主链或质量门禁。`skills.json` 始终是 runtime 真源；即使外置 checkout 不存在或没有刷新，普通 build、test、update 和 projection 也应继续工作。
-
-需要源码对比时，`references/reference-shelf.manifest.json` 才登记本次可用的 core/secondary 集合，owned root 为 `D:\CODE\external\skills-manager-references`。以下命令只在显式 refresh/verify 工作流中运行：
-
-```powershell
-.\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
-.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
-.\scripts\verify-reference-governance.ps1
-```
-
-refresh/verify 失败只阻断该次参考研究，不外推为产品主链失败。每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`，不在 Git 中维护动态 latest 状态。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`；没有当前消费者的候选不进入 manifest。
 
 ## 开发与验证
 

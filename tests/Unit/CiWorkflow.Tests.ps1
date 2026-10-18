@@ -133,142 +133,65 @@ Describe 'GitHub CI workflow supply-chain contract' {
         @([regex]::Matches($script:workflow, '(?m)^\s+contents:\s*write\s*$')).Count | Should -Be 1
     }
 
-    It 'checks the PR charter before selecting the proportional gate' {
-        $scriptPath = Join-Path $repoRoot 'scripts\quality\verify-pr-charter.ps1'
+    It 'checks the new-surface label before selecting the proportional gate' {
+        $scriptPath = Join-Path $repoRoot 'scripts\quality\verify-new-surface.ps1'
         Test-Path -LiteralPath $scriptPath -PathType Leaf | Should -BeTrue
-        $script:workflow | Should -Match 'Verify pull request charter'
-        $script:workflow | Should -Match 'verify-pr-charter\.ps1 -EventPath \$env:GITHUB_EVENT_PATH'
+        $script:workflow | Should -Match 'Verify new-surface label'
+        $script:workflow | Should -Match 'verify-new-surface\.ps1 -EventPath \$env:GITHUB_EVENT_PATH'
         $script:workflow | Should -Match "if: github\.event_name == 'pull_request'"
-        $script:workflow.IndexOf('Verify pull request charter') | Should -BeLessThan $script:workflow.IndexOf('Select proportional quality gate profile')
-
-        $validEvent = [ordered]@{
-            pull_request = [ordered]@{
-                body = @'
-## Goal
-- Keep the merge contract reviewable.
-- New surface: yes
-
-## Charter admission
-- Current caller: GitHub pull request workflow
-- Replaces / deletes: none; this is the existing PR template contract
-- Minimum proof: focused CI workflow contract test
-
-## Verification
-- Minimum proof: focused CI workflow contract test
-- Result: pwsh tests/run.ps1; exit=0; the affected contract passes.
-
-## Deletion delta
-- Removed: 0
-
-## Risks and Rollback
-- Risk: a malformed PR body is rejected before tests.
-- Rollback: revert the workflow and verifier change.
-'@
-            }
-        }
-        $validPath = Join-Path $TestDrive 'valid-event.json'
-        $validEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $validPath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $validPath *> $null
-        $LASTEXITCODE | Should -Be 0
-
-        $template = Get-Content -LiteralPath (Join-Path $repoRoot '.github\pull_request_template.md') -Raw
-        $templateAdmissionHeading = [regex]::Match($template, '(?m)^## Charter admission[^\r\n]*').Value
-        $templateAdmissionHeading | Should -Match '^## Charter admission\s+\('
-        $templateStyleEvent = [ordered]@{
-            pull_request = [ordered]@{
-                body = $validEvent.pull_request.body.Replace('## Charter admission', $templateAdmissionHeading)
-            }
-        }
-        $templateStylePath = Join-Path $TestDrive 'template-style-event.json'
-        $templateStyleEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $templateStylePath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $templateStylePath *> $null
-        $LASTEXITCODE | Should -Be 0
-
-        $invalidEvent = [ordered]@{
-            pull_request = [ordered]@{
-                body = @'
-## Goal
-- <what this PR changes>
-- New surface: yes
-
-## Charter admission
-- Current caller: <who calls this today; "may be useful later" is not a caller>
-- Replaces / deletes: <what this removes or supersedes; "none" = net-new surface, justify it>
-- Minimum proof: <smallest check that proves the change; does it escalate the gate to full?>
-
-## Deletion delta
-- Removed: <tests/gates/docs removed or merged; write 0 only after checking>
-
-## Risks and Rollback
-- Risk: <risk>
-- Rollback: <rollback>
-'@
-            }
-        }
-        $invalidPath = Join-Path $TestDrive 'invalid-event.json'
-        $invalidEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $invalidPath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $invalidPath *> $null
-        $LASTEXITCODE | Should -Not -Be 0
-
-        $emptyEvent = [ordered]@{ pull_request = [ordered]@{ body = '' } }
-        $emptyPath = Join-Path $TestDrive 'empty-event.json'
-        $emptyEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $emptyPath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $emptyPath *> $null
-        $LASTEXITCODE | Should -Not -Be 0
-
-        $missingSectionEvent = [ordered]@{
-            pull_request = [ordered]@{
-                body = $validEvent.pull_request.body -replace '## Charter admission', '## Admission details'
-            }
-        }
-        $missingSectionPath = Join-Path $TestDrive 'missing-section-event.json'
-        $missingSectionEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $missingSectionPath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $missingSectionPath *> $null
-        $LASTEXITCODE | Should -Not -Be 0
-
-        $routineEvent = [ordered]@{
-            pull_request = [ordered]@{
-                body = @'
-## Goal
-- Fix a regression in an existing command.
-- New surface: no
-
-## Verification
-- Minimum proof: reproduce the invalid input and rerun the affected test.
-- Result: affected test passes; exit=0; live acceptance not exercised.
-
-## Risks and Rollback
-- Risk: the command may still reject invalid input.
-- Rollback: revert the implementation change.
-'@
-            }
-        }
-        $routinePath = Join-Path $TestDrive 'routine-event.json'
-        $routineEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $routinePath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $routinePath *> $null
-        $LASTEXITCODE | Should -Be 0
-
-        # Admission evidence must not satisfy an empty Verification field.
-        $invalidVerificationBodies = @(
-            ($routineEvent.pull_request.body -replace '(?ms)^## Verification\r?\n.*?(?=^## )', ''),
-            $routineEvent.pull_request.body.Replace('- Result: affected test passes; exit=0; live acceptance not exercised.', '- Result: <command, exit code and relevant result>'),
-            $routineEvent.pull_request.body.Replace('- Minimum proof: reproduce the invalid input and rerun the affected test.', '- Minimum proof: '),
-            $validEvent.pull_request.body.Replace('- Result: pwsh tests/run.ps1; exit=0; the affected contract passes.', '- Result: '),
-            ([regex]::Replace($validEvent.pull_request.body, '(?m)(^## Verification\r?\n)- Minimum proof:[^\r\n]*', '$1- Minimum proof: <unresolved>'))
-        )
-        foreach ($body in $invalidVerificationBodies) {
-            $invalidVerificationPath = Join-Path $TestDrive 'invalid-verification-event.json'
-            @{ pull_request = @{ body = $body } } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $invalidVerificationPath -Encoding UTF8
-            & pwsh -NoProfile -File $scriptPath -EventPath $invalidVerificationPath *> $null
-            $LASTEXITCODE | Should -Not -Be 0
-        }
-
-        $missingSurfaceEvent = [ordered]@{ pull_request = [ordered]@{ body = $routineEvent.pull_request.body.Replace('- New surface: no', '') } }
-        $missingSurfacePath = Join-Path $TestDrive 'missing-surface-event.json'
-        $missingSurfaceEvent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $missingSurfacePath -Encoding UTF8
-        & pwsh -NoProfile -File $scriptPath -EventPath $missingSurfacePath *> $null
-        $LASTEXITCODE | Should -Not -Be 0
+        $script:workflow.IndexOf('Verify new-surface label') | Should -BeLessThan $script:workflow.IndexOf('Select proportional quality gate profile')
     }
+
+    It 'applies the new-surface label rule to new runtime, gate, test and CI files only' {
+        $scriptPath = Join-Path $repoRoot 'scripts\quality\verify-new-surface.ps1'
+        $repo = Join-Path $TestDrive 'surface-repo'
+        New-Item -ItemType Directory -Path $repo | Out-Null
+        Push-Location $repo
+        try {
+            & git init -q -b main *> $null
+            & git config user.email 'ci@example.invalid'
+            & git config user.name 'ci'
+            Set-Content -LiteralPath 'README.md' -Value 'base'
+            & git add . *> $null
+            & git commit -q -m base *> $null
+            $base = (& git rev-parse HEAD).Trim()
+
+            function Invoke-SurfaceGate([string[]]$Labels) {
+                $event = [ordered]@{ pull_request = [ordered]@{ base = [ordered]@{ sha = $base }; labels = @($Labels | ForEach-Object { [ordered]@{ name = $_ } }) } }
+                $path = Join-Path $TestDrive ('event-' + [Guid]::NewGuid().ToString('N') + '.json')
+                $event | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+                & pwsh -NoProfile -File $scriptPath -EventPath $path *> $null
+                return $LASTEXITCODE
+            }
+
+            New-Item -ItemType Directory -Path 'scripts', 'docs', 'tests/fixtures/sample' -Force | Out-Null
+            Set-Content -LiteralPath 'scripts/new-gate.ps1' -Value '# gate'
+            Set-Content -LiteralPath 'docs/new-note.md' -Value '# note'
+            Set-Content -LiteralPath 'tests/fixtures/sample/data.json' -Value '{}'
+            & git add . *> $null
+            & git commit -q -m 'mixed change' *> $null
+
+            # A new gate script without the label fails; with the label it passes.
+            Invoke-SurfaceGate @() | Should -Be 1
+            Invoke-SurfaceGate @('new-surface') | Should -Be 0
+
+            # Docs and fixtures alone do not require the label.
+            & git reset -q --hard $base *> $null
+            New-Item -ItemType Directory -Path 'docs' -Force | Out-Null
+            Set-Content -LiteralPath 'docs/only-doc.md' -Value '# doc'
+            & git add . *> $null
+            & git commit -q -m 'doc only' *> $null
+            Invoke-SurfaceGate @() | Should -Be 0
+
+            # A non-pull_request event is not applicable.
+            $pushPath = Join-Path $TestDrive 'push-event.json'
+            [ordered]@{ ref = 'refs/heads/main' } | ConvertTo-Json | Set-Content -LiteralPath $pushPath -Encoding UTF8
+            & pwsh -NoProfile -File $scriptPath -EventPath $pushPath *> $null
+            $LASTEXITCODE | Should -Be 0
+        }
+        finally { Pop-Location }
+    }
+
 
     It 'attests exactly the three release assets with pinned provenance action and minimal tag-job permissions' {
         $script:workflow | Should -Match 'id-token:\s*write'

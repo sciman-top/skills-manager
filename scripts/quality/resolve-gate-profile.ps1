@@ -37,13 +37,12 @@ $sourceTests = @{
     'src/Commands/AuditTargets.Template.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/AuditTargets.Plan.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Application/RuleDiagnostics.ps1' = @('RuleDiagnostics', 'RuleContent', 'ReadOnlyCli')
-    'src/Application/RuleAdvisor.ps1' = @('RuleAdvisor', 'RuleEstate', 'ReadOnlyCli')
-    'src/Application/RuleDiscovery.ps1' = @('RuleDiscovery', 'RuleAudit', 'RuleEstate', 'ReadOnlyCli')
-    'src/Application/RuleAudit.ps1' = @('RuleAudit', 'RuleEstate', 'ReadOnlyCli')
-    'src/Application/RuleEstate.ps1' = @('RuleEstate')
-    # 宿主事实注册表：本体断言 + 三个直接消费方（规则投影/全域比对/发现）的
+    'src/Application/RuleAdvisor.ps1' = @('RuleAdvisor', 'ReadOnlyCli')
+    'src/Application/RuleDiscovery.ps1' = @('RuleDiscovery', 'RuleAudit', 'ReadOnlyCli')
+    'src/Application/RuleAudit.ps1' = @('RuleAudit', 'ReadOnlyCli')
+    # 宿主事实注册表：本体断言 + 两个直接消费方（规则投影/发现）的
     # 行为套件共同证明。
-    'src/Application/HostRegistry.ps1' = @('HostRegistry', 'GlobalRuleProjection', 'RuleEstate', 'RuleDiscovery')
+    'src/Application/HostRegistry.ps1' = @('HostRegistry', 'GlobalRuleProjection', 'RuleDiscovery')
     'src/Application/SkillCatalogCompiler.ps1' = @('SkillCatalogCompiler')
     'src/Application/SkillEligibilityPolicy.ps1' = @('SkillEligibilityPolicy')
     'src/Application/SkillProjectionPlanning.ps1' = @('SkillProjection', 'SkillProjectionProfiles')
@@ -56,12 +55,11 @@ $sourceTests = @{
     'src/Commands/AuditTargets.Workflow.ps1' = @('AuditTargets', 'AuditTargetsHardening')
     'src/Commands/Capability.ps1' = @('CapabilityContracts', 'CapabilityInventory', 'CapabilityRouter', 'CapabilityRouterCrossRepo')
     'src/Commands/AiCoding.ps1' = @('AiCodingCommand')
-    'src/Commands/AiRiskControl.ps1' = @('AiRiskControl')
     'src/Commands/Doctor.ps1' = @('DoctorCli', 'DoctorEnhancements')
     'src/Commands/RuleAudit.ps1' = @('RuleAudit')
     'src/Commands/Utils.ps1' = @('MainDispatch', 'MenuStructure', 'SelectionCancellation')
     'src/Domain/ExecutionAdmission.ps1' = @('ExecutionAdmission')
-    'src/Domain/Receipt.ps1' = @('OperationContracts', 'ColdSkillRoutingReceipt')
+    'src/Domain/Receipt.ps1' = @('OperationContracts')
     'src/Domain/RulePatchPlan.ps1' = @('RulePatchPlan', 'RulePatchExecutor', 'RulePatchGuard')
     'src/Infrastructure/CodexCli.ps1' = @('CodexCli')
     'src/Main.ps1' = @('MainDispatch', 'MenuStructure')
@@ -78,7 +76,7 @@ $skillFocusedTests = @(
 $assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
-    'AiRiskControl', 'AiCodingCommand',
+    'AiCodingCommand',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 

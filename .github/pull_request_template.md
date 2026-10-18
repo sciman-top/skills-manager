@@ -1,11 +1,10 @@
 ## Goal
 - <what this PR changes>
 - New surface: no
-- Set this to `yes` when adding an independent feature/module, gate/workflow, test suite, persistent documentation/policy surface, or reusable abstraction. Routine fixes and regression cases within existing surfaces use `no`.
-- Review this declaration against the diff; CI validates the declaration, not its semantic truth.
+- Set this to `yes` when adding an independent feature/module, gate/workflow, test suite, or reusable abstraction. Routine fixes and regression cases within existing surfaces use `no`.
+- CI enforces the `new-surface` label, not this text: a PR that adds files under `src/`, `scripts/`, `tests/` (not fixtures) or `.github/` must carry the label, which a human sets. Docs are not gated.
 
-## Charter admission (complete only when New surface is yes)
-- CI rejects unresolved placeholders in this section; the fields must describe the actual change.
+## Admission (complete only when New surface is yes)
 - Current caller: <who calls this today; "may be useful later" is not a caller>
 - Replaces / deletes: <what this removes or supersedes; "none" = net-new surface, justify it>
 - Minimum proof: <smallest check that proves the change; does it escalate the gate to full?>

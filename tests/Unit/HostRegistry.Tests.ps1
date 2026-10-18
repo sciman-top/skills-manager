@@ -30,7 +30,6 @@ Describe 'Agent host registry' {
         # 新的平行枚举。
         $expected = @(Get-AgentHostIds)
         $reflectionTargets = @(
-            @{ Command = 'Get-RuleEstateGlobalDocument'; Parameter = 'HostName'; File = 'src\Application\RuleEstate.ps1' }
             @{ Command = 'Get-RuleDiscovery'; Parameter = 'HostName'; File = 'src\Application\RuleDiscovery.ps1' }
             @{ Command = 'Resolve-SkillProjectionSelection'; Parameter = 'HostName'; File = 'src\Application\SkillProjection.ps1' }
             @{ Command = 'Get-SkillProjectionEffectiveSelection'; Parameter = 'DefaultHost'; File = 'src\Application\SkillProjection.ps1' }
