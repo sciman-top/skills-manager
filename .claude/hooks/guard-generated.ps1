@@ -52,7 +52,8 @@ foreach ($m in [regex]::Matches($command, '(?<!\d)>>?\s*(?<t>"[^"]+"|''[^'']+''|
 }
 
 # 2) Write verbs modify their path arguments: any guarded token after such a verb is a write.
-$writeVerb = '(?i)(?<![\w-])(Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content|rm|mv|cp|tee|sed|rmdir|del)(?![\w-])'
+# sed 只有原地编辑（-i / --in-place）才写文件，只读 sed -n 不应被阻断。
+$writeVerb = '(?i)(?<![\w-])(Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content|rm|mv|cp|tee|rmdir|del)(?![\w-])|(?<![\w-])sed\b[^|;&]*\s--?(?:\w*i\w*|in-place)(?=\s|\.|$)'
 if ([regex]::IsMatch($command, $writeVerb)) {
     foreach ($tok in [regex]::Matches($command, '"[^"]+"|''[^'']+''|[^\s;&|()]+')) {
         $hit = Get-GuardedRel $tok.Value

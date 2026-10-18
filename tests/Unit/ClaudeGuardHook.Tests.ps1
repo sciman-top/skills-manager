@@ -67,6 +67,8 @@ Describe 'Claude PreToolUse guard blocks Bash writes to generated paths' {
 
     It 'blocks an in-place edit of the generated thin entry' {
         Invoke-Guard (New-BashEvent "sed -i 's/a/b/' skills.ps1") | Should -Be 2
+        Invoke-Guard (New-BashEvent 'sed -i.bak s/a/b/ agent/README.md') | Should -Be 2
+        Invoke-Guard (New-BashEvent 'sed --in-place s/a/b/ vendor/demo/README.md') | Should -Be 2
     }
 
     It 'blocks removing or copying generated directories' {
@@ -80,6 +82,11 @@ Describe 'Claude PreToolUse guard allows Bash commands that do not write generat
     It 'allows read-only access to generated files' {
         Invoke-Guard (New-BashEvent 'cat skills.lib/Core.ps1') | Should -Be 0
         Invoke-Guard (New-BashEvent 'git diff -- skills.lib/Core.ps1') | Should -Be 0
+    }
+
+    It 'allows read-only sed on generated files, which is not an in-place write' {
+        Invoke-Guard (New-BashEvent 'sed -n 1,5p agent/README.md') | Should -Be 0
+        Invoke-Guard (New-BashEvent "sed -n '1,20p' vendor/readme.txt | head -5") | Should -Be 0
     }
 
     It 'allows the build and generated-tree verification commands' {
