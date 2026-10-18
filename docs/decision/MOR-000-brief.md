@@ -5,6 +5,16 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-10-18 槽位路由与原生宿主分面修订
+
+本次修复将 schema v6 的 Codex 全 Luna 默认路由恢复为模型分工映射：`quick_triage`→Haiku/medium；`routine_maintenance`、`bounded_implementation`、`test_execution`→GLM/xhigh；`standard_review`→Haiku/xhigh；`deep_implementation`、`documentation_review`→Gemini/high；`deep_investigation`、`architecture_review`→Luna/max。Haiku 自身槽位表保留 medium（triage）、high（routine/test/docs）、xhigh（standard/deep/architecture），供选择 Haiku preset 时使用。
+
+映射依据是槽位语义与供应商官方定位，不是跨模型基准：OpenAI 将 GPT-6 Luna 定位为高容量、聚焦任务的高效率模型；Anthropic 将 Haiku 5.5 定位于低延迟分类、路由、抽取与 subagent 工作；Google 将 Gemini 3.8 Flash 定位于长周期软件工程、自主 Agent 与复杂工作流；Z.ai 描述 GLM-5.3 的编码能力并列出 `low/high/max` reasoning 档。未据此推断跨供应商质量、延迟、费用或“max≈xhigh”。官方来源：`developers.openai.com/api/docs/models/gpt-6-luna`、`platform.claude.com/docs/en/models/haiku-5-5/overview`、`ai.google.dev/gemini-api/docs/models/gemini-3.8-flash`、`docs.z.ai/guides/llm/glm-5.3`。Codex 当前精确 tuple 保持 Luna/max、GLM/xhigh、Haiku/medium|high|xhigh、Gemini/high。
+
+Claude Code 的整池自动解析现按其原生 Haiku 分面逐槽解析，显式指定无 Claude 分面的 preset 仍拒绝。ZCode 官方 subagent 文档（`zcode.z.ai/cn/docs/subagents`，2026-10-18 复核）确认 `~/.zcode/agents/<name>.md`、大小写敏感的 `model`/`thoughtLevel` frontmatter 与下次运行加载。受控 Apply 从本机既有 `~/.zcode/agents/glm-max.md` 读取模型 selector，仅投影有命名空间与 ownership marker 的逐槽 GLM/max agent，走通用备份、receipt、hash readback 与 rollback；不写 account-bound model id 到仓库，不修改原 agent、ZCode settings、workflow、并发或凭据。计划/回读证明最多 `filesystem_projected`，host load 需新 ZCode run；本次不重启客户端、不调用模型。
+
+Antigravity 仍仅有 `inherit/flash/pro` tier，无法表达本池 exact model/effort，因此不投影。ZCode GLM/max 与 Codex GLM/xhigh 是两个宿主的精确配置名；没有端点证据证明实际推理强度等价。路由是可测的初始推荐，待有同任务、同输入、独立验收数据后再校准，不形成模型统一强弱榜。
+
 ## 2026-10-17 同日二次修订：haiku 三档菜单
 
 用户把 haiku 修订为三档 xhigh/high/medium（存储为升序 medium<high<xhigh），可用性声明扩展为"claude/zcode/Antigravity 等只能调用自家模型"——AG 仅 tier 级（inherit/flash/pro）无 effort 键，无法表达精确元组，gemini 不设 AG 分面，hosts 面维持 codex/claude/zcode。**槽位统一乘 xhigh（沿用单档行为），medium/high 两档作为同 preset 失败降阶（haiku/xhigh 失败→high→medium 先于跨 preset）与显式选择档**；pool 角色扩为 6 个（luna_max/glm_xhigh/haiku_medium/haiku_high/haiku_xhigh/gemini_high），enabled_routes=6。若需省配额可把 standard_review 的 slot_map 降到 high（一处改动）。luna/glm/gemini 单档与 429 链不变。Test-ModelPreset 318 断言绿。
@@ -92,7 +102,7 @@
 | 项 | 状态 |
 | --- | --- |
 | 独立 preset 工具 / owner | `src/model-orchestration` / 当前用户 sciman；入口、配置真源和回滚见该目录 `AGENTS.md` |
-| 原生投影 / 受控启动 | 由用户显式调用独立脚本；不接入 `skills.ps1`，不自动改写运行中的会话；ZCode 投影仍阻断 |
+| 原生投影 / 受控启动 | 由用户显式调用独立脚本；不接入 `skills.ps1`，不自动改写运行中的会话；Codex/Claude 按各自配置 API 投影，ZCode 只新增基于现有模型 selector 的标记子代理文件 |
 | 完整 MOR 控制面 | 继续 `decided_deferred`；§3 是未来实现的历史设计输入，不限制已授权的独立工具，也不授权新增 runtime、自动故障切换或任务重放 |
 
 ## 5. 与既有资产的边界
