@@ -45,12 +45,23 @@ function Get-PresetMenu {
     }
     return @($PresetPolicy['menu'])
 }
+# Strict subagent allowlist (user requirement, 2026-10-18): every menu and host menu
+# tuple must be one of these. gemini-3.8-flash is the relay slug gemini-3.8-flash-high.
+$allowedSubagentTuples = @{
+    'gpt-6-luna' = @('max')
+    'glm-5.3-flash' = @('xhigh','max')
+    'claude-haiku-5-5' = @('medium','high','xhigh')
+    'gemini-3.8-flash-high' = @('high')
+}
 function Assert-PresetMenu {
     param([string]$PresetId, [string]$HostName, $Menu)
     $menu = @($Menu)
     if ($menu.Count -eq 0) { throw "Preset $PresetId has an empty menu for host $HostName." }
     foreach ($entry in $menu) {
         if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $PresetId for host $HostName." }
+        if (-not $allowedSubagentTuples.ContainsKey([string]$entry.model) -or $entry.effort -cnotin @($allowedSubagentTuples[[string]$entry.model])) {
+            throw "Tuple outside the allowed subagent set in preset ${PresetId} for host ${HostName}: $($entry.model)/$($entry.effort)"
+        }
     }
     # Failure re-selection uses menu indices as effort order.
     $effortOrder = @('low','medium','high','max','xhigh')
