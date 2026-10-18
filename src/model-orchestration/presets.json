@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "default_preset": "gpt6_luna_only",
   "active_presets": [
     "gpt6_luna_only",
@@ -32,7 +32,7 @@
     "architecture_review": "gpt6_luna_only"
   },
   "dispatch_policy": {
-    "max_upstream_attempts_per_bounded_task": 1,
+    "max_controlled_launcher_invocations_per_bounded_task": 1,
     "max_explicit_reselections": 1,
     "duplicate_prompt_replay": false,
     "parallel_duplicate_requests": false,
