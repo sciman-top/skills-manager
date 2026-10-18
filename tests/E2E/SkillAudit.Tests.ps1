@@ -1,6 +1,8 @@
 BeforeAll {
 . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
     . $PSScriptRoot\..\..\skills.ps1
+    # Pin the Codex plugin listing so the audit scan does not depend on a host Codex CLI.
+    Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
 
     $script:originalWorkspaceState = @{}
     foreach ($name in @('Root', 'CfgPath', 'LogPath', 'VendorDir', 'AgentDir', 'OverridesDir', 'ManualDir', 'ImportDir', 'DryRun')) {

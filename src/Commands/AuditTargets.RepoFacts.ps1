@@ -1370,7 +1370,7 @@ function Get-AuditPlainDirectoryFingerprint([string]$dirPath) {
 function Get-AuditGitPathStatePairs($paths) {
     # 单次全量 ls-files 取代逐路径派生进程（脏路径多时每路径一个 git 进程是扫描
     # 的主要耗时）；pathspec 的目录前缀语义用前缀过滤等价复现。
-    $pathList = @($paths)
+    $pathList = @($paths | Where-Object { -not [string]::IsNullOrEmpty([string]$_) })
     if ($pathList.Count -eq 0) { return @() }
     # git status/diff/ls-files 输出仓根相对路径：用扫描目录拼接会拼出不存在的
     # 路径（目标指向仓库子目录时）。
@@ -1445,7 +1445,11 @@ function Get-AuditGitInfo([string]$resolvedPath) {
             # Skip three redundant Git child processes on every clean target.
             $changedPaths = if ($statusLines.Count -gt 0) { @(Get-AuditGitChangedPaths) } else { @() }
             $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
-            $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
+            # Passing an empty array variable unrolls to $null, which the path probe would
+            # read as the repository root and hash the whole worktree into the fingerprint.
+            if (@($changedPaths).Count -gt 0) {
+                $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
+            }
             $info.dirty = ($statusLines.Count -gt 0)
             $info.status_count = $statusLines.Count
             $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true

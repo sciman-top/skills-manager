@@ -2,6 +2,8 @@ Describe 'Audit snapshot configuration failures' {
     BeforeAll {
         . $PSScriptRoot\..\..\skills.ps1
         . $PSScriptRoot\..\Shared\TestHelpers.ps1
+        # Pin the plugin inventory so snapshot tests do not depend on a host Codex CLI.
+        Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
         Initialize-TestGitIdentity
     }
     It 'preserves an external configuration <Change> during compensation' -TestCases @(
@@ -45,6 +47,8 @@ Describe 'Audit snapshot configuration failures' {
 
 BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
+    # Pin the Codex plugin listing so snapshot tests do not depend on a host Codex CLI.
+    Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
     $script:Root = $Root
     $script:CfgPath = $CfgPath
     $script:ImportDir = $ImportDir
