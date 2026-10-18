@@ -15,14 +15,14 @@ The default task-shape route is deterministic and is a routing policy, not a per
 
 | Task shape | Default tuple |
 | --- | --- |
-| `quick_triage` | `claude-haiku-5-5/medium` |
-| `routine_maintenance` | `glm-5.3-flash/xhigh` |
-| `standard_review` | `claude-haiku-5-5/xhigh` |
-| `bounded_implementation` | `glm-5.3-flash/xhigh` |
+| `quick_triage` | `gpt-6-luna/max` |
+| `routine_maintenance` | `gpt-6-luna/max` |
+| `standard_review` | `gpt-6-luna/max` |
+| `bounded_implementation` | `gpt-6-luna/max` |
 | `deep_investigation` | `gpt-6-luna/max` |
-| `deep_implementation` | `gemini-3.8-flash-high/high` |
-| `test_execution` | `glm-5.3-flash/xhigh` |
-| `documentation_review` | `gemini-3.8-flash-high/high` |
+| `deep_implementation` | `gpt-6-luna/max` |
+| `test_execution` | `gpt-6-luna/max` |
+| `documentation_review` | `gpt-6-luna/max` |
 | `architecture_review` | `gpt-6-luna/max` |
 
 No legacy preset aliases remain. DeepSeek, Terra and Sol presets and aliases are rejected; the subagent pool excludes them without changing the parent model. `-Preset` pins one preset for all slots; without it, `auto_routes` selects the task-shape tuple. `-AvailablePreset` limits the jointly enabled pool; if an automatic route is excluded, the first remaining launchable preset is used and the `fallback_from` field records that decision. Resolve returns `active_presets`, `enabled_routes`, `slots`, `routes` and the dispatch policy. These are declared routes until the current execution surface passes capability preflight. Historical profile and custom role files remain outside the active managed block; launching an old profile directly does not invoke the current pool.
@@ -64,19 +64,19 @@ Schema v6 declares each slot's overload alternates explicitly in `presets.json` 
 
 | Slot | Default route (Codex) | Declared alternates, in order |
 | --- | --- | --- |
-| `quick_triage` | `claude-haiku-5-5/medium` | `claude-haiku-5-5/high`, `gemini-3.8-flash-high/high` |
-| `routine_maintenance` | `glm-5.3-flash/xhigh` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
-| `standard_review` | `claude-haiku-5-5/xhigh` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
-| `bounded_implementation` | `glm-5.3-flash/xhigh` | `claude-haiku-5-5/xhigh`, `gemini-3.8-flash-high/high` |
+| `quick_triage` | `gpt-6-luna/max` | `claude-haiku-5-5/high`, `gemini-3.8-flash-high/high` |
+| `routine_maintenance` | `gpt-6-luna/max` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
+| `standard_review` | `gpt-6-luna/max` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
+| `bounded_implementation` | `gpt-6-luna/max` | `claude-haiku-5-5/xhigh`, `gemini-3.8-flash-high/high` |
 | `deep_investigation` | `gpt-6-luna/max` | `claude-haiku-5-5/xhigh`, `glm-5.3-flash/xhigh` |
-| `deep_implementation` | `gemini-3.8-flash-high/high` | `gpt-6-luna/max`, `glm-5.3-flash/xhigh` |
-| `test_execution` | `glm-5.3-flash/xhigh` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
-| `documentation_review` | `gemini-3.8-flash-high/high` | `claude-haiku-5-5/high`, `glm-5.3-flash/xhigh` |
+| `deep_implementation` | `gpt-6-luna/max` | `glm-5.3-flash/xhigh` |
+| `test_execution` | `gpt-6-luna/max` | `claude-haiku-5-5/high`, `claude-haiku-5-5/medium`, `gemini-3.8-flash-high/high` |
+| `documentation_review` | `gpt-6-luna/max` | `claude-haiku-5-5/high`, `glm-5.3-flash/xhigh` |
 | `architecture_review` | `gpt-6-luna/max` | `claude-haiku-5-5/xhigh`, `gemini-3.8-flash-high/high` |
 
 Migration from v5: fallback candidates were inferred across presets; schema v6 declares each slot's exact alternate tuples in `fallbacks`. The table above is the current contract. Edit the slot's list to change its supported alternates or order.
 
-2026-10-18 model-fit revision (schema stays v6): the Codex daily routes include all four requested models at their supported tuples. When Haiku is selected, its slot map scales triage to medium, routine maintenance/test/docs to high, and standard/deep/architecture review to xhigh; the full-pool defaults route routine/test coding to GLM/xhigh, documentation/deep implementation to Gemini/high, and deep investigation/architecture to Luna/max. The mixed `deep_investigation_or_implementation` slot is replaced by read-only `deep_investigation` and write-capable `deep_implementation`. GLM remains xhigh in the Codex menu and max in the ZCode Resolve-only facet. The user confirms ChatGPT Desktop can call all four; Codex host projection still preflights each exact tuple, while Claude, ZCode and Antigravity keep their native model choices. Repository presets and host configuration are separate layers: a plan/readback establishes filesystem projection, not that an already running client has loaded it.
+2026-10-18 model-fit revision (schema stays v6): the Codex daily routes include all four requested models at their supported tuples. When Haiku is selected, its slot map scales triage to medium, routine maintenance/test/docs to high, and standard/deep/architecture review to xhigh; the full-pool defaults route every slot to Luna/max; GLM, Haiku and Gemini remain only as declared alternates. The mixed `deep_investigation_or_implementation` slot is replaced by read-only `deep_investigation` and write-capable `deep_implementation`. GLM remains xhigh in the Codex menu and max in the ZCode Resolve-only facet. The user confirms ChatGPT Desktop can call all four; Codex host projection still preflights each exact tuple, while Claude, ZCode and Antigravity keep their native model choices. Repository presets and host configuration are separate layers: a plan/readback establishes filesystem projection, not that an already running client has loaded it.
 
 Effort names are not one scale across agents, so `xhigh` and `max` cannot be compared by name. The Codex config accepts `low`, `medium`, `high`, `xhigh`, `max` and `ultra`, and availability depends on the model and client; the Codex picker labels `xhigh` as Extra High. Claude Code calibrates each model's levels separately ("the same level name does not represent the same underlying value across models"); Haiku 5.5 defaults to `medium`, and the `effortLevel` setting accepts `low` through `xhigh` but not `max`. Z.ai's documented mapping for Claude Code and Coding Plan collapses `xhigh`, `max` and `ultra` into `max`. The Codex GLM tuple `xhigh` and the ZCode facet `max` are therefore different catalog names. Whether they reach different effective reasoning depends on the endpoint, and this repo has no evidence for that yet.
 

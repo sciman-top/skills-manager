@@ -32,17 +32,17 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
-Assert (@($policy.auto_routes.Values | Where-Object { $_ -ceq 'glm53_flash_only' }).Count -gt 0 -and @($policy.auto_routes.Values | Where-Object { $_ -ceq 'gemini38_flash_only' }).Count -gt 0) 'Daily routes include GLM and Gemini tuples'
+Assert (@($policy.auto_routes.Values | Where-Object { $_ -cne 'gpt6_luna_only' }).Count -eq 0) 'Every automatic daily route is gpt6_luna_only; GLM, Haiku and Gemini stay as declared alternates'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
 $autoRoutes = @{
-    quick_triage = 'claude_haiku55_only'
-    routine_maintenance = 'glm53_flash_only'
-    standard_review = 'claude_haiku55_only'
-    bounded_implementation = 'glm53_flash_only'
+    quick_triage = 'gpt6_luna_only'
+    routine_maintenance = 'gpt6_luna_only'
+    standard_review = 'gpt6_luna_only'
+    bounded_implementation = 'gpt6_luna_only'
     deep_investigation = 'gpt6_luna_only'
-    deep_implementation = 'gemini38_flash_only'
-    test_execution = 'glm53_flash_only'
-    documentation_review = 'gemini38_flash_only'
+    deep_implementation = 'gpt6_luna_only'
+    test_execution = 'gpt6_luna_only'
+    documentation_review = 'gpt6_luna_only'
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
@@ -62,7 +62,7 @@ Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEa
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
 $cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
-Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'claude_haiku55_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding and route profile'
+Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding: standard_review auto route (luna) is outside the set, so the first available preset binds'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
