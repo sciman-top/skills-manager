@@ -5,10 +5,10 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
 $expected = @{
-    glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    claude_haiku55_only = @{ menu = @(@('claude-haiku-5-5','medium'),@('claude-haiku-5-5','high'),@('claude-haiku-5-5','xhigh')); map = @{quick_triage=2;routine_maintenance=2;standard_review=2;bounded_implementation=2;deep_investigation_or_implementation=2;test_execution=2;documentation_review=2;architecture_review=2} }
-    gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation_or_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    claude_haiku55_only = @{ menu = @(@('claude-haiku-5-5','medium'),@('claude-haiku-5-5','high'),@('claude-haiku-5-5','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=2;bounded_implementation=2;deep_investigation=2;deep_implementation=2;test_execution=1;documentation_review=1;architecture_review=2} }
+    gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
 Assert ($policy.presets.Count -eq 4 -and $slots.Count -gt 3) 'Four single-tier models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
@@ -30,15 +30,17 @@ foreach ($id in $expected.Keys) {
     }
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
-Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'glm53_flash_only') 'Default comes from policy'
+Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
+Assert (@($policy.auto_routes.Values | Where-Object { $_ -ceq 'glm53_flash_only' }).Count -gt 0 -and @($policy.auto_routes.Values | Where-Object { $_ -ceq 'gemini38_flash_only' }).Count -gt 0) 'Daily routes include GLM and Gemini tuples'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
 $autoRoutes = @{
-    quick_triage = 'glm53_flash_only'
+    quick_triage = 'claude_haiku55_only'
     routine_maintenance = 'glm53_flash_only'
     standard_review = 'claude_haiku55_only'
     bounded_implementation = 'glm53_flash_only'
-    deep_investigation_or_implementation = 'gpt6_luna_only'
+    deep_investigation = 'gpt6_luna_only'
+    deep_implementation = 'gemini38_flash_only'
     test_execution = 'glm53_flash_only'
     documentation_review = 'gemini38_flash_only'
     architecture_review = 'gpt6_luna_only'
@@ -56,7 +58,7 @@ $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -A
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 4) 'AvailablePreset retains the whole selected pool including haiku rungs'
 Assert ([int]$policy.schema_version -eq 6 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v6 declares fallbacks for every slot'
-Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'glm-5.3-flash/xhigh,claude-haiku-5-5/xhigh') 'Resolve exposes the declared alternates of each route'
+Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
 $cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
@@ -97,6 +99,7 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='claude-haiku-5-5';Effort='low'},
     @{Slot='standard_review';Model='gpt-6-luna';Effort='xhigh'},
     @{Slot='unknown_slot'},
+    @{Slot='deep_investigation_or_implementation'},
     @{Slot='standard_review';Preset='gpt_terra_only'},
     @{Slot='standard_review';AvailablePreset=@('glm53_flash_only');Model='gpt-6-luna';Effort='max'}
 )) {
@@ -104,8 +107,10 @@ foreach ($invalidSelection in @(
     try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') @invalidSelection -Plan | Out-Null } catch { $rejected = $true }
     Assert $rejected 'Reject removed, incomplete or out-of-pool selection'
 }
-$deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation_or_implementation -ReadOnly -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
-Assert $deepReadOnly.read_only 'Deep cross-model review supports explicit read-only scope'
+$deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
+Assert $deepReadOnly.read_only 'Deep investigation is read-only by slot contract'
+$deepImplementation = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_implementation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
+Assert (-not $deepImplementation.read_only) 'Deep implementation is a distinct write-capable slot'
 $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Raw
 Assert ($launcher.Contains('no replay or preset substitution performed') -and $launcher.Contains('No arbitrary CLI pass-through')) 'Failed task must not replay'
 $providerEvidencePath = Join-Path ([IO.Path]::GetTempPath()) ('model-provider-evidence-'+[guid]::NewGuid().ToString('N')+'.json')
@@ -153,10 +158,10 @@ function global:codex {
 }
 try {
     foreach ($failedRoute in @(
-            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','claude-haiku-5-5/xhigh'); lower = @() },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('claude-haiku-5-5/xhigh'); lower = @() },
-            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; fallback = @('glm-5.3-flash/xhigh'); lower = @('claude-haiku-5-5/high','claude-haiku-5-5/medium') },
-            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('glm-5.3-flash/xhigh','claude-haiku-5-5/xhigh'); lower = @() }
+            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
+            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; fallback = @('gemini-3.8-flash-high/high'); lower = @('claude-haiku-5-5/high','claude-haiku-5-5/medium') },
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('claude-haiku-5-5/xhigh'); lower = @() }
     )) {
         $failureMessage = ''
         try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
@@ -269,7 +274,7 @@ try {
     [IO.File]::WriteAllText($cfg, $emptyRoot)
     $emptyRootReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $emptyRootResult = Get-Content -LiteralPath $cfg -Raw
-    Assert ($emptyRootResult.StartsWith('model = "glm-5.3-flash"')) 'Empty root must receive its own model key'
+    Assert ($emptyRootResult.StartsWith('model = "gpt-6-luna"')) 'Empty root must receive its own model key'
     Assert ($emptyRootResult.Contains("[unrelated]`nmodel = `"preserve-other-section`"")) 'Empty root must preserve other sections'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $emptyRootReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $emptyRoot) 'Empty-root rollback must restore original content'
@@ -281,7 +286,7 @@ try {
     $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
-    Assert ($subagentConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "xhigh"')) 'Subagent standard defaults'
+    Assert ($subagentConfig.Contains('default_subagent_model = "gpt-6-luna"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "max"')) 'Subagent standard defaults'
     Assert ($subagentConfig.Contains('max_concurrent_threads_per_session = 2') -and $subagentConfig.Contains('enabled = true')) 'Native delegation and concurrency preserved'
     foreach ($entry in $defaultResolved.enabled_routes) {
         Assert ($subagentConfig.Contains("[agents.$($entry.role)]")) 'All tuple roles coexist in the shared config'
@@ -374,7 +379,7 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $retryReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $original) 'Interrupted rollback must be retryable'
     Assert (-not (Test-Path -LiteralPath $lockedPath)) 'Retry must remove a created file that blocked the first rollback'
-    $badText = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw) -replace '"deep_investigation_or_implementation": \d+', '"deep_investigation_or_implementation": 9'
+    $badText = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw) -replace '"deep_implementation": \d+', '"deep_implementation": 9'
     [IO.File]::WriteAllText((Join-Path $fixture 'presets.json'), $badText)
     $threw = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
