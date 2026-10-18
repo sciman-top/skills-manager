@@ -17,6 +17,7 @@ Assert (@($policy.presets['gemini38_flash_only'].hosts).Count -eq 1 -and 'codex'
 $zcodeResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset glm53_flash_only | ConvertFrom-Json -AsHashtable
 Assert ($zcodeResolved.host -ceq 'zcode' -and $zcodeResolved.routes.quick_triage.model -ceq 'glm-5.3-flash' -and $zcodeResolved.routes.quick_triage.effort -ceq 'max') 'ZCode keeps the native GLM max facet'
 Assert (@($zcodeResolved.enabled_routes | Where-Object { $_.model -ceq 'glm-5.3-flash' -and $_.effort -ceq 'max' }).Count -eq 1) 'ZCode exposes only the reviewed GLM max tuple'
+Assert (@($zcodeResolved.enabled_routes).Count -eq 1) 'ZCode exposes no other model/effort tuple'
 $zcodeAutoResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode | ConvertFrom-Json -AsHashtable
 Assert ($zcodeAutoResolved.auto_routing -and @($zcodeAutoResolved.active_presets).Count -eq 1 -and $zcodeAutoResolved.active_presets[0] -ceq 'glm53_flash_only') 'ZCode automatic routing narrows the pool to its native GLM facet'
 foreach ($slot in $slots) { Assert ($zcodeAutoResolved.routes[$slot].model -ceq 'glm-5.3-flash' -and $zcodeAutoResolved.routes[$slot].effort -ceq 'max') "ZCode maps the supported native tuple to $slot" }
@@ -41,6 +42,9 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
+$expectedCodexTuples = @('gpt-6-luna/max','glm-5.3-flash/xhigh','claude-haiku-5-5/medium','claude-haiku-5-5/high','claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high') | Sort-Object
+Assert (((@($defaultResolved.enabled_routes | ForEach-Object { "$($_.model)/$($_.effort)" } | Sort-Object) -join ',') -ceq ($expectedCodexTuples -join ','))) 'Codex exposes exactly the six approved tuples'
+Assert (@($claudeAutoResolved.enabled_routes).Count -eq 3 -and @($claudeAutoResolved.enabled_routes | Where-Object { $_.model -cne 'claude-haiku-5-5' -or $_.effort -cnotin @('medium','high','xhigh') }).Count -eq 0) 'Claude exposes only the three approved Haiku tuples'
 Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 4) 'Automatic routes use all four requested model families'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
 $autoRoutes = @{
@@ -411,7 +415,7 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
-    $descendingPolicy.presets.glm53_flash_only.menu += @{model='glm-5.3-flash';effort='high'}
+    $descendingPolicy.presets.claude_haiku55_only.menu += @{model='claude-haiku-5-5';effort='high'}
     [IO.File]::WriteAllText($fixturePolicyPath, ($descendingPolicy | ConvertTo-Json -Depth 12))
     $orderRejected = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null }
@@ -437,9 +441,10 @@ try {
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
     Assert $threw 'Out-of-range slot index must fail closed'
     $hostMenuPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
-    $hostMenus = if ($hostMenuPolicy.presets['glm53_flash_only']['host_menus']) { $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] } else { @{} }
-    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'high' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' })
-    $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] = $hostMenus
+    $hostMenus = if ($hostMenuPolicy.presets['claude_haiku55_only']['host_menus']) { $hostMenuPolicy.presets['claude_haiku55_only']['host_menus'] } else { @{} }
+    $hostMenus['codex'] = @(@{ model = 'claude-haiku-5-5'; effort = 'medium' }, @{ model = 'claude-haiku-5-5'; effort = 'xhigh' })
+    $hostMenuPolicy.presets['claude_haiku55_only']['host_menus'] = $hostMenus
+    foreach ($slot in $slots) { $hostMenuPolicy.presets['claude_haiku55_only'].slot_map[$slot] = 0 }
     [IO.File]::WriteAllText($fixturePolicyPath, ($hostMenuPolicy | ConvertTo-Json -Depth 12))
     $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
     $hostMenuEvidence = [ordered]@{
@@ -449,8 +454,8 @@ try {
         expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
         source = 'test-host-menu-reselection'
         tuples = @(
-            @{ model = 'glm-5.3-flash'; effort = 'high'; status = 'verified' },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
+            @{ model = 'claude-haiku-5-5'; effort = 'medium'; status = 'verified' },
+            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; status = 'verified' },
             @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
         )
     }
@@ -463,11 +468,11 @@ try {
     }
     try {
         $hostMenuFailure = ''
-        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $hostMenuEvidencePath -Prompt 'Host facet failure document' | Out-Null }
+        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot architecture_review -Model claude-haiku-5-5 -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $hostMenuEvidencePath -Prompt 'Host facet failure document' | Out-Null }
         catch { $hostMenuFailure = $_.Exception.Message }
-        Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') 'Host-menu failure returns control without replay'
+        Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') "Host-menu failure returns control without replay: $hostMenuFailure"
         $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
-        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'glm-5.3-flash/high') 'Failure reselection menus follow the codex host menu'
+        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'claude-haiku-5-5/medium') 'Failure reselection menus follow the codex host menu'
         Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
     }
     finally {
@@ -491,6 +496,22 @@ try {
         $caseRejected = $false
         try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $caseRejected = $true }
         Assert $caseRejected "Invalid declared fallback fails closed: $($fallbackCase.name)"
+    }
+    $allowlistCases = @(
+        @{ name = 'unlisted model'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].model = 'gpt-5.6-terra' } },
+        @{ name = 'wrong Luna effort'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].effort = 'high' } },
+        @{ name = 'Codex GLM max'; mutate = { param($p) $p.presets.glm53_flash_only.menu[0].effort = 'max' } },
+        @{ name = 'ZCode GLM xhigh'; mutate = { param($p) $p.presets.glm53_flash_only.host_menus.zcode[0].effort = 'xhigh' } },
+        @{ name = 'Haiku low effort'; mutate = { param($p) $p.presets.claude_haiku55_only.menu[0].effort = 'low' } },
+        @{ name = 'bare Gemini family name'; mutate = { param($p) $p.presets.gemini38_flash_only.menu[0].model = 'gemini-3.8-flash' } }
+    )
+    foreach ($allowlistCase in $allowlistCases) {
+        $casePolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+        & $allowlistCase.mutate $casePolicy
+        [IO.File]::WriteAllText($fixturePolicyPath, ($casePolicy | ConvertTo-Json -Depth 12))
+        $caseRejected = $false
+        try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $caseRejected = $true }
+        Assert $caseRejected "Out-of-allowlist model/effort fails closed: $($allowlistCase.name)"
     }
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json).routes.architecture_review.declared_fallback.Count -eq 2) 'Restored shipped fallbacks resolve again'

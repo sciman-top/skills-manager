@@ -13,6 +13,24 @@ param(
     [ValidateSet('codex','claude','zcode')][string]$ExecutionHost = 'codex'
 )
 $ErrorActionPreference = 'Stop'
+$allowedModelEffortByHost = [ordered]@{
+    codex = @(
+        'gpt-6-luna|max'
+        'glm-5.3-flash|xhigh'
+        'claude-haiku-5-5|medium'
+        'claude-haiku-5-5|high'
+        'claude-haiku-5-5|xhigh'
+        # The current Codex native catalog exposes this Gemini Flash model ID with the high tier in its slug.
+        'gemini-3.8-flash-high|high'
+    )
+    claude = @(
+        'claude-haiku-5-5|medium'
+        'claude-haiku-5-5|high'
+        'claude-haiku-5-5|xhigh'
+    )
+    zcode = @('glm-5.3-flash|max')
+}
+$allowedModelEffortTuples = @($allowedModelEffortByHost.Values | ForEach-Object { $_ } | Select-Object -Unique)
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 # Fail closed on any malformed preset, not only the selected one: slot_map keys,
 # index range, and menu population are the whole contract between menu and slots.
@@ -52,6 +70,8 @@ function Assert-PresetMenu {
     if ($menu.Count -eq 0) { throw "Preset $PresetId has an empty menu for host $HostName." }
     foreach ($entry in $menu) {
         if ($entry.model -cnotmatch '^[a-z0-9][a-z0-9.-]*$' -or $entry.effort -cnotin @('low','medium','high','max','xhigh')) { throw "Invalid tuple in preset $PresetId for host $HostName." }
+        $tupleKey = "$($entry.model)|$($entry.effort)"
+        if ($tupleKey -cnotin $allowedModelEffortTuples) { throw "Tuple outside the fixed model/effort allowlist in preset $PresetId for host $HostName`: $($entry.model)/$($entry.effort)" }
     }
     # Failure re-selection uses menu indices as effort order.
     $effortOrder = @('low','medium','high','max','xhigh')
@@ -76,6 +96,10 @@ foreach ($id in $policy.presets.Keys) {
     if (-not $p.slot_map -or @($p.slot_map.Keys).Count -ne $slotNames.Count) { throw "Preset $id slot_map must cover exactly all slots." }
     foreach ($hostName in $hosts) {
         $hostMenu = @(Get-PresetMenu $p $hostName)
+        foreach ($entry in $hostMenu) {
+            $tupleKey = "$($entry.model)|$($entry.effort)"
+            if ($tupleKey -cnotin $allowedModelEffortByHost[$hostName]) { throw "Tuple outside the fixed model/effort allowlist for host $hostName in preset $id`: $($entry.model)/$($entry.effort)" }
+        }
         foreach ($slot in $slotNames) {
             if (-not $p.slot_map.Contains($slot)) { throw "Preset $id is missing slot mapping: $slot" }
             $idx = $p.slot_map[$slot]
