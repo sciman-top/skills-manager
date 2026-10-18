@@ -84,12 +84,13 @@ function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$
     if ([string]::IsNullOrWhiteSpace($surface)) { $surface = [string]$match.surface; if ([string]::IsNullOrWhiteSpace($surface)) { $surface = [string]$match.provider } }
     $source = [string]$root.source
     if ([string]::IsNullOrWhiteSpace($source)) { $source = [string]$match.source }
+    $providerId = [string]$root.provider_id
     $observedText = [string]$root.observed_at
     if ([string]::IsNullOrWhiteSpace($observedText)) { $observedText = [string]$match.observed_at }
     $expiresText = [string]$root.expires_at
     if ([string]::IsNullOrWhiteSpace($expiresText)) { $expiresText = [string]$match.expires_at }
-    if ([string]::IsNullOrWhiteSpace($surface) -or [string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($observedText) -or [string]::IsNullOrWhiteSpace($expiresText)) {
-        throw 'Provider capability evidence must bind surface/provider, observed_at, expires_at and source.'
+    if ([string]::IsNullOrWhiteSpace($providerId) -or [string]::IsNullOrWhiteSpace($surface) -or [string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($observedText) -or [string]::IsNullOrWhiteSpace($expiresText)) {
+        throw 'Provider capability evidence must bind provider_id, surface, observed_at, expires_at and source.'
     }
     try {
         $observed = [DateTimeOffset]::Parse($observedText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
@@ -101,6 +102,7 @@ function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$
     [ordered]@{
         model = $Model
         effort = $Effort
+        provider_id = $providerId
         status = 'verified'
         surface = $surface
         observed_at = $observed.ToString('o')
@@ -171,17 +173,23 @@ if ($targetHost -eq 'codex') {
         # A plan is advisory and must stay environment-independent: report the
         # missing retry control inside the plan payload instead of killing the
         # plan itself. Native dispatch hard-blocks on the missing cap;
-        # provider_override launches on explicit parent evidence, so the ambient
-        # retry-cap config is best-effort there and the launch proceeds without
-        # the per-invocation retry overrides.
+        # execution modes require a resolvable custom provider so the CLI retry cap
+        # can be applied to this invocation.
         if ($Plan) {
             $capability.retry_control = [ordered]@{ status = 'retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
         }
-        elseif ($CapabilityMode -eq 'provider_override') {
-            $capability.retry_control = [ordered]@{ status = 'ambient_retry_control_unavailable'; reason = [string]$_.Exception.Message; upstream_contacted = $false }
-        }
         else { ThrowCapabilityBlock 'retry_control_unavailable' $_.Exception.Message }
     }
+}
+if (-not $Plan -and $CapabilityMode -eq 'provider_override') {
+    $effectiveProviderId = [string]$codexRetryControl.provider_id
+    if ([string]::IsNullOrWhiteSpace($effectiveProviderId) -or [string]$capability.evidence.provider_id -cne $effectiveProviderId) {
+        ThrowCapabilityBlock 'provider_mismatch' "Provider evidence is bound to '$($capability.evidence.provider_id)', but the selected profile resolves '$effectiveProviderId'."
+    }
+    $capability.provider_id = $effectiveProviderId
+}
+elseif ($null -ne $codexRetryControl) {
+    $capability.provider_id = [string]$codexRetryControl.provider_id
 }
 if (-not $Plan -and $CapabilityMode -ne 'provider_override') {
     if ($targetHost -ne 'codex') { ThrowCapabilityBlock 'probe_unavailable' 'Native capability probing is only implemented for Codex; use a verified host adapter.' }
@@ -320,7 +328,7 @@ try {
                     within_preset_lower = $withinLower
                     declared_fallback = $declaredFallback
                     within_preset_higher_overload_only = $withinHigher
-                    prohibition = 'One upstream attempt per bounded task; no automatic replay, duplicate parallel request, or identical-prompt resend. For 429/quota/rate-limit/auth/risk stop and wait for operator or fresh parent selection. A confirmed overload permits at most one explicit reselection, only when the alternate tuple is currently supported. Record failed tuple, failure, selected tuple and remaining scope.'
+                    prohibition = 'One controlled CLI launch per bounded task; the launcher never automatically retries or replays. This is not a count of model API requests made internally by Codex or by a downstream relay. For 429/quota/rate-limit/auth/risk stop and wait for operator or fresh parent selection. A confirmed overload permits at most one explicit reselection, only when the alternate tuple is currently supported and the parent tracks the task-level budget. Record failed tuple, failure, selected tuple and remaining scope.'
                 }
             }
         } | ConvertTo-Json -Depth 6 -Compress

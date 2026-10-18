@@ -63,14 +63,14 @@ $reselection = $defaultResolved.reselection
 Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 4) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'xhigh') 'Codex GLM menu uses the exact native xhigh tuple'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('risk') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit and risk semantics'
-Assert ($defaultResolved.dispatch_policy.max_upstream_attempts_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'One-attempt upstream safety policy'
+Assert ($defaultResolved.dispatch_policy.max_controlled_launcher_invocations_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.PSObject.Properties.Name -notcontains 'max_upstream_attempts_per_bounded_task' -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'Controlled launcher safety policy'
 Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 4) 'Pool includes distinct model families'
 Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
 Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,claude_haiku55_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 4) 'AvailablePreset retains the whole selected pool including haiku rungs'
-Assert ([int]$policy.schema_version -eq 6 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v6 declares fallbacks for every slot'
+Assert ([int]$policy.schema_version -eq 7 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v7 declares fallbacks and controlled-launch policy for every slot'
 Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
@@ -129,6 +129,7 @@ Assert ($launcher.Contains('no replay or preset substitution performed') -and $l
 $providerEvidencePath = Join-Path ([IO.Path]::GetTempPath()) ('model-provider-evidence-'+[guid]::NewGuid().ToString('N')+'.json')
 $providerEvidence = [ordered]@{
     schema_version = 1
+    provider_id = 'fixture_provider'
     surface = 'codex_provider_channel'
     observed_at = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('o')
     expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
@@ -141,6 +142,28 @@ $providerEvidence = [ordered]@{
     )
 }
 [IO.File]::WriteAllText($providerEvidencePath, ($providerEvidence | ConvertTo-Json -Depth 8))
+$providerMismatchPath = Join-Path ([IO.Path]::GetTempPath()) ('model-provider-mismatch-'+[guid]::NewGuid().ToString('N')+'.json')
+$providerMismatch = [ordered]@{
+    schema_version = $providerEvidence.schema_version
+    provider_id = 'other_fixture_provider'
+    surface = $providerEvidence.surface
+    observed_at = $providerEvidence.observed_at
+    expires_at = $providerEvidence.expires_at
+    source = $providerEvidence.source
+    tuples = $providerEvidence.tuples
+}
+[IO.File]::WriteAllText($providerMismatchPath, ($providerMismatch | ConvertTo-Json -Depth 8))
+$profileProviderEvidencePath = Join-Path ([IO.Path]::GetTempPath()) ('model-profile-provider-evidence-'+[guid]::NewGuid().ToString('N')+'.json')
+$profileProviderEvidence = [ordered]@{
+    schema_version = $providerEvidence.schema_version
+    provider_id = 'fixture_profile_provider'
+    surface = $providerEvidence.surface
+    observed_at = $providerEvidence.observed_at
+    expires_at = $providerEvidence.expires_at
+    source = $providerEvidence.source
+    tuples = $providerEvidence.tuples
+}
+[IO.File]::WriteAllText($profileProviderEvidencePath, ($profileProviderEvidence | ConvertTo-Json -Depth 8))
 if (Test-Path Function:/global:codex) { throw 'Cannot install acceptance mock over an existing global codex function.' }
 $previousCodexHome = $env:CODEX_HOME
 $testCodexHome = Join-Path ([IO.Path]::GetTempPath()) ('model-preset-codex-home-'+[guid]::NewGuid().ToString('N'))
@@ -170,6 +193,11 @@ function global:codex {
     else { '{"type":"turn.completed"}' }
 }
 try {
+    $providerMismatchFailure = ''
+    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerMismatchPath -Prompt 'Mismatched provider must block' | Out-Null }
+    catch { $providerMismatchFailure = $_.Exception.Message }
+    Assert ($providerMismatchFailure -like '*provider_mismatch*' -and $providerMismatchFailure -like '*upstream_contacted*false*') 'Provider evidence must match the effective Codex provider'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 0) 'Provider mismatch blocks before CLI launch'
     foreach ($failedRoute in @(
             @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
             @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
@@ -226,7 +254,7 @@ name = "profile-fixture"
 base_url = "https://profile-fixture.invalid/v1"
 '@
     [IO.File]::WriteAllText($profileConfigPath, $profileConfigText)
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Profile provider wins' | Out-Null
+    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $profileProviderEvidencePath -Prompt 'Profile provider wins' | Out-Null
     $profileCall = $global:ModelSlotAcceptanceCalls[$global:ModelSlotAcceptanceCalls.Count - 1]
     Assert ($profileCall -ccontains 'model_providers.fixture_profile_provider.request_max_retries=0' -and $profileCall -ccontains 'model_providers.fixture_profile_provider.stream_max_retries=0' -and -not ($profileCall -ccontains 'model_providers.fixture_provider.request_max_retries=0')) 'Profile provider takes precedence over base config for retry control'
 
@@ -238,6 +266,11 @@ base_url = "https://profile-fixture.invalid/v1"
     catch { $retryControlFailure = $_.Exception.Message }
     Assert ($retryControlFailure -like '*retry_control_unavailable*' -and $retryControlFailure -like '*upstream_contacted*false*') 'Missing custom-provider retry control blocks before dispatch'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq $beforeRetryControlBlock) 'Retry-control blocker makes no model call'
+    $overrideRetryControlFailure = ''
+    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Provider override must block without retry control' | Out-Null }
+    catch { $overrideRetryControlFailure = $_.Exception.Message }
+    Assert ($overrideRetryControlFailure -like '*retry_control_unavailable*' -and $overrideRetryControlFailure -like '*upstream_contacted*false*') 'Provider override also fails closed without retry control'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq $beforeRetryControlBlock) 'Provider-override retry-control blocker makes no model call'
 }
 finally {
     Remove-Item Function:/global:codex
@@ -265,17 +298,54 @@ try {
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 6) 'Apply records the verified native tuple set'
+    Assert (-not $receipt.host_loaded -and $receipt.execution_boundary -like '*named model-pinned native slots and tuple roles*') 'Apply records the native projection boundary without claiming host load'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
     $projectedConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($projectedConfig.Contains('# availability-rules: ') -and $projectedConfig.Contains('429/quota/rate-limit/auth/risk: stop and wait') -and $projectedConfig.Contains('No hot-swap, aliasing, effort substitution')) 'Shared config carries the stop-and-wait availability rules'
     $profileText = Get-Content -LiteralPath (Join-Path $target 'glm53-flash-only.config.toml') -Raw
-    Assert ($profileText.Contains('One upstream attempt is allowed per bounded task') -and $profileText.Contains('never replay an identical prompt')) 'Profile instructions pin the one-attempt safety policy'
+    Assert ($profileText.Contains('choose the named native execution slot by task shape before dispatch') -and $profileText.Contains('Do not replay an identical prompt')) 'Profile instructions require task-shape native slot dispatch and prohibit duplicate replay'
     Assert ($profileText.Contains('confirmed overload may receive one explicit reselection only')) 'Profile instructions reserve one alternate for confirmed overload'
-    Assert ($profileText.Contains('dispatch other tuples natively only after a passing native probe')) 'Profile instructions restrict native subagents to the verified GPT-family tuple'
+    Assert ($profileText.Contains('On Codex, use the named native slot or exact-tuple role') -and $profileText.Contains('not a substitute for native subagent dispatch')) 'Profile instructions make exact-tuple native roles primary and keep the CLI launcher explicit'
+    Assert ($profileText.Contains('[agents]') -and $profileText.Contains('default_subagent_model = "glm-5.3-flash"') -and $profileText.Contains('default_subagent_reasoning_effort = "xhigh"') -and -not $profileText.Contains('enabled = false')) 'GLM profile defaults to its own native tuple and keeps delegation enabled'
+    $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
+    Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
+    $projectedAgentTables = @([regex]::Matches($projectedConfig, '(?m)^\[agents\.([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedCodexTuples.Count)) 'Shared Codex config registers all nine task slots and six exact-tuple roles'
+    foreach ($slot in $slots) { Assert ($projectedConfig.Contains("[agents.$slot]")) "Shared Codex config registers task slot $slot" }
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
+    $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','claude_haiku55_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    $nonLunaConfig = Get-Content -LiteralPath $cfg -Raw
+    Assert ($nonLunaConfig.Contains('enabled = true') -and -not $nonLunaConfig.Contains('# model-orchestration-native-agents-enabled-prior=') -and $nonLunaConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $nonLunaConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'Non-Luna pool keeps native agents enabled and defaults to its routine slot tuple'
+    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq ($slots.Count + $expectedCodexTuples.Count - 1)) 'Non-Luna pool projects its five exact tuple roles and all task slots'
+    $nonLunaProfileDefaults = @{
+        'glm53-flash-only' = @{ model = 'glm-5.3-flash'; effort = 'xhigh' }
+        'claude-haiku55-only' = @{ model = 'claude-haiku-5-5'; effort = 'high' }
+        'gemini38-flash-only' = @{ model = 'gemini-3.8-flash-high'; effort = 'high' }
+    }
+    foreach ($profileName in $nonLunaProfileDefaults.Keys) {
+        $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$profileName.config.toml") -Raw
+        $profileDefault = $nonLunaProfileDefaults[$profileName]
+        Assert ($profileConfigText.Contains("default_subagent_model = `"$($profileDefault.model)`"") -and $profileConfigText.Contains("default_subagent_reasoning_effort = `"$($profileDefault.effort)`"") -and -not $profileConfigText.Contains('enabled = false')) "Profile defaults to its native routine tuple and keeps delegation enabled: $profileName"
+    }
+    foreach ($profileId in @('glm53_flash_only','claude_haiku55_only','gemini38_flash_only')) {
+        $profilePolicy = $policy.presets[$profileId]
+        $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
+        Assert (-not $profileConfigText.Contains('enabled = false')) "Preset profile leaves native delegation enabled: $profileId"
+        foreach ($slot in $slots) {
+            $profileEntry = $profilePolicy.menu[$profilePolicy.slot_map[$slot]]
+            $slotConfigText = Get-Content -LiteralPath (Join-Path $fixture ".generated/codex/$profileId/$slot.toml") -Raw
+            Assert ($profileConfigText.Contains("[agents.$slot]") -and $slotConfigText.Contains("model = `"$($profileEntry.model)`"") -and $slotConfigText.Contains("model_reasoning_effort = `"$($profileEntry.effort)`"")) "Profile slot pins its configured tuple: $profileId/$slot -> $($profileEntry.model)/$($profileEntry.effort)"
+        }
+    }
+    $restoredReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    $restoredConfig = Get-Content -LiteralPath $cfg -Raw
+    Assert ($restoredConfig.Contains('enabled = true') -and $restoredConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $restoredConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and -not $restoredConfig.Contains('model-orchestration-native-agents-enabled-prior=')) 'Full active pool defaults to the routine native route and preserves delegation'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $restoredReceipt.receipt | Out-Null
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $nonLunaReceipt.receipt | Out-Null
+    Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Non-Luna native projection and restore sequence rolls back to the exact original config'
     $zcodeTarget = Join-Path $fixture 'zcode'
     $zcodeAgents = Join-Path $zcodeTarget 'agents'
     [IO.Directory]::CreateDirectory($zcodeAgents) | Out-Null
@@ -340,18 +410,28 @@ try {
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($subagentPlan.scope -ceq 'subagents_only' -and (Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent Plan is read-only'
+    Assert ($subagentPlan.native_agent_policy.enabled -and $subagentPlan.native_agent_policy.default_slot -ceq 'routine_maintenance' -and $subagentPlan.native_agent_policy.default_model -ceq 'glm-5.3-flash' -and $subagentPlan.native_agent_policy.default_effort -ceq 'xhigh' -and @($subagentPlan.native_agent_policy.tuple_roles).Count -eq 6) 'Plan describes all six native tuple roles and its routine-slot default'
     $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
-    Assert ($subagentConfig.Contains('default_subagent_model = "gpt-6-luna"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "max"')) 'Subagent standard defaults'
+    Assert ($subagentConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "xhigh"')) 'Subagent default follows the routine-maintenance auto route'
     Assert ($subagentConfig.Contains('max_concurrent_threads_per_session = 2') -and $subagentConfig.Contains('enabled = true')) 'Native delegation and concurrency preserved'
     foreach ($entry in $defaultResolved.enabled_routes) {
-        Assert ($subagentConfig.Contains("[agents.$($entry.role)]")) 'All tuple roles coexist in the shared config'
-        $roleText = Get-Content -LiteralPath (Join-Path $fixture ".generated/codex/pool/$($entry.role).toml") -Raw
-        Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and -not $roleText.Contains('[agents]') -and -not $roleText.Contains('sandbox_mode')) 'Tuple role pins its route without embedding parent-session settings'
-        Assert ($roleText.Contains('Do not delegate')) 'Tuple role instructs the child not to delegate'
-        $roleBlock = [regex]::Match($subagentConfig, "\[agents\.$([regex]::Escape($entry.role))\]\r?\n(?<body>[^\[]*)").Groups['body'].Value
-        Assert (($roleBlock.Contains('not readable by this non-GPT tuple')) -eq ($entry.model -notlike 'gpt-*')) "Native-subagent direct-only note matches the tuple family: $($entry.role)"
+        $nativeTuple = "$($entry.model)/$($entry.effort)" -cin $expectedCodexTuples
+        $rolePath = Join-Path $fixture ".generated/codex/pool/$($entry.role).toml"
+        Assert (($subagentConfig.Contains("[agents.$($entry.role)]")) -eq $nativeTuple) "Exact allowlisted tuple role registration: $($entry.role)"
+        Assert ((Test-Path -LiteralPath $rolePath) -eq $nativeTuple) "Generated native tuple file matches the verified pool: $($entry.role)"
+        if ($nativeTuple) {
+            $roleText = Get-Content -LiteralPath $rolePath -Raw
+            Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and -not $roleText.Contains('[agents]') -and -not $roleText.Contains('sandbox_mode')) "Native tuple role pins its exact approved model/effort without embedding parent-session settings: $($entry.role)"
+            Assert ($roleText.Contains('Do not delegate')) 'Native tuple role instructs the child not to delegate'
+        }
+    }
+    foreach ($slot in $slots) {
+        $route = $defaultResolved.routes.$slot
+        $rolePath = Join-Path $fixture ".generated/codex/$($route.preset)/$slot.toml"
+        $roleText = Get-Content -LiteralPath $rolePath -Raw
+        Assert ($subagentConfig.Contains("[agents.$slot]") -and $roleText.Contains("name = `"$slot`"") -and $roleText.Contains("model = `"$($route.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($route.effort)`"") -and $roleText.Contains('Do not delegate or change models.')) "Native execution slot pins the automatic task-shape tuple: $slot -> $($route.model)/$($route.effort)"
     }
     Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
@@ -370,6 +450,11 @@ try {
     catch { $blockedProjectionMessage = $_.Exception.Message }
     Assert ($blockedProjectionMessage -like '*capability preflight blocked projection*' -and $blockedProjectionMessage -like '*no host files were written*') 'Unsupported native projection fails closed'
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $blockedProjectionBefore) 'Blocked native projection leaves host config unchanged'
+    $previousFixtureCodexHome = $env:CODEX_HOME
+    $providerExecutionHome = Join-Path $fixture 'provider-execution-home'
+    [IO.Directory]::CreateDirectory($providerExecutionHome) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $providerExecutionHome 'config.toml'), $codexConfigText)
+    $env:CODEX_HOME = $providerExecutionHome
     $global:CapabilityCalls = [Collections.Generic.List[object]]::new()
     function global:codex {
         $global:CapabilityCalls.Add(@($args))
@@ -393,6 +478,7 @@ try {
     finally {
         Remove-Item Function:/global:codex -ErrorAction SilentlyContinue
         Remove-Variable CapabilityCalls -Scope Global -ErrorAction SilentlyContinue
+        if ($null -eq $previousFixtureCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } else { $env:CODEX_HOME = $previousFixtureCodexHome }
     }
     $ownedFile = (Join-Path $fixture '.generated/codex/pool/sol_low.toml').Replace('\','/')
     $orphanConfig = $parentRoot + "`n[agents.sol_low]`ndescription = `"retired`"`nconfig_file = '$ownedFile'`n# keep this user comment`n# model-orchestration end`n[agents.user_role]`ndescription = `"unrelated`"`nconfig_file = 'D:/user-role.toml'`n"
@@ -414,7 +500,11 @@ try {
     $customPlan = & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot custom_task -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
     Assert ($customPlan.slot -ceq 'custom_task' -and $customPlan.model -ceq 'gemini-3.8-flash-high') 'Additional configured slot can use another model without launcher edits'
     $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
-    Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('[agents.custom_task]')) 'Additional configured slot projects to a native role'
+    $customRootConfig = Get-Content -LiteralPath $cfg -Raw
+    $customLunaProfile = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
+    $customRootRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/glm53_flash_only/custom_task.toml') -Raw
+    $customLunaRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/gpt6_luna_only/custom_task.toml') -Raw
+    Assert ($customRootConfig.Contains('[agents.custom_task]') -and $customRootRole.Contains('model = "glm-5.3-flash"') -and $customRootRole.Contains('model_reasoning_effort = "xhigh"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaRole.Contains('model = "gpt-6-luna"') -and $customLunaRole.Contains('model_reasoning_effort = "max"')) 'Additional slot uses its GLM auto route natively and keeps its exact tuple in every profile'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
@@ -453,6 +543,7 @@ try {
     $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
     $hostMenuEvidence = [ordered]@{
         schema_version = 1
+        provider_id = 'fixture_provider'
         surface = 'codex_provider_channel'
         observed_at = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('o')
         expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
@@ -464,6 +555,8 @@ try {
         )
     }
     [IO.File]::WriteAllText($hostMenuEvidencePath, ($hostMenuEvidence | ConvertTo-Json -Depth 8))
+    $previousHostMenuCodexHome = $env:CODEX_HOME
+    $env:CODEX_HOME = $providerExecutionHome
     $global:HostMenuFailureCalls = [Collections.Generic.List[object]]::new()
     function global:codex {
         $global:HostMenuFailureCalls.Add(@($args))
@@ -482,6 +575,7 @@ try {
     finally {
         Remove-Item Function:/global:codex -ErrorAction SilentlyContinue
         Remove-Variable HostMenuFailureCalls -Scope Global -ErrorAction SilentlyContinue
+        if ($null -eq $previousHostMenuCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } else { $env:CODEX_HOME = $previousHostMenuCodexHome }
     }
     # Declared alternates fail closed at load; each case starts from the shipped policy.
     $fallbackCases = @(
@@ -525,6 +619,8 @@ finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
     if (-not $resolvedFixture.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup path.' }
     Remove-Item -LiteralPath $resolvedFixture -Recurse
-    if (Test-Path -LiteralPath $providerEvidencePath) { Remove-Item -LiteralPath $providerEvidencePath -Force }
+    foreach ($evidencePath in @($providerEvidencePath,$providerMismatchPath,$profileProviderEvidencePath)) {
+        if (Test-Path -LiteralPath $evidencePath) { Remove-Item -LiteralPath $evidencePath -Force }
+    }
 }
-"PASS: $count assertions (joint model pool, cross-model slots, read-only boundaries, extensible slots, removed-model rejection, projection idempotence, exact rollback)."
+"PASS: $count assertions (joint model pool, direct/native routing boundaries, provider controls, read-only slots, projection lifecycle, and exact rollback)."

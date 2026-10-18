@@ -47,7 +47,7 @@ if ($autoRouteNames.Count -ne $slotNames.Count -or $autoRouteKey -cne $slotKey) 
 }
 $dispatchPolicy = $policy.dispatch_policy
 if (-not $dispatchPolicy -or
-    $dispatchPolicy.max_upstream_attempts_per_bounded_task -ne 1 -or
+    $dispatchPolicy.max_controlled_launcher_invocations_per_bounded_task -ne 1 -or
     $dispatchPolicy.max_explicit_reselections -ne 1 -or
     $dispatchPolicy.duplicate_prompt_replay -ne $false -or
     $dispatchPolicy.parallel_duplicate_requests -ne $false -or
@@ -115,9 +115,9 @@ foreach ($slot in $slotNames) {
     $autoPreset = [string]$policy.auto_routes[$slot]
     if (-not $policy.presets.Contains($autoPreset)) { throw "auto_routes[$slot] points to an unknown preset: $autoPreset" }
 }
-# Schema v6: every slot declares its overload alternates explicitly. An empty list
+# Schema v7: every slot declares its overload alternates and controlled-launch policy explicitly. An empty list
 # is an explicit "no automatic alternate", never an implicit fallback.
-if ([int]$policy.schema_version -ne 6) { throw 'presets.json must use schema_version 6 (explicit per-slot fallbacks).' }
+if ([int]$policy.schema_version -ne 7) { throw 'presets.json must use schema_version 7 (explicit per-slot fallbacks and controlled-launch policy).' }
 if (-not $policy.fallbacks) { throw 'fallbacks must declare every slot.' }
 if ((@($policy.fallbacks.Keys | Sort-Object) -join ',') -cne $slotKey) { throw 'fallbacks must declare exactly all slots.' }
 foreach ($slot in $slotNames) {
@@ -299,6 +299,38 @@ function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
     if ($hits.Count -eq 1) { $lines[$hits[0]] = $newLine } else { $lines.Insert($end, $newLine) }
     return $lines -join "`n"
 }
+function GetScalar([string]$Text,[string]$Section,[string]$Key) {
+    $lines = @($Text -split '\r?\n')
+    $start = 0; $end = $lines.Count
+    if ($Section) {
+        $headers = @(0..($lines.Count-1) | Where-Object { $lines[$_] -cmatch ('^\[' + [regex]::Escape($Section) + '\]\s*(?:#.*)?$') })
+        if ($headers.Count -gt 1) { throw "Duplicate [$Section] section." }
+        if ($headers.Count -eq 0) { return $null }
+        $start = $headers[0] + 1
+    }
+    for ($i=$start; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end=$i; break } }
+    $keyPattern = '(?:' + [regex]::Escape($Key) + '|"' + [regex]::Escape($Key) + '"|''' + [regex]::Escape($Key) + ''')'
+    $hits = @(for ($i=$start; $i -lt $end; $i++) { if ($lines[$i] -match ('^\s*' + $keyPattern + '\s*=\s*(?<value>true|false)\s*(?:#.*)?$')) { $matches['value'].ToLowerInvariant() } })
+    if ($hits.Count -gt 1) { throw "Duplicate scalar: $Key" }
+    if ($hits.Count -eq 0) { return $null }
+    return $hits[0]
+}
+function RemoveScalar([string]$Text,[string]$Section,[string]$Key) {
+    $lines = [Collections.Generic.List[string]]::new()
+    foreach ($line in ($Text -split '\r?\n')) { $lines.Add($line) }
+    $start = 0; $end = $lines.Count
+    if ($Section) {
+        $headers = @(0..($lines.Count-1) | Where-Object { $lines[$_] -cmatch ('^\[' + [regex]::Escape($Section) + '\]\s*(?:#.*)?$') })
+        if ($headers.Count -ne 1) { throw "Expected one [$Section] section." }
+        $start = $headers[0] + 1
+    }
+    for ($i=$start; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[') { $end=$i; break } }
+    $keyPattern = '(?:' + [regex]::Escape($Key) + '|"' + [regex]::Escape($Key) + '"|''' + [regex]::Escape($Key) + ''')'
+    $hits = @(for ($i=$start; $i -lt $end; $i++) { if ($lines[$i] -match ('^\s*' + $keyPattern + '\s*=')) { $i } })
+    if ($hits.Count -gt 1) { throw "Duplicate scalar: $Key" }
+    if ($hits.Count -eq 1) { $lines.RemoveAt($hits[0]) }
+    return $lines -join "`n"
+}
 $files = [Collections.Generic.List[object]]::new()
 function AddFile([string]$Path,[string]$Text) {
     $files.Add(@{path=[IO.Path]::GetFullPath($Path); text=$Text; before_hash=(Hash $Path)})
@@ -316,14 +348,16 @@ $slotGuidance = @{
     documentation_review = 'Select for read-only documentation and contract consistency checks.'
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
-$parentGuidance = 'Split work by dependencies and choose the named execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. One upstream attempt is allowed per bounded task: never replay an identical prompt, send duplicate parallel requests, or retry after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, native subagents have so far received readable task payloads only from the GPT-family tuple (gpt-6-luna max); dispatch other tuples natively only after a passing native probe.'
+$parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
+$nativeCodexTuples = @('gpt-6-luna|max','glm-5.3-flash|xhigh','claude-haiku-5-5|medium','claude-haiku-5-5|high','claude-haiku-5-5|xhigh','gemini-3.8-flash-high|high')
+function Test-NativeCodexTuple($Entry) { return ("$($Entry.model)|$($Entry.effort)" -cin $nativeCodexTuples) }
+$nativeAgentAvailable = @($enabledRoutes | Where-Object { Test-NativeCodexTuple $_ }).Count -gt 0
 foreach ($entry in $enabledRoutes) {
     if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
+    if (-not (Test-NativeCodexTuple $entry)) { continue }
     $rolePath = Join-Path $PSScriptRoot ".generated/codex/pool/$($entry.role).toml"
     $description = "Model pool role $($entry.role), $($entry.model)/$($entry.effort). Parent assigns the task slot, exact scope, write set, proof and stop; use only when this exact tuple is supported by the current host."
-    # 2026-10-18 native probes: child task payloads reached only the GPT-family tuple readably; the others got an encrypted task envelope and did not complete. Keep them direct-only until a native probe passes.
-    if ($entry.model -notlike 'gpt-*') { $description += ' Codex native subagent payloads were not readable by this non-GPT tuple in the 2026-10-18 probe; use it only through the controlled direct entrypoint, not as a native subagent, until a native probe passes.' }
     $instructions = 'Execute the assigned bounded task and obey its read-only or write scope. Preserve unrelated work. Do not delegate, change models or replay completed writes. Return verification evidence and unresolved uncertainty to the parent, then stop.'
     $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
     AddFile $rolePath $roleText
@@ -408,8 +442,10 @@ foreach ($id in $codexIds) {
     $roleBlocks = [Collections.Generic.List[string]]::new()
         $codexMenu = @(Get-PresetMenu $p 'codex')
         $standard = $codexMenu[$p.slot_map['routine_maintenance']]
+    $profileNativeAgentAvailable = @($codexMenu | Where-Object { Test-NativeCodexTuple $_ }).Count -gt 0
     foreach ($slot in $slotNames) {
         $entry = $codexMenu[$p.slot_map[$slot]]
+        if (-not (Test-NativeCodexTuple $entry)) { continue }
         $rolePath = Join-Path $PSScriptRoot ".generated/codex/$id/$slot.toml"
         $readOnly = $slot -cin @($policy.read_only_slots)
         $guidance = if ($slotGuidance.ContainsKey($slot)) { $slotGuidance[$slot] } else { 'Select for the configured bounded task; the parent supplies scope, proof and stop.' }
@@ -420,7 +456,11 @@ foreach ($id in $codexIds) {
         AddFile $rolePath $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
-    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', '[agents]', "default_subagent_model = `"$($standard.model)`"", "default_subagent_reasoning_effort = `"$($standard.effort)`"") -join "`n"
+    $profileAgentSection = if ($profileNativeAgentAvailable) {
+        "[agents]`ndefault_subagent_model = `"$($standard.model)`"`ndefault_subagent_reasoning_effort = `"$($standard.effort)`""
+    }
+    else { "[agents]`nenabled = false" }
+    $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', $profileAgentSection) -join "`n"
     $profileText = $header + "`n`n" + ($roleBlocks -join "`n") + "`n" + ($tupleBlocks -join "`n")
     AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
     if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
@@ -430,12 +470,16 @@ foreach ($slot in $slotNames) {
     $routePreset = $routePresetIds[$slot]
     $routePath = Join-Path $PSScriptRoot ".generated/codex/$routePreset/$slot.toml"
     $route = $routes[$slot]
+    if (-not (Test-NativeCodexTuple $route)) { continue }
     $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Auto route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
 $activeBlocks = $activeRoleBlocks -join "`n"
 $configPath = Join-Path $CodexRoot 'config.toml'
 $standard = @(Get-PresetMenu $modelPreset 'codex')[$modelPreset.slot_map['routine_maintenance']]
+$defaultSubagent = $routes['routine_maintenance']
 $config = [IO.File]::ReadAllText($configPath)
+$nativeEnableMarker = [regex]::Match($config, '(?m)^# model-orchestration-native-agents-enabled-prior=(true|false|unset)\s*$')
+$nativeAgentPrior = if ($nativeEnableMarker.Success) { $nativeEnableMarker.Groups[1].Value } else { GetScalar $config 'agents' 'enabled' }
 $config = [regex]::Replace($config, '(?ms)^# model-orchestration begin\r?\n.*?^# model-orchestration end\r?\n?', '')
 # Older host edits can leave owned role tables outside the managed markers.
 # Retire only tables pointing into this tool's generated Codex directory.
@@ -456,9 +500,22 @@ if (-not $SubagentsOnly) {
     $config = SetScalar $config '' 'review_model' ('"'+$standard.model+'"')
     $config = SetScalar $config '' 'model_reasoning_effort' ('"'+$standard.effort+'"')
 }
-$config = SetScalar $config 'agents' 'default_subagent_model' ('"'+$standard.model+'"')
-$config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$standard.effort+'"')
-$config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
+if ($nativeAgentAvailable) {
+    if ($nativeEnableMarker.Success) {
+        if ($nativeAgentPrior -eq 'unset') { $config = RemoveScalar $config 'agents' 'enabled' }
+        else { $config = SetScalar $config 'agents' 'enabled' $nativeAgentPrior }
+    }
+    $config = SetScalar $config 'agents' 'default_subagent_model' ('"'+$defaultSubagent.model+'"')
+    $config = SetScalar $config 'agents' 'default_subagent_reasoning_effort' ('"'+$defaultSubagent.effort+'"')
+}
+else {
+    if ($nativeAgentPrior -notin @('true','false','unset')) { $nativeAgentPrior = 'unset' }
+    $config = SetScalar $config 'agents' 'enabled' 'false'
+    $config = RemoveScalar $config 'agents' 'default_subagent_model'
+    $config = RemoveScalar $config 'agents' 'default_subagent_reasoning_effort'
+}
+$nativeEnableMarkerText = if (-not $nativeAgentAvailable) { "`n# model-orchestration-native-agents-enabled-prior=$nativeAgentPrior" } else { '' }
+$config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary$nativeEnableMarkerText`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
 AddFile $configPath $config
 }
 # Not elseif: a preset may carry both facets (one Apply can project Claude Code
@@ -540,7 +597,12 @@ if ($ExecutionHost -eq 'zcode' -and 'zcode' -in $modelPreset.hosts) {
     }
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
-if ($Action -eq 'Plan') { @{preset=$Preset; host=$ExecutionHost; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; gateway_changes=0} | ConvertTo-Json -Depth 12; return }
+if ($Action -eq 'Plan') {
+    $nativeTupleRoles = @($enabledRoutes | Where-Object { Test-NativeCodexTuple $_ } | ForEach-Object { @{ role=$_.role; model=$_.model; effort=$_.effort } })
+    $nativePolicy = @{ enabled=$nativeAgentAvailable; default_slot='routine_maintenance'; default_model=$defaultSubagent.model; default_effort=$defaultSubagent.effort; tuple_roles=$nativeTupleRoles; direct_cli_path='Start-ModelSlot.ps1' }
+    @{preset=$Preset; host=$ExecutionHost; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; native_agent_policy=$nativePolicy; gateway_changes=0} | ConvertTo-Json -Depth 12
+    return
+}
 if ($changed.Count -eq 0) { 'No changes.'; return }
 $run = Join-Path $stateRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($run) | Out-Null
@@ -576,4 +638,4 @@ catch {
     WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
     throw "Apply failed ($($failure.Exception.Message)); $($receipt.status). Receipt: $receiptFile"
 }
-@{preset=$Preset;host=$ExecutionHost;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Start-ModelSlot.ps1 freezes one child route and disables nested delegation'} | ConvertTo-Json -Depth 12
+@{preset=$Preset;host=$ExecutionHost;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Codex projects named model-pinned native slots and tuple roles; Start-ModelSlot.ps1 is a separate explicitly invoked one-shot CLI path'} | ConvertTo-Json -Depth 12
