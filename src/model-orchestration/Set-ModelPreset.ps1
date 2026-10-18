@@ -95,6 +95,21 @@ foreach ($slot in $slotNames) {
 if ([int]$policy.schema_version -ne 6) { throw 'presets.json must use schema_version 6 (explicit per-slot fallbacks).' }
 if (-not $policy.fallbacks) { throw 'fallbacks must declare every slot.' }
 if ((@($policy.fallbacks.Keys | Sort-Object) -join ',') -cne $slotKey) { throw 'fallbacks must declare exactly all slots.' }
+# Strict subagent allowlist (user-specified): every menu and fallback tuple must be declared per host.
+if (-not $policy.subagent_allowlist) { throw 'presets.json must declare subagent_allowlist (strict per-host subagent tuples).' }
+function Assert-Allowlisted([string]$HostName, [string]$Model, [string]$Effort, [string]$Where) {
+    $hostAllow = $policy.subagent_allowlist[$HostName]
+    if (-not $hostAllow -or -not $hostAllow.Contains($Model) -or @($hostAllow[$Model]) -cnotcontains $Effort) {
+        throw "$Where is not in the subagent allowlist for host ${HostName}: $Model/$Effort"
+    }
+}
+foreach ($id in $policy.presets.Keys) {
+    foreach ($hostName in @($policy.presets[$id].hosts)) {
+        foreach ($entry in @(Get-PresetMenu $policy.presets[$id] $hostName)) {
+            Assert-Allowlisted $hostName ([string]$entry.model) ([string]$entry.effort) "preset $id menu"
+        }
+    }
+}
 foreach ($slot in $slotNames) {
     $alternates = @($policy.fallbacks[$slot])
     if ($alternates.Count -gt 3) { throw "fallbacks[$slot] lists more than three alternates." }
@@ -112,6 +127,7 @@ foreach ($slot in $slotNames) {
             if (@(Get-PresetMenu $policy.presets[$alternatePreset] $hostName | Where-Object { $_.model -ceq [string]$alternate.model -and $_.effort -ceq [string]$alternate.effort }).Count -gt 0) { $inMenu = $true }
         }
         if (-not $inMenu) { throw "fallbacks[$slot] tuple is not in preset ${alternatePreset}: $($alternate.model)/$($alternate.effort)" }
+        Assert-Allowlisted 'codex' ([string]$alternate.model) ([string]$alternate.effort) "fallbacks[$slot]"
         $tupleKey = "$alternatePreset|$($alternate.model)|$($alternate.effort)"
         if ($tupleKey -cin $primaryKeys) { throw "fallbacks[$slot] repeats the slot's own route: $tupleKey" }
         if ($seenKeys.ContainsKey($tupleKey)) { throw "fallbacks[$slot] lists a duplicate: $tupleKey" }

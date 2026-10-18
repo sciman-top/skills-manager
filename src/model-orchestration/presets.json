@@ -20,14 +20,28 @@
     "gemini38_flash_only"
   ],
   "aliases": {},
+  "subagent_allowlist": {
+    "codex": {
+      "gpt-6-luna": ["max"],
+      "glm-5.3-flash": ["xhigh"],
+      "claude-haiku-5-5": ["medium", "high", "xhigh"],
+      "gemini-3.8-flash-high": ["high"]
+    },
+    "claude": {
+      "claude-haiku-5-5": ["medium", "high", "xhigh"]
+    },
+    "zcode": {
+      "glm-5.3-flash": ["max"]
+    }
+  },
   "auto_routes": {
-    "quick_triage": "gpt6_luna_only",
-    "routine_maintenance": "gpt6_luna_only",
+    "quick_triage": "claude_haiku55_only",
+    "routine_maintenance": "glm53_flash_only",
     "standard_review": "gpt6_luna_only",
-    "bounded_implementation": "gpt6_luna_only",
+    "bounded_implementation": "glm53_flash_only",
     "deep_investigation": "gpt6_luna_only",
-    "deep_implementation": "gpt6_luna_only",
-    "test_execution": "gpt6_luna_only",
+    "deep_implementation": "gemini38_flash_only",
+    "test_execution": "glm53_flash_only",
     "documentation_review": "gpt6_luna_only",
     "architecture_review": "gpt6_luna_only"
   },
@@ -60,8 +74,8 @@
   ],
   "fallbacks": {
     "quick_triage": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" }
     ],
     "routine_maintenance": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
@@ -70,8 +84,7 @@
     ],
     "standard_review": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "medium" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
     ],
     "bounded_implementation": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
@@ -82,7 +95,8 @@
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
     ],
     "deep_implementation": [
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "test_execution": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },

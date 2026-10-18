@@ -32,16 +32,16 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
-Assert (@($policy.auto_routes.Values | Where-Object { $_ -cne 'gpt6_luna_only' }).Count -eq 0) 'Every automatic daily route is gpt6_luna_only; GLM, Haiku and Gemini stay as declared alternates'
+Assert (@($policy.auto_routes.Values | Sort-Object -Unique).Count -eq 4) 'Automatic routes span exactly the four allowlisted presets'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
 $autoRoutes = @{
-    quick_triage = 'gpt6_luna_only'
-    routine_maintenance = 'gpt6_luna_only'
+    quick_triage = 'claude_haiku55_only'
+    routine_maintenance = 'glm53_flash_only'
     standard_review = 'gpt6_luna_only'
-    bounded_implementation = 'gpt6_luna_only'
+    bounded_implementation = 'glm53_flash_only'
     deep_investigation = 'gpt6_luna_only'
-    deep_implementation = 'gpt6_luna_only'
-    test_execution = 'gpt6_luna_only'
+    deep_implementation = 'gemini38_flash_only'
+    test_execution = 'glm53_flash_only'
     documentation_review = 'gpt6_luna_only'
     architecture_review = 'gpt6_luna_only'
 }
@@ -384,9 +384,15 @@ try {
     $threw = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
     Assert $threw 'Out-of-range slot index must fail closed'
+    $allowPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
+    $allowPolicy.presets['glm53_flash_only']['host_menus'] = @{ codex = @(@{ model = 'glm-5.3-flash'; effort = 'high' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' }); zcode = @(@{ model = 'glm-5.3-flash'; effort = 'max' }) }
+    [IO.File]::WriteAllText($fixturePolicyPath, ($allowPolicy | ConvertTo-Json -Depth 12))
+    $allowThrew = ''
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $allowThrew = $_.Exception.Message }
+    Assert ($allowThrew -like '*subagent allowlist*glm-5.3-flash/high*') 'Non-allowlisted GLM tuple fails closed at load'
     $hostMenuPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
     $hostMenus = if ($hostMenuPolicy.presets['glm53_flash_only']['host_menus']) { $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] } else { @{} }
-    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'high' }, @{ model = 'glm-5.3-flash'; effort = 'xhigh' })
+    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'xhigh' })
     $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] = $hostMenus
     [IO.File]::WriteAllText($fixturePolicyPath, ($hostMenuPolicy | ConvertTo-Json -Depth 12))
     $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
@@ -397,7 +403,6 @@ try {
         expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
         source = 'test-host-menu-reselection'
         tuples = @(
-            @{ model = 'glm-5.3-flash'; effort = 'high'; status = 'verified' },
             @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
             @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
         )
@@ -415,7 +420,7 @@ try {
         catch { $hostMenuFailure = $_.Exception.Message }
         Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') 'Host-menu failure returns control without replay'
         $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
-        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'glm-5.3-flash/high') 'Failure reselection menus follow the codex host menu'
+        Assert (@($hostMenuDoc.reselection.within_preset_lower).Count -eq 0) 'Codex GLM has one allowlisted tuple, so failure reselection offers no lower rung'
         Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
     }
     finally {
