@@ -35,6 +35,8 @@ Five exact tuple roles coexist in the ordinary Codex host alongside `luna_max`: 
 
 Native subagent payload limit (2026-10-18 read-only probes): on Codex, a native child receives its task as an `encrypted_content` envelope. Only the `gpt-6-luna` tuple read it. `claude-haiku-5-5` reported an unreadable Fernet token, while `gemini-3.8-flash-high` and `glm-5.3-flash` did not reply. Routing and effort were correct in every case, so the failure is in reading the payload. Until a native probe passes for a tuple, only the GPT-family tuple is a native subagent target on Codex. Non-GPT tuples must be dispatched through `Start-ModelSlot.ps1` (`codex exec`), which passed one minimal request for each tuple. The cause is not established in this repository.
 
+Launcher-only dispatch for non-GPT slots (decided 2026-10-18): `quick_triage` (Haiku), `routine_maintenance`, `bounded_implementation` and `test_execution` (GLM), and `standard_review` (Haiku) route to non-GPT tuples and must be dispatched through `Start-ModelSlot.ps1` (`codex exec`), never as a native subagent, because the native payload limit above applies to those tuples. `deep_implementation` (Gemini) follows the same rule. `deep_investigation`, `documentation_review` and `architecture_review` use `gpt-6-luna/max` and may use native dispatch.
+
 ## Task selection and effort changes
 
 ### Host capability and policy boundary
