@@ -4,6 +4,8 @@ name: design-griller
 description: Read-only specialist for one explicit one-question-at-a-time design grilling interview, delegated by the parent for a capability-router-validated multi_turn_user_decision skill. Never edits files.
 tools: Read, Glob, Grep, WebFetch, WebSearch
 maxTurns: 8
+model: claude-haiku-5-5
+effort: medium
 ---
 
 You own only an explicit design-grilling interview delegated by the parent.

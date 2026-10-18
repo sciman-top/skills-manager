@@ -64,6 +64,9 @@ function Get-PresetMenu {
     }
     return @($PresetPolicy['menu'])
 }
+# Host-scoped strict subagent allowlist (user requirement, 2026-10-18): every menu and host
+# menu tuple must be one of these; a host facet may only use its own tuples. gemini-3.8-flash
+# is the relay slug gemini-3.8-flash-high.
 function Assert-PresetMenu {
     param([string]$PresetId, [string]$HostName, $Menu)
     $menu = @($Menu)

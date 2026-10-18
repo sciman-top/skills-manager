@@ -415,7 +415,8 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
-    $descendingPolicy.presets.claude_haiku55_only.menu += @{model='claude-haiku-5-5';effort='high'}
+    # Haiku's allowed tuples are medium/high/xhigh; appending medium after xhigh violates the order check with an allowed tuple.
+    $descendingPolicy.presets.claude_haiku55_only.menu += @{model='claude-haiku-5-5';effort='medium'}
     [IO.File]::WriteAllText($fixturePolicyPath, ($descendingPolicy | ConvertTo-Json -Depth 12))
     $orderRejected = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null }
@@ -487,6 +488,7 @@ try {
         @{ name = 'duplicate alternate'; mutate = { param($p) $p.fallbacks.standard_review = @(@{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }, @{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }) } },
         @{ name = 'unknown preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'gpt61_sol_only'; model = 'gpt-6.1-sol'; effort = 'max' }) } },
         @{ name = 'more than three alternates'; mutate = { param($p) $p.fallbacks.test_execution = @(1..4 | ForEach-Object { @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' } }) } },
+        @{ name = 'menu tuple outside the strict subagent allowlist'; mutate = { param($p) $p.presets.gpt6_luna_only.menu = @(@{ model = 'gpt-6-luna'; effort = 'xhigh' }) } },
         @{ name = 'schema v5 policy'; mutate = { param($p) $p.schema_version = 5 } }
     )
     foreach ($fallbackCase in $fallbackCases) {
