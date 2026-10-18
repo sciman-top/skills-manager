@@ -362,4 +362,105 @@ Describe "Doctor Enhancements" {
         }
     }
 
+    Context "Doctor cold source parity" {
+        It "treats byte-identical source and materialized trees as in sync" {
+            $source = Join-Path $TestDrive 'parity-src\demo-skill'
+            $agentRoot = Join-Path $TestDrive 'parity-agent'
+            $agent = Join-Path $agentRoot 'demo-skill'
+            New-Item -ItemType Directory -Force -Path $source, $agent | Out-Null
+            Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'demo body' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'SKILL.md') -Value 'demo body' -NoNewline
+
+            $result = Test-DoctorColdSourceParity -ResolvedSources @{ 'demo-skill' = $source } -ManagedSourceRoot $agentRoot
+
+            $result.ok | Should -BeTrue
+            $result.compared | Should -Be 1
+        }
+
+        It "flags a source edit that was never materialized" {
+            $source = Join-Path $TestDrive 'parity-drift\demo-skill'
+            $agentRoot = Join-Path $TestDrive 'parity-drift-agent'
+            $agent = Join-Path $agentRoot 'demo-skill'
+            New-Item -ItemType Directory -Force -Path $source, $agent | Out-Null
+            Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'v2 body' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'SKILL.md') -Value 'v1 body' -NoNewline
+
+            $result = Test-DoctorColdSourceParity -ResolvedSources @{ 'demo-skill' = $source } -ManagedSourceRoot $agentRoot
+
+            $result.ok | Should -BeFalse
+            ($result.warnings -join "`n") | Should -Match 'demo-skill'
+            ($result.warnings -join "`n") | Should -Match '源与物化漂移'
+        }
+
+        It "flags source-only and agent-only files" {
+            $source = Join-Path $TestDrive 'parity-files\demo-skill'
+            $agentRoot = Join-Path $TestDrive 'parity-files-agent'
+            $agent = Join-Path $agentRoot 'demo-skill'
+            New-Item -ItemType Directory -Force -Path (Join-Path $source 'docs'), $agent | Out-Null
+            Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'demo' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'SKILL.md') -Value 'demo' -NoNewline
+            Set-Content -LiteralPath (Join-Path $source 'docs\note.md') -Value 'new doc' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'stale.md') -Value 'removed upstream' -NoNewline
+
+            $drift = Test-DoctorSkillTreeParity -SourceRoot $source -MaterializedRoot $agent
+
+            ($drift -join "`n") | Should -Match '源新增未物化 docs/note\.md'
+            ($drift -join "`n") | Should -Match '物化多出文件 stale\.md'
+        }
+
+        It "ignores only the generated router runtime and catalog mirror" {
+            $source = Join-Path $TestDrive 'parity-router-src\capability-router'
+            $agentRoot = Join-Path $TestDrive 'parity-router-agent'
+            $agent = Join-Path $agentRoot 'capability-router'
+            New-Item -ItemType Directory -Force -Path (Join-Path $source 'scripts'), (Join-Path $agent 'scripts') | Out-Null
+            Set-Content -LiteralPath (Join-Path $source 'SKILL.md') -Value 'router' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'SKILL.md') -Value 'router' -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'catalog.json') -Value '{}'
+            Set-Content -LiteralPath (Join-Path $agent 'scripts\execution-admission.ps1') -Value 'generated'
+            Set-Content -LiteralPath (Join-Path $agent 'scripts\unexpected-extra.ps1') -Value 'oops'
+
+            $drift = Test-DoctorSkillTreeParity -SourceRoot $source -MaterializedRoot $agent -AgentGeneratedRelativePaths @('catalog.json', 'scripts/execution-admission.ps1')
+
+            ($drift -join "`n") | Should -Match '物化多出文件 scripts/unexpected-extra\.ps1'
+            ($drift -join "`n") | Should -Not -Match 'execution-admission'
+            ($drift -join "`n") | Should -Not -Match 'catalog\.json'
+        }
+
+        It "accepts BOM-only and placeholder SKILL.md rewrites as in sync" {
+            $source = Join-Path $TestDrive 'parity-transform\demo-skill'
+            $agentRoot = Join-Path $TestDrive 'parity-transform-agent'
+            $agent = Join-Path $agentRoot 'demo-skill'
+            New-Item -ItemType Directory -Force -Path (Join-Path $source 'docs'), (Join-Path $agent 'docs') | Out-Null
+            [IO.File]::WriteAllText((Join-Path $source 'SKILL.md'), "docs\body.md`n", [Text.UTF8Encoding]::new($true))
+            $expanded = "---`nname: demo-skill`ndescription: demo`n---`nexpanded body"
+            Set-Content -LiteralPath (Join-Path $source 'docs\body.md') -Value $expanded -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'docs\body.md') -Value $expanded -NoNewline
+            Set-Content -LiteralPath (Join-Path $agent 'SKILL.md') -Value $expanded -NoNewline
+
+            $result = Test-DoctorColdSourceParity -ResolvedSources @{ 'demo-skill' = $source } -ManagedSourceRoot $agentRoot
+
+            $result.ok | Should -BeTrue
+            $result.compared | Should -Be 1
+        }
+
+        It "reports a missing source directory instead of passing silently" {
+            $agentRoot = Join-Path $TestDrive 'parity-missing-agent'
+            $agent = Join-Path $agentRoot 'demo-skill'
+            New-Item -ItemType Directory -Force -Path $agent | Out-Null
+
+            $result = Test-DoctorColdSourceParity -ResolvedSources @{ 'demo-skill' = (Join-Path $TestDrive 'parity-missing-src\demo-skill') } -ManagedSourceRoot $agentRoot
+
+            $result.ok | Should -BeFalse
+            ($result.warnings -join "`n") | Should -Match '源目录缺失'
+        }
+
+        It "resolves effective sources through the build resolver" {
+            $cfg = LoadCfg -NoAutoFix
+            $sources = Get-DoctorColdMaterializationSources -Cfg $cfg
+
+            $sources.Keys.Count | Should -BeGreaterThan 60
+            $sources['capability-router'] | Should -BeLike '*overrides\custom\capability-router'
+        }
+    }
+
 }

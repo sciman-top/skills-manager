@@ -363,6 +363,133 @@ function Test-DoctorColdCatalogHealth {
     return $result
 }
 
+function Get-DoctorColdMaterializationSources($Cfg) {
+    # Effective-source map for the cold source-parity check.  Mirrors the
+    # materialization order in 构建Agent: mappings first (config order, last
+    # valid one wins), then overrides layers replace the mapped source
+    # wholesale.  Resolution is delegated to the build's own resolver so this
+    # map cannot disagree with what 构建生效 would materialize.
+    $sources = @{}
+    if ($null -eq $Cfg) { return $sources }
+    $resolveContext = New-AgentMappingResolveContext
+    foreach ($m in @($Cfg.mappings)) {
+        try {
+            $resolved = Resolve-AgentMappingForAgent $Cfg $m $resolveContext
+            if ($null -eq $resolved -or -not [bool]$resolved.sync -or -not [bool]$resolved.source_valid) { continue }
+            if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) { continue }
+            $sources[[string]$resolved.to] = [string]$resolved.src_full
+        }
+        catch { continue }
+    }
+    foreach ($d in (Get-OverridesDirs)) {
+        try {
+            $targetName = Get-CanonicalSkillTargetName $d.FullName $d.Name
+            if ([string]::IsNullOrWhiteSpace($targetName)) { continue }
+            $sources[$targetName] = [string]$d.FullName
+        }
+        catch { continue }
+    }
+    return $sources
+}
+
+function Get-DoctorTreeFileMap([string]$Root) {
+    # Relative path -> raw-byte SHA-256.  Raw hashes keep the comparison exact
+    # for binaries; SKILL.md gets a text-level re-check in the caller because
+    # the build legitimately rewrites it (BOM strip, placeholder expansion).
+    $map = @{}
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $map }
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    foreach ($file in @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $relative = $file.FullName.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/')
+        $map[$relative] = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+    }
+    return $map
+}
+
+function Test-DoctorSkillTreeParity {
+    # Compares one source tree against its materialized copy.  Returns a list
+    # of drift descriptions; empty means byte-parity modulo the documented
+    # build transforms.  Pure function: all roots are caller-supplied.
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$MaterializedRoot,
+        [string[]]$AgentGeneratedRelativePaths = @()
+    )
+    $drift = @()
+    $sourceFiles = Get-DoctorTreeFileMap -Root $SourceRoot
+    $materializedFiles = Get-DoctorTreeFileMap -Root $MaterializedRoot
+    foreach ($generated in @($AgentGeneratedRelativePaths)) {
+        if ($materializedFiles.ContainsKey($generated)) { $materializedFiles.Remove($generated) }
+    }
+    foreach ($relative in @($sourceFiles.Keys | Sort-Object)) {
+        if (-not $materializedFiles.ContainsKey($relative)) {
+            $drift += ("源新增未物化 {0}" -f $relative)
+            continue
+        }
+        if ([string]$sourceFiles[$relative] -eq [string]$materializedFiles[$relative]) { continue }
+        if ($relative -notmatch '(^|/)SKILL\.md$') {
+            $drift += ("内容不一致 {0}" -f $relative)
+            continue
+        }
+        # The build rewrites SKILL.md after mirroring: BOM is stripped and a
+        # single-line relative-*.md placeholder is expanded to its target's
+        # content.  Replicate both before declaring drift.
+        $sourcePath = Join-Path $SourceRoot ($relative -replace '/', '\')
+        $expected = Get-ContentUtf8 $sourcePath
+        $placeholderTarget = Resolve-RelativeSkillPlaceholderTarget $sourcePath $SourceRoot
+        if (-not [string]::IsNullOrWhiteSpace([string]$placeholderTarget)) {
+            $expected = Get-ContentUtf8 ([string]$placeholderTarget)
+        }
+        $actual = Get-ContentUtf8 (Join-Path $MaterializedRoot ($relative -replace '/', '\'))
+        if (-not [string]::Equals([string]$expected, [string]$actual, [System.StringComparison]::Ordinal)) {
+            $drift += ("内容不一致 {0}" -f $relative)
+        }
+    }
+    foreach ($relative in @($materializedFiles.Keys | Where-Object { -not $sourceFiles.ContainsKey($_) } | Sort-Object)) {
+        $drift += ("物化多出文件 {0}" -f $relative)
+    }
+    return $drift
+}
+
+function Test-DoctorColdSourceParity {
+    # Source-vs-materialized parity for the cold skill supply.  Catalog health
+    # above only proves agent/ matches the catalog; a source edit without a
+    # following 构建生效 leaves the deployed router/skill stale while every
+    # catalog check stays green (2026-10-18: two cold-discovery fixes sat in
+    # overrides/ unmaterialized with an all-green doctor).  Compares each
+    # agent/<skill> tree against its effective source, excluding exactly the
+    # files the build itself generates after mirroring: the router's catalog
+    # mirror and the generated admission runtime.
+    param(
+        [Parameter(Mandatory = $true)]$ResolvedSources,
+        [Parameter(Mandatory = $true)][string]$ManagedSourceRoot
+    )
+    $result = [ordered]@{ ok = $true; warnings = @(); compared = 0 }
+    if (-not (Test-Path -LiteralPath $ManagedSourceRoot -PathType Container)) { return $result }
+    foreach ($name in @($ResolvedSources.Keys | Sort-Object)) {
+        $sourceDir = [string]$ResolvedSources[$name]
+        $agentDir = Join-Path $ManagedSourceRoot $name
+        if (-not (Test-Path -LiteralPath $agentDir -PathType Container)) { continue }
+        if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+            $result.warnings += ("cold_discovery: {0}: 源目录缺失，无法核对源↔物化一致性: {1}" -f $name, $sourceDir)
+            $result.ok = $false
+            continue
+        }
+        $generated = @('catalog.json')
+        if ([string]::Equals($name, 'capability-router', [StringComparison]::OrdinalIgnoreCase)) {
+            $generated += 'scripts/execution-admission.ps1'
+        }
+        $drift = Test-DoctorSkillTreeParity -SourceRoot $sourceDir -MaterializedRoot $agentDir -AgentGeneratedRelativePaths $generated
+        if (@($drift).Count -gt 0) {
+            $result.warnings += ("cold_discovery: {0}: 源与物化漂移，需重新构建生效: {1}" -f $name, (@($drift) -join '; '))
+            $result.ok = $false
+            continue
+        }
+        $result.compared++
+    }
+    return $result
+}
+
 function Get-DoctorSkillProjectionConsistency {
     # Configuration/profile declaration drift silently changes what each host
     # actually projects; check every declared host, not just the Codex surface.
@@ -478,6 +605,9 @@ function Get-DoctorSkillProjectionConsistency {
         $coldCatalog = Test-DoctorColdCatalogHealth -ManagedSourceRoot ([string]$managedSource)
         foreach ($coldWarning in $coldCatalog.warnings) { $result.warnings += $coldWarning }
         if (-not $coldCatalog.ok) { $result.ok = $false }
+        $coldParity = Test-DoctorColdSourceParity -ResolvedSources (Get-DoctorColdMaterializationSources -Cfg $cfg) -ManagedSourceRoot ([string]$managedSource)
+        foreach ($parityWarning in $coldParity.warnings) { $result.warnings += $parityWarning }
+        if (-not $coldParity.ok) { $result.ok = $false }
         $result.detail = ($details -join '; ')
         if ($result.warnings.Count -gt 0) { $result.ok = $false }
     }
