@@ -32,6 +32,7 @@
 - 源码或配置：`build.ps1` 后跑受影响测试，并核对生成物无漂移。
 - 只有 runtime、安全、数据、迁移、公开契约、依赖或打包风险，才在输入冻结后运行一次 `-Profile full`（约 3–5 分钟）。
 - 证明覆盖当前独立失败后即停止；不为"更全面"重复同层门禁。
+- 收口内门禁与验收的先后由会话自定（默认"输入冻结→门禁→验收"），不逐次请示；解除操作者明示的暂缓或审阅冻结仍须先问。
 - CI 以 `-CheckGenerated` 只读核对已提交的生成物。
 - 生成物 hook（[guard-generated.ps1](.claude/hooks/guard-generated.ps1)、[pre-commit](.githooks/pre-commit)）只是辅助；Bash 写入不受 hook 覆盖，最终裁决是 CI。
 - 全局规则文件相等只证明 `filesystem_projected`；`host_loaded` 需要 fresh host probe。
@@ -42,4 +43,4 @@
 - 收口报告写明：验证命令与结果、未验证项，以及 `Removed:` 行（常规修复写 `N/A`）。
 - 两台电脑同步见 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md)。`fetch` 不会把远端提交整合进工作树。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
-- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt 机制执行，无需逐次请示。
+- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）与模型编排宿主投影及加载探针（受 [局部契约](src/model-orchestration/AGENTS.md) 边界与实测纪律约束）均已获常驻授权（2026-10-18 裁决，模型编排为同日扩展），各按自带 plan/token/receipt 或 receipt/回滚机制执行，无需逐次请示。
