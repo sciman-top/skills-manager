@@ -17,6 +17,15 @@ Assert (@($policy.presets['gemini38_flash_only'].hosts).Count -eq 1 -and 'codex'
 $zcodeResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset glm53_flash_only | ConvertFrom-Json -AsHashtable
 Assert ($zcodeResolved.host -ceq 'zcode' -and $zcodeResolved.routes.quick_triage.model -ceq 'glm-5.3-flash' -and $zcodeResolved.routes.quick_triage.effort -ceq 'max') 'ZCode keeps the native GLM max facet'
 Assert (@($zcodeResolved.enabled_routes | Where-Object { $_.model -ceq 'glm-5.3-flash' -and $_.effort -ceq 'max' }).Count -eq 1) 'ZCode exposes only the reviewed GLM max tuple'
+$zcodeAutoResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode | ConvertFrom-Json -AsHashtable
+Assert ($zcodeAutoResolved.auto_routing -and @($zcodeAutoResolved.active_presets).Count -eq 1 -and $zcodeAutoResolved.active_presets[0] -ceq 'glm53_flash_only') 'ZCode automatic routing narrows the pool to its native GLM facet'
+foreach ($slot in $slots) { Assert ($zcodeAutoResolved.routes[$slot].model -ceq 'glm-5.3-flash' -and $zcodeAutoResolved.routes[$slot].effort -ceq 'max') "ZCode maps the supported native tuple to $slot" }
+$claudeAutoResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost claude | ConvertFrom-Json -AsHashtable
+Assert ($claudeAutoResolved.auto_routing -and @($claudeAutoResolved.active_presets).Count -eq 1 -and $claudeAutoResolved.active_presets[0] -ceq 'claude_haiku55_only') 'Claude automatic routing narrows the pool to its native Haiku facet'
+foreach ($slot in $slots) {
+    $haikuPair = $expected.claude_haiku55_only.menu[$expected.claude_haiku55_only.map[$slot]]
+    Assert ($claudeAutoResolved.routes[$slot].model -ceq $haikuPair[0] -and $claudeAutoResolved.routes[$slot].effort -ceq $haikuPair[1]) "Claude maps the supported Haiku tuple to $slot"
+}
 foreach ($foreignPreset in @('claude_haiku55_only','gemini38_flash_only')) {
     $zcodeForeignRejected = $false
     try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset $foreignPreset | Out-Null } catch { $zcodeForeignRejected = $true }
@@ -32,17 +41,17 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
-Assert (@($policy.auto_routes.Values | Where-Object { $_ -cne 'gpt6_luna_only' }).Count -eq 0) 'Every automatic daily route is gpt6_luna_only; GLM, Haiku and Gemini stay as declared alternates'
+Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 4) 'Automatic routes use all four requested model families'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
 $autoRoutes = @{
-    quick_triage = 'gpt6_luna_only'
-    routine_maintenance = 'gpt6_luna_only'
-    standard_review = 'gpt6_luna_only'
-    bounded_implementation = 'gpt6_luna_only'
+    quick_triage = 'claude_haiku55_only'
+    routine_maintenance = 'glm53_flash_only'
+    standard_review = 'claude_haiku55_only'
+    bounded_implementation = 'glm53_flash_only'
     deep_investigation = 'gpt6_luna_only'
-    deep_implementation = 'gpt6_luna_only'
-    test_execution = 'gpt6_luna_only'
-    documentation_review = 'gpt6_luna_only'
+    deep_implementation = 'gemini38_flash_only'
+    test_execution = 'glm53_flash_only'
+    documentation_review = 'gemini38_flash_only'
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
@@ -61,8 +70,8 @@ Assert ([int]$policy.schema_version -eq 6 -and @($policy.fallbacks.Keys).Count -
 Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
-$cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot standard_review -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
-Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI available-set binding: standard_review auto route (luna) is outside the set, so the first available preset binds'
+$cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
+Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI chooses the first available preset when the deep investigation route (Luna) is excluded'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
@@ -262,6 +271,49 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
+    $zcodeTarget = Join-Path $fixture 'zcode'
+    $zcodeAgents = Join-Path $zcodeTarget 'agents'
+    [IO.Directory]::CreateDirectory($zcodeAgents) | Out-Null
+    $zcodeSourcePath = Join-Path $zcodeAgents 'glm-max.md'
+    $zcodeSourceText = @('---','name: glm-max','description: Existing host-owned GLM max definition','model: "account:test-plan/GLM-5.3-Flash"','thoughtLevel: max','---','','Keep this source agent untouched.') -join "`n"
+    [IO.File]::WriteAllText($zcodeSourcePath, $zcodeSourceText + "`n", [Text.UTF8Encoding]::new($false))
+    $zcodeSourceHash = (Get-FileHash -LiteralPath $zcodeSourcePath -Algorithm SHA256).Hash
+    $zcodeFullPlanRejected = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -ExecutionHost zcode -ZCodeRoot $zcodeTarget | Out-Null }
+    catch { $zcodeFullPlanRejected = $_.Exception.Message -like '*ZCode projection supports only -SubagentsOnly*' }
+    Assert $zcodeFullPlanRejected 'ZCode plan rejects a misleading full-preset scope'
+    $zcodePlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -ExecutionHost zcode -ZCodeRoot $zcodeTarget | ConvertFrom-Json -AsHashtable
+    Assert ($zcodePlan.host -ceq 'zcode' -and $zcodePlan.scope -ceq 'subagents_only' -and @($zcodePlan.files).Count -eq $slots.Count -and $zcodePlan.capability.host -ceq 'zcode') 'ZCode plan lists only the native slot-agent projection'
+    Assert ((Get-FileHash -LiteralPath $zcodeSourcePath -Algorithm SHA256).Hash -ceq $zcodeSourceHash -and -not (Test-Path -LiteralPath (Join-Path $zcodeAgents 'skills-manager-quick-triage.md'))) 'ZCode plan preserves its model source and writes no files'
+    foreach ($slot in $slots) { Assert ($zcodePlan.routes[$slot].model -ceq 'glm-5.3-flash' -and $zcodePlan.routes[$slot].effort -ceq 'max') "ZCode plan routes $slot through GLM/max" }
+    $zcodeReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -ExecutionHost zcode -ZCodeRoot $zcodeTarget | ConvertFrom-Json
+    Assert ($zcodeReceipt.host -ceq 'zcode' -and $zcodeReceipt.changed -eq $slots.Count -and $zcodeReceipt.host_loaded -eq $false) 'ZCode Apply records filesystem projection without claiming host load'
+    foreach ($slot in $slots) {
+        $agentName = "skills-manager-$($slot.Replace('_','-'))"
+        $agentPath = Join-Path $zcodeAgents "$agentName.md"
+        $agentText = Get-Content -LiteralPath $agentPath -Raw
+        Assert ($agentText.Contains("name: $agentName") -and $agentText.Contains('model: "account:test-plan/GLM-5.3-Flash"') -and $agentText.Contains('thoughtLevel: max') -and $agentText.Contains('managed-by: skills-manager/model-orchestration')) "ZCode agent pins host model/max and is marked as managed: $slot"
+        Assert ($agentText.Contains('Read-only: do not modify files or external state.') -eq ($slot -cin @($policy.read_only_slots))) "ZCode agent retains the semantic read-only boundary: $slot"
+    }
+    Assert ((Get-FileHash -LiteralPath $zcodeSourcePath -Algorithm SHA256).Hash -ceq $zcodeSourceHash) 'ZCode projection does not edit its host-owned source agent'
+    Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -ExecutionHost zcode -ZCodeRoot $zcodeTarget | ConvertFrom-Json).files.Count -eq 0) 'ZCode projection is idempotent'
+    & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $zcodeReceipt.receipt | Out-Null
+    Assert ((Get-FileHash -LiteralPath $zcodeSourcePath -Algorithm SHA256).Hash -ceq $zcodeSourceHash -and @((Get-ChildItem -LiteralPath $zcodeAgents -Filter 'skills-manager-*.md' -File)).Count -eq 0) 'ZCode rollback removes only generated slots and preserves the source agent'
+    $zcodeCollisionPath = Join-Path $zcodeAgents 'skills-manager-quick-triage.md'
+    [IO.File]::WriteAllText($zcodeCollisionPath, 'name: user-owned')
+    $zcodeCollisionHash = (Get-FileHash -LiteralPath $zcodeCollisionPath -Algorithm SHA256).Hash
+    $zcodeCollisionRejected = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -ExecutionHost zcode -ZCodeRoot $zcodeTarget | Out-Null }
+    catch { $zcodeCollisionRejected = $_.Exception.Message -like '*Refusing to overwrite user-owned ZCode agent*' }
+    Assert ($zcodeCollisionRejected -and (Get-FileHash -LiteralPath $zcodeCollisionPath -Algorithm SHA256).Hash -ceq $zcodeCollisionHash) 'ZCode projection refuses an unmarked user-owned agent'
+    Remove-Item -LiteralPath $zcodeCollisionPath -Force
+    $zcodeInvalidModel = $zcodeSourceText.Replace('account:test-plan/GLM-5.3-Flash','account:test-plan/GLM-5.2-Flash')
+    [IO.File]::WriteAllText($zcodeSourcePath, $zcodeInvalidModel + "`n", [Text.UTF8Encoding]::new($false))
+    $zcodeInvalidRejected = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -ExecutionHost zcode -ZCodeRoot $zcodeTarget | Out-Null }
+    catch { $zcodeInvalidRejected = $_.Exception.Message -like '*must name the configured GLM-5.3-Flash model*' }
+    Assert ($zcodeInvalidRejected -and @((Get-ChildItem -LiteralPath $zcodeAgents -Filter 'skills-manager-*.md' -File)).Count -eq 0) 'ZCode projection fails closed when its host model source drifts'
+    [IO.File]::WriteAllText($zcodeSourcePath, $zcodeSourceText + "`n", [Text.UTF8Encoding]::new($false))
     $quotedRoot = '"model" = "old"' + "`n[agents] # inline comment`nenabled = true`n"
     [IO.File]::WriteAllText($cfg, $quotedRoot)
     $quotedReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json

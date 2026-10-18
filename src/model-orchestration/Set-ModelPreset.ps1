@@ -6,6 +6,7 @@ param(
     [string[]]$AvailablePreset = @(),
     [string]$CodexRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }),
     [string]$ClaudeRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude' }),
+    [string]$ZCodeRoot = (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.zcode'),
     [string]$ReceiptPath = '',
     [switch]$SubagentsOnly,
     [string]$CapabilityProbePath = '',
@@ -86,9 +87,6 @@ foreach ($id in $policy.presets.Keys) {
 foreach ($slot in $slotNames) {
     $autoPreset = [string]$policy.auto_routes[$slot]
     if (-not $policy.presets.Contains($autoPreset)) { throw "auto_routes[$slot] points to an unknown preset: $autoPreset" }
-    if ($ExecutionHost -notin @($policy.presets[$autoPreset].hosts) -and $ExecutionHost -ne 'zcode') {
-        throw "auto_routes[$slot] must point to a preset available on host $ExecutionHost`: $autoPreset"
-    }
 }
 # Schema v6: every slot declares its overload alternates explicitly. An empty list
 # is an explicit "no automatic alternate", never an implicit fallback.
@@ -249,11 +247,11 @@ if ($Action -eq 'Rollback') {
     }
     'Rollback complete.'; return
 }
-# Only the codex/claude facets have a verified write interface; ZCode remains
-# resolve-only even when a preset carries a host-specific ZCode menu.
-if ($ExecutionHost -eq 'zcode') { throw 'ZCode native model/effort write interface is not verified; use -Action Resolve -ExecutionHost zcode.' }
+# Explicitly selected presets must have a native facet for the target host.
 if ($ExecutionHost -eq 'codex' -and 'codex' -notin @($modelPreset.hosts)) { throw 'Codex native model/effort projection is not available for the selected preset.' }
 if ($ExecutionHost -eq 'claude' -and 'claude' -notin @($modelPreset.hosts)) { throw 'Claude native model/effort projection is not available for the selected preset.' }
+if ($ExecutionHost -eq 'zcode' -and 'zcode' -notin @($modelPreset.hosts)) { throw 'ZCode native model/effort projection is not available for the selected preset.' }
+if ($ExecutionHost -eq 'zcode' -and -not $SubagentsOnly) { throw 'ZCode projection supports only -SubagentsOnly.' }
 function SetScalar([string]$Text,[string]$Section,[string]$Key,[string]$Value) {
     # Only edit known flat scalar keys; unfamiliar TOML shapes are rejected.
     $lines = [Collections.Generic.List[string]]::new()
@@ -294,7 +292,7 @@ $slotGuidance = @{
 $parentGuidance = 'Split work by dependencies and choose the named execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. One upstream attempt is allowed per bounded task: never replay an identical prompt, send duplicate parallel requests, or retry after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
-    if ('codex' -notin $entry.hosts) { continue }
+    if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
     $rolePath = Join-Path $PSScriptRoot ".generated/codex/pool/$($entry.role).toml"
     $description = "Model pool role $($entry.role), $($entry.model)/$($entry.effort). Parent assigns the task slot, exact scope, write set, proof and stop; use only when this exact tuple is supported by the current host."
     $instructions = 'Execute the assigned bounded task and obey its read-only or write scope. Preserve unrelated work. Do not delegate, change models or replay completed writes. Return verification evidence and unresolved uncertainty to the parent, then stop.'
@@ -304,7 +302,7 @@ foreach ($entry in $enabledRoutes) {
 }
 $capability = [ordered]@{
     status = 'not_applicable'
-    host = 'codex'
+    host = $ExecutionHost
     source = $CapabilityProbePath
     tuples = @()
     unsupported = @()
@@ -458,6 +456,58 @@ if ($ExecutionHost -eq 'claude' -and 'claude' -in $modelPreset.hosts) {
         $body = @('---',"name: $name", "description: $slot execution slot using $($entry.model) at $($entry.effort) effort. $($slotGuidance[$slot])", "model: $($entry.model)", "effort: $($entry.effort)", 'disallowedTools: Agent', '---', '', 'Perform only the assigned bounded task. Preserve unrelated work. Return concrete verification evidence and unresolved uncertainty for parent re-selection before a new bounded task. Do not replay completed writes, change models or delegate.')
         if ($slot -cin @($policy.read_only_slots)) { $body += 'Read-only: do not modify files or external state.' }
         AddFile (Join-Path $ClaudeRoot "agents/$name.md") (($body -join "`n")+"`n")
+    }
+}
+if ($ExecutionHost -eq 'zcode' -and 'zcode' -in $modelPreset.hosts) {
+    $ZCodeRoot = [IO.Path]::GetFullPath($ZCodeRoot)
+    $zcodeMenu = @(Get-PresetMenu $modelPreset 'zcode')
+    if ($zcodeMenu.Count -ne 1 -or $zcodeMenu[0].model -cne 'glm-5.3-flash' -or $zcodeMenu[0].effort -cne 'max') {
+        throw 'The ZCode writer only supports the reviewed GLM-5.3-Flash/max host facet.'
+    }
+    $sourcePath = Join-Path $ZCodeRoot 'agents/glm-max.md'
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "ZCode model source agent is required: $sourcePath" }
+    $sourceText = [IO.File]::ReadAllText($sourcePath)
+    $frontmatterMatch = [regex]::Match($sourceText, '\A---\s*\r?\n(?<frontmatter>.*?)\r?\n---(?:\r?\n|$)', [Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $frontmatterMatch.Success) { throw 'ZCode model source agent has invalid frontmatter.' }
+    $zcodeModelMatch = [regex]::Match($frontmatterMatch.Groups['frontmatter'].Value, '(?m)^model\s*:\s*(?<value>.+?)\s*$')
+    $zcodeEffortMatch = [regex]::Match($frontmatterMatch.Groups['frontmatter'].Value, '(?m)^thoughtLevel\s*:\s*(?<value>.+?)\s*$')
+    if (-not $zcodeModelMatch.Success -or -not $zcodeEffortMatch.Success) { throw 'ZCode model source agent must declare exact model and thoughtLevel fields.' }
+    $zcodeModel = $zcodeModelMatch.Groups['value'].Value.Trim()
+    if (($zcodeModel.StartsWith('"') -and $zcodeModel.EndsWith('"')) -or ($zcodeModel.StartsWith("'") -and $zcodeModel.EndsWith("'"))) {
+        $zcodeModel = $zcodeModel.Substring(1, $zcodeModel.Length - 2)
+    }
+    $zcodeEffort = $zcodeEffortMatch.Groups['value'].Value.Trim().Trim([char[]]@('"', "'"))
+    if ($zcodeModel -cnotmatch '^[A-Za-z0-9][A-Za-z0-9:./_-]*$' -or $zcodeModel -cnotmatch '(?i)(?:^|/)GLM-5\.3-Flash$') {
+        throw 'ZCode model source agent must name the configured GLM-5.3-Flash model without whitespace or YAML-special characters.'
+    }
+    if ($zcodeEffort -cne 'max') { throw 'ZCode model source agent must declare thoughtLevel: max.' }
+    $managedMarker = '<!-- managed-by: skills-manager/model-orchestration -->'
+    $zcodeEffort = [string]$zcodeMenu[0].effort
+    foreach ($slot in $slotNames) {
+        $name = "skills-manager-$($slot.Replace('_','-'))"
+        $path = Join-Path $ZCodeRoot "agents/$name.md"
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $existingText = [IO.File]::ReadAllText($path)
+            if (-not $existingText.Contains($managedMarker)) { throw "Refusing to overwrite user-owned ZCode agent: $path" }
+        }
+        $readOnly = $slot -cin @($policy.read_only_slots)
+        $guidance = if ($slotGuidance.ContainsKey($slot)) { $slotGuidance[$slot] } else { 'Execute the assigned bounded task; return evidence and stop.' }
+        $description = "Execution slot $slot. $guidance"
+        $modelScalar = $zcodeModel.Replace('"','\"')
+        $descriptionScalar = $description.Replace('"','\"')
+        $body = @(
+            '---',
+            "name: $name",
+            "description: `"$descriptionScalar`"",
+            "model: `"$modelScalar`"",
+            "thoughtLevel: $zcodeEffort",
+            '---',
+            '',
+            $managedMarker,
+            "Execute only the assigned $slot task within the supplied scope. Preserve unrelated changes. Do not delegate, change models, or replay completed writes. Return concrete evidence and unresolved uncertainty for parent selection before a new bounded task. Stop at the assigned boundary."
+        )
+        if ($readOnly) { $body += 'Read-only: do not modify files or external state.' }
+        AddFile $path (($body -join "`n")+"`n")
     }
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
