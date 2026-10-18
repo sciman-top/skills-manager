@@ -33,6 +33,8 @@ The nine semantic slots are `quick_triage`, `routine_maintenance`, `standard_rev
 
 Five exact tuple roles coexist in the ordinary Codex host alongside `luna_max`: `glm_xhigh`, `haiku_medium`, `haiku_high`, `haiku_xhigh` and `gemini_high`. The parent selects a tuple role and supplies the semantic slot, scope, write set, proof and stop in its assignment. Semantic roles retain fallback routes and read-only descriptions. A fixed custom role's model/effort cannot be overridden: choose the matching tuple role or a supported native explicit tuple route instead. Specialist bridges retain their own execution contracts.
 
+Native subagent payload limit (2026-10-18 read-only probes): on Codex, a native child receives its task as an `encrypted_content` envelope. Only the `gpt-6-luna` tuple read it. `claude-haiku-5-5` reported an unreadable Fernet token, while `gemini-3.8-flash-high` and `glm-5.3-flash` did not reply. Routing and effort were correct in every case, so the failure is in reading the payload. Until a native probe passes for a tuple, only the GPT-family tuple is a native subagent target on Codex. Non-GPT tuples must be dispatched through `Start-ModelSlot.ps1` (`codex exec`), which passed one minimal request for each tuple. The cause is not established in this repository.
+
 ## Task selection and effort changes
 
 ### Host capability and policy boundary
