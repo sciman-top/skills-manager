@@ -219,6 +219,28 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
     }
 
+    It 'preserves parent-user-input contracts without granting execution' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
+                mode = 'parent_user_input'
+                native_agent = ''
+                conversation_owner = 'parent'
+                stop_condition = 'user_input_required'
+            })
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'Please inspect this request using the named workflow.' -CatalogPath $catalog -AutoDiscover -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.load_validation.pass | Should -Be $true
+        $result.execution_contract.mode | Should -Be 'parent_user_input'
+        $result.execution_contract.native_agent | Should -Be ''
+        $result.execution_contract.conversation_owner | Should -Be 'parent'
+        $result.execution_contract.stop_condition | Should -Be 'user_input_required'
+        $result.execution_authorization.status | Should -Be 'not_granted'
+        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_parent_user_input'
+        $result.routing_receipt.execution_contract.mode | Should -Be 'parent_user_input'
+    }
+
     It 'binds the effective dispatch contract to the selected root, not a supporting dependency' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
         $rootContract = [pscustomobject]@{
@@ -574,6 +596,47 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
         $result.execution_authorization.reason | Should -Be 'domain_hint_required'
         $result.execution_authorization.status | Should -Be 'not_granted'
+    }
+
+    It 'returns the complete hinted set when two domains together exceed the unscoped limit' {
+        # Regression: a host hint pair whose union exceeds 12 used to answer
+        # domain_hint_required with zero candidates, spending the one discovery.
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $added = [Collections.Generic.List[object]]::new()
+        $members = @{ alpha = [Collections.Generic.List[string]]::new(); beta = [Collections.Generic.List[string]]::new() }
+        foreach ($domain in @('alpha', 'beta')) {
+            for ($i = 1; $i -le 7; $i++) {
+                $name = '{0}-{1:00}' -f $domain, $i
+                $dir = Join-Path $root $name
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                $entry = Join-Path $dir 'SKILL.md'
+                "---`nname: $name`ndescription: Member $name.`n---" | Set-Content -LiteralPath $entry -Encoding UTF8
+                $added.Add([pscustomobject][ordered]@{name=$name;description="Member $name.";relative_path="..\$name\SKILL.md";entrypoint_sha256=(Get-FileHash $entry -Algorithm SHA256).Hash.ToLowerInvariant();domains=@($domain);load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()}) | Out-Null
+                $members[$domain].Add($name) | Out-Null
+            }
+        }
+        $document.skills = @($document.skills) + @($added.ToArray())
+        $document.domains = @($document.domains) + @(
+            [pscustomobject][ordered]@{name='alpha';purpose='Alpha';skill_names=@($members['alpha'])},
+            [pscustomobject][ordered]@{name='beta';purpose='Beta';skill_names=@($members['beta'])}
+        )
+        Write-TestCatalog $document $catalog
+
+        $hinted = & $router -Query 'alpha and beta work' -CatalogPath $catalog -DomainHint 'alpha,beta' | ConvertFrom-Json
+        $hinted.catalog.status | Should -Be 'current'
+        $hinted.retrieval.candidate_count | Should -Be 14
+        @($hinted.retrieval.candidates).Count | Should -Be 14
+        $hinted.retrieval.truncated | Should -Be $false
+        $hinted.retrieval.scope_required | Should -Be $false
+        $hinted.routing_receipt.status | Should -Be 'candidates_returned'
+        $hinted.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_only'
+        @($hinted.excluded | Where-Object reason -eq 'domain_hint_required').Count | Should -Be 0
+
+        # The unscoped limit is unchanged: without a hint the same 15-skill catalog stays scoped.
+        $unscoped = & $router -Query 'alpha and beta work' -CatalogPath $catalog | ConvertFrom-Json
+        $unscoped.retrieval.scope_required | Should -Be $true
+        $unscoped.routing_receipt.status | Should -Be 'domain_hint_required'
+        @($unscoped.retrieval.candidates).Count | Should -Be 0
     }
 
     It 'accepts the Bash-form comma-separated domain hint from a child process' {
