@@ -595,12 +595,17 @@ if ($catalogStatus -eq 'stale' -and $catalogSkillCount -gt 0 -and
 }
 
 $allRows = @($rows.ToArray())
-$truncated = $allRows.Count -gt $MaxCandidates
+# A host-hinted set is the complete membership of the hinted domains.  The host
+# passes one or two hints, so the set is bounded by catalog membership rather than
+# by an arbitrary cut.  Applying the unscoped limit here answered
+# domain_hint_required with zero candidates and spent the host's one discovery.
+$hinted = $domainNames.Count -gt 0
 # The router is a deterministic catalog reader, not a semantic ranker.  Returning
-# the first N names from an over-broad domain would silently bias the host toward
-# alphabetical order and can hide the relevant cold skill.  An exact candidate is
-# still safe to validate without a domain hint; discovery without one must stay
-# within the bounded candidate contract.
+# the first N names from an over-broad *unscoped* catalog would silently bias the
+# host toward alphabetical order and can hide the relevant cold skill, so unscoped
+# discovery stays within the bounded candidate contract.  An exact candidate is
+# still safe to validate without a domain hint.
+$truncated = (-not $hinted) -and ($allRows.Count -gt $MaxCandidates)
 $discoveryScopeRequired = $requestedNames.Count -eq 0 -and $truncated
 if ($discoveryScopeRequired) {
     $excluded.Add([pscustomobject][ordered]@{ kind = 'request'; name = ''; reason = 'domain_hint_required'; candidate_count = $allRows.Count; max_candidates = $MaxCandidates }) | Out-Null
@@ -613,7 +618,10 @@ if ($discoveryScopeRequired) {
 # everything because the row scan never ran.
 [object[]]$visible = @()
 if ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) {
-    $visible = @($allRows | Select-Object -First $MaxCandidates)
+    # Assign inside each branch: an if-expression would unroll an empty array to
+    # $null, and the JSON candidates field would then read as null rather than [].
+    if ($hinted) { $visible = @($allRows) }
+    else { $visible = @($allRows | Select-Object -First $MaxCandidates) }
 }
 if ($catalogStatus -ne 'invalid' -and $requestValid) {
     foreach ($name in $requestedNames) {
