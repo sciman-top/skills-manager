@@ -6,7 +6,7 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $slots = @($policy.slots)
 $expected = @{
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    claude_haiku55_only = @{ menu = @(@('claude-haiku-5-5','medium'),@('claude-haiku-5-5','high'),@('claude-haiku-5-5','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=2;bounded_implementation=2;deep_investigation=2;deep_implementation=2;test_execution=1;documentation_review=1;architecture_review=2} }
+    claude_haiku55_only = @{ menu = @(@('claude-haiku-5-5','medium'),@('claude-haiku-5-5','high'),@('claude-haiku-5-5','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=2;deep_investigation=2;deep_implementation=2;test_execution=1;documentation_review=1;architecture_review=2} }
     gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
@@ -55,7 +55,7 @@ $autoRoutes = @{
     deep_investigation = 'gpt6_luna_only'
     deep_implementation = 'gemini38_flash_only'
     test_execution = 'glm53_flash_only'
-    documentation_review = 'gemini38_flash_only'
+    documentation_review = 'gpt6_luna_only'
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }

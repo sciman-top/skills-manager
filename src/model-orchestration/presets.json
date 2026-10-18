@@ -28,7 +28,7 @@
     "deep_investigation": "gpt6_luna_only",
     "deep_implementation": "gemini38_flash_only",
     "test_execution": "glm53_flash_only",
-    "documentation_review": "gemini38_flash_only",
+    "documentation_review": "gpt6_luna_only",
     "architecture_review": "gpt6_luna_only"
   },
   "dispatch_policy": {
@@ -60,8 +60,8 @@
   ],
   "fallbacks": {
     "quick_triage": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" }
     ],
     "routine_maintenance": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
@@ -69,8 +69,8 @@
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "standard_review": [
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "bounded_implementation": [
@@ -84,8 +84,8 @@
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "deep_implementation": [
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
     ],
     "test_execution": [
@@ -96,7 +96,7 @@
     "documentation_review": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "architecture_review": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
@@ -179,7 +179,7 @@
       "slot_map": {
         "quick_triage": 0,
         "routine_maintenance": 1,
-        "standard_review": 2,
+        "standard_review": 1,
         "bounded_implementation": 2,
         "deep_investigation": 2,
         "deep_implementation": 2,
