@@ -639,6 +639,41 @@ Describe 'Capability router fallback' {
         @($unscoped.retrieval.candidates).Count | Should -Be 0
     }
 
+    It 'marks catalog_projection_incomplete when a full copied package is the only surviving entry' {
+        # Regression: a natural full-package copy (SKILL.md included) always
+        # validates its own entry, so the historical zero-available-rows
+        # condition never fired for the documented copied-package shape and the
+        # recovery diagnostic never reached the host.
+        $copyRoot = Join-Path $TestDrive 'copied-projection'
+        $copiedRouter = Join-Path $copyRoot 'capability-router'
+        New-Item -ItemType Directory -Path $copiedRouter -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md') -Destination (Join-Path $copiedRouter 'SKILL.md')
+        Copy-Item -Recurse -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\scripts') -Destination (Join-Path $copiedRouter 'scripts')
+        $selfHash = (Get-FileHash (Join-Path $copiedRouter 'SKILL.md') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $placeholder = 'f' + ('0' * 63)
+        $document = [pscustomobject][ordered]@{
+            schema_version=1
+            decision_owner='host_ai'
+            semantic_routing_performed=$false
+            domains=@([ordered]@{name='testing';purpose='Copied projection.';skill_names=@('capability-router','ghost-skill')})
+            skills=@(
+                [ordered]@{name='capability-router';description='Copied router.';relative_path='..\capability-router\SKILL.md';entrypoint_sha256=$selfHash;package_sha256='';domains=@('testing');load_side_effect='read_only';side_effect='unknown';dependencies=@();routing_rules=@()}
+                [ordered]@{name='ghost-skill';description='Missing sibling.';relative_path='..\ghost-skill\SKILL.md';entrypoint_sha256=$placeholder;package_sha256=$placeholder;domains=@('testing');load_side_effect='read_only';side_effect='unknown';dependencies=@();routing_rules=@()}
+            )
+            capabilities=@()
+        }
+        $copyCatalog = Join-Path $copiedRouter 'catalog.json'
+        Write-TestCatalog $document $copyCatalog
+
+        $result = & (Join-Path $copiedRouter 'scripts\route-capability.ps1') -Query 'ghost work' -CatalogPath $copyCatalog -Candidate 'skill|ghost-skill' | ConvertFrom-Json
+
+        @($result.catalog.diagnostics | Where-Object code -eq 'catalog_projection_incomplete').Count | Should -Be 1
+        $result.catalog.status | Should -Be 'stale'
+        @($result.selected).Count | Should -Be 0
+        $result.routing_receipt.status | Should -Be 'blocked'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+    }
+
     It 'accepts the Bash-form comma-separated domain hint from a child process' {
         # Claude's Bash tool on Windows is Git Bash; the documented form passes
         # `-DomainHint decision,engineering` as one literal token. A child pwsh

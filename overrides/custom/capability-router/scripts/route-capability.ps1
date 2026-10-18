@@ -577,8 +577,25 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
 # and block the discovery receipt until the managed catalog is reachable or a
 # complete package is supplied.
 $unavailableEntrypoints = @($excluded | Where-Object { $_.kind -eq 'skill' -and $_.reason -eq 'entrypoint_unavailable' })
-if ($catalogStatus -eq 'stale' -and $catalogSkillCount -gt 0 -and
-    $allAvailableRows.Count -eq 0 -and $unavailableEntrypoints.Count -eq $catalogSkillCount) {
+# The copy always validates its own entry (the running script sits inside it),
+# so a strict zero-available-rows condition can never describe the documented
+# copied-package degradation.  The projection is effectively incomplete when
+# nothing beside the running router validates: zero available rows, or the
+# single surviving row is the running router package itself.
+$routerPackageRoot = Split-Path $PSScriptRoot -Parent
+$runningRouterItem = Get-Item -LiteralPath $routerPackageRoot -Force -ErrorAction SilentlyContinue
+if ($null -ne $runningRouterItem -and ($runningRouterItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -and @($runningRouterItem.Target).Count -gt 0) {
+    $routerPackageTarget = [IO.Path]::GetFullPath(([string]@($runningRouterItem.Target)[0]).Trim())
+    if (Test-Path -LiteralPath $routerPackageTarget -PathType Container) { $routerPackageRoot = $routerPackageTarget }
+}
+$runningRouterEntrypoint = [IO.Path]::GetFullPath((Join-Path $routerPackageRoot 'SKILL.md'))
+$onlyRouterSurvives = $catalogSkillCount -gt 1 -and $allAvailableRows.Count -eq 1 -and
+    [string]::Equals([string]$allAvailableRows[0].path, $runningRouterEntrypoint, [StringComparison]::OrdinalIgnoreCase) -and
+    $unavailableEntrypoints.Count -eq ($catalogSkillCount - 1)
+$allCatalogEntrypointsUnavailable = $catalogSkillCount -gt 0 -and
+    $allAvailableRows.Count -eq 0 -and
+    $unavailableEntrypoints.Count -eq $catalogSkillCount
+if ($catalogStatus -eq 'stale' -and ($allCatalogEntrypointsUnavailable -or $onlyRouterSurvives)) {
     $catalogProjectionIncomplete = $true
     $managedCatalogHint = if (-not [string]::IsNullOrWhiteSpace($managedRoot)) {
         Join-Path $managedRoot '.skills-manager\catalog.json'
@@ -588,7 +605,7 @@ if ($catalogStatus -eq 'stale' -and $catalogSkillCount -gt 0 -and
         (Test-Path -LiteralPath $managedCatalogHint -PathType Leaf)
     $catalogDiagnostics.Add([pscustomobject][ordered]@{
             code = 'catalog_projection_incomplete'
-            reason = 'all_catalog_entrypoints_unavailable'
+            reason = if ($onlyRouterSurvives) { 'only_router_entrypoint_available' } else { 'all_catalog_entrypoints_unavailable' }
             recovery = 'run_build_effective_or_pin_managed_catalog'
             managed_catalog_available = [bool]$managedCatalogAvailable
         }) | Out-Null
