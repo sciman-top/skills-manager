@@ -373,13 +373,55 @@ $capability = [ordered]@{
 function Get-CodexCatalog([string]$Path) {
     if ($Path) {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Capability probe file not found: $Path" }
-        try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) }
+        try { $snapshot = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
         catch { throw "Capability probe file is not valid JSON: $($_.Exception.Message)" }
+        $observed = [DateTimeOffset]::MinValue
+        $expires = [DateTimeOffset]::MinValue
+        $now = [DateTimeOffset]::UtcNow
+        if ($snapshot.source -cne 'codex debug models' -or
+            [string]::IsNullOrWhiteSpace([string]$snapshot.codex_root) -or
+            -not [IO.Path]::IsPathFullyQualified([string]$snapshot.codex_root) -or
+            [IO.Path]::GetFullPath([string]$snapshot.codex_root) -ne $CodexRoot -or
+            -not [DateTimeOffset]::TryParse([string]$snapshot.observed_at, [ref]$observed) -or
+            -not [DateTimeOffset]::TryParse([string]$snapshot.expires_at, [ref]$expires) -or
+            $observed -gt $now -or $expires -le $now -or $expires -le $observed -or
+            $expires -gt $observed.AddMinutes(5)) {
+            throw 'Native catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
+        }
+        return $snapshot
     }
-    $output = @(& codex debug models 2>&1)
-    $probeCode = $LASTEXITCODE
-    if ($probeCode -ne 0) { throw "codex debug models failed (exit=$probeCode)." }
-    try { return (($output | Out-String).Trim() | ConvertFrom-Json) }
+    # Probe the target root in a child process; never change this session's CODEX_HOME.
+    $command = Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $command.Source
+    if ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
+        $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        foreach ($arg in @('-NoProfile','-File',$command.Source)) { $info.ArgumentList.Add($arg) }
+    }
+    foreach ($arg in @('debug','models')) { $info.ArgumentList.Add($arg) }
+    $info.Environment['CODEX_HOME'] = $CodexRoot
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    $started = $false
+    try {
+        $null = $process.Start()
+        $started = $true
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(30000)) { throw 'codex debug models timed out after 30 seconds.' }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr), 2000)) { throw 'codex debug models output read timed out.' }
+        if ($process.ExitCode -ne 0) { throw "codex debug models failed (exit=$($process.ExitCode))." }
+        $output = $stdout.GetAwaiter().GetResult()
+    }
+    finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
+    try { return ($output.Trim() | ConvertFrom-Json) }
     catch { throw "codex debug models did not return JSON: $($_.Exception.Message)" }
 }
 function Test-CodexNativeTuples($Catalog, $Entries, [string]$Source) {
@@ -419,6 +461,9 @@ if ($ExecutionHost -eq 'codex' -and 'codex' -in @($modelPreset.hosts)) {
         $catalog = Get-CodexCatalog $CapabilityProbePath
         $capabilitySource = if ($CapabilityProbePath) { $CapabilityProbePath } else { 'codex debug models' }
         $capability = Test-CodexNativeTuples $catalog $codexEntries $capabilitySource
+        $capability.codex_root = $CodexRoot
+        $capability.observed_at = if ($CapabilityProbePath) { ([DateTimeOffset]$catalog.observed_at).ToString('o') } else { [DateTimeOffset]::UtcNow.ToString('o') }
+        $capability.evidence_kind = if ($CapabilityProbePath) { 'bound_snapshot' } else { 'live_target_catalog' }
     }
     catch {
         $capability.status = 'probe_failed'
@@ -524,14 +569,16 @@ if ($ExecutionHost -eq 'claude' -and 'claude' -in $modelPreset.hosts) {
     $ClaudeRoot = [IO.Path]::GetFullPath($ClaudeRoot)
     $standard = @(Get-PresetMenu $modelPreset 'claude')[$modelPreset.slot_map['routine_maintenance']]
     $settingsPath = Join-Path $ClaudeRoot 'settings.json'
-    $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
+    $settings = if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
+    } else { [ordered]@{} }
+    if ($settings -isnot [Collections.IDictionary]) { throw 'Claude settings must be a JSON object.' }
     if (-not $settings.Contains('env')) { $settings.env = [ordered]@{} }
     if (-not $SubagentsOnly) {
         $settings.model = $standard.model
         $settings.availableModels = @($standard.model)
         $settings.effortLevel = $standard.effort
         foreach ($key in @('ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_MODEL','ANTHROPIC_DEFAULT_FABLE_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL')) { $settings.env[$key] = $standard.model }
-        $settings.env.CLAUDE_CODE_EFFORT_LEVEL = $standard.effort
     }
     $settings.env.CLAUDE_CODE_SUBAGENT_MODEL = $standard.model
     $settings.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE = '1'
@@ -541,7 +588,18 @@ if ($ExecutionHost -eq 'claude' -and 'claude' -in $modelPreset.hosts) {
         $entry = @(Get-PresetMenu $modelPreset 'claude')[$modelPreset.slot_map[$slot]]
         $body = @('---',"name: $name", "description: $slot execution slot using $($entry.model) at $($entry.effort) effort. $($slotGuidance[$slot])", "model: $($entry.model)", "effort: $($entry.effort)", 'disallowedTools: Agent', '---', '', 'Perform only the assigned bounded task. Preserve unrelated work. Return concrete verification evidence and unresolved uncertainty for parent re-selection before a new bounded task. Do not replay completed writes, change models or delegate.')
         if ($slot -cin @($policy.read_only_slots)) { $body += 'Read-only: do not modify files or external state.' }
-        AddFile (Join-Path $ClaudeRoot "agents/$name.md") (($body -join "`n")+"`n")
+        $agentPath = Join-Path $ClaudeRoot "agents/$name.md"
+        $legacyText = ($body -join "`n")+"`n"
+        $marker = '<!-- skills-manager:model-orchestration:claude -->'
+        if (Test-Path -LiteralPath $agentPath) {
+            if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf)) { throw "Claude agent target is not a file: $agentPath" }
+            $existingText = [IO.File]::ReadAllText($agentPath)
+            $normalized = $existingText.Replace("`r`n","`n")
+            if (-not $normalized.Contains($marker) -and $normalized -cne $legacyText) {
+                throw "Unowned Claude agent collision; preserve or review before projection: $agentPath"
+            }
+        }
+        AddFile $agentPath ($legacyText + "`n$marker`n")
     }
 }
 if ($ExecutionHost -eq 'zcode' -and 'zcode' -in $modelPreset.hosts) {

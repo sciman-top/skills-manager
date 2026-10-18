@@ -13,9 +13,71 @@ param(
     [switch]$Ephemeral,
     [ValidateSet('native','provider_override')][string]$CapabilityMode = 'native',
     [string]$CapabilityProbePath = '',
-    [ValidateRange(0,1)][int]$ReselectionCount = 0
+    [ValidateRange(0,1)][int]$ReselectionCount = 0,
+    [ValidateRange(1,3600)][int]$TimeoutSeconds = 900,
+    [ValidateRange(1,120)][int]$ProbeTimeoutSeconds = 30
 )
 $ErrorActionPreference = 'Stop'
+function Invoke-ModelSlotProcess {
+    param([string]$Executable, [string[]]$Arguments, [int]$LimitSeconds, [hashtable]$Environment = @{})
+    $command = Get-Command $Executable -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $command.Source
+    if ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
+        $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        foreach ($arg in @('-NoProfile','-File',$command.Source)) { $info.ArgumentList.Add($arg) }
+    }
+    foreach ($arg in $Arguments) { $info.ArgumentList.Add($arg) }
+    foreach ($key in $Environment.Keys) { $info.Environment[$key] = [string]$Environment[$key] }
+    $info.WorkingDirectory = (Get-Location).Path
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    $started = $false
+    try {
+        $null = $process.Start()
+        $started = $true
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $timedOut = -not $process.WaitForExit($LimitSeconds * 1000)
+        if ($timedOut) {
+            try { $process.Kill($true) } catch {}
+            $null = $process.WaitForExit(2000)
+        }
+        $streamsReady = [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr), 2000)
+        $outReady = $stdout.IsCompletedSuccessfully
+        $errReady = $stderr.IsCompletedSuccessfully
+        $readTimedOut = -not $streamsReady
+        $outputText = if ($outReady) { $stdout.GetAwaiter().GetResult() } else { '' }
+        $errorText = if ($errReady) { $stderr.GetAwaiter().GetResult() } else { '' }
+        return [pscustomobject]@{
+            started = $true
+            process_id = $process.Id
+            timed_out = ($timedOut -or $readTimedOut)
+            timeout_kind = if ($timedOut) { 'process_timeout' } elseif ($readTimedOut) { 'output_read_timeout' } else { $null }
+            exit_code = if ($timedOut -or $readTimedOut) { 124 } else { $process.ExitCode }
+            output = @((($outputText + "`n" + $errorText) -split '\r?\n') | Where-Object { $_ -ne '' })
+        }
+    }
+    catch {
+        # A post-start pipe/process error must not claim that no request could
+        # have been sent. Retain conservative contact evidence for the parent.
+        return [pscustomobject]@{
+            started = $started
+            timed_out = $false
+            timeout_kind = $null
+            exit_code = 1
+            output = @('{"type":"turn.failed","error":{"code":"environment_error"}}')
+        }
+    }
+    finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
+}
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $Preset -AvailablePreset $AvailablePreset | ConvertFrom-Json -AsHashtable
 $Preset = $resolved.preset
@@ -61,14 +123,29 @@ function ThrowCapabilityBlock($Status, $Reason, $SupportedEfforts = @()) {
     throw "Capability preflight blocked dispatch; no model request was sent. $doc"
 }
 function Get-CodexCatalog([string]$Path) {
+    $codexRoot = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }
     if ($Path) {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Capability probe file not found: $Path" }
-        return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+        $snapshot = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $observed = [DateTimeOffset]::MinValue
+        $expires = [DateTimeOffset]::MinValue
+        $now = [DateTimeOffset]::UtcNow
+        if ($snapshot.source -cne 'codex debug models' -or
+            [string]::IsNullOrWhiteSpace([string]$snapshot.codex_root) -or
+            -not [IO.Path]::IsPathFullyQualified([string]$snapshot.codex_root) -or
+            [IO.Path]::GetFullPath([string]$snapshot.codex_root) -ne $codexRoot -or
+            -not [DateTimeOffset]::TryParse([string]$snapshot.observed_at, [ref]$observed) -or
+            -not [DateTimeOffset]::TryParse([string]$snapshot.expires_at, [ref]$expires) -or
+            $observed -gt $now -or $expires -le $now -or $expires -le $observed -or
+            $expires -gt $observed.AddMinutes(5)) {
+            throw 'Native catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
+        }
+        return $snapshot
     }
-    $output = @(& codex debug models 2>&1)
-    $probeCode = $LASTEXITCODE
-    if ($probeCode -ne 0) { throw "codex debug models failed (exit=$probeCode)." }
-    try { return (($output | Out-String).Trim() | ConvertFrom-Json) }
+    $result = Invoke-ModelSlotProcess -Executable codex -Arguments @('debug','models') -LimitSeconds $ProbeTimeoutSeconds -Environment @{ CODEX_HOME=$codexRoot }
+    if ($result.timed_out) { throw 'codex debug models timed out; no dispatch was performed.' }
+    if ($result.exit_code -ne 0) { throw "codex debug models failed (exit=$($result.exit_code))." }
+    try { return (($result.output -join "`n").Trim() | ConvertFrom-Json) }
     catch { throw "codex debug models did not return JSON: $($_.Exception.Message)" }
 }
 function Get-ProviderCapabilityEvidence([string]$Path, [string]$Model, [string]$Effort) {
@@ -222,7 +299,7 @@ else {
     $executable = 'claude'
 }
 if ($Plan) {
-    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;declared_fallback=$declaredFallback;dispatch_policy=$resolved.dispatch_policy} | ConvertTo-Json -Depth 8
+    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;declared_fallback=$declaredFallback;dispatch_policy=$resolved.dispatch_policy;timeout_seconds=$TimeoutSeconds;probe_timeout_seconds=$ProbeTimeoutSeconds} | ConvertTo-Json -Depth 8
     return
 }
 if ([string]::IsNullOrWhiteSpace($Prompt)) { throw 'Prompt is required to execute a slot.' }
@@ -265,26 +342,34 @@ function Classify-Failure([object[]]$Output) {
             }
         }
     }
-    foreach ($errorRecord in $errors) {
-        $tokens = @(
+    # Classify the complete failure stream before deciding whether reselection
+    # is allowed. A later rate/auth/risk event must dominate an earlier overload.
+    $tokens = @(foreach ($errorRecord in $errors) {
+        @(
             $errorRecord.code, $errorRecord.reason_code, $errorRecord.category, $errorRecord.type, $errorRecord.status, $errorRecord.http_status
         ) | ForEach-Object { if ($null -ne $_) { ([string]$_).Trim().ToLowerInvariant() } } | Where-Object { $_ }
-        if (@($tokens | Where-Object { $_ -in @('risk','account_risk','policy_violation','safety_block','fraud','banned') }).Count -gt 0) { return [pscustomobject]@{ class='account_risk'; source='structured_error_event' } }
-        if (@($tokens | Where-Object { $_ -in @('429','rate_limit','rate-limit','quota','too_many_requests') }).Count -gt 0) { return [pscustomobject]@{ class='rate_limit'; source='structured_error_event' } }
-        if (@($tokens | Where-Object { $_ -in @('401','403','auth','authentication','unauthorized','forbidden','permission') }).Count -gt 0) { return [pscustomobject]@{ class='auth_or_permission'; source='structured_error_event' } }
-        if (@($tokens | Where-Object { $_ -in @('502','503','504','overload','service_unavailable','upstream_unavailable','temporarily_unavailable') }).Count -gt 0) { return [pscustomobject]@{ class='upstream_unavailable'; source='structured_error_event' } }
-        if (@($tokens | Where-Object { $_ -in @('tool_error','environment_error','sandbox_error','not_found') }).Count -gt 0) { return [pscustomobject]@{ class='tool_or_environment'; source='structured_error_event' } }
-    }
+    })
+    if (@($tokens | Where-Object { $_ -in @('risk','account_risk','policy_violation','safety_block','fraud','banned') }).Count -gt 0) { return [pscustomobject]@{ class='account_risk'; source='structured_error_event' } }
+    if (@($tokens | Where-Object { $_ -in @('401','403','auth','authentication','unauthorized','forbidden','permission') }).Count -gt 0) { return [pscustomobject]@{ class='auth_or_permission'; source='structured_error_event' } }
+    if (@($tokens | Where-Object { $_ -in @('429','rate_limit','rate-limit','quota','too_many_requests') }).Count -gt 0) { return [pscustomobject]@{ class='rate_limit'; source='structured_error_event' } }
+    if (@($tokens | Where-Object { $_ -in @('tool_error','environment_error','sandbox_error','not_found') }).Count -gt 0) { return [pscustomobject]@{ class='tool_or_environment'; source='structured_error_event' } }
+    if (@($tokens | Where-Object { $_ -in @('502','503','504','overload','service_unavailable','upstream_unavailable','temporarily_unavailable') }).Count -gt 0) { return [pscustomobject]@{ class='upstream_unavailable'; source='structured_error_event' } }
     [pscustomobject]@{ class='unknown'; source=if ($errors.Count -gt 0) { 'structured_error_unclassified' } else { 'unstructured_output' } }
 }
 Push-Location -LiteralPath $WorkingDirectory
 try {
     # End variadic Claude tool options before passing the positional prompt.
     if ($targetHost -eq 'claude') { $cliArgs += '--' }
-    $launchOutput = @(& $executable @cliArgs $scopedPrompt 2>&1)
+    try {
+        $launchResult = Invoke-ModelSlotProcess -Executable $executable -Arguments @($cliArgs + $scopedPrompt) -LimitSeconds $TimeoutSeconds
+    }
+    catch {
+        $launchResult = [pscustomobject]@{ started=$false; timed_out=$false; timeout_kind=$null; exit_code=1; output=@('{"type":"turn.failed","error":{"code":"environment_error"}}') }
+    }
+    $launchOutput = @($launchResult.output)
     $launchOutput | ForEach-Object { $_ }
-    $capability.upstream_contacted = $true
-    $code = $LASTEXITCODE
+    $capability.upstream_contacted = [bool]$launchResult.started
+    $code = $launchResult.exit_code
     if ($code -ne 0) {
         # Structured failure for explicit parent re-selection.  The launcher
         # never retries or substitutes; higher-effort entries are listed only
@@ -304,6 +389,9 @@ try {
         if ($failedIndex -ge 0 -and $failedIndex -lt ($menuByPreset[$routePreset].Count - 1)) { $withinHigher = @($menuByPreset[$routePreset])[($failedIndex + 1)..($menuByPreset[$routePreset].Count - 1)] }
         $classification = Classify-Failure $launchOutput
         $failureClass = [string]$classification.class
+        if ($launchResult.timed_out -and $failureClass -notin @('account_risk','auth_or_permission','rate_limit')) {
+            $failureClass = 'launcher_timeout'
+        }
         $nextAction = switch ($failureClass) {
             'account_risk' { 'stop_and_operator_review' }
             'auth_or_permission' { 'stop_and_operator_review' }
@@ -317,7 +405,8 @@ try {
                 failure_source = [string]$classification.source
                 failed_tuple = $failedTuple
                 capability = $capability
-                upstream_contacted = $true
+                upstream_contacted = [bool]$launchResult.started
+                execution = @{ timed_out=[bool]$launchResult.timed_out; timeout_kind=$launchResult.timeout_kind; timeout_seconds=$TimeoutSeconds }
                 retry_policy = [ordered]@{
                     replay_allowed = $false
                     duplicate_parallel_allowed = $false

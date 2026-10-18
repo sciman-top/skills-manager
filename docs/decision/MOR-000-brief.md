@@ -7,7 +7,7 @@
 
 ## 2026-10-18 槽位路由与原生宿主分面修订
 
-本次修复将 schema v6 的 Codex 全 Luna 默认路由恢复为模型分工映射：`quick_triage`→Haiku/medium；`routine_maintenance`、`bounded_implementation`、`test_execution`→GLM/xhigh；`standard_review`→Haiku/xhigh；`deep_implementation`、`documentation_review`→Gemini/high；`deep_investigation`、`architecture_review`→Luna/max。Haiku 自身槽位表保留 medium（triage）、high（routine/test/docs）、xhigh（standard/deep/architecture），供选择 Haiku preset 时使用。
+当前 schema v7 的 Codex 分工映射以 `src/model-orchestration/presets.json` 为准：`quick_triage`→Haiku/medium；`routine_maintenance`、`bounded_implementation`、`test_execution`→GLM/xhigh；`standard_review`→Haiku/high；`deep_implementation`→Gemini/high；`deep_investigation`、`documentation_review`、`architecture_review`→Luna/max。Haiku 自身槽位表为 medium（triage）、high（routine/standard/test/docs）、xhigh（bounded/deep/architecture），供选择 Haiku preset 时使用。九槽位描述任务职责，六个精确元组角色描述模型选择，不增加并发配额。
 
 映射依据是槽位语义与供应商官方定位，不是跨模型基准：OpenAI 将 GPT-6 Luna 定位为高容量、聚焦任务的高效率模型；Anthropic 将 Haiku 5.5 定位于低延迟分类、路由、抽取与 subagent 工作；Google 将 Gemini 3.8 Flash 定位于长周期软件工程、自主 Agent 与复杂工作流；Z.ai 描述 GLM-5.3 的编码能力并列出 `low/high/max` reasoning 档。未据此推断跨供应商质量、延迟、费用或“max≈xhigh”。官方来源：`developers.openai.com/api/docs/models/gpt-6-luna`、`platform.claude.com/docs/en/models/haiku-5-5/overview`、`ai.google.dev/gemini-api/docs/models/gemini-3.8-flash`、`docs.z.ai/guides/llm/glm-5.3`。Codex 当前精确 tuple 保持 Luna/max、GLM/xhigh、Haiku/medium|high|xhigh、Gemini/high。
 
@@ -15,7 +15,15 @@ Claude Code 的整池自动解析现按其原生 Haiku 分面逐槽解析，显�
 
 Antigravity 仍仅有 `inherit/flash/pro` tier，无法表达本池 exact model/effort，因此不投影。ZCode GLM/max 与 Codex GLM/xhigh 是两个宿主的精确配置名；没有端点证据证明实际推理强度等价。路由是可测的初始推荐，待有同任务、同输入、独立验收数据后再校准，不形成模型统一强弱榜。
 
+当前失败规则取代下文历史“429 可用性链”与“失败逐档降阶”描述：429/quota/auth/risk 停止，禁止自动重发、换模型规避限制或重放完成的写入；只有确认 overload/unavailable 且未出现更严格停止条件，才由父代理审查剩余工作并显式选择下一 bounded task。Haiku medium/high/xhigh 是按任务预选的菜单，不是自动失败阶梯。受控 launcher 聚合整段结构化错误，优先级为 risk > auth > rate/quota > tool/environment > overload。原生宿主请求、下游 relay 的重试与并发仍属宿主边界，不能由 launcher 的零重试设置外推。
+
+PR #143 的 108 次历史评测每槽位仅三题、多数候选同分，判分曾在观察输出后调整；短题未验证复杂实施的长周期优势，也未验收完整原生子代理生命周期。因此当前路由保留为初始分工，不能称为统一强弱排名。本轮审查通过只读目录与投影计划确认既有模型池，不为排名重跑批量真实调用。
+
+同日修复封闭四个实际缺口：Claude 首次配置和同名文件归属保护；原生目录快照绑定目标根目录与五分钟有效期；目录探针及受控执行的进程/输出读取超时；整段结构化错误按更严格停止条件优先分类。未新增自动调度器、后台重试或跨宿主模型适配器。当前原生委派仍观察到任务载荷不可读及宿主 `INVALID_ARGUMENT` 协议错误，失败切片转串行、不重发；该现象不能据此推断整类模型不可用，也不能宣称原生并行任务已验收。
+
 ## 2026-10-17 同日二次修订：haiku 三档菜单
+
+本节为历史记录；槽位映射及失败处理已由上方 2026-10-18 当前规则取代。
 
 用户把 haiku 修订为三档 xhigh/high/medium（存储为升序 medium<high<xhigh），可用性声明扩展为"claude/zcode/Antigravity 等只能调用自家模型"——AG 仅 tier 级（inherit/flash/pro）无 effort 键，无法表达精确元组，gemini 不设 AG 分面，hosts 面维持 codex/claude/zcode。**槽位统一乘 xhigh（沿用单档行为），medium/high 两档作为同 preset 失败降阶（haiku/xhigh 失败→high→medium 先于跨 preset）与显式选择档**；pool 角色扩为 6 个（luna_max/glm_xhigh/haiku_medium/haiku_high/haiku_xhigh/gemini_high），enabled_routes=6。若需省配额可把 standard_review 的 slot_map 降到 high（一处改动）。luna/glm/gemini 单档与 429 链不变。Test-ModelPreset 318 断言绿。
 

@@ -1,6 +1,31 @@
 #requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 $count = 0
+
+function Set-ModelSlotFixtureRunner([string]$Path) {
+    $text = [IO.File]::ReadAllText($Path)
+    $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+    $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-ModelSlotProcess' }, $true)
+    if ($null -eq $node) { throw 'Fixture runner function not found.' }
+    $mock = @'
+function Invoke-ModelSlotProcess {
+    param([string]$Executable, [string[]]$Arguments, [int]$LimitSeconds, [hashtable]$Environment = @{})
+    $output = @(& $Executable @Arguments 2>&1)
+    $timeout = $global:ModelSlotAcceptanceFailureMode -ceq 'process_timeout'
+    [pscustomobject]@{
+        started=$true; timed_out=$timeout; timeout_kind=$(if ($timeout) { 'process_timeout' } else { $null }); exit_code=$(if ($timeout) { 124 } else { $LASTEXITCODE }); output=$output
+    }
+}
+'@
+    [IO.File]::WriteAllText($Path, $text.Substring(0,$node.Extent.StartOffset) + $mock + $text.Substring($node.Extent.EndOffset))
+}
+$acceptanceFixture = Join-Path ([IO.Path]::GetTempPath()) ('model-slot-acceptance-'+[guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($acceptanceFixture) | Out-Null
+foreach ($name in @('Set-ModelPreset.ps1','Start-ModelSlot.ps1','presets.json')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $acceptanceFixture
+}
+$acceptanceLauncher = Join-Path $acceptanceFixture 'Start-ModelSlot.ps1'
+Set-ModelSlotFixtureRunner $acceptanceLauncher
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message }; $script:count++ }
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
@@ -74,7 +99,7 @@ Assert ([int]$policy.schema_version -eq 7 -and @($policy.fallbacks.Keys).Count -
 Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
-$cliSelection = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
+$cliSelection = & $acceptanceLauncher -Slot deep_investigation -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
 Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI chooses the first available preset when the deep investigation route (Luna) is excluded'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
@@ -85,14 +110,14 @@ try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Availab
 Assert $legacyRejected 'Removed Terra presets and aliases are rejected, not silently resolved'
 foreach ($id in @($policy.active_presets)) {
     foreach ($slot in $slots) {
-        $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Preset $id -Slot $slot -Plan | ConvertFrom-Json
+        $plan = & $acceptanceLauncher -Preset $id -Slot $slot -Plan | ConvertFrom-Json
         $pair = $expected[$id].menu[$expected[$id].map[$slot]]
         Assert ($plan.model -eq $pair[0] -and $plan.effort -eq $pair[1] -and $plan.delegation_enabled -eq $false) 'Frozen route and delegation disabled'
     }
 }
 foreach ($entry in $defaultResolved.enabled_routes) {
     foreach ($slot in $slots) {
-        $plan = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot $slot -Model $entry.model -Effort $entry.effort -Plan | ConvertFrom-Json
+        $plan = & $acceptanceLauncher -Slot $slot -Model $entry.model -Effort $entry.effort -Plan | ConvertFrom-Json
         Assert ($plan.model -ceq $entry.model -and $plan.effort -ceq $entry.effort -and $plan.delegation_enabled -eq $false) 'Every slot can use every pool tuple'
         Assert ($plan.read_only -eq ($slot -cin @($policy.read_only_slots))) 'Cross-model selection retains slot read-only boundary'
     }
@@ -117,12 +142,12 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';AvailablePreset=@('glm53_flash_only');Model='gpt-6-luna';Effort='max'}
 )) {
     $rejected = $false
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') @invalidSelection -Plan | Out-Null } catch { $rejected = $true }
+    try { & $acceptanceLauncher @invalidSelection -Plan | Out-Null } catch { $rejected = $true }
     Assert $rejected 'Reject removed, incomplete or out-of-pool selection'
 }
-$deepReadOnly = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_investigation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
+$deepReadOnly = & $acceptanceLauncher -Slot deep_investigation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
 Assert $deepReadOnly.read_only 'Deep investigation is read-only by slot contract'
-$deepImplementation = & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot deep_implementation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
+$deepImplementation = & $acceptanceLauncher -Slot deep_implementation -Model gemini-3.8-flash-high -Effort high -Plan | ConvertFrom-Json
 Assert (-not $deepImplementation.read_only) 'Deep implementation is a distinct write-capable slot'
 $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Raw
 Assert ($launcher.Contains('no replay or preset substitution performed') -and $launcher.Contains('No arbitrary CLI pass-through')) 'Failed task must not replay'
@@ -187,14 +212,16 @@ function global:codex {
     $global:ModelSlotAcceptanceCalls.Add(@($args))
     $global:LASTEXITCODE = $global:ModelSlotAcceptanceExitCode
     if ($global:ModelSlotAcceptanceExitCode -ne 0) {
-        if ($global:ModelSlotAcceptanceFailureMode -ceq 'timeout_message_only') { '{"type":"turn.failed","error":{"message":"request timeout (simulated)"}}' }
+        if ($global:ModelSlotAcceptanceFailureMode -ceq 'mixed_events') { $global:ModelSlotAcceptanceErrorEvents }
+        elseif ($global:ModelSlotAcceptanceFailureMode -ceq 'timeout_message_only') { '{"type":"turn.failed","error":{"message":"request timeout (simulated)"}}' }
+        elseif ($global:ModelSlotAcceptanceFailureMode -ceq 'process_timeout') { '{"type":"turn.failed","error":{"code":"unknown"}}' }
         else { '{"type":"turn.failed","error":{"code":"rate_limit","message":"Too Many Requests (simulated)"}}' }
     }
     else { '{"type":"turn.completed"}' }
 }
 try {
     $providerMismatchFailure = ''
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerMismatchPath -Prompt 'Mismatched provider must block' | Out-Null }
+    try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerMismatchPath -Prompt 'Mismatched provider must block' | Out-Null }
     catch { $providerMismatchFailure = $_.Exception.Message }
     Assert ($providerMismatchFailure -like '*provider_mismatch*' -and $providerMismatchFailure -like '*upstream_contacted*false*') 'Provider evidence must match the effective Codex provider'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 0) 'Provider mismatch blocks before CLI launch'
@@ -205,7 +232,7 @@ try {
             @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('claude-haiku-5-5/xhigh'); lower = @() }
     )) {
         $failureMessage = ''
-        try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
+        try { & $acceptanceLauncher -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
         catch { $failureMessage = $_.Exception.Message }
         Assert ($failureMessage -like '*no replay or preset substitution performed*') 'Failure returns control without replay'
         $jsonMatch = [regex]::Match($failureMessage, '\{.*\}')
@@ -221,29 +248,62 @@ try {
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceFailureMode = 'timeout_message_only'
     $timeoutFailure = ''
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Output contains timeout text but no structured code' | Out-Null }
+    try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Output contains timeout text but no structured code' | Out-Null }
     catch { $timeoutFailure = $_.Exception.Message }
     $timeoutJson = [regex]::Match($timeoutFailure, '\{.*\}')
     Assert $timeoutJson.Success 'Unclassified structured error still emits failure evidence'
     $timeoutDoc = ($timeoutJson.Value | ConvertFrom-Json).slot_failure
     Assert ($timeoutDoc.failure_class -ceq 'unknown' -and $timeoutDoc.failure_source -ceq 'structured_error_unclassified' -and $timeoutDoc.retry_policy.next_action -ceq 'diagnose_before_any_new_dispatch') 'Timeout text without a structured code stays unknown'
+    $global:ModelSlotAcceptanceFailureMode = 'process_timeout'
+    $callsBeforeTimeout = $global:ModelSlotAcceptanceCalls.Count
+    $processTimeoutFailure = ''
+    try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -TimeoutSeconds 1 -Prompt 'Simulated process timeout without replay' | Out-Null }
+    catch { $processTimeoutFailure = $_.Exception.Message }
+    $processTimeoutMatch = [regex]::Match($processTimeoutFailure, '\{.*\}')
+    Assert $processTimeoutMatch.Success 'Launcher timeout emits structured failure evidence'
+    $processTimeoutDoc = ($processTimeoutMatch.Value | ConvertFrom-Json).slot_failure
+    Assert ($processTimeoutDoc.failure_class -ceq 'launcher_timeout' -and $processTimeoutDoc.execution.timed_out -and $processTimeoutDoc.exit -eq 124 -and $processTimeoutDoc.retry_policy.next_action -ceq 'diagnose_before_any_new_dispatch') 'Launcher timeout requires diagnosis rather than alternate model dispatch'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq $callsBeforeTimeout + 1 -and -not $processTimeoutDoc.retry_policy.replay_allowed) 'Launcher timeout makes exactly one controlled call with no replay'
     $global:ModelSlotAcceptanceFailureMode = 'rate_limit'
     $budgetMessage = ''
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -ReselectionCount 1 -Prompt 'Budget must block before launch' | Out-Null }
+    try { & $acceptanceLauncher -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -ReselectionCount 1 -Prompt 'Budget must block before launch' | Out-Null }
     catch { $budgetMessage = $_.Exception.Message }
     Assert ($budgetMessage -like '*Reselection budget exhausted*' -and $budgetMessage -like '*no upstream request was sent*') 'Exhausted reselection budget blocks dispatch'
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Exhausted reselection budget makes no launch call'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 6) 'Exhausted reselection budget makes no launch call'
     $budgetJson = [regex]::Match($budgetMessage, '\{.*\}')
     Assert $budgetJson.Success 'Budget block emits structured evidence'
     $budget = ($budgetJson.Value | ConvertFrom-Json).reselection_budget_exhausted
     Assert ($budget.reselection_count -eq 1 -and $budget.max_explicit_reselections -eq 1 -and $budget.upstream_contacted -eq $false) 'Budget evidence records the hard stop'
     $global:ModelSlotAcceptanceExitCode = 0
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Explicit remaining read-only work' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 6) 'Parent can explicitly select the next supported model'
+    & $acceptanceLauncher -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Explicit remaining read-only work' | Out-Null
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 7) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and (($call -ccontains 'model_reasoning_effort="max"') -or ($call -ccontains 'model_reasoning_effort="xhigh"') -or ($call -ccontains 'model_reasoning_effort="high"'))) 'All launches preserve read-only, fixed tuple and no nested delegation'
         Assert ($call -ccontains 'model_providers.fixture_provider.request_max_retries=0' -and $call -ccontains 'model_providers.fixture_provider.stream_max_retries=0') 'Codex CLI retries are capped for the selected custom provider'
     }
+
+    $global:ModelSlotAcceptanceExitCode = 1
+    $global:ModelSlotAcceptanceFailureMode = 'mixed_events'
+    foreach ($failureCase in @(
+        @{ codes = @('service_unavailable','rate_limit'); class = 'rate_limit'; action = 'stop_and_wait_for_fresh_parent_selection' },
+        @{ codes = @('rate_limit','service_unavailable'); class = 'rate_limit'; action = 'stop_and_wait_for_fresh_parent_selection' },
+        @{ codes = @('service_unavailable','unauthorized'); class = 'auth_or_permission'; action = 'stop_and_operator_review' },
+        @{ codes = @('rate_limit','account_risk'); class = 'account_risk'; action = 'stop_and_operator_review' },
+        @{ codes = @('account_risk','rate_limit'); class = 'account_risk'; action = 'stop_and_operator_review' },
+        @{ codes = @('service_unavailable','tool_error'); class = 'tool_or_environment'; action = 'diagnose_before_any_new_dispatch' },
+        @{ codes = @('service_unavailable'); class = 'upstream_unavailable'; action = 'one_explicit_reselection_only' }
+    )) {
+        $global:ModelSlotAcceptanceErrorEvents = @($failureCase.codes | ForEach-Object { @{ type='turn.failed'; error=@{ code=$_ } } | ConvertTo-Json -Compress })
+        $beforeFailureCalls = $global:ModelSlotAcceptanceCalls.Count
+        $mixedFailure = ''
+        try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Classify complete failure stream without replay' | Out-Null }
+        catch { $mixedFailure = $_.Exception.Message }
+        $mixedDoc = (([regex]::Match($mixedFailure, '{.*}')).Value | ConvertFrom-Json).slot_failure
+        Assert ($mixedDoc.failure_class -ceq $failureCase.class -and $mixedDoc.retry_policy.next_action -ceq $failureCase.action) "Complete stream classification: $($failureCase.codes -join ',')"
+        Assert ($global:ModelSlotAcceptanceCalls.Count -eq ($beforeFailureCalls + 1)) 'Mixed failure events never cause a retry'
+    }
+    $global:ModelSlotAcceptanceExitCode = 0
+    $global:ModelSlotAcceptanceFailureMode = 'rate_limit'
 
     $profileConfigPath = Join-Path $testCodexHome 'glm53-flash-only.config.toml'
     $profileConfigText = @'
@@ -254,7 +314,7 @@ name = "profile-fixture"
 base_url = "https://profile-fixture.invalid/v1"
 '@
     [IO.File]::WriteAllText($profileConfigPath, $profileConfigText)
-    & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $profileProviderEvidencePath -Prompt 'Profile provider wins' | Out-Null
+    & $acceptanceLauncher -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $profileProviderEvidencePath -Prompt 'Profile provider wins' | Out-Null
     $profileCall = $global:ModelSlotAcceptanceCalls[$global:ModelSlotAcceptanceCalls.Count - 1]
     Assert ($profileCall -ccontains 'model_providers.fixture_profile_provider.request_max_retries=0' -and $profileCall -ccontains 'model_providers.fixture_profile_provider.stream_max_retries=0' -and -not ($profileCall -ccontains 'model_providers.fixture_provider.request_max_retries=0')) 'Profile provider takes precedence over base config for retry control'
 
@@ -262,19 +322,22 @@ base_url = "https://profile-fixture.invalid/v1"
     [IO.File]::WriteAllText($codexConfigPath, 'model = "gpt-6-luna"' + [Environment]::NewLine)
     $beforeRetryControlBlock = $global:ModelSlotAcceptanceCalls.Count
     $retryControlFailure = ''
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode native -Prompt 'Must block without retry control' | Out-Null }
+    try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode native -Prompt 'Must block without retry control' | Out-Null }
     catch { $retryControlFailure = $_.Exception.Message }
     Assert ($retryControlFailure -like '*retry_control_unavailable*' -and $retryControlFailure -like '*upstream_contacted*false*') 'Missing custom-provider retry control blocks before dispatch'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq $beforeRetryControlBlock) 'Retry-control blocker makes no model call'
     $overrideRetryControlFailure = ''
-    try { & (Join-Path $PSScriptRoot 'Start-ModelSlot.ps1') -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Provider override must block without retry control' | Out-Null }
+    try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Provider override must block without retry control' | Out-Null }
     catch { $overrideRetryControlFailure = $_.Exception.Message }
     Assert ($overrideRetryControlFailure -like '*retry_control_unavailable*' -and $overrideRetryControlFailure -like '*upstream_contacted*false*') 'Provider override also fails closed without retry control'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq $beforeRetryControlBlock) 'Provider-override retry-control blocker makes no model call'
 }
 finally {
     Remove-Item Function:/global:codex
-    Remove-Variable ModelSlotAcceptanceCalls,ModelSlotAcceptanceExitCode -Scope Global -ErrorAction SilentlyContinue
+    $acceptanceResolved = [IO.Path]::GetFullPath($acceptanceFixture)
+    if (-not $acceptanceResolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe acceptance fixture path.' }
+    Remove-Item -LiteralPath $acceptanceResolved -Recurse
+    Remove-Variable ModelSlotAcceptanceCalls,ModelSlotAcceptanceExitCode,ModelSlotAcceptanceFailureMode,ModelSlotAcceptanceErrorEvents -Scope Global -ErrorAction SilentlyContinue
     if ($null -eq $previousCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } else { $env:CODEX_HOME = $previousCodexHome }
     Remove-Item -LiteralPath $testCodexHome -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -282,22 +345,31 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('model-preset-test-'+[guid]::Ne
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
 try {
     foreach ($name in @('Set-ModelPreset.ps1','Start-ModelSlot.ps1','presets.json')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $fixture }
+    Set-ModelSlotFixtureRunner (Join-Path $fixture 'Start-ModelSlot.ps1')
     $target = Join-Path $fixture 'codex'
     [IO.Directory]::CreateDirectory($target) | Out-Null
     $cfg = Join-Path $target 'config.toml'
     $original = "model = `"old`"`r`nmodel_provider = `"preserve-provider`"`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`n"
     [IO.File]::WriteAllText($cfg,$original,[Text.UTF8Encoding]::new($true))
     $projectionCapabilityPath = Join-Path $fixture 'models-all-supported.json'
-    $projectionCatalog = @{ models = @(
+    $catalogBinding = @{
+        source = 'codex debug models'
+        codex_root = $target
+        observed_at = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o')
+        expires_at = [DateTimeOffset]::UtcNow.AddMinutes(3).ToString('o')
+    }
+    $projectionCatalog = $catalogBinding.Clone()
+    $projectionCatalog.models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
         @{ slug = 'claude-haiku-5-5'; supported_reasoning_levels = @(@{ effort = 'medium' }, @{ effort = 'high' }, @{ effort = 'xhigh' }) },
         @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
-    ) }
+    )
     [IO.File]::WriteAllText($projectionCapabilityPath, ($projectionCatalog | ConvertTo-Json -Depth 8))
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 6) 'Apply records the verified native tuple set'
+    Assert ($receipt.capability.codex_root -ceq $target -and $receipt.capability.evidence_kind -ceq 'bound_snapshot' -and ([DateTimeOffset]$receipt.capability.observed_at) -eq ([DateTimeOffset]$catalogBinding.observed_at)) 'Capability receipt preserves the bound snapshot identity'
     Assert (-not $receipt.host_loaded -and $receipt.execution_boundary -like '*named model-pinned native slots and tuple roles*') 'Apply records the native projection boundary without claiming host load'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
     $projectedConfig = Get-Content -LiteralPath $cfg -Raw
@@ -438,11 +510,12 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
     $catalogPath = Join-Path $fixture 'models.json'
-    $catalog = @{ models = @(
+    $catalog = $catalogBinding.Clone()
+    $catalog.models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'max' }) }
-    ) }
+    )
     [IO.File]::WriteAllText($catalogPath, ($catalog | ConvertTo-Json -Depth 8))
     $blockedProjectionBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $blockedProjectionMessage = ''
@@ -455,6 +528,8 @@ try {
     [IO.Directory]::CreateDirectory($providerExecutionHome) | Out-Null
     [IO.File]::WriteAllText((Join-Path $providerExecutionHome 'config.toml'), $codexConfigText)
     $env:CODEX_HOME = $providerExecutionHome
+    $catalog.codex_root = $providerExecutionHome
+    [IO.File]::WriteAllText($catalogPath, ($catalog | ConvertTo-Json -Depth 8))
     $global:CapabilityCalls = [Collections.Generic.List[object]]::new()
     function global:codex {
         $global:CapabilityCalls.Add(@($args))
@@ -464,7 +539,7 @@ try {
     try {
         $blocked = $false
         try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot standard_review -Model glm-5.3-flash -Effort xhigh -CapabilityProbePath $catalogPath -Prompt 'blocked native tuple' | Out-Null }
-        catch { $blocked = $_.Exception.Message -like '*no model request was sent*' }
+        catch { $blocked = $_.Exception.Message -like '*no model request was sent*' -and $_.Exception.Message -like '*tuple_unsupported*' }
         Assert $blocked 'Unsupported native tuple is blocked before upstream contact'
         Assert ($global:CapabilityCalls.Count -eq 0) 'Capability block makes no launch call'
         $missingEvidence = $false
