@@ -1,6 +1,6 @@
 {
   "schema_version": 6,
-  "default_preset": "glm53_flash_only",
+  "default_preset": "gpt6_luna_only",
   "active_presets": [
     "gpt6_luna_only",
     "glm53_flash_only",
@@ -21,13 +21,14 @@
   ],
   "aliases": {},
   "auto_routes": {
-    "quick_triage": "glm53_flash_only",
-    "routine_maintenance": "glm53_flash_only",
-    "standard_review": "claude_haiku55_only",
-    "bounded_implementation": "glm53_flash_only",
-    "deep_investigation_or_implementation": "gpt6_luna_only",
-    "test_execution": "glm53_flash_only",
-    "documentation_review": "gemini38_flash_only",
+    "quick_triage": "gpt6_luna_only",
+    "routine_maintenance": "gpt6_luna_only",
+    "standard_review": "gpt6_luna_only",
+    "bounded_implementation": "gpt6_luna_only",
+    "deep_investigation": "gpt6_luna_only",
+    "deep_implementation": "gpt6_luna_only",
+    "test_execution": "gpt6_luna_only",
+    "documentation_review": "gpt6_luna_only",
     "architecture_review": "gpt6_luna_only"
   },
   "dispatch_policy": {
@@ -44,7 +45,8 @@
     "routine_maintenance",
     "standard_review",
     "bounded_implementation",
-    "deep_investigation_or_implementation",
+    "deep_investigation",
+    "deep_implementation",
     "test_execution",
     "documentation_review",
     "architecture_review"
@@ -52,16 +54,18 @@
   "read_only_slots": [
     "quick_triage",
     "standard_review",
+    "deep_investigation",
     "documentation_review",
     "architecture_review"
   ],
   "fallbacks": {
     "quick_triage": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "routine_maintenance": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "medium" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "standard_review": [
@@ -73,21 +77,25 @@
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
-    "deep_investigation_or_implementation": [
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
-    ],
-    "test_execution": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
-    ],
-    "documentation_review": [
+    "deep_investigation": [
       { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
     ],
+    "deep_implementation": [
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+    ],
+    "test_execution": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "medium" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+    ],
+    "documentation_review": [
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+    ],
     "architecture_review": [
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
+      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ]
   },
   "presets": {
@@ -106,7 +114,8 @@
         "routine_maintenance": 0,
         "standard_review": 0,
         "bounded_implementation": 0,
-        "deep_investigation_or_implementation": 0,
+        "deep_investigation": 0,
+        "deep_implementation": 0,
         "test_execution": 0,
         "documentation_review": 0,
         "architecture_review": 0
@@ -136,7 +145,8 @@
         "architecture_review": 0,
         "documentation_review": 0,
         "bounded_implementation": 0,
-        "deep_investigation_or_implementation": 0,
+        "deep_investigation": 0,
+        "deep_implementation": 0,
         "standard_review": 0,
         "quick_triage": 0,
         "test_execution": 0
@@ -162,13 +172,14 @@
         }
       ],
       "slot_map": {
-        "quick_triage": 2,
-        "routine_maintenance": 2,
+        "quick_triage": 0,
+        "routine_maintenance": 1,
         "standard_review": 2,
         "bounded_implementation": 2,
-        "deep_investigation_or_implementation": 2,
-        "test_execution": 2,
-        "documentation_review": 2,
+        "deep_investigation": 2,
+        "deep_implementation": 2,
+        "test_execution": 1,
+        "documentation_review": 1,
         "architecture_review": 2
       }
     },
@@ -187,7 +198,8 @@
         "routine_maintenance": 0,
         "standard_review": 0,
         "bounded_implementation": 0,
-        "deep_investigation_or_implementation": 0,
+        "deep_investigation": 0,
+        "deep_implementation": 0,
         "test_execution": 0,
         "documentation_review": 0,
         "architecture_review": 0
