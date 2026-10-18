@@ -73,7 +73,7 @@ Describe 'Native agent bridge' {
         }
     }
 
-    It 'ships Claude subagent templates that keep the ownership marker and pin no route or credential' {
+    It 'ships Claude subagent templates that keep the ownership marker and pin only the strict subagent tuple' {
         foreach ($name in @('design-griller', 'cold-capability-runner')) {
             $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\claude\{0}.md" -f $name)
 
@@ -82,7 +82,9 @@ Describe 'Native agent bridge' {
             $template | Should -Match ("(?m)^name: {0}$" -f [regex]::Escape($name))
             $template | Should -Match '(?m)^description: '
             $template | Should -Match '(?m)^tools: '
-            $template | Should -Not -Match '(?m)^(model|effort|provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:'
+            $template | Should -Match '(?m)^model: claude-haiku-5-5$'
+            $template | Should -Match '(?m)^effort: (medium|high|xhigh)$'
+            $template | Should -Not -Match '(?m)^(provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:'
         }
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\claude\cold-capability-runner.md') | Should -Match '(?m)^tools: Read, Glob, Grep$'
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\claude\design-griller.md') | Should -Match '(?m)^tools: Read, Glob, Grep, WebFetch, WebSearch$'
@@ -100,6 +102,16 @@ Describe 'Native agent bridge' {
         $template = Get-BridgeTemplateText 'overrides/resources/native-agent-bridge/claude/design-griller.md'
         $template = $template.Replace('name: design-griller', "name: design-griller`n$Field")
         { Assert-ClaudeNativeAgentTemplateContent $template 'fixture.md' 'design-griller' } | Should -Throw '*unsupported frontmatter*'
+    }
+
+    It 'rejects Claude template pins outside the strict subagent allowlist (<Pin>)' -ForEach @(@{ Pin = 'model: claude-sonnet-5'; Reason = '*outside the subagent allowlist*' }, @{ Pin = 'model: claude-haiku-5-5'; Reason = $null }, @{ Pin = 'effort: max'; Reason = '*outside the subagent allowlist*' }, @{ Pin = 'effort: low'; Reason = '*outside the subagent allowlist*' }) {
+        $template = Get-BridgeTemplateText 'overrides/resources/native-agent-bridge/claude/design-griller.md'
+        $template = $template.Replace('name: design-griller', "name: design-griller`n$Pin")
+        if ($null -eq $Reason) {
+            { Assert-ClaudeNativeAgentTemplateContent $template 'fixture.md' 'design-griller' } | Should -Not -Throw
+        } else {
+            { Assert-ClaudeNativeAgentTemplateContent $template 'fixture.md' 'design-griller' } | Should -Throw $Reason
+        }
     }
 
     It 'validates the Claude bridge block against ~/.claude/agents only' {
