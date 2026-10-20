@@ -31,13 +31,12 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $slots = @($policy.slots)
 $expected = @{
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
-    claude_haiku55_only = @{ menu = @(@('claude-haiku-5-5','medium'),@('claude-haiku-5-5','high'),@('claude-haiku-5-5','xhigh')); map = @{quick_triage=0;routine_maintenance=1;standard_review=1;bounded_implementation=2;deep_investigation=2;deep_implementation=2;test_execution=1;documentation_review=1;architecture_review=2} }
     gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
 }
-Assert ($policy.presets.Count -eq 4 -and $slots.Count -gt 3) 'Four single-tier models and multiple slots'
+Assert ($policy.presets.Count -eq 3 -and $slots.Count -gt 3) 'Three single-tier models and multiple slots'
 Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -in $policy.presets['glm53_flash_only'].hosts)) 'GLM host facets'
-Assert (('codex' -in $policy.presets['claude_haiku55_only'].hosts) -and ('claude' -in $policy.presets['claude_haiku55_only'].hosts)) 'Haiku declares the codex and claude facets'
+Assert (-not $policy.presets.Contains('claude_haiku55_only')) 'Retired Claude Haiku preset is absent from the pool'
 Assert (@($policy.presets['gemini38_flash_only'].hosts).Count -eq 1 -and 'codex' -in $policy.presets['gemini38_flash_only'].hosts) 'Gemini stays codex-only'
 $zcodeResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset glm53_flash_only | ConvertFrom-Json -AsHashtable
 Assert ($zcodeResolved.host -ceq 'zcode' -and $zcodeResolved.routes.quick_triage.model -ceq 'glm-5.3-flash' -and $zcodeResolved.routes.quick_triage.effort -ceq 'max') 'ZCode keeps the native GLM max facet'
@@ -46,12 +45,9 @@ Assert (@($zcodeResolved.enabled_routes).Count -eq 1) 'ZCode exposes no other mo
 $zcodeAutoResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode | ConvertFrom-Json -AsHashtable
 Assert ($zcodeAutoResolved.auto_routing -and @($zcodeAutoResolved.active_presets).Count -eq 1 -and $zcodeAutoResolved.active_presets[0] -ceq 'glm53_flash_only') 'ZCode automatic routing narrows the pool to its native GLM facet'
 foreach ($slot in $slots) { Assert ($zcodeAutoResolved.routes[$slot].model -ceq 'glm-5.3-flash' -and $zcodeAutoResolved.routes[$slot].effort -ceq 'max') "ZCode maps the supported native tuple to $slot" }
-$claudeAutoResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost claude | ConvertFrom-Json -AsHashtable
-Assert ($claudeAutoResolved.auto_routing -and @($claudeAutoResolved.active_presets).Count -eq 1 -and $claudeAutoResolved.active_presets[0] -ceq 'claude_haiku55_only') 'Claude automatic routing narrows the pool to its native Haiku facet'
-foreach ($slot in $slots) {
-    $haikuPair = $expected.claude_haiku55_only.menu[$expected.claude_haiku55_only.map[$slot]]
-    Assert ($claudeAutoResolved.routes[$slot].model -ceq $haikuPair[0] -and $claudeAutoResolved.routes[$slot].effort -ceq $haikuPair[1]) "Claude maps the supported Haiku tuple to $slot"
-}
+$claudeHostRejected = $false
+try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost claude | Out-Null } catch { $claudeHostRejected = $_.Exception.Message -like '*No active preset is available on host claude*' }
+Assert $claudeHostRejected 'Retired Claude host facet fails closed instead of resolving a Haiku pool'
 foreach ($foreignPreset in @('claude_haiku55_only','gemini38_flash_only')) {
     $zcodeForeignRejected = $false
     try { & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset $foreignPreset | Out-Null } catch { $zcodeForeignRejected = $true }
@@ -66,16 +62,15 @@ foreach ($id in $expected.Keys) {
 }
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
-Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 6) 'Four presets expose six enabled codex tuples'
-$expectedCodexTuples = @('gpt-6-luna/max','glm-5.3-flash/xhigh','claude-haiku-5-5/medium','claude-haiku-5-5/high','claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high') | Sort-Object
-Assert (((@($defaultResolved.enabled_routes | ForEach-Object { "$($_.model)/$($_.effort)" } | Sort-Object) -join ',') -ceq ($expectedCodexTuples -join ','))) 'Codex exposes exactly the six approved tuples'
-Assert (@($claudeAutoResolved.enabled_routes).Count -eq 3 -and @($claudeAutoResolved.enabled_routes | Where-Object { $_.model -cne 'claude-haiku-5-5' -or $_.effort -cnotin @('medium','high','xhigh') }).Count -eq 0) 'Claude exposes only the three approved Haiku tuples'
-Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 4) 'Automatic routes use all four requested model families'
-Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' } | ForEach-Object { $_.effort }) -join ',') -ceq 'medium,high,xhigh') 'Haiku exposes the three-rung menu in effort order'
+Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Three presets expose three enabled codex tuples'
+$expectedCodexTuples = @('gpt-6-luna/max','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high') | Sort-Object
+Assert (((@($defaultResolved.enabled_routes | ForEach-Object { "$($_.model)/$($_.effort)" } | Sort-Object) -join ',') -ceq ($expectedCodexTuples -join ','))) 'Codex exposes exactly the three approved tuples'
+Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 3) 'Automatic routes use all three pool model families'
+Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' })).Count -eq 0) 'Retired Haiku tuple is absent from enabled routes'
 $autoRoutes = @{
-    quick_triage = 'claude_haiku55_only'
+    quick_triage = 'gemini38_flash_only'
     routine_maintenance = 'glm53_flash_only'
-    standard_review = 'claude_haiku55_only'
+    standard_review = 'gemini38_flash_only'
     bounded_implementation = 'glm53_flash_only'
     deep_investigation = 'gpt6_luna_only'
     deep_implementation = 'gemini38_flash_only'
@@ -85,21 +80,21 @@ $autoRoutes = @{
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
 $reselection = $defaultResolved.reselection
-Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 4) 'Reselection contract derives from the active pool'
+Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'xhigh') 'Codex GLM menu uses the exact native xhigh tuple'
 Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.Contains('risk') -and $reselection.prohibition.Contains('never')) 'Reselection prohibition pins rate-limit and risk semantics'
 Assert ($defaultResolved.dispatch_policy.max_controlled_launcher_invocations_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.PSObject.Properties.Name -notcontains 'max_upstream_attempts_per_bounded_task' -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'Controlled launcher safety policy'
-Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 4) 'Pool includes distinct model families'
+Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 3) 'Pool includes distinct model families'
 Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
 Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
-$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,claude_haiku55_only | ConvertFrom-Json
+$selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,gemini38_flash_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
-Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 4) 'AvailablePreset retains the whole selected pool including haiku rungs'
+Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
 Assert ([int]$policy.schema_version -eq 7 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v7 declares fallbacks and controlled-launch policy for every slot'
-Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
+Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'glm-5.3-flash/xhigh,gemini-3.8-flash-high/high') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
-Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'claude-haiku-5-5/xhigh') 'Alternates stay inside the active pool and exclude the substituted route'
-$cliSelection = & $acceptanceLauncher -Slot deep_investigation -AvailablePreset 'glm53_flash_only,claude_haiku55_only' -Plan | ConvertFrom-Json
+Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high') 'Alternates stay inside the active pool and exclude the substituted route'
+$cliSelection = & $acceptanceLauncher -Slot deep_investigation -AvailablePreset 'glm53_flash_only,gemini38_flash_only' -Plan | ConvertFrom-Json
 Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI chooses the first available preset when the deep investigation route (Luna) is excluded'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
@@ -136,9 +131,12 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='gpt-6-luna'},
     @{Slot='standard_review';Model='claude-haiku-5-5';Effort='low'},
     @{Slot='standard_review';Model='gpt-6-luna';Effort='xhigh'},
+    @{Slot='standard_review';Model='claude-haiku-5-5';Effort='high'},
+    @{Slot='standard_review';Model='claude-haiku-5-5';Effort='xhigh'},
     @{Slot='unknown_slot'},
     @{Slot='deep_investigation_or_implementation'},
     @{Slot='standard_review';Preset='gpt_terra_only'},
+    @{Slot='standard_review';Preset='claude_haiku55_only'},
     @{Slot='standard_review';AvailablePreset=@('glm53_flash_only');Model='gpt-6-luna';Effort='max'}
 )) {
     $rejected = $false
@@ -162,7 +160,6 @@ $providerEvidence = [ordered]@{
     tuples = @(
         @{ model = 'gpt-6-luna'; effort = 'max'; status = 'verified' },
         @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
-        @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; status = 'verified' },
         @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
     )
 }
@@ -226,10 +223,9 @@ try {
     Assert ($providerMismatchFailure -like '*provider_mismatch*' -and $providerMismatchFailure -like '*upstream_contacted*false*') 'Provider evidence must match the effective Codex provider'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 0) 'Provider mismatch blocks before CLI launch'
     foreach ($failedRoute in @(
-            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('claude-haiku-5-5/xhigh','gemini-3.8-flash-high/high'); lower = @() },
-            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; fallback = @('gemini-3.8-flash-high/high'); lower = @('claude-haiku-5-5/high','claude-haiku-5-5/medium') },
-            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('claude-haiku-5-5/xhigh'); lower = @() }
+            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','gemini-3.8-flash-high/high'); lower = @() },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('gemini-3.8-flash-high/high'); lower = @() },
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('glm-5.3-flash/xhigh'); lower = @() }
     )) {
         $failureMessage = ''
         try { & $acceptanceLauncher -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
@@ -245,7 +241,7 @@ try {
         Assert ((@($failure.reselection.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq ($failedRoute.fallback -join ',')) 'Declared alternates exclude the failed tuple and keep policy order'
         Assert (-not ($failure.reselection.PSObject.Properties.Name -ccontains 'cross_preset')) 'Implicit cross-preset list is retired'
     }
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 4) 'Failures never automatically retry'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 3) 'Failures never automatically retry'
     $global:ModelSlotAcceptanceFailureMode = 'timeout_message_only'
     $timeoutFailure = ''
     try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Output contains timeout text but no structured code' | Out-Null }
@@ -269,14 +265,14 @@ try {
     try { & $acceptanceLauncher -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -ReselectionCount 1 -Prompt 'Budget must block before launch' | Out-Null }
     catch { $budgetMessage = $_.Exception.Message }
     Assert ($budgetMessage -like '*Reselection budget exhausted*' -and $budgetMessage -like '*no upstream request was sent*') 'Exhausted reselection budget blocks dispatch'
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 6) 'Exhausted reselection budget makes no launch call'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 5) 'Exhausted reselection budget makes no launch call'
     $budgetJson = [regex]::Match($budgetMessage, '\{.*\}')
     Assert $budgetJson.Success 'Budget block emits structured evidence'
     $budget = ($budgetJson.Value | ConvertFrom-Json).reselection_budget_exhausted
     Assert ($budget.reselection_count -eq 1 -and $budget.max_explicit_reselections -eq 1 -and $budget.upstream_contacted -eq $false) 'Budget evidence records the hard stop'
     $global:ModelSlotAcceptanceExitCode = 0
     & $acceptanceLauncher -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Explicit remaining read-only work' | Out-Null
-    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 7) 'Parent can explicitly select the next supported model'
+    Assert ($global:ModelSlotAcceptanceCalls.Count -eq 6) 'Parent can explicitly select the next supported model'
     foreach ($call in $global:ModelSlotAcceptanceCalls) {
         Assert ($call -ccontains 'read-only' -and $call -ccontains 'agents.enabled=false' -and (($call -ccontains 'model_reasoning_effort="max"') -or ($call -ccontains 'model_reasoning_effort="xhigh"') -or ($call -ccontains 'model_reasoning_effort="high"'))) 'All launches preserve read-only, fixed tuple and no nested delegation'
         Assert ($call -ccontains 'model_providers.fixture_provider.request_max_retries=0' -and $call -ccontains 'model_providers.fixture_provider.stream_max_retries=0') 'Codex CLI retries are capped for the selected custom provider'
@@ -362,13 +358,12 @@ try {
     $projectionCatalog.models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
-        @{ slug = 'claude-haiku-5-5'; supported_reasoning_levels = @(@{ effort = 'medium' }, @{ effort = 'high' }, @{ effort = 'xhigh' }) },
         @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
     )
     [IO.File]::WriteAllText($projectionCapabilityPath, ($projectionCatalog | ConvertTo-Json -Depth 8))
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
-    Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 6) 'Apply records the verified native tuple set'
+    Assert ($receipt.capability.status -ceq 'native_supported' -and @($receipt.capability.tuples).Count -eq 3) 'Apply records the verified native tuple set'
     Assert ($receipt.capability.codex_root -ceq $target -and $receipt.capability.evidence_kind -ceq 'bound_snapshot' -and ([DateTimeOffset]$receipt.capability.observed_at) -eq ([DateTimeOffset]$catalogBinding.observed_at)) 'Capability receipt preserves the bound snapshot identity'
     Assert (-not $receipt.host_loaded -and $receipt.execution_boundary -like '*named model-pinned native slots and tuple roles*') 'Apply records the native projection boundary without claiming host load'
     Assert ((Get-Content -LiteralPath $cfg -Raw).Contains('preserve-provider')) 'Provider changed'
@@ -382,19 +377,18 @@ try {
     $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
     $projectedAgentTables = @([regex]::Matches($projectedConfig, '(?m)^\[agents\.([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedCodexTuples.Count)) 'Shared Codex config registers all nine task slots and six exact-tuple roles'
+    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedCodexTuples.Count)) 'Shared Codex config registers all nine task slots and three exact-tuple roles'
     foreach ($slot in $slots) { Assert ($projectedConfig.Contains("[agents.$slot]")) "Shared Codex config registers task slot $slot" }
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
-    $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','claude_haiku55_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $nonLunaConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($nonLunaConfig.Contains('enabled = true') -and -not $nonLunaConfig.Contains('# model-orchestration-native-agents-enabled-prior=') -and $nonLunaConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $nonLunaConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'Non-Luna pool keeps native agents enabled and defaults to its routine slot tuple'
-    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq ($slots.Count + $expectedCodexTuples.Count - 1)) 'Non-Luna pool projects its five exact tuple roles and all task slots'
+    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq ($slots.Count + $expectedCodexTuples.Count - 1)) 'Non-Luna pool projects its two exact tuple roles and all task slots'
     $nonLunaProfileDefaults = @{
         'glm53-flash-only' = @{ model = 'glm-5.3-flash'; effort = 'xhigh' }
-        'claude-haiku55-only' = @{ model = 'claude-haiku-5-5'; effort = 'high' }
         'gemini38-flash-only' = @{ model = 'gemini-3.8-flash-high'; effort = 'high' }
     }
     foreach ($profileName in $nonLunaProfileDefaults.Keys) {
@@ -402,7 +396,7 @@ try {
         $profileDefault = $nonLunaProfileDefaults[$profileName]
         Assert ($profileConfigText.Contains("default_subagent_model = `"$($profileDefault.model)`"") -and $profileConfigText.Contains("default_subagent_reasoning_effort = `"$($profileDefault.effort)`"") -and -not $profileConfigText.Contains('enabled = false')) "Profile defaults to its native routine tuple and keeps delegation enabled: $profileName"
     }
-    foreach ($profileId in @('glm53_flash_only','claude_haiku55_only','gemini38_flash_only')) {
+    foreach ($profileId in @('glm53_flash_only','gemini38_flash_only')) {
         $profilePolicy = $policy.presets[$profileId]
         $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
         Assert (-not $profileConfigText.Contains('enabled = false')) "Preset profile leaves native delegation enabled: $profileId"
@@ -482,7 +476,7 @@ try {
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($subagentPlan.scope -ceq 'subagents_only' -and (Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent Plan is read-only'
-    Assert ($subagentPlan.native_agent_policy.enabled -and $subagentPlan.native_agent_policy.default_slot -ceq 'routine_maintenance' -and $subagentPlan.native_agent_policy.default_model -ceq 'glm-5.3-flash' -and $subagentPlan.native_agent_policy.default_effort -ceq 'xhigh' -and @($subagentPlan.native_agent_policy.tuple_roles).Count -eq 6) 'Plan describes all six native tuple roles and its routine-slot default'
+    Assert ($subagentPlan.native_agent_policy.enabled -and $subagentPlan.native_agent_policy.default_slot -ceq 'routine_maintenance' -and $subagentPlan.native_agent_policy.default_model -ceq 'glm-5.3-flash' -and $subagentPlan.native_agent_policy.default_effort -ceq 'xhigh' -and @($subagentPlan.native_agent_policy.tuple_roles).Count -eq 3) 'Plan describes all three native tuple roles and its routine-slot default'
     $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
@@ -583,8 +577,9 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
-    # Haiku's allowed tuples are medium/high/xhigh; appending medium after xhigh violates the order check with an allowed tuple.
-    $descendingPolicy.presets.claude_haiku55_only.menu += @{model='claude-haiku-5-5';effort='medium'}
+    # No active model exposes two allowlisted efforts any more; appending the same single
+    # allowlisted tuple still violates the strict-increase order check with allowed tuples.
+    $descendingPolicy.presets.glm53_flash_only.menu += @{model='glm-5.3-flash';effort='xhigh'}
     [IO.File]::WriteAllText($fixturePolicyPath, ($descendingPolicy | ConvertTo-Json -Depth 12))
     $orderRejected = $false
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null }
@@ -610,10 +605,10 @@ try {
     try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | Out-Null } catch { $threw = $true }
     Assert $threw 'Out-of-range slot index must fail closed'
     $hostMenuPolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
-    $hostMenus = if ($hostMenuPolicy.presets['claude_haiku55_only']['host_menus']) { $hostMenuPolicy.presets['claude_haiku55_only']['host_menus'] } else { @{} }
-    $hostMenus['codex'] = @(@{ model = 'claude-haiku-5-5'; effort = 'medium' }, @{ model = 'claude-haiku-5-5'; effort = 'xhigh' })
-    $hostMenuPolicy.presets['claude_haiku55_only']['host_menus'] = $hostMenus
-    foreach ($slot in $slots) { $hostMenuPolicy.presets['claude_haiku55_only'].slot_map[$slot] = 0 }
+    $hostMenus = if ($hostMenuPolicy.presets['glm53_flash_only']['host_menus']) { $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] } else { @{} }
+    $hostMenus['codex'] = @(@{ model = 'glm-5.3-flash'; effort = 'xhigh' })
+    $hostMenuPolicy.presets['glm53_flash_only']['host_menus'] = $hostMenus
+    foreach ($slot in $slots) { $hostMenuPolicy.presets['glm53_flash_only'].slot_map[$slot] = 0 }
     [IO.File]::WriteAllText($fixturePolicyPath, ($hostMenuPolicy | ConvertTo-Json -Depth 12))
     $hostMenuEvidencePath = Join-Path $fixture 'models-host-menu-evidence.json'
     $hostMenuEvidence = [ordered]@{
@@ -624,8 +619,7 @@ try {
         expires_at = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o')
         source = 'test-host-menu-reselection'
         tuples = @(
-            @{ model = 'claude-haiku-5-5'; effort = 'medium'; status = 'verified' },
-            @{ model = 'claude-haiku-5-5'; effort = 'xhigh'; status = 'verified' },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
             @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
         )
     }
@@ -640,11 +634,12 @@ try {
     }
     try {
         $hostMenuFailure = ''
-        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot architecture_review -Model claude-haiku-5-5 -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $hostMenuEvidencePath -Prompt 'Host facet failure document' | Out-Null }
+        try { & (Join-Path $fixture 'Start-ModelSlot.ps1') -Slot architecture_review -Model glm-5.3-flash -Effort xhigh -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $hostMenuEvidencePath -Prompt 'Host facet failure document' | Out-Null }
         catch { $hostMenuFailure = $_.Exception.Message }
         Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') "Host-menu failure returns control without replay: $hostMenuFailure"
         $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
-        Assert (@($hostMenuDoc.reselection.within_preset_lower | ForEach-Object { "$($_.model)/$($_.effort)" }) -ccontains 'claude-haiku-5-5/medium') 'Failure reselection menus follow the codex host menu'
+        Assert (@($hostMenuDoc.reselection.within_preset_lower).Count -eq 0) 'Single-rung host menu leaves no within-preset downgrade'
+        Assert ((@($hostMenuDoc.reselection.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high') 'Failure reselection menus follow the codex host menu'
         Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
     }
     finally {
@@ -657,7 +652,7 @@ try {
         @{ name = 'missing slot declaration'; mutate = { param($p) $p.fallbacks.Remove('documentation_review') } },
         @{ name = 'alternate repeats the own route'; mutate = { param($p) $p.fallbacks.architecture_review = @(@{ preset = 'gpt6_luna_only'; model = 'gpt-6-luna'; effort = 'max' }) } },
         @{ name = 'tuple absent from its preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'glm53_flash_only'; model = 'glm-5.3-flash'; effort = 'high' }) } },
-        @{ name = 'duplicate alternate'; mutate = { param($p) $p.fallbacks.standard_review = @(@{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }, @{ preset = 'claude_haiku55_only'; model = 'claude-haiku-5-5'; effort = 'high' }) } },
+        @{ name = 'duplicate alternate'; mutate = { param($p) $p.fallbacks.standard_review = @(@{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' }, @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' }) } },
         @{ name = 'unknown preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'gpt61_sol_only'; model = 'gpt-6.1-sol'; effort = 'max' }) } },
         @{ name = 'more than three alternates'; mutate = { param($p) $p.fallbacks.test_execution = @(1..4 | ForEach-Object { @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' } }) } },
         @{ name = 'menu tuple outside the strict subagent allowlist'; mutate = { param($p) $p.presets.gpt6_luna_only.menu = @(@{ model = 'gpt-6-luna'; effort = 'xhigh' }) } },
@@ -676,7 +671,7 @@ try {
         @{ name = 'wrong Luna effort'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].effort = 'high' } },
         @{ name = 'Codex GLM max'; mutate = { param($p) $p.presets.glm53_flash_only.menu[0].effort = 'max' } },
         @{ name = 'ZCode GLM xhigh'; mutate = { param($p) $p.presets.glm53_flash_only.host_menus.zcode[0].effort = 'xhigh' } },
-        @{ name = 'Haiku low effort'; mutate = { param($p) $p.presets.claude_haiku55_only.menu[0].effort = 'low' } },
+        @{ name = 'retired Haiku model'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].model = 'claude-haiku-5-5' } },
         @{ name = 'bare Gemini family name'; mutate = { param($p) $p.presets.gemini38_flash_only.menu[0].model = 'gemini-3.8-flash' } }
     )
     foreach ($allowlistCase in $allowlistCases) {

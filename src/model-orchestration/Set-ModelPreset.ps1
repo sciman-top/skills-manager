@@ -17,16 +17,8 @@ $allowedModelEffortByHost = [ordered]@{
     codex = @(
         'gpt-6-luna|max'
         'glm-5.3-flash|xhigh'
-        'claude-haiku-5-5|medium'
-        'claude-haiku-5-5|high'
-        'claude-haiku-5-5|xhigh'
         # The current Codex native catalog exposes this Gemini Flash model ID with the high tier in its slug.
         'gemini-3.8-flash-high|high'
-    )
-    claude = @(
-        'claude-haiku-5-5|medium'
-        'claude-haiku-5-5|high'
-        'claude-haiku-5-5|xhigh'
     )
     zcode = @('glm-5.3-flash|max')
 }
@@ -350,7 +342,7 @@ $slotGuidance = @{
 }
 $parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
-$nativeCodexTuples = @('gpt-6-luna|max','glm-5.3-flash|xhigh','claude-haiku-5-5|medium','claude-haiku-5-5|high','claude-haiku-5-5|xhigh','gemini-3.8-flash-high|high')
+$nativeCodexTuples = @('gpt-6-luna|max','glm-5.3-flash|xhigh','gemini-3.8-flash-high|high')
 function Test-NativeCodexTuple($Entry) { return ("$($Entry.model)|$($Entry.effort)" -cin $nativeCodexTuples) }
 $nativeAgentAvailable = @($enabledRoutes | Where-Object { Test-NativeCodexTuple $_ }).Count -gt 0
 foreach ($entry in $enabledRoutes) {

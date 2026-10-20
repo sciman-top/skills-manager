@@ -38,66 +38,13 @@ Describe 'Independent model preset behavior' {
         $LASTEXITCODE | Should -Be 0 -Because ($output -join "`n")
     }
 
-    It 'plans, creates and rolls back a first-run Claude configuration' {
+    It 'fails closed for the retired Claude host facet without writing host files' {
         $scriptPath = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'src/model-orchestration/Set-ModelPreset.ps1'
-        $claudeRoot = Join-Path $TestDrive 'claude-first-run'
-        $plan = & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Plan -SubagentsOnly | ConvertFrom-Json
-        $plan.files.Count | Should -Be 10
-        Test-Path -LiteralPath $claudeRoot | Should -BeFalse
-        $applied = & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Apply -SubagentsOnly | ConvertFrom-Json
-        $settingsPath = Join-Path $claudeRoot 'settings.json'
-        Test-Path -LiteralPath $settingsPath | Should -BeTrue
-        (& $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Plan -SubagentsOnly | ConvertFrom-Json).files.Count | Should -Be 0
-        $legacyPath = Join-Path $claudeRoot 'agents/standard-review.md'
-        $legacyText = [IO.File]::ReadAllText($legacyPath).Replace("`n<!-- skills-manager:model-orchestration:claude -->`n", '')
-        [IO.File]::WriteAllText($legacyPath, $legacyText)
-        $adopted = & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Apply -SubagentsOnly | ConvertFrom-Json
-        $adopted.changed | Should -Be 1
-        & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Rollback -ReceiptPath $adopted.receipt | Out-Null
-        [IO.File]::ReadAllText($legacyPath) | Should -BeExactly $legacyText
-        # Restore the first projection's exact bytes before rolling it back.
-        & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Apply -SubagentsOnly | Out-Null
-        & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Rollback -ReceiptPath $applied.receipt | Out-Null
-        Test-Path -LiteralPath $settingsPath | Should -BeFalse
-        @(Get-ChildItem -LiteralPath (Join-Path $claudeRoot 'agents') -File).Count | Should -Be 0
-    }
-
-    It 'refuses an unowned Claude agent before writing settings or agents' {
-        $scriptPath = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'src/model-orchestration/Set-ModelPreset.ps1'
-        $claudeRoot = Join-Path $TestDrive 'claude-collision'
-        $agentRoot = Join-Path $claudeRoot 'agents'
-        New-Item -ItemType Directory -Path $agentRoot | Out-Null
-        $agentPath = Join-Path $agentRoot 'standard-review.md'
-        $userText = "---`nname: standard-review`ndescription: User agent`n---`nPreserve this custom agent.`n"
-        [IO.File]::WriteAllText($agentPath, $userText)
+        $claudeRoot = Join-Path $TestDrive 'claude-retired'
         foreach ($action in @('Plan','Apply')) {
-            { & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action $action -SubagentsOnly } | Should -Throw
-            [IO.File]::ReadAllText($agentPath) | Should -BeExactly $userText
-            Test-Path -LiteralPath (Join-Path $claudeRoot 'settings.json') | Should -BeFalse
-            @(Get-ChildItem -LiteralPath $agentRoot -File).Count | Should -Be 1
+            { & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action $action -SubagentsOnly } | Should -Throw '*No active preset is available on host claude*'
+            Test-Path -LiteralPath $claudeRoot | Should -BeFalse
         }
-    }
-
-    It 'preserves parent settings and does not introduce a global effort override' {
-        $scriptPath = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'src/model-orchestration/Set-ModelPreset.ps1'
-        $claudeRoot = Join-Path $TestDrive 'claude-parent'
-        New-Item -ItemType Directory -Path $claudeRoot | Out-Null
-        $settingsPath = Join-Path $claudeRoot 'settings.json'
-        $original = '{"model":"parent-model","effortLevel":"medium","env":{"CUSTOM_VALUE":"preserve"}}'
-        [IO.File]::WriteAllText($settingsPath, $original)
-        $applied = & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Apply -SubagentsOnly | ConvertFrom-Json
-        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
-        $settings.model | Should -Be 'parent-model'
-        $settings.effortLevel | Should -Be 'medium'
-        $settings.env.CUSTOM_VALUE | Should -Be 'preserve'
-        $settings.env.Contains('CLAUDE_CODE_EFFORT_LEVEL') | Should -BeFalse
-        & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Rollback -ReceiptPath $applied.receipt | Out-Null
-        [IO.File]::ReadAllText($settingsPath) | Should -BeExactly $original
-        $full = & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Apply | ConvertFrom-Json
-        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json -AsHashtable
-        $settings.env.Contains('CLAUDE_CODE_EFFORT_LEVEL') | Should -BeFalse
-        & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action Rollback -ReceiptPath $full.receipt | Out-Null
-        [IO.File]::ReadAllText($settingsPath) | Should -BeExactly $original
     }
 
     It 'rejects stale, unbound and future native catalog snapshots in both entrypoints' {
