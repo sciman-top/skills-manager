@@ -4,26 +4,23 @@
   "active_presets": [
     "gpt6_luna_only",
     "glm53_flash_only",
-    "claude_haiku55_only",
     "gemini38_flash_only"
   ],
   "role_prefixes": {
     "gpt6_luna_only": "luna",
     "glm53_flash_only": "glm",
-    "claude_haiku55_only": "haiku",
     "gemini38_flash_only": "gemini"
   },
   "codex_order": [
     "gpt6_luna_only",
     "glm53_flash_only",
-    "claude_haiku55_only",
     "gemini38_flash_only"
   ],
   "aliases": {},
   "auto_routes": {
-    "quick_triage": "claude_haiku55_only",
+    "quick_triage": "gemini38_flash_only",
     "routine_maintenance": "glm53_flash_only",
-    "standard_review": "claude_haiku55_only",
+    "standard_review": "gemini38_flash_only",
     "bounded_implementation": "glm53_flash_only",
     "deep_investigation": "gpt6_luna_only",
     "deep_implementation": "gemini38_flash_only",
@@ -60,46 +57,38 @@
   ],
   "fallbacks": {
     "quick_triage": [
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
     ],
     "routine_maintenance": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "standard_review": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
     ],
     "bounded_implementation": [
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "deep_investigation": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "deep_implementation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" }
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "test_execution": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "documentation_review": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "high" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "architecture_review": [
-      { "preset": "claude_haiku55_only", "model": "claude-haiku-5-5", "effort": "xhigh" },
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ]
   },
@@ -155,37 +144,6 @@
         "standard_review": 0,
         "quick_triage": 0,
         "test_execution": 0
-      }
-    },
-    "claude_haiku55_only": {
-      "hosts": [
-        "codex",
-        "claude"
-      ],
-      "menu": [
-        {
-          "model": "claude-haiku-5-5",
-          "effort": "medium"
-        },
-        {
-          "model": "claude-haiku-5-5",
-          "effort": "high"
-        },
-        {
-          "model": "claude-haiku-5-5",
-          "effort": "xhigh"
-        }
-      ],
-      "slot_map": {
-        "quick_triage": 0,
-        "routine_maintenance": 1,
-        "standard_review": 1,
-        "bounded_implementation": 2,
-        "deep_investigation": 2,
-        "deep_implementation": 2,
-        "test_execution": 1,
-        "documentation_review": 1,
-        "architecture_review": 2
       }
     },
     "gemini38_flash_only": {
