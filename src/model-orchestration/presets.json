@@ -57,7 +57,8 @@
   ],
   "fallbacks": {
     "quick_triage": [
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "routine_maintenance": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
