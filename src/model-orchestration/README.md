@@ -71,7 +71,7 @@ Schema v7 retains the per-slot `fallbacks` introduced in v6 and renames the disp
 
 | Slot | Default route (Codex) | Declared alternates, in order |
 | --- | --- | --- |
-| `quick_triage` | `gemini-3.8-flash-high/high` | `glm-5.3-flash/xhigh` |
+| `quick_triage` | `gemini-3.8-flash-high/high` | `glm-5.3-flash/xhigh`, `gpt-6-luna/max` |
 | `routine_maintenance` | `glm-5.3-flash/xhigh` | `gpt-6-luna/max`, `gemini-3.8-flash-high/high` |
 | `standard_review` | `gemini-3.8-flash-high/high` | `gpt-6-luna/max`, `glm-5.3-flash/xhigh` |
 | `bounded_implementation` | `glm-5.3-flash/xhigh` | `gemini-3.8-flash-high/high`, `gpt-6-luna/max` |
