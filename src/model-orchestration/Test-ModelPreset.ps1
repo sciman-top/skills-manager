@@ -64,6 +64,7 @@ $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Res
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 3 -and $defaultResolved.enabled_routes.Count -eq 3) 'Three presets expose three enabled codex tuples'
 $expectedCodexTuples = @('gpt-6-luna/max','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high') | Sort-Object
+$expectedNativeTuples = @('gpt-6-luna/max')
 Assert (((@($defaultResolved.enabled_routes | ForEach-Object { "$($_.model)/$($_.effort)" } | Sort-Object) -join ',') -ceq ($expectedCodexTuples -join ','))) 'Codex exposes exactly the three approved tuples'
 Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 3) 'Automatic routes use all three pool model families'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' })).Count -eq 0) 'Retired Haiku tuple is absent from enabled routes'
@@ -79,6 +80,8 @@ $autoRoutes = @{
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
+Assert ($defaultResolved.routes.routine_maintenance.model -ceq 'glm-5.3-flash' -and $defaultResolved.native_routes.routine_maintenance.model -ceq 'gpt-6-luna' -and $defaultResolved.native_agent_available) 'Launcher route stays GLM while native subagent route is GPT'
+Assert ((@($defaultResolved.native_routes.PSObject.Properties.Name | Sort-Object) -join ',') -ceq (@($slots | Sort-Object) -join ',')) 'Native routes cover exactly the configured slots'
 $reselection = $defaultResolved.reselection
 Assert ($null -ne $reselection -and @($reselection.rate_limit_order).Count -eq 3) 'Reselection contract derives from the active pool'
 Assert ((@($reselection.rate_limit_order | Where-Object { $_.preset -ceq 'glm53_flash_only' })[0].menu | ForEach-Object { $_.effort }) -ccontains 'xhigh') 'Codex GLM menu uses the exact native xhigh tuple'
@@ -373,11 +376,11 @@ try {
     Assert ($profileText.Contains('choose the named native execution slot by task shape before dispatch') -and $profileText.Contains('Do not replay an identical prompt')) 'Profile instructions require task-shape native slot dispatch and prohibit duplicate replay'
     Assert ($profileText.Contains('confirmed overload may receive one explicit reselection only')) 'Profile instructions reserve one alternate for confirmed overload'
     Assert ($profileText.Contains('On Codex, use the named native slot or exact-tuple role') -and $profileText.Contains('not a substitute for native subagent dispatch')) 'Profile instructions make exact-tuple native roles primary and keep the CLI launcher explicit'
-    Assert ($profileText.Contains('[agents]') -and $profileText.Contains('default_subagent_model = "glm-5.3-flash"') -and $profileText.Contains('default_subagent_reasoning_effort = "xhigh"') -and -not $profileText.Contains('enabled = false')) 'GLM profile defaults to its own native tuple and keeps delegation enabled'
+    Assert ($profileText.Contains('[agents]') -and $profileText.Contains('enabled = false') -and -not $profileText.Contains('default_subagent_model =')) 'GLM profile disables native subagents because the gateway cannot decode non-GPT envelopes'
     $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
     $projectedAgentTables = @([regex]::Matches($projectedConfig, '(?m)^\[agents\.([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedCodexTuples.Count)) 'Shared Codex config registers all nine task slots and three exact-tuple roles'
+    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedNativeTuples.Count)) 'Shared Codex config registers nine native task slots and the single GPT tuple role'
     foreach ($slot in $slots) { Assert ($projectedConfig.Contains("[agents.$slot]")) "Shared Codex config registers task slot $slot" }
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
@@ -385,30 +388,18 @@ try {
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
     $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $nonLunaConfig = Get-Content -LiteralPath $cfg -Raw
-    Assert ($nonLunaConfig.Contains('enabled = true') -and -not $nonLunaConfig.Contains('# model-orchestration-native-agents-enabled-prior=') -and $nonLunaConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $nonLunaConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'Non-Luna pool keeps native agents enabled and defaults to its routine slot tuple'
-    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq ($slots.Count + $expectedCodexTuples.Count - 1)) 'Non-Luna pool projects its two exact tuple roles and all task slots'
-    $nonLunaProfileDefaults = @{
-        'glm53-flash-only' = @{ model = 'glm-5.3-flash'; effort = 'xhigh' }
-        'gemini38-flash-only' = @{ model = 'gemini-3.8-flash-high'; effort = 'high' }
-    }
-    foreach ($profileName in $nonLunaProfileDefaults.Keys) {
-        $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$profileName.config.toml") -Raw
-        $profileDefault = $nonLunaProfileDefaults[$profileName]
-        Assert ($profileConfigText.Contains("default_subagent_model = `"$($profileDefault.model)`"") -and $profileConfigText.Contains("default_subagent_reasoning_effort = `"$($profileDefault.effort)`"") -and -not $profileConfigText.Contains('enabled = false')) "Profile defaults to its native routine tuple and keeps delegation enabled: $profileName"
-    }
+    Assert ($nonLunaConfig.Contains('enabled = false') -and $nonLunaConfig.Contains('# model-orchestration-native-agents-enabled-prior=') -and -not $nonLunaConfig.Contains('default_subagent_model =') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'Non-Luna pool disables native subagents instead of routing GLM/Gemini envelopes'
+    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq 0) 'Non-Luna pool projects no native agent tables'
     foreach ($profileId in @('glm53_flash_only','gemini38_flash_only')) {
-        $profilePolicy = $policy.presets[$profileId]
         $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
-        Assert (-not $profileConfigText.Contains('enabled = false')) "Preset profile leaves native delegation enabled: $profileId"
+        Assert ($profileConfigText.Contains('enabled = false') -and -not $profileConfigText.Contains('[agents.')) "Non-GPT profile disables native delegation and registers no slot roles: $profileId"
         foreach ($slot in $slots) {
-            $profileEntry = $profilePolicy.menu[$profilePolicy.slot_map[$slot]]
-            $slotConfigText = Get-Content -LiteralPath (Join-Path $fixture ".generated/codex/$profileId/$slot.toml") -Raw
-            Assert ($profileConfigText.Contains("[agents.$slot]") -and $slotConfigText.Contains("model = `"$($profileEntry.model)`"") -and $slotConfigText.Contains("model_reasoning_effort = `"$($profileEntry.effort)`"")) "Profile slot pins its configured tuple: $profileId/$slot -> $($profileEntry.model)/$($profileEntry.effort)"
+            Assert (-not (Test-Path -LiteralPath (Join-Path $fixture ".generated/codex/$profileId/$slot.toml"))) "Non-GPT profile emits no native slot file: $profileId/$slot"
         }
     }
     $restoredReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $restoredConfig = Get-Content -LiteralPath $cfg -Raw
-    Assert ($restoredConfig.Contains('enabled = true') -and $restoredConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $restoredConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and -not $restoredConfig.Contains('model-orchestration-native-agents-enabled-prior=')) 'Full active pool defaults to the routine native route and preserves delegation'
+    Assert ($restoredConfig.Contains('enabled = true') -and $restoredConfig.Contains('default_subagent_model = "gpt-6-luna"') -and $restoredConfig.Contains('default_subagent_reasoning_effort = "max"') -and -not $restoredConfig.Contains('model-orchestration-native-agents-enabled-prior=')) 'Full active pool defaults native subagents to the GPT tuple'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $restoredReceipt.receipt | Out-Null
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $nonLunaReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Non-Luna native projection and restore sequence rolls back to the exact original config'
@@ -476,14 +467,14 @@ try {
     $parentBefore = (Get-FileHash -LiteralPath $cfg).Hash
     $subagentPlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($subagentPlan.scope -ceq 'subagents_only' -and (Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent Plan is read-only'
-    Assert ($subagentPlan.native_agent_policy.enabled -and $subagentPlan.native_agent_policy.default_slot -ceq 'routine_maintenance' -and $subagentPlan.native_agent_policy.default_model -ceq 'glm-5.3-flash' -and $subagentPlan.native_agent_policy.default_effort -ceq 'xhigh' -and @($subagentPlan.native_agent_policy.tuple_roles).Count -eq 3) 'Plan describes all three native tuple roles and its routine-slot default'
+    Assert ($subagentPlan.native_agent_policy.enabled -and $subagentPlan.native_agent_policy.default_slot -ceq 'routine_maintenance' -and $subagentPlan.native_agent_policy.default_model -ceq 'gpt-6-luna' -and $subagentPlan.native_agent_policy.default_effort -ceq 'max' -and @($subagentPlan.native_agent_policy.tuple_roles).Count -eq 1) 'Plan describes the single GPT native tuple role and its routine-slot default'
     $subagentReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $subagentConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($subagentConfig.StartsWith($parentRoot.Substring(0, $parentRoot.IndexOf('[agents]')).Replace("`r`n","`n"))) 'Subagent projection preserves exact parent lines and comments'
-    Assert ($subagentConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "xhigh"')) 'Subagent default follows the routine-maintenance auto route'
+    Assert ($subagentConfig.Contains('default_subagent_model = "gpt-6-luna"') -and $subagentConfig.Contains('default_subagent_reasoning_effort = "max"')) 'Subagent default follows the native GPT routine route'
     Assert ($subagentConfig.Contains('max_concurrent_threads_per_session = 2') -and $subagentConfig.Contains('enabled = true')) 'Native delegation and concurrency preserved'
     foreach ($entry in $defaultResolved.enabled_routes) {
-        $nativeTuple = "$($entry.model)/$($entry.effort)" -cin $expectedCodexTuples
+        $nativeTuple = "$($entry.model)/$($entry.effort)" -cin $expectedNativeTuples
         $rolePath = Join-Path $fixture ".generated/codex/pool/$($entry.role).toml"
         Assert (($subagentConfig.Contains("[agents.$($entry.role)]")) -eq $nativeTuple) "Exact allowlisted tuple role registration: $($entry.role)"
         Assert ((Test-Path -LiteralPath $rolePath) -eq $nativeTuple) "Generated native tuple file matches the verified pool: $($entry.role)"
@@ -494,10 +485,11 @@ try {
         }
     }
     foreach ($slot in $slots) {
-        $route = $defaultResolved.routes.$slot
+        $route = $defaultResolved.native_routes.$slot
         $rolePath = Join-Path $fixture ".generated/codex/$($route.preset)/$slot.toml"
         $roleText = Get-Content -LiteralPath $rolePath -Raw
-        Assert ($subagentConfig.Contains("[agents.$slot]") -and $roleText.Contains("name = `"$slot`"") -and $roleText.Contains("model = `"$($route.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($route.effort)`"") -and $roleText.Contains('Do not delegate or change models.')) "Native execution slot pins the automatic task-shape tuple: $slot -> $($route.model)/$($route.effort)"
+        Assert ($subagentConfig.Contains("[agents.$slot]") -and $roleText.Contains("name = `"$slot`"") -and $roleText.Contains("model = `"$($route.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($route.effort)`"") -and $roleText.Contains('Do not delegate or change models.')) "Native execution slot pins the GPT native tuple: $slot -> $($route.model)/$($route.effort)"
+        Assert ($roleText.Contains('model = "gpt-')) "Native slot role uses a GPT model: $slot"
     }
     Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
@@ -558,6 +550,18 @@ try {
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Orphan cleanup remains idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $orphanReceipt.receipt | Out-Null
     Assert ((Get-Content -LiteralPath $cfg -Raw) -ceq $orphanConfig) 'Orphan cleanup rollback restores exact original config'
+    $verifyRoot = Join-Path $fixture 'verify-root'
+    [IO.Directory]::CreateDirectory($verifyRoot) | Out-Null
+    $verifyRole = Join-Path $verifyRoot 'bad-role.toml'
+    [IO.File]::WriteAllText($verifyRole, "name = `"bad`"`nmodel = `"glm-5.3-flash`"`nmodel_reasoning_effort = `"xhigh`"`n")
+    $verifyBad = "model = `"glm-5.3-flash`"`n[agents]`nenabled = true`ndefault_subagent_model = `"glm-5.3-flash`"`ndefault_subagent_reasoning_effort = `"xhigh`"`n[agents.bad]`ndescription = `"bad`"`nconfig_file = '$($verifyRole.Replace('\','/'))'`n"
+    [IO.File]::WriteAllText((Join-Path $verifyRoot 'config.toml'), $verifyBad)
+    $verifyBadResult = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Verify -CodexRoot $verifyRoot | ConvertFrom-Json
+    Assert ($verifyBadResult.status -ceq 'fail' -and @($verifyBadResult.issues).Count -ge 2) 'Verify flags a non-GPT default and a non-GPT native role'
+    $verifyGood = "model = `"glm-5.3-flash`"`n[agents]`nenabled = true`ndefault_subagent_model = `"gpt-6-luna`"`ndefault_subagent_reasoning_effort = `"max`"`n"
+    [IO.File]::WriteAllText((Join-Path $verifyRoot 'config.toml'), $verifyGood)
+    $verifyGoodResult = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Verify -CodexRoot $verifyRoot | ConvertFrom-Json
+    Assert ($verifyGoodResult.status -ceq 'pass' -and @($verifyGoodResult.issues).Count -eq 0 -and $verifyGoodResult.default_subagent_model -ceq 'gpt-6-luna') 'Verify accepts GPT-only native routing'
     [IO.File]::WriteAllText($cfg, $parentRoot)
     $fixturePolicyPath = Join-Path $fixture 'presets.json'
     $expandedPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
@@ -571,9 +575,10 @@ try {
     $customReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $customRootConfig = Get-Content -LiteralPath $cfg -Raw
     $customLunaProfile = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
-    $customRootRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/glm53_flash_only/custom_task.toml') -Raw
-    $customLunaRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/gpt6_luna_only/custom_task.toml') -Raw
-    Assert ($customRootConfig.Contains('[agents.custom_task]') -and $customRootRole.Contains('model = "glm-5.3-flash"') -and $customRootRole.Contains('model_reasoning_effort = "xhigh"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaRole.Contains('model = "gpt-6-luna"') -and $customLunaRole.Contains('model_reasoning_effort = "max"')) 'Additional slot uses its GLM auto route natively and keeps its exact tuple in every profile'
+    $customNativeRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/gpt6_luna_only/custom_task.toml') -Raw
+    $customGlmProfile = Get-Content -LiteralPath (Join-Path $target 'glm53-flash-only.config.toml') -Raw
+    $customResolved = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
+    Assert ($customRootConfig.Contains('[agents.custom_task]') -and $customNativeRole.Contains('model = "gpt-6-luna"') -and $customNativeRole.Contains('model_reasoning_effort = "max"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaProfile.Contains('default_subagent_model = "gpt-6-luna"') -and $customGlmProfile.Contains('enabled = false') -and -not $customGlmProfile.Contains('[agents.custom_task]') -and $customResolved.routes.custom_task.model -ceq 'glm-5.3-flash') 'Additional slot routes natively through GPT, stays GLM on the launcher, and non-GPT profiles disable native delegation'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
@@ -656,6 +661,8 @@ try {
         @{ name = 'unknown preset'; mutate = { param($p) $p.fallbacks.quick_triage = @(@{ preset = 'gpt61_sol_only'; model = 'gpt-6.1-sol'; effort = 'max' }) } },
         @{ name = 'more than three alternates'; mutate = { param($p) $p.fallbacks.test_execution = @(1..4 | ForEach-Object { @{ preset = 'gemini38_flash_only'; model = 'gemini-3.8-flash-high'; effort = 'high' } }) } },
         @{ name = 'menu tuple outside the strict subagent allowlist'; mutate = { param($p) $p.presets.gpt6_luna_only.menu = @(@{ model = 'gpt-6-luna'; effort = 'xhigh' }) } },
+        @{ name = 'native_subagent preset exposes a non-GPT codex tuple'; mutate = { param($p) $p.presets.glm53_flash_only.native_subagent = $true } },
+        @{ name = 'native_subagent preset without a codex host'; mutate = { param($p) $p.presets.glm53_flash_only.hosts = @('zcode'); $p.presets.glm53_flash_only.native_subagent = $true } },
         @{ name = 'schema v5 policy'; mutate = { param($p) $p.schema_version = 5 } }
     )
     foreach ($fallbackCase in $fallbackCases) {

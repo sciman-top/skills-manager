@@ -98,6 +98,7 @@
       "hosts": [
         "codex"
       ],
+      "native_subagent": true,
       "menu": [
         {
           "model": "gpt-6-luna",
@@ -121,6 +122,7 @@
         "zcode",
         "codex"
       ],
+      "native_subagent": false,
       "menu": [
         {
           "model": "glm-5.3-flash",
@@ -151,6 +153,7 @@
       "hosts": [
         "codex"
       ],
+      "native_subagent": false,
       "menu": [
         {
           "model": "gemini-3.8-flash-high",

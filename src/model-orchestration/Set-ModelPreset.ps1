@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [ValidateSet('Resolve','Plan','Apply','Rollback')][string]$Action = 'Plan',
+    [ValidateSet('Resolve','Plan','Apply','Rollback','Verify')][string]$Action = 'Plan',
     [string]$Preset = '',
     [string[]]$AvailablePreset = @(),
     [string]$CodexRoot = $(if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex' }),
@@ -101,6 +101,17 @@ foreach ($id in $policy.presets.Keys) {
             if ($idx -isnot [int] -and $idx -isnot [long]) { throw "Preset $id slot index must be an integer: $slot" }
             if ($idx -lt 0 -or $idx -ge $hostMenu.Count) { throw "Preset $id slot index out of range for host $hostName`: $slot -> $idx" }
         }
+    }
+}
+# Native Codex subagents carry opaque agent_message.encrypted_content that only
+# GPT-family upstreams decode; the CPA admission layer rejects claude-/glm-/gemini-
+# routes before contacting upstream. Enforce that invariant at policy load.
+foreach ($id in $policy.presets.Keys) {
+    $p = $policy.presets[$id]
+    if (-not [bool]$p.native_subagent) { continue }
+    if ('codex' -notin @($p.hosts)) { throw "Preset $id declares native_subagent without a codex host." }
+    foreach ($entry in @(Get-PresetMenu $p 'codex')) {
+        if (([string]$entry.model) -notmatch '^gpt-') { throw "Preset $id declares native_subagent but exposes non-GPT codex tuple $($entry.model)/$($entry.effort)." }
     }
 }
 foreach ($slot in $slotNames) {
@@ -222,8 +233,77 @@ foreach ($id in $activePresets) {
         $enabledRoutes += @{preset=$id;role=$roleName;model=$entry.model;effort=$entry.effort;hosts=@($policy.presets[$id].hosts)}
     }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
+# Native subagent roles must resolve to a native_subagent preset; the launcher/one-shot
+# lane keeps using auto_routes because `codex exec` sends a plain prompt, not an envelope.
+function Test-NativePreset([string]$Id) { return [bool]$policy.presets[$Id].native_subagent }
+function Test-NativeCodexTuple($Entry) { return ([string]$Entry.model) -match '^gpt-' }
+$nativePresetIds = @($policy.codex_order | Where-Object {
+    $activePresets -ccontains $_ -and 'codex' -in @($policy.presets[$_].hosts) -and (Test-NativePreset $_)
+})
+$nativeAgentAvailable = $nativePresetIds.Count -gt 0
+$nativeRoutes = [ordered]@{}
+$nativeRoutePresetIds = [ordered]@{}
+foreach ($slot in $slotNames) {
+    if ($nativePresetIds.Count -eq 0) { break }
+    $nativePreset = $nativePresetIds[0]
+    $nativeMenu = @(Get-PresetMenu $policy.presets[$nativePreset] 'codex')
+    $nativeEntry = $nativeMenu[$policy.presets[$nativePreset].slot_map[$slot]]
+    $nativeRoutePresetIds[$slot] = $nativePreset
+    $nativeRoutes[$slot] = @{ preset = $nativePreset; model = [string]$nativeEntry.model; effort = [string]$nativeEntry.effort }
+}
+if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; native_routes = $nativeRoutes; native_agent_available = $nativeAgentAvailable; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
+if ($Action -eq 'Verify') {
+    # Read-only host preflight: a native Codex subagent route is only usable when
+    # every role it exposes and the default subagent model use a GPT-family model.
+    # The CPA admission layer rejects opaque agent_message.encrypted_content for
+    # claude-/glm-/gemini- routes before contacting upstream, so a non-GPT native
+    # route can only fail. This never writes host files.
+    $verifyConfigPath = Join-Path $CodexRoot 'config.toml'
+    if (-not (Test-Path -LiteralPath $verifyConfigPath -PathType Leaf)) { throw "Codex config not found: $verifyConfigPath" }
+    $verifyText = [IO.File]::ReadAllText($verifyConfigPath)
+    $verifyEnabled = $null
+    $verifyDefaultModel = $null
+    $agentsHeader = [regex]::Match($verifyText, '(?m)^\[agents\]\s*(?:#.*)?$')
+    if ($agentsHeader.Success) {
+        $sectionStart = $agentsHeader.Index + $agentsHeader.Length
+        $nextHeader = [regex]::Match($verifyText.Substring($sectionStart), '(?m)^\s*\[')
+        $sectionText = if ($nextHeader.Success) { $verifyText.Substring($sectionStart, $nextHeader.Index) } else { $verifyText.Substring($sectionStart) }
+        $enabledMatch = [regex]::Match($sectionText, '(?m)^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$')
+        if ($enabledMatch.Success) { $verifyEnabled = $enabledMatch.Groups[1].Value }
+        $defaultMatch = [regex]::Match($sectionText, '(?m)^\s*default_subagent_model\s*=\s*"([^"]*)"')
+        if ($defaultMatch.Success) { $verifyDefaultModel = $defaultMatch.Groups[1].Value }
+    }
+    $verifyRoles = [Collections.Generic.List[object]]::new()
+    $verifyIssues = [Collections.Generic.List[string]]::new()
+    foreach ($roleMatch in [regex]::Matches($verifyText, '(?ms)^\[agents\.([A-Za-z0-9_]+)\][^\r\n]*\r?\n(?:(?!^\[).)*')) {
+        $roleName = $roleMatch.Groups[1].Value
+        $configMatch = [regex]::Match($roleMatch.Value, "(?m)^\s*config_file\s*=\s*['""]([^'""]+)['""]")
+        $roleModel = $null
+        $configFile = if ($configMatch.Success) { $configMatch.Groups[1].Value } else { $null }
+        if ($configFile -and (Test-Path -LiteralPath $configFile -PathType Leaf)) {
+            $roleText = [IO.File]::ReadAllText($configFile)
+            $modelMatch = [regex]::Match($roleText, '(?m)^\s*model\s*=\s*"([^"]*)"')
+            if ($modelMatch.Success) { $roleModel = $modelMatch.Groups[1].Value }
+        }
+        $verifyRoles.Add(@{ name=$roleName; config_file=$configFile; model=$roleModel; native_compatible=([bool]($roleModel -and $roleModel -match '^gpt-')) })
+        if ($roleModel -and $roleModel -notmatch '^gpt-') { $verifyIssues.Add("agent role '$roleName' uses non-GPT model '$roleModel'") }
+    }
+    $verifyEnabledNow = ($verifyEnabled -ne 'false')
+    if ($verifyEnabledNow -and $verifyDefaultModel -and $verifyDefaultModel -notmatch '^gpt-') {
+        $verifyIssues.Add("default_subagent_model '$verifyDefaultModel' is not GPT-family")
+    }
+    [ordered]@{
+        status = $(if ($verifyIssues.Count -eq 0) { 'pass' } else { 'fail' })
+        codex_root = $CodexRoot
+        enabled = $verifyEnabled
+        default_subagent_model = $verifyDefaultModel
+        roles = @($verifyRoles)
+        issues = @($verifyIssues)
+        checked_at = [DateTimeOffset]::UtcNow.ToString('o')
+    } | ConvertTo-Json -Depth 8
+    return
+}
 $stateRoot = Join-Path $PSScriptRoot '.state'
 function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }; return $null }
 function WriteAtomic([string]$Path, [string]$Text) {
@@ -342,12 +422,9 @@ $slotGuidance = @{
 }
 $parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
-$nativeCodexTuples = @('gpt-6-luna|max','glm-5.3-flash|xhigh','gemini-3.8-flash-high|high')
-function Test-NativeCodexTuple($Entry) { return ("$($Entry.model)|$($Entry.effort)" -cin $nativeCodexTuples) }
-$nativeAgentAvailable = @($enabledRoutes | Where-Object { Test-NativeCodexTuple $_ }).Count -gt 0
 foreach ($entry in $enabledRoutes) {
     if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
-    if (-not (Test-NativeCodexTuple $entry)) { continue }
+    if (-not (Test-NativePreset $entry.preset)) { continue }
     $rolePath = Join-Path $PSScriptRoot ".generated/codex/pool/$($entry.role).toml"
     $description = "Model pool role $($entry.role), $($entry.model)/$($entry.effort). Parent assigns the task slot, exact scope, write set, proof and stop; use only when this exact tuple is supported by the current host."
     $instructions = 'Execute the assigned bounded task and obey its read-only or write scope. Preserve unrelated work. Do not delegate, change models or replay completed writes. Return verification evidence and unresolved uncertainty to the parent, then stop.'
@@ -479,7 +556,7 @@ foreach ($id in $codexIds) {
     $roleBlocks = [Collections.Generic.List[string]]::new()
         $codexMenu = @(Get-PresetMenu $p 'codex')
         $standard = $codexMenu[$p.slot_map['routine_maintenance']]
-    $profileNativeAgentAvailable = @($codexMenu | Where-Object { Test-NativeCodexTuple $_ }).Count -gt 0
+    $profileNativeAgentAvailable = Test-NativePreset $id
     foreach ($slot in $slotNames) {
         $entry = $codexMenu[$p.slot_map[$slot]]
         if (-not (Test-NativeCodexTuple $entry)) { continue }
@@ -504,16 +581,16 @@ foreach ($id in $codexIds) {
 }
 $activeRoleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($slot in $slotNames) {
-    $routePreset = $routePresetIds[$slot]
+    if ($nativePresetIds.Count -eq 0) { break }
+    $routePreset = $nativeRoutePresetIds[$slot]
+    $route = $nativeRoutes[$slot]
     $routePath = Join-Path $PSScriptRoot ".generated/codex/$routePreset/$slot.toml"
-    $route = $routes[$slot]
-    if (-not (Test-NativeCodexTuple $route)) { continue }
-    $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Auto route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
+    $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Native route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
 $activeBlocks = $activeRoleBlocks -join "`n"
 $configPath = Join-Path $CodexRoot 'config.toml'
 $standard = @(Get-PresetMenu $modelPreset 'codex')[$modelPreset.slot_map['routine_maintenance']]
-$defaultSubagent = $routes['routine_maintenance']
+$defaultSubagent = $nativeRoutes['routine_maintenance']
 $config = [IO.File]::ReadAllText($configPath)
 $nativeEnableMarker = [regex]::Match($config, '(?m)^# model-orchestration-native-agents-enabled-prior=(true|false|unset)\s*$')
 $nativeAgentPrior = if ($nativeEnableMarker.Success) { $nativeEnableMarker.Groups[1].Value } else { GetScalar $config 'agents' 'enabled' }
@@ -648,7 +725,7 @@ if ($ExecutionHost -eq 'zcode' -and 'zcode' -in $modelPreset.hosts) {
 }
 $changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
 if ($Action -eq 'Plan') {
-    $nativeTupleRoles = @($enabledRoutes | Where-Object { Test-NativeCodexTuple $_ } | ForEach-Object { @{ role=$_.role; model=$_.model; effort=$_.effort } })
+    $nativeTupleRoles = @($enabledRoutes | Where-Object { Test-NativePreset $_.preset } | ForEach-Object { @{ role=$_.role; model=$_.model; effort=$_.effort } })
     $nativePolicy = @{ enabled=$nativeAgentAvailable; default_slot='routine_maintenance'; default_model=$defaultSubagent.model; default_effort=$defaultSubagent.effort; tuple_roles=$nativeTupleRoles; direct_cli_path='Start-ModelSlot.ps1' }
     @{preset=$Preset; host=$ExecutionHost; active_presets=$activePresets; enabled_routes=$enabledRoutes; scope=$projectionScope; files=@($changed | ForEach-Object { @{path=$_.path;before_hash=$_.before_hash} }); routes=$routes; reselection=$reselectionContract; capability=$capability; native_agent_policy=$nativePolicy; gateway_changes=0} | ConvertTo-Json -Depth 12
     return
