@@ -1,292 +1,251 @@
 # skills-manager
 
-Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex、Claude Code、ZCode 等宿主。
+<p align="center">
+  <strong>面向 Windows 的本地优先（Local-First）AI 技能与 MCP 服务版本化管理器</strong><br>
+  一处配置，五大 AI 宿主无缝投影 · 版本锁定防漂移 · 目标仓能力审计 · 零账号侵入
+</p>
 
-适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
+<p align="center">
+  <a href="https://github.com/sciman-top/skills-manager/releases"><img src="https://img.shields.io/github/v/release/sciman-top/skills-manager?color=0078D4&label=Release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows-blue?logo=windows" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/PowerShell-7.0%2B-5391FE?logo=powershell" alt="PowerShell 7+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/Language-English-orange.svg" alt="English README"></a>
+</p>
 
-主 CLI 不选择模型、不管理 provider/auth/session、不接管宿主语义路由或插件缓存。[独立 preset 工具](src/model-orchestration/README.md) 提供显式模型配置和受控启动，不参与技能/MCP 构建，也不自动故障切换或重放任务。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。冻结面（仅维护、不新增能力）与解冻条件见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+---
 
-本项目采用 [MIT License](LICENSE)。第三方技能与依赖仍各自遵循其原始许可证。
+### 解决什么痛点？
 
-## 快速开始
+你在用 Codex、Claude Code、ZCode、Antigravity (Gemini) 或 WorkBuddy 进行日常编码时，是否遇到过：
 
-要求 PowerShell 7 (`pwsh`) 和 Git。Windows PowerShell 5.1 不受支持。
+- **多端配置繁琐**：台式机配好的 Agent 技能与 MCP，换到笔记本或新电脑要手动翻目录、重新粘 JSON？
+- **多宿主标准分裂**：Codex 要放到 `~/.codex/skills`，Claude 要放到 `~/.claude/`，Antigravity 又有自己的目录，每次加个工具都要配五遍？
+- **上游依赖不可控**：引用的第三方开源技能悄悄发了破坏性更新，提示词突然失效，却查不到改动记录？
+- **过度包装与隐私焦虑**：想要统一管理，却不想引入沉重的常驻后台，更不想把 API Key 和账号交给第三方代理框架？
 
-### 推荐：Release 一键安装
+**skills-manager** 正是为此而生：把多处分散的 AI 技能和 MCP 服务收敛到单一版本化配置（`skills.json`），精准锁定 Git Commit，并以原生安全的文件链接（Junction）透明投影到各宿主，**不劫持模型、不代理网络、不接触凭据**。
 
-当前稳定版为 [v2026.08.30.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.30.1)。从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载对应版本的 `bootstrap.zip`，先核对 `SHA256SUMS.txt`，再解压运行：
-
-```powershell
-.\setup.cmd
+```text
+                    ┌─── [ skills.json ] (配置真源) ───┐
+                    │   • 技能来源 / 版本锁定 (Git SHA)    │
+                    │   • 统一 MCP 场景 Profiles (coding/web)│
+                    └─────────────────┬────────────────┘
+                                      │
+                           pwsh .\skills.ps1 构建生效
+                                      │
+       ┌──────────────┬───────────────┼───────────────┬──────────────┐
+       ▼              ▼               ▼               ▼              ▼
+  OpenAI Codex   Claude Code        ZCode       Antigravity     WorkBuddy
+(~/.codex/skills) (~/.claude/agents) (~/.zcode/skills) (~/.gemini/...) (本地受管目标)
 ```
 
-需要离线或 U 盘绿色运行时下载 `portable.zip`，解压后运行 `skills.cmd`；它不会自动写宿主目录。两种包的选择、SHA-256 校验和迁移步骤见 [安装、绿色运行与迁移](docs/INSTALLATION_AND_MIGRATION.md)。
+---
 
-`artifacts/` 只是本机 ignored 输出目录，不是公共下载目录；正式公共制品、校验清单和 attestation 以 GitHub Release 为准。目录按 `deliveries/history/work` 分层，规则见 [`artifacts/README.md`](artifacts/README.md)。
+## 核心特性
 
-### 从源码使用
+- 🎯 **一次配置，五大多宿主投影**：原生支持 Codex、Claude Code、ZCode、Antigravity（Gemini）与 WorkBuddy。按宿主规范生成目录链接或配置，告别重复配置。
+- 🔒 **版本锁定与防漂移（Lockfile）**：内置 `skills.lock.json` 精准锁定 Commit SHA，杜绝上游隐式更新引入的提示词劣化。
+- 🔌 **统一 MCP 服务与场景切换**：一条命令安装 stdio / HTTP SSE 协议的 MCP。支持 `default`、`coding`、`browser`、`database` 等场景 Profile，全宿主一键同步。
+- 🔍 **目标仓能力智能审查（Audit Targets）**：一键扫描你的本地代码仓库，识别当前项目缺什么技能或 MCP，生成可审查、可预检、带回滚保障的三文件决策包。
+- 💻 **交互式 TUI 菜单（新手友好）**：直接双击 `skills.cmd` 即可启动终端图形菜单，浏览、勾选、安装、同步一站式搞定。
+- 📦 **开箱即用 & 免安装便携（Portable）**：提供预打包的绿色便携版，支持 U 盘即插即用和离线机器无网运行。
+- 🛡️ **严格安全边界**：纯本地运行，不碰你的 API Key / Token，不常驻后台，不侵入模型推断链。
+
+---
+
+## 宿主支持矩阵
+
+| AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 |
+| :--- | :--- | :--- | :--- |
+| **OpenAI Codex** | Native Skill Root & Agent Bridge | `core-lean` (7 个精选) | 原生 Codex MCP 配置 |
+| **Claude Code** | 用户级 `~/.claude/agents` 链接 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 |
+| **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` |
+| **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` |
+| **WorkBuddy** | 受管本地目标投影 | `core-ops` (8 个运维增强) | 内部工作区标准配置 |
+
+---
+
+## 快速上手
+
+系统要求：**Windows 10 / 11**，已安装 **PowerShell 7+** (`pwsh`) 与 **Git**。（*注：不支持老旧的 Windows PowerShell 5.1*）。
+
+### 方式 A：GitHub Release 预打包安装（最省心）
+
+前往 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载最新发行版：
+
+1. **标准一键安装**：下载 `bootstrap.zip`，解压后双击运行：
+   ```cmd
+   .\setup.cmd
+   ```
+2. **绿色便携运行（推荐 U 盘 / 离线环境）**：下载 `portable.zip`，解压后直接运行 `skills.cmd`，不会主动改动系统宿主目录。
+
+> 校验信息与安全签名可在 Release 页下载 `SHA256SUMS.txt` 对比。详细说明请参考 [安装、绿色运行与迁移指南](docs/INSTALLATION_AND_MIGRATION.md)。
+
+### 方式 B：源码直接运行 / 交互式菜单
+
+克隆仓库到本地：
 
 ```powershell
-pwsh -NoProfile -File .\skills.ps1 help
-pwsh -NoProfile -File .\skills.ps1 发现
-pwsh -NoProfile -File .\skills.ps1 安装
-pwsh -NoProfile -File .\skills.ps1 doctor --strict
+git clone https://github.com/sciman-top/skills-manager.git
+cd skills-manager
 ```
 
-也可直接运行 `skills.cmd` 打开交互菜单。新手通常只需“浏览技能 → 选择安装 → 重建并同步 → doctor”。
-
-交互菜单按“高频动作直达 + 领域子菜单”组织：
-
-- 浏览技能
-- 选择安装
-- 粘贴命令导入
-- 重建并同步（CLI 命令仍为 `构建生效`）
-- 更新上游（CLI 命令仍为 `更新`）
-- 目标仓审查
-- MCP 服务
-- 技能库管理
-- 更多
-
-## 配置真源
-
-`skills.json` 管理：
-
-- `vendors` / `imports`：技能来源
-- `mappings`：安装白名单与输出名
-- `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
-- `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 定义、按场景启用 profile 与同步目标；存在 `mcp_profiles` 时，`mcp_profiles.active` 是当前启用集合的唯一真源，server 定义只描述服务能力，旧配置的 `mcp_servers[].enabled` 仅作无 profile 配置的兼容回退
-
-### 同一版本下的四类交付物
-
-| 形态 | 获取方式 | 内容与边界 |
-| --- | --- | --- |
-| 标准安装版 | `<version>/standard-install/bootstrap.zip` | 公共工具与源码；不带 skills/MCP，首次扫描新电脑的目标仓后再选择安装。 |
-| 完整绿色版 | `<version>/portable/portable.zip` | 公共工具与源码；不带 skills/MCP，不自动写宿主目录。 |
-| 公共源码开发版 | `<version>/source/source.zip` 或 Git clone/fork/tag | 无 skills/MCP；ZIP 含开发文件，完整 Git 历史仍以 clone/fork/tag 为准。 |
-| 私用全量快照 | `<version>/private-snapshot/private-all.zip` | 唯一携带全部现有 skills/MCP 的明文、无口令恢复包；不含 Git 历史，不得公开分发。 |
-
-同一版本的四类交付物统一位于 `artifacts/deliveries/<version>/`。三个公共包都不携带 `agent/`、MCP 清单、目标仓状态、`vendor/` 或 `imports/`；`rules/global/` 只随源码开发版和私用快照作为规则源携带，绝不自动覆盖宿主已生效的全局规则。`rescan` 只是辅助扫描清单，不是第五种交付物。
-
-### 项目迁移
-
-可用 `迁移` 命令生成私用全量快照。默认交付路径必须提供版本号，因此它与三个公共包同处一个版本根目录。
+**新手推荐：直接运行 `skills.cmd` 打开交互菜单**：
 
 ```powershell
-# 唯一的私用状态交付物：全部当前 skills + MCP，明文、无口令
-.\skills.ps1 迁移 --mode private-all --version <version>
-# 可选辅助清单，不是第五种交付物
-.\skills.ps1 迁移 --mode rescan --version <version>
+.\skills.cmd
 ```
 
-迁移包默认不会包含宿主登录态、插件缓存、`reports/` 或目录链接；当前生成器只生成携带完整 skills/MCP 状态的 `private-all` 明文快照，凭据写入 `MIGRATION-MCP-CREDENTIALS.json`，不询问口令。`all`、`general`、`private-general` 和 `--encrypt` 不再是生成选项；为兼容历史包，`migration-unlock` 仍可读取 manifest 指向的旧 `MIGRATION-MCP-CREDENTIALS.enc.json`。所有非 `rescan` 模式都会携带恢复所需的 `src/`、`config/`、`tests/`、`scripts/`、`docs/`、`overrides/`、`references/`、`.github/`、源物化目录和 `LICENSE`，并带 `MIGRATION-CONTENT.json` 逐文件 SHA-256 校验；它们不包含 `.git` 历史，不能替代公共 Git 开发版。`private-all` 解压后可运行 `migration-apply`，必要时再运行 `构建生效`/`同步MCP`。`rescan` 包只含清单：新电脑须先安装同版本的 skills-manager，再运行 `发现`、`安装` 和 `同步MCP`，因此不会声称已完成 `host_loaded` 或 `live_accepted`。
+通过上下方向键即可直接执行高频动作：
 
-`private-all` 是允许携带 MCP `env`/`headers` 值的私用模式。当前生成的快照为明文，不需要口令；它只应通过你控制的本地或私有介质传输，绝不要上传公共 GitHub、公共 Release 或公共网盘。历史加密快照在 `migration-unlock` 时才会询问口令，口令不进入命令行、日志或 manifest。新电脑解压后可直接运行：
-
-```powershell
-.\skills.ps1 migration-apply
-# 只恢复包内配置和 skills，暂不同步宿主 MCP：
-.\skills.ps1 migration-apply --skip-mcp
+```text
+==============================================
+         Skills 管理器（交互菜单）
+==============================================
+  [1] 浏览技能      - 查看来源中所有可用技能
+  [2] 选择安装      - 交互式勾选并写入配置
+  [3] 粘贴命令导入  - 直接解析 add / npx 安装指令
+  [4] 重建并同步    - 重新编译并安全投影至各 AI 宿主
+  [5] 更新上游      - 一键拉取上游技能更新
+  [6] 目标仓审查    - 扫描代码仓缺失的 AI 技能
+  [7] MCP 服务      - 管理并同步 MCP 服务
+  [8] 环境体检      - 运行 doctor 检查健康状态
+==============================================
 ```
 
-等价手动流程是先运行 `migration-unlock`，再运行 `setup.cmd -SkipRebuildLocked -SyncMcp`；当前明文包的 `migration-unlock` 不会询问口令，历史加密包才会询问。`private-all` 使用相同的 `migration-apply`/`migration-unlock` 流程，携带全部技能和 MCP。迁移完成后建议轮换长期或高权限 token。
-- `skill_projection`：技能来源、domain catalog、native placement 与按宿主的 projection profiles；metadata budget 与 description 截断由宿主原生处理
+---
 
-`skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
+## 核心工作流与常用命令
 
-## 常用命令
-
-### 技能
+### 1. 技能管理（Skills）
 
 ```powershell
+# 浏览已配置来源中的全部技能
 .\skills.ps1 发现
+
+# 交互式选择技能并安装
 .\skills.ps1 安装
-.\skills.ps1 卸载 <name> --yes
-.\skills.ps1 add <repo> --skill <path>
-.\skills.ps1 锁定
-.\skills.ps1 verify-lock
+
+# 从 GitHub 仓库添加单个技能
+.\skills.ps1 add <github-user/repo> --skill <skill-name>
+
+# 检查上游技能是否有新提交（只读预览，不改本地文件）
 .\skills.ps1 check-updates --json
-.\skills.ps1 更新 -Plan
+
+# 一键拉取上游更新并升级锁文件
 .\skills.ps1 更新 -Upgrade
+
+# 重新生成本地受管技能并投影到宿主目录（核心生效命令）
 .\skills.ps1 构建生效
-.\skills.ps1 构建生效 -SkillProfile full-compatible
+
+# 仅投影到指定宿主（例如只更新 Codex 与 Claude）
+.\skills.ps1 构建生效 -ProjectionHosts codex,claude
 ```
 
-`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。报告增加 `complete/failed` 与逐源 `reason`：超时、查询失败、未命中 ref 分别为 `timeout/query_failed/ref_not_found`，目标为 `unknown`，不代表已是最新；部分失败仍输出 JSON，调用方必须检查 `complete`，每周 runner 遇到不完整检查会停止。每次远端 Git 查询默认限时 30 秒，可通过 `SKILLS_REMOTE_QUERY_TIMEOUT_SECONDS` 设置为 1–300 秒；同一 repo/ref 的失败在本次检查内缓存，其他源继续检查。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
-公开分发通过 GitHub Releases 的 `bootstrap.zip`/`portable.zip` 完成下载和安装。公共源码开发版应从 GitHub clone、fork 或 tag 获取，保留 Git 历史；Release ZIP 是安装制品，不替代源码仓。发布包包含运行所需源码、脚本、文档与 MIT `LICENSE`，第三方 `vendor/`/`imports/` 仍按各自许可证。
+### 2. 统一 MCP 服务管理（Model Context Protocol）
 
-`check-updates` 继续只检查上游技能；以下命令检查并更新 skills-manager 本体 Release。它只接受未被本地修改的 GitHub Release 安装目录，先核对 GitHub 发布的 SHA-256，再把目录替换交给独立进程，保留同级旧目录备份。源码开发版必须通过 Git 更新，不能使用此命令覆盖。
-
-```powershell
-.\skills.ps1 release-update --check --json
-.\skills.ps1 release-update --apply --yes
-# 自动更新成功后才同步 MCP；默认不会同步 MCP
-.\skills.ps1 release-update --apply --yes --sync-mcp
-```
-
-### Skills 投影档位
-
-`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：Codex、Claude、ZCode 默认使用 `core-lean` 7 项；Antigravity、WorkBuddy 默认使用 `core-ops` 8 项（`core-lean` 7 项加一份沙箱慢测诊断技能）。显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
-
-当本次只授权部分宿主时，可用 `-ProjectionHosts <host...>` 限定配置中的 managed targets；有效值为 `codex`、`claude`、`zcode`、`antigravity`、`workbuddy`。当前 ChatGPT Work 使用宿主托管环境，没有本机投影入口；`codex` 只表示本机 Codex。显式筛选时，无法识别宿主的 target 会 fail closed；省略此参数维持所有已配置 target 的既有行为。选中 `codex` 才会更新 Codex native skill root 与 custom-agent bridge；选中 `claude` 才会投影受管 Claude 子代理定义到 `~/.claude/agents`。两者均要求正式宿主晋级，备份位于对应宿主的 `skills-manager-agent-backups`，不进入代理发现目录；加载和调用须单独验收。当前 `antigravity` target 指 App/IDE 的 `~/.gemini/config/skills`；CLI 的独立 root 尚无受管 target，不会由该命令投影。
-
-`-ProjectionHosts` 只限制本次枚举和同步哪些 target，不提供宿主间的内容隔离：`agent/` 是共享生成源，当前 `managed_link_only` 技能目录是指向 `agent/<skill>` 的 junction。重建 `agent/` 后，未选中的宿主仍会通过既有 junction 看到其所链接技能的内容变化。需要确认实际影响时，应比较源与各 target 的内容哈希；不能仅凭参数筛选声称未选宿主字节不变。
-
-| 宿主 | 默认 profile | `full-compatible` 的宿主适配 |
-| --- | --- | --- |
-| ChatGPT/Codex | `core-lean`：7 个默认技能 | 全量受管技能，排除原生 `documents`/`presentations`/`spreadsheets` 已覆盖的 `docx`、`pptx`、`xlsx`，以及 `skill-creator` 和 `web-artifacts-builder` |
-| Claude | `core-lean`：7 个默认技能 | 全量受管技能 |
-| ZCode | `core-lean`：7 个默认技能 | 排除原生 `documents`/`presentations`/`spreadsheets` 插件已覆盖的 `docx`、`pptx`、`xlsx`，以及 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
-| Antigravity | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
-| WorkBuddy | `core-ops`：8 个技能 | 全量受管技能；当前未配置宿主排除项 |
-
-表格描述仓库投影策略；目标路径和文件写入不能证明宿主已发现、加载或成功执行这些技能。
-
-默认 7 项中的 `ai-coding-workflow` 保持常驻，作为日常实现、调试与收口的薄闭环入口；纯审查使用 `code-review-and-quality`。它只携带高频稳定方法，不把模型接力、严格 TDD、全量测试或额外门禁变成默认动作；详细映射仍留在产品参考件中，不新增模型/provider 路由或运行时状态库。
-
-### AI 编码快速用法
-
-日常编码可调用 `$ai-coding-workflow`，提供目标、现场、约束和可观察的验收结果；不知道文件和测试命令时，由 AI 读取仓库后确定 `Exact write set`、`Minimum proof` 和 `Stop`。默认由一个主执行者完成检查、实现与验证；ChatGPT/Codex、Claude Code、ZCode/GLM、Antigravity/Gemini 和 WorkBuddy 按当前任务的工具能力、上下文和验收证据选择，不固定跨宿主接力。Claude Desktop 内运行的 Code 会话按 Claude Code 支持面验收；普通 Claude Desktop 聊天使用账号同步 skills/plugins，本机 `.claude` 投影不证明该聊天已加载。
-
-不要复制整段历史会话来交接，只传递当前状态、已确认决策、精确写集和最低验证；接收方仍须重新读取当前仓库状态。可直接复制的普通修复、GPT/GLM 双向交接和独立审查模板见 [AI 编码工作流与约束](docs/product/ai-coding-workflow-guide.md)。
-
-工作流技能按受影响行为选择观察证据：Web 交互、桌面输入、服务交付、自动化与数据迁移各有不同验收路径；项目类型本身不触发全量测试或外部访问。日常执行方式、项目观察矩阵和工程终态见该手册第 7–9 节。[可复用编码验收样例](tests/fixtures/ai-coding-workflow/)及手册第 10 节用于在独立副本中验证宿主的修复、测试和审查流程，不直接修复 tracked 样例，也不替代真实项目验收。修改技能源后通过既有 `构建生效` 流程物化和投影；源码落盘不等于宿主已加载，也不等于真实任务已验收。
-
-`full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
-
-### MCP
+告别在各个客户端配置文件里手写 JSON 的痛苦：
 
 ```powershell
-.\skills.ps1 安装MCP <name> -- <command> [args...]
-.\skills.ps1 安装MCP <name> --transport http --url <url>
-.\skills.ps1 卸载MCP <name>
+# 添加标准 stdio 类型的 MCP
+.\skills.ps1 安装MCP fetch -- uvx mcp-server-fetch
+
+# 添加远程 HTTP / SSE 类型的 MCP
+.\skills.ps1 安装MCP remote-api --transport http --url https://api.example.com/mcp
+
+# 查看当前所有 MCP Profiles 场景
 .\skills.ps1 MCP配置 列表
-.\skills.ps1 MCP配置 使用 default
+
+# 按场景一键切换启用的 MCP（例如切换为 coding 场景）
+.\skills.ps1 MCP配置 使用 coding
+
+# 将当前启用的 MCP 配置同步到所有已安装的宿主（Claude / Codex / Antigravity / ZCode）
 .\skills.ps1 同步MCP
 ```
 
-本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。同步会按已配置目标使用宿主原生格式：Claude Code 用户级 `~/.claude.json`、Claude Desktop 的 `%APPDATA%/Claude/claude_desktop_config.json`（仅在其配置目录已存在时纳入，当前只接受本地 `stdio` server）、Antigravity `~/.gemini/config/mcp_config.json`（远程地址使用 `serverUrl`），以及 Codex、ZCode、Gemini、Trae 和 WorkBuddy 各自配置。Claude Desktop 账号侧的远程 connectors 与普通桌面聊天的 skills/plugins 由 Claude 账号管理；ChatGPT Work 也没有本地 MCP/skill 投影入口，因此本机文件同步不代表这些账号侧能力已加载。
+### 3. 目标代码仓审查（Audit Targets）
 
-运行 `同步MCP --plan --json` 可预览配置动作；计划只证明 `repo_verified`，实际同步才会写受管目标文件，仍不证明宿主已加载或真实调用。默认 MCP profile 为空时，不会新建缺失的配置文件；现有文件中本仓声明但当前 profile 未启用的 server 会被清理，其他宿主配置会保留。
-
-`卸载MCP <name>` 会显式清理各受管目标中的同名 server；dry-run 只预览并预检，不保存 `skills.json`。若直接从 `skills.json` 删除 server，工具无法确认已有同名宿主项是否属于本仓，因此会保留该项。Claude Desktop 配置目录存在且当前 profile 含非 `stdio` server 时，整批同步会在写入前失败关闭，不会只更新其他宿主。
-
-### 目标仓审查
+想知道自己的某个工程（比如做 OCR 的项目、或做物理课件的项目）缺少什么针对性的 AI 技能？
 
 ```powershell
-.\skills.ps1 审查目标 列表
-.\skills.ps1 审查目标 添加 <name> <path>
-.\skills.ps1 审查目标 扫描 [--query "<user-goal>"]
-.\skills.ps1 审查目标 预检 --recommendations <file>
-.\skills.ps1 审查目标 应用确认 --recommendations <file>
-.\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes
+# 1. 添加要审查的本地工程目录
+.\skills.ps1 审查目标 添加 my-project D:\CODE\my-project
+
+# 2. 扫描该工程的技术特征与能力需求画像
+.\skills.ps1 审查目标 扫描
+
+# 3. 预检推荐的技能方案并 dry-run 验证
+.\skills.ps1 审查目标 预检 --recommendations <推荐文件路径>
+
+# 4. 显式确认应用（安全落盘，绝不静默覆盖）
+.\skills.ps1 审查目标 应用 --recommendations <推荐文件路径> --apply --yes
 ```
 
-`audit-targets.json` 是两台电脑共享的目标清单。每台电脑可在仓库根目录创建 Git 忽略的 `audit-targets.local.json`，用 `target_overrides` 按名称设置本机 `enabled` 或 `path`；这只影响目标列表和扫描，添加、修改、删除命令只写共享清单。两台电脑的目录不同或目标仅在一台电脑存在时，应分别配置本机覆盖文件。覆盖名称必须对应共享清单中的唯一目标；错误配置会阻断列表/扫描。
+### 4. 多机迁移与全量快照
 
-```json
-{
-  "version": 1,
-  "target_overrides": [
-    { "name": "classroomtoolkit", "enabled": false },
-    { "name": "physics-ppt-toolkit", "path": "E:/Repos/physics-ppt-toolkit" }
-  ]
-}
-```
-
-扫描产物位于 ignored `reports/skill-audit/<run-id>/`，每个 run 固定只有三个文件：`snapshot.json` 是不可变审查输入，`recommendations.json` 是唯一允许 AI 编辑的决策文件，`receipt.json` 是命令维护的阶段、结果、补偿/回滚与 truth-boundary 记录。扫描固定汇总全部 enabled 目标仓；`--target` 仅为兼容保留，不再缩小范围。`--query` 用于冻结本次任务语境；省略时只生成仓库能力盘点，不得据此声称存在用户需求缺口，也不能据此新增、删除或替换 skill/MCP。`snapshot.json` 还记录 `scan_contract`、全仓汇总画像和 `scan_coverage`，用于披露证据范围与采样上限。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。缺少 snapshot 直接阻断，不生成第四个报告或 evidence 文件。
-
-自 `prompt_contract_version=audit-prompt-v20260829.3`（skills 口径改为 current-profile 有效库存 + configured supply 双轨、MCP 指纹纳入 env/header 值域摘要）起，此前所有 run 的 `snapshot.json` 因指纹口径切换必然 stale，预检会 fail closed 要求重扫——这是预期的口径迁移行为，不是环境故障。
-
-使用证据通过 `recommendations.json.usage_observations` 显式提供，不自动读取会话或部署遥测。每条包含 `name`、`kind`（`skill/mcp`）、`task`、`source`、`observed_at`、`stage`（`discovery/load/execution/acceptance`）、`result`（`succeeded/failed/unknown`）和 `provenance`（`host_observed/user_reported/controlled_replay`）。记录的是有来源的观察，不是工具自动认证的调用账本；加载成功不能当成执行成功，受控重放不能当成自然验收。旧文件缺少该数组仍可读取。扫描器的 `not_observed` 仅表示未采集遥测，不会被这些观察覆盖。
-
-`semantic_review.usage_evidence.state` 接受 `observed_used/observed_unused/unknown`：使用情况影响迁移和验证要求，不单独决定保留或退役。替代覆盖、依赖检查、迁移回滚与显式 apply 确认仍适用。默认建议只是未审阅基线，不能据此宣称无需增删。语义契约版本为 `audit-prompt-v20260913.1`；旧快照需要重扫，回滚本次代码后应使用对应版本的快照。
-
-### 规则审查
+在公司电脑配好了 20 个技能和一整套 MCP，怎样安全带回家里的电脑？
 
 ```powershell
-.\skills.ps1 rule-audit --repo <repo-root> --host codex|claude|zcode --json
-.\skills.ps1 rule-plan --target <AGENTS.md> --desired-file <reviewed.md> --repo-root <repo> --out <plan.json> --json
-.\skills.ps1 rule-apply --plan <plan.json> --repo-root <repo> --token APPLY_RULE_REPO_PATCH --json
+# 在旧电脑上打包全部现有 skills + MCP（明文私用快照，严禁上传公共网络）
+.\skills.ps1 迁移 --mode private-all --version v2026.10
+
+# 拷贝到新电脑后，解压运行一键恢复：
+.\skills.ps1 migration-apply
 ```
 
-全局 Codex/Claude/ZCode/Antigravity/Gemini/WorkBuddy 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
+---
+
+## 配置真源架构
+
+本项目的配置边界极度清晰，保证开发者的可预期性与环境可复现：
+
+- **`skills.json`**：声明式配置真源。定义上游 `vendors`、已安装映射 `mappings`、目标目录 `targets` 以及 `mcp_servers` 与场景 `mcp_profiles`。
+- **`skills.lock.json`**：严格锁定每个引入技能的 Git 提交哈希，协同与迁移时绝不漂移。
+- **`overrides/`**：存放你编写的本地私有技能（`custom/`）或对第三方技能的微调补丁（`patches/`）。
+- **`agent/`**：构建时生成的纯净技能包中间物，随后透明链接至系统各宿主。
+
+### 四类交付物边界
+
+| 形态 | 产物包 | 定位与说明 |
+| :--- | :--- | :--- |
+| **标准安装版** | `bootstrap.zip` | 公共标准发行包，解压后通过 `setup.cmd` 一键部署。 |
+| **完整绿色版** | `portable.zip` | 离线免安装绿色包，U 盘即插即用，不主动向宿主写入配置。 |
+| **公共源码版** | `source.zip` 或 Git clone | 开发者完整工程源码。 |
+| **私用全量快照** | `private-all.zip` | 用户自用多机迁移包，携带所有私有配置，明文存放，仅供私有介质流转。 |
+
+---
+
+## 设计原则与安全边界
+
+为了让个人开发者和企业研发团队完全放心地使用，本项目严格遵循以下架构不变量：
+
+1. **零框架劫持**：本工具只负责同步与投影文件配置，**绝不接管你的 API Key、账号登录态、推理网络请求或上下文路由**。
+2. **真值分层与证据闭环**：内部严格遵守 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted` 四层边界，未经验证的绝不虚假断言生效。
+3. **Fail-Closed 安全机制**：所有 MCP 与规则的同步均支持 `--plan` 预览；修改外部目录前强制经过校验，防止配置污染。
+4. **受控的独立扩展**：独立的模型配置工具详见 [模型编排工具](src/model-orchestration/README.md)；产品冻结面与解冻条件详见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+
+---
+
+## 开发与门禁验证
+
+如果你希望为本项目贡献代码或进行本地定制：
 
 ```powershell
-.\skills.ps1 global-rules-plan --antigravity-user-root "$env:USERPROFILE\.gemini" --out .\reports\global-rule-projection\plan.json --json
-.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --antigravity-user-root "$env:USERPROFILE\.gemini" --json
-.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --antigravity-user-root "$env:USERPROFILE\.gemini" --resume --json
-.\skills.ps1 global-rules-check --json
-.\skills.ps1 global-rules-rollback --receipt .\reports\global-rule-projection\receipt.json --token <receipt.rollback.required_token> --json
-```
-
-投影事务使用 schema v2：apply 会从当前显式 roots 重新推导唯一的五宿主 source-target action 集；五份受管源的版本与 A/C/D 共性正文必须一致，各宿主 B 段保留真实加载与安全差异。ZCode、Antigravity/Gemini 和 WorkBuddy 在对应用户根存在或通过 CLI 显式指定时加入各自规则文件 action，并在任何用户规则写入前落盘 journal。中断后仅可用同一 plan、receipt、roots 和显式 `--resume` 续跑。plan/receipt 只能位于 `reports/global-rule-projection/`（`backups/` 保留给内部备份），schema v1 产物 fail closed，需重新执行 plan。默认 Codex 用户根优先使用 `CODEX_HOME`，未设置时使用 `~/.codex`；Claude 用户根优先使用 `CLAUDE_CONFIG_DIR`，未设置时使用 `~/.claude`；ZCode 默认根为 `~/.zcode`；Antigravity/Gemini 默认根为 `~/.gemini`（目录存在时）；WorkBuddy 按 `WORKBUDDY_CONFIG_DIR`、`CODEBUDDY_CONFIG_DIR` 或已存在的用户根解析；CLI 显式 root 优先级最高。文件相等只证明 `filesystem_projected`，fresh run/session 探针才可证明 `host_loaded`。
-
-### ZCode
-
-ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会按 ZCode profile 把受管 Skills 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
-
-审查默认只读。全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。单仓规则写入只经 `rule-plan/rule-apply`：apply 需要 reviewed desired file、before hash 与显式 token。多仓（全域）规则事务已随本分支移除。
-
-### 技能投影与 fallback
-
-宿主原生 metadata 是普通请求的首选选择面。只有用户明确要求使用当前不可见的本地技能，或宿主高置信度判定没有足够的可见技能匹配完整请求且确实需要专门工作流时，才调用一次 `capability-router` 做 cold discovery 或 policy validation；它接收完整请求和至多两个宿主选择的 `DomainHint`，返回小候选集，仍由宿主语义选择。提及或讨论技能、以及语义不确定的普通请求都不是调用；不确定时默认使用通用推理或可见技能。随后 router 校验一个精确候选及其依赖闭包，不作语义排序、不切换 profile、不写宿主状态。输出中的 `routing_receipt` 只保存 query SHA-256、候选/闭包、catalog fingerprint、`truth_boundary` 和写入计数，不回显原始请求；它用于证明“候选发现/候选校验”边界，不等于宿主已加载或真实调用技能。
-若复制形态的 router 目录能读到 catalog、但 catalog 引用的兄弟技能没有随包存在，router 会返回 `catalog_projection_incomplete`，并将 receipt 标为 `candidate_discovery_blocked`；这表示投影不完整而非语义无匹配。修复应重新执行 `skills.ps1 构建生效`，或显式使用受管 catalog 的 `SKILLS_MANAGER_CAPABILITY_CATALOG`/`-CatalogPath`，不要把只含 router 的副本当成完整技能供应。
-
-Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
-
-`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 必须有路径、`SKILL.md` hash、覆盖同包资源的 package hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。CSR-100 实现后，受管 custom-agent template 将静态声明 `model` / `model_reasoning_effort`，以优先于全局 subagent 默认值；它不改变 provider/auth，也不构成动态模型路由。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。完整阶段与任务合同见 [冷技能路由路线图](docs/product/cold-skill-routing-roadmap.md)、[实施计划](docs/archive/cold-skill-routing-implementation-plan.md) 和 [验收 Runbook](docs/runbooks/cold-skill-routing-acceptance.md)。
-
-```powershell
-# 默认只读取仓库侧技能面，不调用宿主 CLI
-.\skills.ps1 capability-inventory --view skill-surfaces --json
-
-# 需要当前宿主观测时才显式启用；只调用公开 JSON 命令，不写宿主状态
-.\skills.ps1 capability-inventory --view skill-surfaces --host-probe --json
-```
-
-默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；对仍会被 Codex `full-compatible` 投影的仓库技能，另输出 `retirement_candidates` 的 host-profile 排除候选。候选只保留精确重叠、目标配置路径和不改变的跨宿主/冷目录范围，不能自行卸载，也不把插件存在推断成成功调用。它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
-
-## 开发与验证
-
-按风险选择一个 closeout 入口。普通变更运行 build、受影响测试、适用的受影响 verifier 和 diff check。测试入口支持 `-TestPath`、`-TestName` 和标签筛选，适合从大型测试文件中只运行受影响行为：
-
-```powershell
+# 1. 从源码构建根 skills.ps1 与 skills.lib/
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\run.ps1 -TestPath .\tests\Unit\CapabilityInventory.Tests.ps1
-# 仅在适用时运行对应的受影响 verifier，例如：
-pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
-git diff --check
-```
 
-文档-only 变更只需运行 diff check；单个行为修复可使用 focused gate，避免误跑整套测试：
+# 2. 检查生成物是否与源码保持一致
+pwsh -NoProfile -File .\build.ps1 -Check
 
-```powershell
-pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile docs
-pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
-```
-
-本地入口默认 auto：只检查 `HEAD` 后的编辑，未跟踪文件参与同一选档，不累加已提交但未推送的历史。文档及技能参考正文走轻量检查，规则和技能元数据走内容检查，已映射源码选行为测试；纯测试运行器/测试夹具变更只运行 focused 测试，不重建未被使用的 CLI bundle；可用 `-TestPath` 追加本次回归测试，无须先跑一遍完整测试：
-
-```powershell
+# 3. 运行本地自动化质量门禁
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
 ```
 
-集成检查显式加 `-DiffBase <revision>`；CI 使用事件基线，发布标签运行 full。未知路径、未映射源码、风险变更或分类失败仍选 full；明确影响范围时可使用 focused。具体映射以 `scripts/quality/resolve-gate-profile.ps1` 为准。当前输入已有充分证据后停止，不重复审计。
+更多工程规范请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [发布指南](docs/RELEASING.md)。
 
-本地 gate 构建生成物，允许正常的未提交修改；CI 使用 `-CheckGenerated` 在测试前只读核对提交的生成物，漂移立即失败。也可单独运行 `build.ps1 -Check`。`-AllowDirtyWorktree` 仅保留参数兼容，不再需要。CI 只为实际需要物化资产的检查恢复锁定来源；Pester 由测试入口按需准备一次，纯文档检查不安装测试依赖。
+---
 
-runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
+## 开源协议 / License
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
-```
-
-测试入口会在 ignored `reports/test-runtime/` 中按固定 SHA-256 准备 Pester 6.1.0，不要求全局安装模块；CI 复用同一 bootstrap。
-
-一键发布包：
-
-```powershell
-pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
-```
-
-发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是第三方来源和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。
+本项目基于 [MIT License](LICENSE) 开源发布。所引用的第三方技能与依赖仍各自遵循其原始开源许可证。

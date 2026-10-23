@@ -1,139 +1,228 @@
 # skills-manager
 
-A Windows-first, local-first PowerShell 7 manager for AI skills and MCP servers. It consolidates scattered sources into one versioned configuration, pins revisions, builds portable skill directories, and safely projects them to hosts such as Codex and Claude Code.
+<p align="center">
+  <strong>A Windows-First, Local-First AI Skills & MCP Server Versioned Manager</strong><br>
+  Single Configuration · Safe Projection to 5 AI Hosts · Version Locking · Zero Account Hijacking
+</p>
 
-It is aimed at individuals and teams that want the same skill set across Windows machines, auditable repository rules, and a shared MCP inventory without handing model, account, or runtime ownership to another framework.
+<p align="center">
+  <a href="https://github.com/sciman-top/skills-manager/releases"><img src="https://img.shields.io/github/v/release/sciman-top/skills-manager?color=0078D4&label=Release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows-blue?logo=windows" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/PowerShell-7.0%2B-5391FE?logo=powershell" alt="PowerShell 7+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/Language-中文-blue.svg" alt="Chinese README"></a>
+</p>
 
-Claude integration targets Claude Code's local configuration and skill surface. A Code session launched inside Claude Desktop uses that same surface; regular Claude Desktop chats use account-synced skills/plugins, so a local `.claude` projection does not prove those chats loaded them.
+---
 
-The main CLI does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. The [independent preset tool](src/model-orchestration/README.md) provides explicit model configuration and controlled launches; it is outside the skills/MCP build and does not automate failover or task replay. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
+### What Pain Point Does It Solve?
 
-This project is licensed under the [MIT License](LICENSE). Third-party skills and dependencies remain subject to their original licenses.
+When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy across multiple Windows machines, you frequently run into:
 
-## Quick start
+- **Config Duplication**: Manually copying `.agents/skills` or configuring MCP JSON every time you switch from your desktop to your laptop.
+- **Host Fragmentation**: Codex uses `~/.codex/skills`, Claude Code uses `~/.claude/agents`, Antigravity uses `~/.gemini/...`. Adding a single skill requires updating 5 different paths.
+- **Upstream Prompt Drift**: A third-party skill quietly updates upstream with breaking changes, degrading agent behavior without any commit history.
+- **Over-Engineered Meta-Agents**: You want clean management, not a bloated daemon that hijacks your API keys or proxies your network traffic.
 
-PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupported.
+**skills-manager** solves this by unifying all your AI skills and MCP servers into a single, version-controlled `skills.json`. It pins exact Git commit SHAs (`skills.lock.json`) and projects cleanly into each host using native Windows junctions or configurations—**without touching your API keys, models, or network traffic**.
 
-### Recommended: one-step Release install
-
-The current stable release is [v2026.08.30.1](https://github.com/sciman-top/skills-manager/releases/tag/v2026.08.30.1). Download the matching `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), verify `SHA256SUMS.txt`, extract it, and run:
-
-```powershell
-.\setup.cmd
+```text
+                    ┌─── [ skills.json ] (Single Source of Truth) ───┐
+                    │   • Upstream Skill Sources & Git SHA Locks      │
+                    │   • Unified MCP Server Profiles (coding/web)    │
+                    └──────────────────────┬─────────────────────────┘
+                                           │
+                             pwsh .\skills.ps1 构建生效
+                                           │
+       ┌──────────────┬────────────────────┼───────────────────┬──────────────┐
+       ▼              ▼                    ▼                   ▼              ▼
+  OpenAI Codex   Claude Code             ZCode            Antigravity     WorkBuddy
+(~/.codex/skills) (~/.claude/agents)    (~/.zcode/skills)   (~/.gemini/...) (Local targets)
 ```
 
-For offline or USB-style green use, download `portable.zip`, extract it, and run `skills.cmd`. It does not write host directories automatically. See the [installation and migration guide](docs/INSTALLATION_AND_MIGRATION.md) for package selection, checksums, and migration boundaries. Local outputs follow the `deliveries/history/work` layout: each version has one delivery root `artifacts/deliveries/<version>/` (see below), and migration snapshots land under `artifacts/deliveries/<version>/{private-snapshot,rescan}/<run-id>/`.
+---
 
-`artifacts/` is only a local ignored output directory. Public downloads, checksums, and attestations are sourced from the GitHub Release, not from this directory. See [`artifacts/README.md`](artifacts/README.md) for the local retention rules.
+## Key Features
 
-### From source
+- 🎯 **One Config, 5 AI Hosts**: Native projection for OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), and WorkBuddy.
+- 🔒 **Version-Locked (Lockfile)**: `skills.lock.json` pins exact commit hashes to protect your prompt supply chain against breaking changes.
+- 🔌 **Unified MCP Management**: Configure `stdio` or `http/sse` MCP servers once. Switch profiles (`coding`, `browser`, `database`, `off`) and sync across all clients with a single command.
+- 🔍 **Target Repo Capability Audit**: Scan any local project repository, detect missing domain capabilities, and generate a safe, verifiable 3-file decision package (Snapshot -> Recommendation -> Receipt).
+- 💻 **Interactive TUI Menu**: Launch `skills.cmd` to browse, pick, install, and sync skills using a clean terminal menu.
+- 📦 **Portable & USB-Ready**: Pre-built `portable.zip` for offline / USB workflows without altering host settings.
+- 🛡️ **Zero Hijacking**: Runs entirely locally. Does not touch API keys, does not proxy prompts, and has no daemon services.
+
+---
+
+## Host Support Matrix
+
+| AI Host | Skill Projection | Default Profile | MCP Target Format |
+| :--- | :--- | :--- | :--- |
+| **OpenAI Codex** | Native Skill Root & Agent Bridge | `core-lean` (7 curated) | Native Codex MCP config |
+| **Claude Code** | User-level `~/.claude/agents` | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
+| **ZCode** | `~/.zcode/skills` junction | `core-lean` (7 curated) | `~/.zcode/cli/config.json` |
+| **Antigravity (Gemini)** | `~/.gemini/config/skills` junction | `core-ops` (8 enhanced) | `mcp_config.json` |
+| **WorkBuddy** | Managed local targets | `core-ops` (8 enhanced) | Standard workspace config |
+
+---
+
+## Quick Start
+
+Prerequisites: **Windows 10 / 11** with **PowerShell 7+** (`pwsh`) and **Git**. (*Windows PowerShell 5.1 is unsupported*).
+
+### Option A: GitHub Release Pre-built Package (Recommended)
+
+Grab the latest release from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases):
+
+1. **Standard One-Step Setup**: Download `bootstrap.zip`, extract, and run:
+   ```cmd
+   .\setup.cmd
+   ```
+2. **Portable Edition (Offline / USB)**: Download `portable.zip` and run `skills.cmd`. It does not write to system host directories automatically.
+
+> SHA-256 checksums are published in `SHA256SUMS.txt`. For details, see the [Installation and Migration Guide](docs/INSTALLATION_AND_MIGRATION.md).
+
+### Option B: Run from Source / Interactive Menu
 
 ```powershell
-pwsh -NoProfile -File .\skills.ps1 help
-pwsh -NoProfile -File .\skills.ps1 发现
-pwsh -NoProfile -File .\skills.ps1 安装
-pwsh -NoProfile -File .\skills.ps1 doctor --strict
+git clone https://github.com/sciman-top/skills-manager.git
+cd skills-manager
 ```
 
-You can also run `skills.cmd` to open the interactive menu.
-
-The interactive menu uses direct frequent actions plus domain submenus.
-
-- Browse Skills
-- Pick Install
-- Paste Command Import
-- Rebuild and Sync (CLI command remains `构建生效`)
-- Update Upstream (CLI command remains `更新`)
-- Target Repo Audit
-- MCP Services
-- Skill Library Admin
-- More
-
-The `Target Repo Audit` submenu follows the workflow: scan, preflight, dry-run, then explicit apply.
-
-## Distribution models
-
-Each version has one delivery root, `artifacts/deliveries/<version>/`, with four sibling forms: `standard-install/bootstrap.zip`, `portable/portable.zip`, `source/source.zip`, and the local-only `private-snapshot/private-all.zip`. The first three are public tool/source baselines with no `agent/`, skill inventory, MCP inventory, target state, `vendor/`, or `imports/`; a new machine scans its own target repositories before the user chooses what to install. The source archive contains development files but not Git history; clone/fork/tag remains the development truth. Only `private-all` carries the current complete skills/MCP state, as a plaintext, no-passphrase private snapshot. Repository `rules/global/` source is present only in the source archive and private snapshot, and never overwrites effective host-global rules automatically. `rescan` is an auxiliary scan list, not a fifth delivery form.
-
-Release installations can check for a newer skills-manager release and, only after explicit confirmation, verify the published SHA-256, preserve a sibling backup, and hand off a directory switch to an independent updater. Source checkouts must use Git rather than the Release updater.
+Double-click or run `skills.cmd` to open the interactive TUI menu:
 
 ```powershell
-.\skills.ps1 release-update --check --json
-.\skills.ps1 release-update --apply --yes
+.\skills.cmd
 ```
 
-## Sources of truth
+```text
+==============================================
+         Skills Manager (Interactive Menu)
+==============================================
+  [1] Browse Skills      - View all available skills in sources
+  [2] Pick Install       - Interactively select and install
+  [3] Paste Command      - Parse and import add / npx commands
+  [4] Rebuild & Sync     - Build & safely project to AI hosts
+  [5] Update Upstream    - Pull updates for third-party skills
+  [6] Target Repo Audit  - Scan repositories for missing skills
+  [7] MCP Services       - Manage & sync MCP servers
+  [8] Doctor             - Run environment health check
+==============================================
+```
 
-`skills.json` owns vendors, imports, mappings, targets, MCP configuration, and skill projection. `skills.lock.json` pins resolved sources. `src/` is the CLI source and `build.ps1` generates `skills.ps1`; `overrides/{custom,patches,resources}` generates `agent/`. Do not hand-edit generated, vendored, or runtime report directories.
+---
 
-## Common commands
+## Common Commands
+
+### 1. Skills Management
 
 ```powershell
-# Skills
+# Discover available skills across sources
 .\skills.ps1 发现
+
+# Interactively choose and install skills
 .\skills.ps1 安装
-.\skills.ps1 卸载 <name> --yes
+
+# Add a single skill from GitHub
+.\skills.ps1 add <github-user/repo> --skill <skill-name>
+
+# Check upstream skill changes (read-only query)
 .\skills.ps1 check-updates --json
-.\skills.ps1 更新 -Plan
+
+# Pull updates and refresh the lockfile
 .\skills.ps1 更新 -Upgrade
+
+# Rebuild and safely project to AI hosts
 .\skills.ps1 构建生效
 
-# MCP
-.\skills.ps1 安装MCP <name> -- <command> [args...]
-.\skills.ps1 安装MCP <name> --transport http --url <url>
-.\skills.ps1 卸载MCP <name>
+# Project only to selected hosts (e.g., Codex and Claude)
+.\skills.ps1 构建生效 -ProjectionHosts codex,claude
+```
+
+### 2. MCP Server Management
+
+```powershell
+# Add a stdio MCP server
+.\skills.ps1 安装MCP fetch -- uvx mcp-server-fetch
+
+# Add an HTTP/SSE remote MCP server
+.\skills.ps1 安装MCP remote-api --transport http --url https://api.example.com/mcp
+
+# List all MCP profiles
 .\skills.ps1 MCP配置 列表
+
+# Switch active MCP profile (e.g. coding profile)
+.\skills.ps1 MCP配置 使用 coding
+
+# Sync active profile to all installed AI hosts
 .\skills.ps1 同步MCP
-
-# Target audit
-.\skills.ps1 审查目标 扫描 --target <name>
-.\skills.ps1 审查目标 预检 --recommendations <file>
-.\skills.ps1 审查目标 应用确认 --recommendations <file>
-.\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes
-
-# Rule audit and reviewed mutation
-.\skills.ps1 rule-audit --repo <repo-root> --host codex --json
 ```
 
-Target-audit runtime bundles and receipts live under ignored `reports/skill-audit/<run-id>/`. Only explicit `--apply --yes` persists recommendations. Rule mutation additionally requires reviewed input, exact roots and hashes, a token, a receipt, and rollback data.
+### 3. Target Repo Audit
 
-`check-updates --json` reports only `current/target/changed/source`; it does not apply, build, project, or sync MCP. `构建生效` writes projected output outside the repository. For repository-only generated synchronization, run `build.ps1` instead. `scripts/weekly-skills-update.ps1` remains a skills-only runner that a host/operator may schedule, but the repository provides no entry to create, update, or delete that legacy Windows scheduled task; `doctor` only reports it read-only and cleanup is a host-side decision. In contrast, `release-update-schedule --enable` explicitly creates a non-elevated scheduled task under the current interactive user, and `--disable` removes it.
-
-## Projection and explicit fallback
-
-Host-native metadata is the normal selection surface. `capability-router` is an explicit cold-discovery or policy-validation fallback. It accepts `DomainHint`, returns candidates, and validates host selections; it does not rank semantically, switch profiles, or mutate host state.
+Scan your other projects to identify needed AI agent capabilities:
 
 ```powershell
-# Default: read repository skill surfaces only; do not invoke the host CLI.
-.\skills.ps1 capability-inventory --view skill-surfaces --json
+# 1. Register a project
+.\skills.ps1 审查目标 添加 my-project D:\CODE\my-project
 
-# Opt in only when a current, read-only host observation is needed.
-.\skills.ps1 capability-inventory --view skill-surfaces --host-probe --json
+# 2. Scan requirements and generate snapshot
+.\skills.ps1 审查目标 扫描
+
+# 3. Preflight and dry-run recommendations
+.\skills.ps1 审查目标 预检 --recommendations <recommendations.json>
+
+# 4. Explicitly apply verified changes
+.\skills.ps1 审查目标 应用 --recommendations <recommendations.json> --apply --yes
 ```
 
-By default the inventory returns repository and projected skill surfaces only. `--host-probe` opts into public Codex CLI JSON for plugins, MCP servers, and doctor facts; the result is redacted and read-only. When an enabled plugin and a standalone/system skill share a name, it emits a report-only native-source preference. It never installs, removes, or enables plugins, never reads or writes plugin caches, and does not prove host loading or actual skill invocation.
-
-## Development and verification
+### 4. Cross-Machine Migration
 
 ```powershell
+# Package all current skills + MCP into a private snapshot on machine A:
+.\skills.ps1 迁移 --mode private-all --version v2026.10
+
+# Restore instantly on machine B:
+.\skills.ps1 migration-apply
+```
+
+---
+
+## Distribution Packages
+
+| Package | Distribution File | Description |
+| :--- | :--- | :--- |
+| **Standard Setup** | `bootstrap.zip` | Public release package deployed via `setup.cmd`. |
+| **Portable** | `portable.zip` | Standalone portable package for USB / offline environments. |
+| **Source** | `source.zip` or Git clone | Full development source archive. |
+| **Private Snapshot** | `private-all.zip` | Plaintext private migration bundle for personal transfers. |
+
+---
+
+## Architectural Integrity
+
+- **No Hijacking**: Does not manage models, intercept tokens, or hijack inference routes.
+- **Verification Hierarchy**: Strictly enforces `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`.
+- **Fail-Closed Safety**: Supports `--plan` preview for rule and MCP mutations, preventing configuration contamination.
+- For model orchestration presets, see [Model Orchestration](src/model-orchestration/README.md).
+
+---
+
+## Development & Gates
+
+```powershell
+# Build the CLI bundle
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
-pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
-git diff --check
+
+# Check for generated file drift
+pwsh -NoProfile -File .\build.ps1 -Check
+
+# Run automated local quality gates
+pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
 ```
 
-Use affected tests for ordinary changes. Runtime, security, data, migration, public-contract, dependency, or packaging changes justify one full gate:
+---
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
-```
+## License
 
-See [docs/product/README.md](docs/product/README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md).
-
-Build both release packages with:
-
-```powershell
-pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version <version>
-```
-
-Maintainers should read [the release guide](docs/RELEASING.md), especially the third-party provenance and clean-machine acceptance requirements.
+This project is licensed under the [MIT License](LICENSE). Third-party skills and dependencies remain subject to their respective upstream licenses.
