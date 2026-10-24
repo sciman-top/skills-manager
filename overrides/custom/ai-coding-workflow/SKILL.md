@@ -50,6 +50,13 @@ fix the cause, rerun the symptom and one relevant boundary case. Never weaken
 assertions, hide errors or delete protection to pass. Strict TDD, coverage,
 full suites and independent review require a request, contract or affected risk.
 Never let a skill invent a new gate.
+Derive expected results from requirements, examples or an external contract,
+not just the implementation. For a meaningful regression, confirm the check
+detects the old failure when practical; do not manufacture tests for trivial edits.
+Choose evidence by the changed behavior: UI needs rendered interaction and
+empty/error states; APIs need caller compatibility and error responses; data
+changes need representative values and invariants; performance needs comparable
+before/after measurements. Use only the applicable checks.
 Reuse valid evidence; rerun only proof invalidated by input/environment changes.
 Reversible low-impact edits can use direct observation. Defend real trust/data
 boundaries; fallbacks need defined triggers and correct observable behavior.
@@ -83,6 +90,8 @@ boundaries. Prove hook coverage and failure behavior before claiming enforcement
 ## Resume, persist, explain
 
 On continue/handoff, reread status; retain decisions and valid proof.
+When context becomes noisy, retain the goal, decisions, changed paths, current
+proof and next step in a compact handoff; recheck mutable facts against source.
 Report changes, verification, limits and rollback.
 Put durable facts in `AGENTS.md`, methods in narrow skills, checks in existing
 scripts/hooks/CI. New layers need a real caller, failure or measurable benefit.
