@@ -287,7 +287,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
     $contract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $Validation 'execution_contract')
     $receiptContract = Get-ExecutionAdmissionContractSnapshot (Get-ExecutionAdmissionProperty $receipt 'execution_contract')
     # Non-bridge modes (e.g. host_admission_required) belong to the parent-decision path, not this structured admission.
-    if ([string]::IsNullOrWhiteSpace((Get-ExecutionAdmissionContractMode $contract))) { throw 'execution_contract_mode_unsupported' }
+    if ([string]::IsNullOrWhiteSpace((Get-ExecutionAdmissionContractMode $contract))) { throw 'execution_contract_mode_unsupported: non-bridge contract modes (host_admission_required) are the documented parent-mediated boundary, not a broken chain; continue per capability-router SKILL.md and report parent_mediated' }
     if ((ConvertTo-ExecutionAdmissionCanonicalJson $contract) -ne (ConvertTo-ExecutionAdmissionCanonicalJson $receiptContract)) { throw 'execution_contract_invalid' }
 
     $closurePaths = New-Object System.Collections.Generic.List[string]
@@ -302,7 +302,7 @@ function Get-ExecutionAdmissionValidationSnapshot {
         $packageHash = [string](Get-ExecutionAdmissionProperty $member 'package_sha256')
         if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($path) -or -not $closureNames.Add($name)) { throw 'validated_closure_identity_invalid' }
         if ($availability -ne 'available' -or -not [bool](Get-ExecutionAdmissionProperty $member 'entrypoint_hash_validated') -or -not [bool](Get-ExecutionAdmissionProperty $member 'package_hash_validated') -or $packageHash -notmatch '^[a-f0-9]{64}$' -or -not [bool](Get-ExecutionAdmissionProperty $member 'contained')) { throw 'validated_closure_unavailable' }
-        if ($sideEffect -in @('unknown', 'external_read') -or $loadSideEffect -ne 'read_only') { throw 'validated_closure_side_effect_invalid' }
+        if ($sideEffect -in @('unknown', 'external_read') -or $loadSideEffect -ne 'read_only') { throw 'validated_closure_side_effect_invalid: unknown/external_read side effects are not bridge-admissible; treat as the documented parent-mediated boundary per capability-router SKILL.md' }
         $closurePaths.Add($path) | Out-Null
         $closureRows.Add([pscustomobject][ordered]@{
             name = $name

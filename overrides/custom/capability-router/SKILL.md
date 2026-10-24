@@ -232,6 +232,17 @@ additionally records the user's implementation request, exact write set,
 minimum proof, and stop condition. For `external_read`, `unknown`, ambiguity,
 a missing execution contract, or any request to alter host/session/profile state, return an admission request to the parent instead. Never use the bridge as automatic middleware or make every natural-language request cold-discover skills.
 
+Structured admission is bridge-only. `New-ExecutionAdmission` accepts exactly the
+three bridge contracts (`one_shot`, `parent_user_input`, `multi_turn_user_decision`)
+with classified workflow side effects (`read_only`, `controlled_write`). A
+`host_admission_required` contract — the catalog default for skills without an
+explicit contract — or an `unknown`/`external_read` side effect fails construction
+with `execution_contract_mode_unsupported` or `validated_closure_side_effect_invalid`.
+That throw is the documented parent-mediated boundary, not a broken chain and not an
+unavailable skill: apply the `host_admission_required` guidance above, execute
+parent-mediated under the current authorization or stop for the missing input, and
+report the path as `parent_mediated`.
+
 The specialist bridge uses the generated `scripts/execution-admission.ps1`
 beside this router script. Dot-source that file after router package validation;
 it contains the deterministic helpers and needs no repository source import.
