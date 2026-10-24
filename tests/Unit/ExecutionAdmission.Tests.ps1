@@ -416,6 +416,22 @@ finally {
         { New-ExecutionAdmission -OriginalRequest 'read-only review' -AdmittedGoal 'review' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*execution_contract_mode_unsupported*'
     }
 
+    It 'points mode_unsupported and unclassified side effects at the parent-mediated recovery path' {
+        $root = Join-Path $TestDrive 'recovery-hint'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $unsupported = [pscustomobject]@{ mode = 'host_admission_required'; native_agent = ''; conversation_owner = 'parent'; stop_condition = 'admission_required' }
+        $fixture.validation.execution_contract = $unsupported
+        $fixture.validation.routing_receipt.execution_contract = $unsupported
+
+        $err = { New-ExecutionAdmission -OriginalRequest 'read-only review' -AdmittedGoal 'review' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*execution_contract_mode_unsupported*' -PassThru
+        "$err" | Should -Match 'parent_mediated'
+
+        $fixture2 = New-ExecutionAdmissionFixture $root
+        @($fixture2.validation.validated_closure)[0].side_effect = 'unknown'
+        $err2 = { New-ExecutionAdmission -OriginalRequest 'read-only review' -AdmittedGoal 'review' -Validation $fixture2.validation -AllowedReadSet $fixture2.allowed_read_set -AuthorityBasis 'current_user_request' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*validated_closure_side_effect_invalid*' -PassThru
+        "$err2" | Should -Match 'parent-mediated boundary'
+    }
+
     It 'derives a successor only after predecessor revalidation and an attributable user answer' {
         $root = Join-Path $TestDrive 'successor'
         $fixture = New-ExecutionAdmissionFixture $root
