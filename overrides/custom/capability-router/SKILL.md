@@ -62,9 +62,11 @@ binding failure, not a semantic miss and not an empty catalog: correct the
 argument and run the same single discovery once. Do not treat it as
 "cold discovery unavailable".
 
-Prefer PowerShell 7 with `-File` from either shell. Under `cmd.exe /c`, the
-`-File` form breaks on quoting when `-Query` contains spaces or non-ASCII
-text. If the host shell is `cmd.exe`, pass the whole invocation through
+Prefer PowerShell 7 with `-File` from either shell. An interactive `cmd.exe`
+session can still break `-File` quoting when `-Query` contains spaces or
+non-ASCII text under a legacy console code page; a `cmd.exe /c` child spawned
+from pwsh passes Unicode arguments through intact (observed 2026-10-24). If
+the host shell is an interactive `cmd.exe`, pass the whole invocation through
 `pwsh -NoProfile -Command "& { ... }"` or `-EncodedCommand`, and treat a
 non-zero exit as "the router did not run" rather than as an empty catalog.
 
@@ -81,8 +83,8 @@ did not run, not that the transport is broken.
 
 Use functional domains, not arbitrary task keywords: `decision`, `engineering`,
 `coding`, `frontend`, `design`, `writing`, `content`, `presentation`, `diagram`,
-`animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, or
-`skill-management`. Existing specialist domains such as `ppt`, `physics`, and
+`animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, `general`,
+or `skill-management`. Existing specialist domains such as `ppt`, `physics`, and
 `coding-strict` remain available. The default maximum is 12 and applies only to
 unscoped discovery: if that candidate set exceeds the limit, the router returns
 `domain_hint_required` with no arbitrary alphabetical subset. A hinted set is
@@ -242,6 +244,13 @@ That throw is the documented parent-mediated boundary, not a broken chain and no
 unavailable skill: apply the `host_admission_required` guidance above, execute
 parent-mediated under the current authorization or stop for the missing input, and
 report the path as `parent_mediated`.
+
+Configure a bridge contract only for a skill whose workflow a fresh subagent
+can finish as a closed, independently verifiable task (`one_shot`), an
+interview that needs one-question-per-turn user decisions
+(`multi_turn_user_decision`), or a flow that must stop for user input
+(`parent_user_input`). Methodology skills that the parent absorbs and applies
+itself keep the catalog default by design.
 
 The specialist bridge uses the generated `scripts/execution-admission.ps1`
 beside this router script. Dot-source that file after router package validation;

@@ -37,7 +37,7 @@
        ┌──────────────┬───────────────┼───────────────┬──────────────┐
        ▼              ▼               ▼               ▼              ▼
   OpenAI Codex   Claude Code        ZCode       Antigravity     WorkBuddy
-(~/.agents/skills) (~/.claude/agents) (~/.zcode/skills) (~/.gemini/...) (本地受管目标)
+(~/.agents/skills) (~/.claude/skills) (~/.zcode/skills) (~/.gemini/...) (本地受管目标)
 ```
 
 ---
@@ -59,7 +59,7 @@
 | AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 |
 | :--- | :--- | :--- | :--- |
 | **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | 原生 Codex MCP 配置 |
-| **Claude Code** | 用户级 `~/.claude/agents` 链接 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 |
+| **Claude Code** | 用户级 `~/.claude/skills` 链接；Agent Bridge 另写 `~/.claude/agents` 子代理定义 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 |
 | **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` |
 | **WorkBuddy** | 受管本地目标投影 | `core-ops` (8 个运维增强) | 内部工作区标准配置 |
