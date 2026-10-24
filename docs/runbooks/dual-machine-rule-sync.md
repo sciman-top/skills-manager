@@ -53,8 +53,8 @@
 - 探针提问：`这是加载核验探针:禁止读取任何文件、禁止使用任何工具。仅凭你本轮已加载的全局指令回答:Universal Agent Protocol 的版本号是多少?只回答版本号,不要解释。`
 - Codex：临时目录 `codex exec --skip-git-repo-check --sandbox read-only <探针>`。
 - Claude Code：临时目录 `claude -p <探针> --disallowedTools "Read,Grep,Glob,Bash,Write,Edit,WebFetch,WebSearch,Task,NotebookEdit"`；已知阻断：本机 provider key 失效在探针回合发生前报 401，修复 auth 后复测。
-- ZCode：临时目录 `node "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" -p <探针> --disallowedTools "Read Grep Glob Bash Write Edit WebFetch WebSearch Agent Task"`；已知阻断：CLI 凭据面与桌面端不共享时报 `Model creation failed`（`doctor` 显示运行时 healthy），CLI 侧 `zcode login` 后复测。
-- WorkBuddy：临时目录 `CODEBUDDY_CONFIG_DIR=~/.workbuddy-ai "$env:LOCALAPPDATA\Programs\WorkBuddyAI\resources\app.asar.unpacked\cli\bin\codebuddy" -p <探针> --tools ""`；已知阻断：CLI 未登录报 Authentication required，CLI `/login` 后复测。
+- ZCode：临时目录 `node "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" -p <探针> --disallowedTools "Read Grep Glob Bash Write Edit WebFetch WebSearch Agent Task"`；已知阻断：CLI 凭据面与桌面端不共享时报 `Model creation failed`（`doctor` 显示运行时 healthy），CLI 侧 `zcode login` 后复测；2026-10-24 本机 5.8.x 另见 `无法定位 CLI ZCode Built-in Provider Config`，须先按当前安装包修复内置 provider 配置再复测。
+- WorkBuddy：无扩展名入口是 Node 脚本，PowerShell 不可直接调用；临时目录使用 `CODEBUDDY_CONFIG_DIR=~/.workbuddy-ai node "$env:LOCALAPPDATA\Programs\WorkBuddyAI\resources\app.asar.unpacked\cli\bin\codebuddy" -p <探针> --tools ""`。已知阻断：CLI 未登录报 Authentication required，CLI `/login` 后复测。2026-10-24 国际版 5.8.4 / CLI 2.161.0 上 `--version` 可用，但正式 CLI 路径报 `Cannot find module '../dist/codebuddy'`（桌面包未解包 CLI dist），按 `platform_na` 记录，替代验证仍为 `global-rules-check` 字节一致；安装包恢复可用 CLI dist 或提供全局 CLI 后复测，不得把空输出当作加载成功。
 - Antigravity：无非交互入口，仅真实 GUI 新会话核验。
 - 依据：Claude Code best practices（code.claude.com/docs/en/best-practices）、Anthropic context engineering（anthropic.com/engineering/effective-context-engineering-for-ai-agents）、AGENTS.md 规范（agents.md），2026-10-10 读取。
 
