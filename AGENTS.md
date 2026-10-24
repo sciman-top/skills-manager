@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.91
-**最后更新**: 2026-10-18
+**全局规则复核**: 9.92
+**最后更新**: 2026-10-25
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。

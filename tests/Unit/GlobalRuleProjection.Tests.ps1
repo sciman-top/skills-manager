@@ -72,6 +72,26 @@ Describe 'Global rule source contract' {
         (Get-FileHash -LiteralPath $path).Hash | Should -Be $before
     }
 
+    It 'retains the conservative Antigravity compatibility ceiling without calling it a current host limit' {
+        $result = Test-GlobalRuleSourceFamily $fixture $codex $claude
+        $result.pass | Should -BeTrue -Because ($result.findings.code -join ', ')
+        $budget = @($result.budget | Where-Object { $_.host -eq 'antigravity' })
+        $budget.Count | Should -Be 1
+        $budget[0].host_char_limit | Should -Be 12000
+        $note = @($result.observations | Where-Object { $_.code -eq 'antigravity_legacy_char_compatibility_budget' })
+        $note.Count | Should -Be 1
+        $note[0].limit | Should -Be $budget[0].host_char_limit
+        $note[0].message | Should -Match 'not evidence of the current Antigravity hard limit or the running host version'
+
+        $rendered = @(Get-GlobalRuleRenderedEntries $fixture | Where-Object { $_.id -eq 'antigravity' })
+        $padding = 12001 - $rendered[0].text.Length
+        $padding | Should -BeGreaterThan 0
+        ($rendered[0].bytes.Length + $padding) | Should -BeLessThan 16384
+        $platform = Join-Path $fixture 'rules/global/platforms/antigravity.md'
+        [IO.File]::AppendAllText($platform, ('x' * $padding))
+        { Get-GlobalRuleRenderedEntries $fixture } | Should -Throw '*legacy compatibility ceiling*'
+    }
+
     It 'rejects common source drift before target writes' {
         $plan = New-GlobalRuleProjectionPlan $fixture $codex $claude
         $path = Join-Path $fixture 'rules/global/common.md'
@@ -449,6 +469,31 @@ Describe 'Global rule CLI boundaries' {
         {
             Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude,'--antigravity-user-root',$missing)
         } | Should -Throw '*Antigravity user root does not exist or is not a directory*'
+    }
+
+    It 'reports Antigravity source pressure when it exceeds the legacy character budget' {
+        $antigravity = Join-Path $TestDrive 'antigravity-summary-root'
+        $zcode = Join-Path $TestDrive 'zcode-summary-root'
+        $workbuddy = Join-Path $TestDrive 'workbuddy-summary-root'
+        New-Item -ItemType Directory -Path $antigravity, $zcode, $workbuddy -Force | Out-Null
+        $gemini = Join-Path $fixture 'rules/global/antigravity/GEMINI.md'
+        $baseline = Get-GlobalRuleFileFacts $gemini
+        $baselineCheck = Test-GlobalRuleSourceFamily $fixture $codex $claude
+        $otherPressure = [double](($baselineCheck.budget | Where-Object { $_.host -ne 'antigravity' } | Measure-Object -Property usage_ratio -Maximum).Maximum)
+        $targetBytes = [int][Math]::Max(15000, [Math]::Ceiling(($otherPressure + .01) * 16384))
+        $paddingBytes = $targetBytes - $baseline.bytes
+        $wideChars = [int][Math]::Floor($paddingBytes / 3)
+        $asciiChars = $paddingBytes - (3 * $wideChars)
+        $padding = ('中' * $wideChars) + ('x' * $asciiChars)
+        ($baseline.chars + $wideChars + $asciiChars) | Should -BeLessThan 12000
+        [IO.File]::AppendAllText($gemini, $padding)
+        $result = Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude,'--zcode-user-root',$zcode,'--antigravity-user-root',$antigravity,'--workbuddy-user-root',$workbuddy)
+        $antigravityBudget = @($result.envelope.result.budget | Where-Object { $_.host -eq 'antigravity' })
+        $antigravityBudget.Count | Should -Be 1
+        $antigravityBudget[0].usage_ratio | Should -BeGreaterThan .9
+        (1.0 * $antigravityBudget[0].chars / $antigravityBudget[0].host_char_limit) | Should -BeLessThan $antigravityBudget[0].usage_ratio
+        $expectedHeadline = 'antigravity source budget {0:P1} used' -f [double]$antigravityBudget[0].usage_ratio
+        $result.output | Should -Match ([regex]::Escape($expectedHeadline))
     }
 
     It 'enables the WorkBuddy host root without a pre-existing projected rule' {

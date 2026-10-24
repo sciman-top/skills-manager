@@ -143,15 +143,22 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
     }
     $json=$envelope|ConvertTo-Json -Depth 30 -Compress
     $budgetHeadline=if($Mode-eq'check'){
-        # 摘取全局压力最大的一项：宿主字符硬限按 chars 计（与渲染门禁同单位，
-        # 字节口径会把中文文本压力高估近一倍），无宿主硬限时退回源文件 16 KiB/130 行预算。
-        $worstHost='';$worstPressure=-1.0
+        # host_char_limit 为兼容保留字段；Antigravity 的值是项目 legacy
+        # compatibility ceiling，不表示当前宿主硬限或运行版本。
+        # Antigravity 摘要取 source usage_ratio 与字符兼容预算压力的较大值。
+        $worstHost='';$worstBudgetKind='';$worstPressure=-1.0
         foreach($entry in @($envelope.result.budget)){
             $limit=[int]$entry.host_char_limit
-            $p=if($limit -gt 0){1.0*[int]$entry.chars/$limit}else{[double]$entry.usage_ratio}
-            if($p -gt $worstPressure){$worstPressure=$p;$worstHost=[string]$entry.host}
+            $p=[double]$entry.usage_ratio
+            $budgetKind='source budget'
+            if($limit -gt 0 -and [string]$entry.host -eq 'antigravity'){
+                $compatibilityPressure=1.0*[int]$entry.chars/$limit
+                if($compatibilityPressure -gt $p){$p=$compatibilityPressure;$budgetKind='legacy compatibility budget'}
+                elseif($compatibilityPressure -eq $p){$budgetKind='source and legacy compatibility budgets'}
+            }
+            if($p -gt $worstPressure){$worstPressure=$p;$worstHost=[string]$entry.host;$worstBudgetKind=$budgetKind}
         }
-        if($worstPressure -lt 0){''}else{'{0} {1:P1} used' -f $worstHost,$worstPressure}
+        if($worstPressure -lt 0){''}else{'{0} {1} {2:P1} used' -f $worstHost,$worstBudgetKind,$worstPressure}
     }else{''}
     $summary=switch($Mode){
         'check'{'Global rules check: pass={0}, findings={1}, budget={2}'-f$envelope.pass,@($envelope.result.findings).Count,$budgetHeadline}

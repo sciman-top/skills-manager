@@ -15,16 +15,22 @@ Describe 'Checked-in rule content' {
         $expectedWarnings = @($result.facts.Values | Where-Object {
             [Math]::Max($_.bytes / 16384.0, $_.lines / 130.0) -ge .85
         })
-        @($result.observations).Count | Should -Be $expectedWarnings.Count
-        foreach ($observation in $result.observations) {
-            $observation.code | Should -Be 'source_budget_warning'
-            $observation.usage_ratio | Should -BeGreaterOrEqual .85
-            $observation.usage_ratio | Should -BeLessThan .95
+        $budgetObservations = @($result.observations | Where-Object { $_.code -in @('source_budget_warning', 'source_budget_addition_blocked') })
+        $budgetObservations.Count | Should -Be $expectedWarnings.Count
+        foreach ($observation in $budgetObservations) {
+            if ($observation.code -eq 'source_budget_warning') {
+                $observation.usage_ratio | Should -BeGreaterOrEqual .85
+                $observation.usage_ratio | Should -BeLessThan .95
+            }
+            else {
+                $observation.code | Should -Be 'source_budget_addition_blocked'
+                $observation.usage_ratio | Should -BeGreaterOrEqual .95
+            }
         }
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md rules/global/antigravity/GEMINI.md rules/global/workbuddy/CODEBUDDY.md) -join "`n") | Should -Match 'eol: lf'
     }
 
-    It 'reports host char pressure in characters, matching the render gate unit' {
+    It 'reports Antigravity character pressure against the retained legacy compatibility budget' {
         $codex = Join-Path $TestDrive 'codex'
         $claude = Join-Path $TestDrive 'claude'
         New-Item -ItemType Directory -Path $codex, $claude -Force | Out-Null
@@ -32,11 +38,16 @@ Describe 'Checked-in rule content' {
         $entry = @($result.budget | Where-Object { $_.host -eq 'antigravity' })
         $entry.Count | Should -Be 1
         $gemini = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md')).Replace("`r`n", "`n")
-        # 与 Sync-GlobalRuleGeneratedFiles 的 12000 字符硬限同单位：字节÷字符限
-        # 会把中文 UTF-8 的压力高估近一倍，让 healthy 状态报成逼近红线。
+        # host_char_limit 是为消费者兼容而保留的字段，Antigravity 的值仅代表
+        # 项目 legacy compatibility ceiling，不表示当前硬限或运行版本。
         $entry[0].chars | Should -Be $gemini.Length
         $entry[0].host_char_limit | Should -Be 12000
         $entry[0].chars | Should -BeLessOrEqual $entry[0].host_char_limit
+        $legacyNote = @($result.observations | Where-Object { $_.code -eq 'antigravity_legacy_char_compatibility_budget' })
+        $legacyNote.Count | Should -Be 1
+        $legacyNote[0].limit | Should -Be $entry[0].host_char_limit
+        $legacyNote[0].path | Should -Be $entry[0].path
+        $legacyNote[0].message | Should -Match 'not evidence of the current Antigravity hard limit or the running host version'
     }
 
     It 'retains the cold-routing execution and observation boundaries' {
