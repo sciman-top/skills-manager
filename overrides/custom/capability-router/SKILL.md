@@ -40,6 +40,12 @@ context supplies one. Stop and ask the user for the target (the
 loading. Inventing a substitute task to route around the missing payload is
 fail-open on an unknown target, not routing.
 
+A subagent's Skill tool can report a same-name skill from the dual user roots
+(`~/.zcode/skills` and `~/.agents/skills`) as ambiguous, and the namespaced
+form may not be subagent-callable (observed on ZCode 2026-10-24). That is a
+known host-surface shape, not an unavailable router: read this SKILL.md and
+invoke the script form below directly.
+
 Bash tool (Git Bash on Windows, the usual Claude shell). Pass one or two
 functional domains as a literal comma-separated token, and single-quote the
 request so a `$skill-name` inside it is not expanded:
