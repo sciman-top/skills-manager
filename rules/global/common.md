@@ -1,5 +1,5 @@
-# AGENTS.md - Universal Agent Protocol v9.91 | OpenAI ChatGPT Work / Codex App / Codex CLI
-**版本**: 9.91
+# AGENTS.md - Universal Agent Protocol v9.92 | OpenAI ChatGPT Work / Codex App / Codex CLI
+**版本**: 9.92
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引

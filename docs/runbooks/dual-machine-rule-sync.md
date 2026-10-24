@@ -43,20 +43,22 @@
 ## 3. 全局规则同步步骤
 1. 按第 2 节先确认控制仓工作区干净，`fetch` 并审查远端改动，再整合 `origin/main`；不以 `git pull` 跳过 review。
 2. `pwsh -NoProfile -File build.ps1`：物化未跟踪的 `agent/` 运行目录并核对全部生成物（含五份宿主全局规则）无漂移。
-3. `.\skills.ps1 global-rules-check`：应 `pass=True, findings=0`；budget 摘要显示最紧宿主的真实压力（Antigravity 12000 字符硬限按字符口径计，其余按 16 KiB/130 行）。
+3. `.\skills.ps1 global-rules-check`：应 `pass=True, findings=0`；budget 摘要显示受管源文件的保守预算压力（Antigravity 保留 12000 字符旧版兼容预算，其余按 16 KiB/130 行；不是当前宿主完整加载预算，详见 `rules/global/README.md`）。
 4. `global-rules-plan --out reports/global-rule-projection/plan.json`，再用 plan 输出的 `apply.required_token` 执行 `global-rules-apply`；中断后仅可用同一 plan、receipt、roots 加 `--resume` 续跑。
 5. 重跑一次 `global-rules-check` 留证；文件相等只证明 `filesystem_projected`，`host_loaded` 需各宿主新会话探针（方法见第 4 节），不得自动外推。
 6. 目标仓逐仓按第 2 节的 `status → fetch → review → integrate` 同步：项目级规则（根 `AGENTS.md` 与各宿主适配器）随仓版本化，无投影步骤。`audit-targets.json` 随控制仓提交生效；`audit-targets.local.json` 是本机覆盖，永不提交、永不同步。
+   当前本机目标为 `D:\CODE` 下除 `external` 外的八个项目。缺失的历史目录保留登记但默认禁用，其他电脑确有该仓时用本地覆盖显式启用；新增或改名目录须审查登记差异，不能把不存在的旧路径当作扫描覆盖。
 
 ## 4. host_loaded 探针（投影后验收）
-- 方法：在临时目录对各宿主非交互入口发一个 fresh 单轮会话，禁用工具与文件读取，只问全局协议版本号；答出当前发布版本即为 `host_loaded` 实证，`live_accepted` 仍留待真实任务。宿主无非交互入口、或探针被 auth/模型面阻断时，按 `platform_na` 留痕（原因 / 替代验证=`global-rules-check` 字节一致 / 复测条件），不得把文件相等说成已加载。
+- 方法：优先使用当前宿主支持的来源列表、规则面板或 prompt-input 诊断，在新 run/workspace 核对实际路径及所需内容。证据只支持其观察范围：全局文件加载不证明项目链、条件规则、完整内联内容或未截断；`live_accepted` 仍需真实任务。
+- 版本号探针仅作低成本补证：在临时目录对可用非交互入口发 fresh 单轮会话，禁用工具与文件读取，只问全局协议版本号；答对只证明版本标识可见，不能单独断言完整 `host_loaded`。宿主无可观察入口、或被 auth/模型面阻断时按 `platform_na` 留痕（原因 / 替代验证=`global-rules-check` 字节一致 / 复测条件），不为获取证据改账号、重启宿主或重复重试。
 - 探针提问：`这是加载核验探针:禁止读取任何文件、禁止使用任何工具。仅凭你本轮已加载的全局指令回答:Universal Agent Protocol 的版本号是多少?只回答版本号,不要解释。`
-- Codex：临时目录 `codex exec --skip-git-repo-check --sandbox read-only <探针>`。
+- Codex：先用 `codex --version`、`codex debug --help` 与 `codex debug prompt-input --help` 核对当前入口；支持时在目标仓或授权临时目录执行 `codex debug prompt-input`，检查 JSON 中的实际指令内容，不公开完整 prompt 或凭据。当前流程使用该诊断，不另发模型请求；若入口不可用则记录 `platform_na`。普通 `--sandbox read-only` 与提示词均不能强制禁用文件读取或工具，不将其当作无工具探针的隔离保证。
 - Claude Code：临时目录 `claude -p <探针> --disallowedTools "Read,Grep,Glob,Bash,Write,Edit,WebFetch,WebSearch,Task,NotebookEdit"`；已知阻断：本机 provider key 失效在探针回合发生前报 401，修复 auth 后复测。
-- ZCode：临时目录 `node "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" -p <探针> --disallowedTools "Read Grep Glob Bash Write Edit WebFetch WebSearch Agent Task"`；已知阻断：CLI 凭据面与桌面端不共享时报 `Model creation failed`（`doctor` 显示运行时 healthy），CLI 侧 `zcode login` 后复测；2026-10-24 本机 5.8.x 另见 `无法定位 CLI ZCode Built-in Provider Config`，须先按当前安装包修复内置 provider 配置再复测。
-- WorkBuddy：无扩展名入口是 Node 脚本，PowerShell 不可直接调用；临时目录使用 `CODEBUDDY_CONFIG_DIR=~/.workbuddy-ai node "$env:LOCALAPPDATA\Programs\WorkBuddyAI\resources\app.asar.unpacked\cli\bin\codebuddy" -p <探针> --tools ""`。已知阻断：CLI 未登录报 Authentication required，CLI `/login` 后复测。2026-10-24 国际版 5.8.4 / CLI 2.161.0 上 `--version` 可用，但正式 CLI 路径报 `Cannot find module '../dist/codebuddy'`（桌面包未解包 CLI dist），按 `platform_na` 记录，替代验证仍为 `global-rules-check` 字节一致；安装包恢复可用 CLI dist 或提供全局 CLI 后复测，不得把空输出当作加载成功。
-- Antigravity：无非交互入口，仅真实 GUI 新会话核验。
-- 依据：Claude Code best practices（code.claude.com/docs/en/best-practices）、Anthropic context engineering（anthropic.com/engineering/effective-context-engineering-for-ai-agents）、AGENTS.md 规范（agents.md），2026-10-10 读取。
+- ZCode：当前入口 `node "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" --help` 在 2026-10-25 成功（本机 App 3.16.3），列有 `-p`、工具禁用和 `--mode`，未验证无需模型请求的加载诊断。确需模型补证时在临时目录用当前 help 支持的参数禁用工具，并显式选择只读任务所需权限模式。历史的 `Model creation failed`、`无法定位 CLI ZCode Built-in Provider Config` 只作排障线索，不认定为当前故障；登录或 provider 修复属于独立授权范围。
+- WorkBuddy：无扩展名入口是 Node 脚本，使用 `node "$env:LOCALAPPDATA\Programs\WorkBuddyAI\resources\app.asar.unpacked\cli\bin\codebuddy" --help` 核对入口。2026-10-25 国际版 App 5.8.4 实测退出码 1、`Cannot find module '../dist/codebuddy'`，按 `platform_na` 记录，替代验证为 `global-rules-check` 字节一致；可用 CLI 恢复或现有 GUI 提供来源证据后复测，不以 `--version`、空输出或其他版本的 CLI 代替当前执行面验收。需要显式 root 时使用 PowerShell 进程环境变量并在 `finally` 恢复，不使用 POSIX `NAME=value command` 写法。
+- Antigravity：本轮仅确认本机 App 2.26.0 安装版本，未验证可用的非交互加载诊断；优先用 GUI 新会话的规则来源面板核验。当前官方文档已区分 App、CLI 与 IDE/extension 执行面，不将某个执行面缺少入口推广为整个产品无 CLI；不得为核验自动启动或重启 GUI。
+- 依据：[Codex instructions](https://developers.openai.com/codex/guides/agents-md) 与本机 `codex-cli 0.159.2` help（2026-10-25）；其余宿主入口按当前安装包与 help 核对，不把历史已知故障视为当前探针结果。
 
 ## 5. 证据与回滚
 - 留证：apply 的 `receipt.json`（schema v2）与第二次 `global-rules-check` 输出；普通同步不为它新增审计文档。

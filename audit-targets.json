@@ -19,9 +19,9 @@
     {
       "name": "codex-watch-runtime",
       "path": "D:\\CODE\\codex-watch-runtime",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机目录不存在；保留登记供其他机器通过 audit-targets.local.json 显式启用。"
     },
     {
       "name": "skills-manager",
@@ -40,9 +40,9 @@
     {
       "name": "physicist_chinese_poster_batch_tool",
       "path": "D:\\CODE\\physicist_chinese_poster_batch_tool",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机目录不存在；保留登记供其他机器通过 audit-targets.local.json 显式启用。"
     },
     {
       "name": "ai-content-delivery-studio",
@@ -60,10 +60,10 @@
     },
     {
       "name": "qq-codex-bot",
-      "path": "D:\\CODE\\qq-codex-bot",
+      "path": "D:\\CODE\\qq-astrbot-stack",
       "enabled": true,
       "tags": [],
-      "notes": ""
+      "notes": "目录已更名为 qq-astrbot-stack；保留登记名以兼容已有本地覆盖。"
     },
     {
       "name": "vps-ssh-launcher",
@@ -75,16 +75,16 @@
     {
       "name": "physics-ppt-toolkit",
       "path": "D:/CODE/physics-ppt-toolkit",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机目录不存在；保留登记供其他机器通过 audit-targets.local.json 显式启用。"
     },
     {
       "name": "claude-antiban",
       "path": "D:\\CODE\\claude-antiban",
-      "enabled": true,
+      "enabled": false,
       "tags": [],
-      "notes": ""
+      "notes": "本机目录不存在；保留登记供其他机器通过 audit-targets.local.json 显式启用。"
     }
   ]
 }

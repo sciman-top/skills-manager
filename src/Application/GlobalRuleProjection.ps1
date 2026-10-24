@@ -29,7 +29,9 @@ function Get-GlobalRuleRenderedEntries {
         if ($null -eq (Get-GlobalRuleSections $text)) { throw "Generated global rule structure is invalid: $($hostEntry.id)" }
         $bytes = $encoding.GetBytes($text)
         if ($bytes.Length -gt 16384 -or ($text -split "`n").Count -gt 130) { throw "Generated global rule exceeds its budget: $($hostEntry.id)" }
-        if ($hostEntry.id -eq 'antigravity' -and $text.Length -gt 12000) { throw 'Generated Antigravity rule exceeds 12,000 characters.' }
+        # Keep the historical ceiling conservative for compatibility. It is not
+        # a statement about Antigravity's current hard limit or running version.
+        if ($hostEntry.id -eq 'antigravity' -and $text.Length -gt 12000) { throw 'Project Antigravity legacy compatibility ceiling exceeded (12,000 rendered characters); this does not establish the current host hard limit or running version.' }
         [pscustomobject]@{ id = $hostEntry.id; source_path = (Join-Path $repo ("rules/global/{0}/{1}" -f $hostEntry.id, $hostEntry.file)); text = $text; bytes = $bytes }
     }
 }
@@ -180,13 +182,15 @@ function Test-GlobalRuleSourceFamily {
         if($fact.bytes -gt 16384){$findings.Add((New-GlobalRuleFinding 'source_byte_budget_exceeded' $entry.source_path 'Global rule exceeds 16 KiB.'))|Out-Null}
         if($fact.lines -gt 130){$findings.Add((New-GlobalRuleFinding 'source_line_budget_exceeded' $entry.source_path 'Global rule exceeds 130 lines.'))|Out-Null}
         $ratio=[Math]::Max($fact.bytes/16384.0,$fact.lines/130.0)
-        # 恒定的预算成本信号：无论是否越过 85%/95%，都回显距离硬墙的余量，
-        # 让每次检查都暴露「再改一次会不会撞墙」。observations 保持阈值语义不变。
-        # Antigravity 另有宿主硬限（渲染文件 ≤12000 字符，见 Sync-GlobalRuleGeneratedFiles）：
-        # chars 与该硬限同单位（LF 归一化后计数），供 check 摘要按字符口径求压力；
-        # 字节÷字符限会把中文 UTF-8 的压力高估近一倍。
+        # 恒定的源文件预算信号：无论是否越过 85%/95%，都回显距离预算线的余量；
+        # source_budget observations 仍只在原有阈值触发，兼容说明另用独立 code。
+        # host_char_limit 是公开兼容字段；Antigravity 的 12000 表示项目保留的
+        # legacy compatibility ceiling，不代表当前宿主硬限或运行版本。
+        # chars 与保守预算同单位（LF 归一化后计数），字节÷字符预算会把中文
+        # UTF-8 的压力高估近一倍。兼容说明通过既有 observations 返回。
         $hostCharLimit=$(if($entry.id -eq 'antigravity'){12000}else{0})
         $budget.Add([pscustomobject][ordered]@{host=$entry.id;path=$entry.source_path;bytes=$fact.bytes;chars=$fact.chars;max_bytes=16384;lines=$fact.lines;max_lines=130;usage_ratio=[Math]::Round($ratio,4);host_char_limit=$hostCharLimit;state=$(if($ratio-ge .95){'addition_blocked'}elseif($ratio-ge .85){'warning'}else{'healthy'})})|Out-Null
+        if($entry.id -eq 'antigravity'){$observations.Add([pscustomobject][ordered]@{code='antigravity_legacy_char_compatibility_budget';path=$entry.source_path;limit=$hostCharLimit;message='The project preserves a conservative 12,000-character legacy compatibility ceiling. This is not evidence of the current Antigravity hard limit or the running host version.'})|Out-Null}
         if($ratio-ge .95){$observations.Add([pscustomobject]@{code='source_budget_addition_blocked';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         elseif($ratio-ge .85){$observations.Add([pscustomobject]@{code='source_budget_warning';path=$entry.source_path;usage_ratio=[Math]::Round($ratio,4)})|Out-Null}
         if([string]::IsNullOrWhiteSpace([string]$fact.version)){$findings.Add((New-GlobalRuleFinding 'source_version_missing' $entry.source_path 'Global rule version is missing.'))|Out-Null}
