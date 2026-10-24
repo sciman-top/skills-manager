@@ -61,9 +61,11 @@ Describe 'Skill projection profiles' {
         $config.PSObject.Properties['managed_link_includes'] | Should -BeNullOrEmpty
         $config.PSObject.Properties['managed_link_excludes'] | Should -BeNullOrEmpty
         # Budget is content bytes: normalize CRLF checkouts away so the pinned
-        # limit does not flip with the local core.autocrlf setting.
+        # limit does not flip with the local core.autocrlf setting. Raised to
+        # 5250 on 2026-10-24 for ba319e61's acceptance-evidence guidance (4500
+        # -> 5181 actual); the anchor keeps guarding against unconscious drift.
         $lfBytes = [Text.Encoding]::UTF8.GetByteCount(([IO.File]::ReadAllText($skillPath).Replace("`r`n", "`n")))
-        $lfBytes | Should -BeLessOrEqual 4500
+        $lfBytes | Should -BeLessOrEqual 5250
         $text | Should -Match 'Never let a skill invent a new gate'
         $text | Should -Match 'Strict TDD, coverage'
         $text | Should -Match 'capability-router'
