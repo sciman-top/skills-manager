@@ -37,7 +37,7 @@ When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy 
        ┌──────────────┬────────────────────┼───────────────────┬──────────────┐
        ▼              ▼                    ▼                   ▼              ▼
   OpenAI Codex   Claude Code             ZCode            Antigravity     WorkBuddy
-(~/.agents/skills) (~/.claude/agents)    (~/.zcode/skills)   (~/.gemini/...) (Local targets)
+(~/.agents/skills) (~/.claude/skills)    (~/.zcode/skills)   (~/.gemini/...) (Local targets)
 ```
 
 ---
@@ -59,7 +59,7 @@ When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy 
 | AI Host | Skill Projection | Default Profile | MCP Target Format |
 | :--- | :--- | :--- | :--- |
 | **OpenAI Codex** | Shared `~/.agents/skills`; optional Agent Bridge writes `~/.codex/agents` | `core-lean` (7 curated) | Native Codex MCP config |
-| **Claude Code** | User-level `~/.claude/agents` | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
+| **Claude Code** | User-level `~/.claude/skills` junctions; Agent Bridge separately writes `~/.claude/agents` subagent definitions | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
 | **ZCode** | `~/.zcode/skills` junction | `core-lean` (7 curated) | `~/.zcode/cli/config.json` |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` junction | `core-ops` (8 enhanced) | `mcp_config.json` |
 | **WorkBuddy** | Managed local targets | `core-ops` (8 enhanced) | Standard workspace config |
