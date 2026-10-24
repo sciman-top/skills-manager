@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>面向 Windows 的本地优先（Local-First）AI 技能与 MCP 服务版本化管理器</strong><br>
-  一处配置，五大 AI 宿主无缝投影 · 版本锁定防漂移 · 目标仓能力审计 · 零账号侵入
+  一处配置，多宿主受管投影 · 版本锁定防漂移 · 目标仓能力审计 · 零账号侵入
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 你在用 Codex、Claude Code、ZCode、Antigravity (Gemini) 或 WorkBuddy 进行日常编码时，是否遇到过：
 
 - **多端配置繁琐**：台式机配好的 Agent 技能与 MCP，换到笔记本或新电脑要手动翻目录、重新粘 JSON？
-- **多宿主标准分裂**：Codex 要放到 `~/.codex/skills`，Claude 要放到 `~/.claude/`，Antigravity 又有自己的目录，每次加个工具都要配五遍？
+- **多宿主标准分裂**：Codex、Claude Code、ZCode、Antigravity 和 WorkBuddy 的技能与 MCP 入口不同，每次加个工具都要配多遍？
 - **上游依赖不可控**：引用的第三方开源技能悄悄发了破坏性更新，提示词突然失效，却查不到改动记录？
 - **过度包装与隐私焦虑**：想要统一管理，却不想引入沉重的常驻后台，更不想把 API Key 和账号交给第三方代理框架？
 
@@ -37,16 +37,16 @@
        ┌──────────────┬───────────────┼───────────────┬──────────────┐
        ▼              ▼               ▼               ▼              ▼
   OpenAI Codex   Claude Code        ZCode       Antigravity     WorkBuddy
-(~/.codex/skills) (~/.claude/agents) (~/.zcode/skills) (~/.gemini/...) (本地受管目标)
+(~/.agents/skills) (~/.claude/agents) (~/.zcode/skills) (~/.gemini/...) (本地受管目标)
 ```
 
 ---
 
 ## 核心特性
 
-- 🎯 **一次配置，五大多宿主投影**：原生支持 Codex、Claude Code、ZCode、Antigravity（Gemini）与 WorkBuddy。按宿主规范生成目录链接或配置，告别重复配置。
+- 🎯 **一次配置，多宿主投影**：为 Codex、Claude Code、ZCode、Antigravity（Gemini）与 WorkBuddy 提供受管投影适配。投影成功不等于宿主新会话已加载或真实工作流已验收。
 - 🔒 **版本锁定与防漂移（Lockfile）**：内置 `skills.lock.json` 精准锁定 Commit SHA，杜绝上游隐式更新引入的提示词劣化。
-- 🔌 **统一 MCP 服务与场景切换**：一条命令安装 stdio / HTTP SSE 协议的 MCP。支持 `default`、`coding`、`browser`、`database` 等场景 Profile，全宿主一键同步。
+- 🔌 **统一 MCP 服务与场景切换**：一条命令安装 stdio / Streamable HTTP 兼容入口的 MCP。支持 `default`、`coding`、`browser`、`database` 等场景 Profile，并同步到 `skills.json` 中已配置的目标。
 - 🔍 **目标仓能力智能审查（Audit Targets）**：一键扫描你的本地代码仓库，识别当前项目缺什么技能或 MCP，生成可审查、可预检、带回滚保障的三文件决策包。
 - 💻 **交互式 TUI 菜单（新手友好）**：直接双击 `skills.cmd` 即可启动终端图形菜单，浏览、勾选、安装、同步一站式搞定。
 - 📦 **开箱即用 & 免安装便携（Portable）**：提供预打包的绿色便携版，支持 U 盘即插即用和离线机器无网运行。
@@ -58,7 +58,7 @@
 
 | AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 |
 | :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | Native Skill Root & Agent Bridge | `core-lean` (7 个精选) | 原生 Codex MCP 配置 |
+| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | 原生 Codex MCP 配置 |
 | **Claude Code** | 用户级 `~/.claude/agents` 链接 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 |
 | **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` |
@@ -118,6 +118,8 @@ cd skills-manager
 
 ## 核心工作流与常用命令
 
+日常主链保持最短：`发现 → 安装/锁定 → 检查更新 → 构建生效 → doctor`。目标仓审查、规则投影、迁移、native-agent bridge 和模型 preset 属于高级维护能力，不是每次编码任务的必经步骤。
+
 ### 1. 技能管理（Skills）
 
 ```powershell
@@ -136,7 +138,7 @@ cd skills-manager
 # 一键拉取上游更新并升级锁文件
 .\skills.ps1 更新 -Upgrade
 
-# 重新生成本地受管技能并投影到宿主目录（核心生效命令）
+# 重新生成本地受管技能并执行已配置的宿主投影（核心生效命令）
 .\skills.ps1 构建生效
 
 # 仅投影到指定宿主（例如只更新 Codex 与 Claude）
@@ -151,7 +153,7 @@ cd skills-manager
 # 添加标准 stdio 类型的 MCP
 .\skills.ps1 安装MCP fetch -- uvx mcp-server-fetch
 
-# 添加远程 HTTP / SSE 类型的 MCP
+# 添加远程 Streamable HTTP 类型的 MCP
 .\skills.ps1 安装MCP remote-api --transport http --url https://api.example.com/mcp
 
 # 查看当前所有 MCP Profiles 场景

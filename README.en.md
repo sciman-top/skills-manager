@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>A Windows-First, Local-First AI Skills & MCP Server Versioned Manager</strong><br>
-  Single Configuration · Safe Projection to 5 AI Hosts · Version Locking · Zero Account Hijacking
+  Single Configuration · Managed Projection to Multiple Hosts · Version Locking · Zero Account Hijacking
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy across multiple Windows machines, you frequently run into:
 
 - **Config Duplication**: Manually copying `.agents/skills` or configuring MCP JSON every time you switch from your desktop to your laptop.
-- **Host Fragmentation**: Codex uses `~/.codex/skills`, Claude Code uses `~/.claude/agents`, Antigravity uses `~/.gemini/...`. Adding a single skill requires updating 5 different paths.
+- **Host Fragmentation**: Codex, Claude Code, ZCode, Antigravity, and WorkBuddy expose different skill and MCP entry points. Adding a single skill otherwise requires updating several paths.
 - **Upstream Prompt Drift**: A third-party skill quietly updates upstream with breaking changes, degrading agent behavior without any commit history.
 - **Over-Engineered Meta-Agents**: You want clean management, not a bloated daemon that hijacks your API keys or proxies your network traffic.
 
@@ -37,16 +37,16 @@ When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy 
        ┌──────────────┬────────────────────┼───────────────────┬──────────────┐
        ▼              ▼                    ▼                   ▼              ▼
   OpenAI Codex   Claude Code             ZCode            Antigravity     WorkBuddy
-(~/.codex/skills) (~/.claude/agents)    (~/.zcode/skills)   (~/.gemini/...) (Local targets)
+(~/.agents/skills) (~/.claude/agents)    (~/.zcode/skills)   (~/.gemini/...) (Local targets)
 ```
 
 ---
 
 ## Key Features
 
-- 🎯 **One Config, 5 AI Hosts**: Native projection for OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), and WorkBuddy.
+- 🎯 **One Config, Multiple Hosts**: Managed projection adapters for OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), and WorkBuddy. Projection does not by itself prove a fresh host session loaded the skill or that a live workflow passed.
 - 🔒 **Version-Locked (Lockfile)**: `skills.lock.json` pins exact commit hashes to protect your prompt supply chain against breaking changes.
-- 🔌 **Unified MCP Management**: Configure `stdio` or `http/sse` MCP servers once. Switch profiles (`coding`, `browser`, `database`, `off`) and sync across all clients with a single command.
+- 🔌 **Unified MCP Management**: Configure `stdio` or Streamable HTTP compatible MCP servers once. Switch profiles (`coding`, `browser`, `database`, `off`) and sync to the targets declared in `skills.json` with a single command.
 - 🔍 **Target Repo Capability Audit**: Scan any local project repository, detect missing domain capabilities, and generate a safe, verifiable 3-file decision package (Snapshot -> Recommendation -> Receipt).
 - 💻 **Interactive TUI Menu**: Launch `skills.cmd` to browse, pick, install, and sync skills using a clean terminal menu.
 - 📦 **Portable & USB-Ready**: Pre-built `portable.zip` for offline / USB workflows without altering host settings.
@@ -58,7 +58,7 @@ When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy 
 
 | AI Host | Skill Projection | Default Profile | MCP Target Format |
 | :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | Native Skill Root & Agent Bridge | `core-lean` (7 curated) | Native Codex MCP config |
+| **OpenAI Codex** | Shared `~/.agents/skills`; optional Agent Bridge writes `~/.codex/agents` | `core-lean` (7 curated) | Native Codex MCP config |
 | **Claude Code** | User-level `~/.claude/agents` | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
 | **ZCode** | `~/.zcode/skills` junction | `core-lean` (7 curated) | `~/.zcode/cli/config.json` |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` junction | `core-ops` (8 enhanced) | `mcp_config.json` |
@@ -114,6 +114,8 @@ Double-click or run `skills.cmd` to open the interactive TUI menu:
 
 ## Common Commands
 
+Keep the daily path short: `discover → install/lock → check updates → build and project → doctor`. Target audits, rule projection, migration, the native-agent bridge, and model presets are advanced maintenance capabilities rather than mandatory steps for every coding task.
+
 ### 1. Skills Management
 
 ```powershell
@@ -145,7 +147,7 @@ Double-click or run `skills.cmd` to open the interactive TUI menu:
 # Add a stdio MCP server
 .\skills.ps1 安装MCP fetch -- uvx mcp-server-fetch
 
-# Add an HTTP/SSE remote MCP server
+# Add a Streamable HTTP remote MCP server
 .\skills.ps1 安装MCP remote-api --transport http --url https://api.example.com/mcp
 
 # List all MCP profiles
