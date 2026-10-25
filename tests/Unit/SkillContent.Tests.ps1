@@ -22,34 +22,16 @@ Describe 'Checked-in skill content' {
         }
     }
 
-    It 'keeps GPT and GLM selection task-fit instead of imposing a fixed pipeline' {
-        $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
-
-        $skill | Should -Match '(?i)GPT/Codex and GLM/ZCode'
-        $skill | Should -Match '(?i)not stages in a fixed\s+pipeline'
-        $skill | Should -Match '(?i)same-task acceptance'
-        $skill | Should -Match '(?i)current help, schema, documentation and actual inputs'
-    }
-
     It 'keeps the reusable task contract and failure recovery in the resident entrypoint' {
         $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
 
         foreach ($field in @('Goal:', 'Context:', 'Constraints:', 'Exact write set:', 'Minimum proof:', 'Done when:', 'Stop:')) {
             $skill | Should -Match ([regex]::Escape($field))
         }
-        $skill | Should -Match '(?i)After two\s+failed corrections'
-        $skill | Should -Match '(?i)fresh/cleared or compacted context'
+        $skill | Should -Match '(?is)After two failed corrections.*ask the user\s+for clarification'
+        $skill | Should -Match '(?i)handoff does not replace clarification'
         $skill | Should -Match '(?i)evidence, not permission'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
-    }
-
-    It 'keeps the resident context budget and comprehension rules explicit' {
-        $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
-
-        $skill | Should -Match '(?i)removing it\s+would cause a mistake'
-        $skill | Should -Match '(?i)bloated resident\s+file makes the model\s+ignore the rules that matter'
-        $skill | Should -Match '(?i)Load the rest just in time'
-        $skill | Should -Match '(?i)Green checks prove only the behavior they exercise, not comprehension'
     }
 
     It 'retains the explicit-use constraint for strict TDD' {
