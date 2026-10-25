@@ -187,8 +187,10 @@ function Invoke-AuditTargetsScan {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
         Write-Host ("Scanning {0} ..." -f $_.name)
         $timer = [Diagnostics.Stopwatch]::StartNew()
-        # --skip-dirty：在途修改的仓扫完即会因 drift fail closed，预检到 dirty 直接
-        # 落一个同 schema 的空画像 scan；git 取证保留，apply 时 drift 检测照常生效。
+        # --skip-dirty：在途修改的仓未采集画像，预检到 dirty 直接落同 schema 的空画像。
+        # dirty_skip 是人工声明的“whole repository deferred”范围；preflight 只忽略
+        # 该仓的整个快照/工作树差异，仍要求 exists/is_repo 与当前目标匹配。
+        # 内容变化不能从跳过仓的旧画像被推断为新的用户需求。
         # 仅在显式 -SkipDirty 时预检，不给常规扫描增加重复 git 取证。
         $gitInfo = if ($SkipDirty) { Get-AuditGitInfo $resolved } else { $null }
         if ($SkipDirty -and $gitInfo.dirty) {
@@ -203,6 +205,11 @@ function Invoke-AuditTargetsScan {
                     exists = $true
                 }
                 git = $gitInfo
+                dirty_skip = [pscustomobject]([ordered]@{
+                    declared_at = (Get-Date).ToString("o")
+                    scope = "whole_repository"
+                    reason = "worktree_dirty"
+                })
                 detected = [ordered]@{
                     languages = @()
                     package_managers = @()
@@ -216,6 +223,7 @@ function Invoke-AuditTargetsScan {
                     notable_files = @()
                 }
                 scan_coverage = [pscustomobject]([ordered]@{
+                    status = "skipped"
                     population_count = 0
                     sampled_count = 0
                     sample_limit = 600
@@ -227,7 +235,9 @@ function Invoke-AuditTargetsScan {
                     sampled_by_kind = [pscustomobject]@{ source_code = 0; supporting_code = 0; test = 0; non_product_code = 0 }
                     confidence_ceiling = "skipped_dirty"
                 })
-                risks = @("git_dirty", "scan_skipped_dirty")
+                # 不能把 git_dirty 写进 risks：审查推荐模板由上次扫描结果承载，
+                # 这些风险会遮蔽 current_profile_selected_skills 等真实观察。
+                risks = @("scan_skipped_dirty")
             })
             Write-Host ("Skipped {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
             return

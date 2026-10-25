@@ -47,26 +47,14 @@ Describe 'Audit snapshot configuration failures' {
 
 BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
+    . $PSScriptRoot\..\Shared\TestHelpers.ps1
+    Initialize-TestGitIdentity
     # Pin the Codex plugin listing so snapshot tests do not depend on a host Codex CLI.
     Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
     $script:Root = $Root
     $script:CfgPath = $CfgPath
     $script:ImportDir = $ImportDir
     $script:OverridesDir = $OverridesDir
-
-    function New-TestAuditGitRepository([string]$Path) {
-        New-Item -ItemType Directory -Path $Path -Force | Out-Null
-        Push-Location $Path
-        try {
-            git init --quiet
-            Set-ContentUtf8 (Join-Path $Path "README.md") "# Audit target"
-            git add README.md
-            git commit --quiet -m "initial"
-        }
-        finally {
-            Pop-Location
-        }
-    }
 
     function New-TestAuditRecommendation([string]$Path, [string]$RunId = "r-hardening") {
         Set-ContentUtf8 $Path ('{"schema_version":3,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"target_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
@@ -108,6 +96,16 @@ BeforeAll {
 
 }
 Describe "Audit target hardening" {
+    BeforeAll {
+        function New-TestAuditGitRepository([string]$Path) {
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $Path "README.md") "# Audit target"
+            git -C $Path init --quiet
+            git -C $Path add README.md
+            git -C $Path commit --quiet -m "initial"
+        }
+    }
+
     It "Accepts explicit usage evidence without upgrading its stage or provenance" {
         $rec = New-AuditRecommendationsTemplate 'usage-test' '*'
         $rec.usage_observations = @([pscustomobject]@{
@@ -172,6 +170,30 @@ Describe "Audit target hardening" {
         $stale.drifted_targets[0].changes | Should -Contain "worktree"
     }
 
+    It "Reads target git facts from the requested repository rather than the caller cwd" {
+        $firstRepo = Join-Path $TestDrive "first-git-repo"
+        $secondRepo = Join-Path $TestDrive "second-git-repo"
+        New-TestAuditGitRepository $firstRepo
+        New-TestAuditGitRepository $secondRepo
+        Set-ContentUtf8 (Join-Path $secondRepo "README.md") "second repository change"
+        $runDir = Join-Path $TestDrive "two-repo-target-state-run"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $cleanScan = New-AuditRepoScan "first-git-repo" $firstRepo $firstRepo
+        $dirtyScan = New-AuditRepoScan "second-git-repo" $secondRepo $secondRepo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-two-repo-target-state" @($cleanScan, $dirtyScan)
+
+        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
+        $live = Get-AuditTargetRepoLiveState $snapshot
+        $first = @($live.targets | Where-Object name -eq "first-git-repo")[0]
+        $second = @($live.targets | Where-Object name -eq "second-git-repo")[0]
+
+        $first.dirty | Should -BeFalse
+        $second.dirty | Should -BeTrue
+        $first.status_count | Should -Be 0
+        $second.status_count | Should -Be 1
+        $first.status_fingerprint | Should -Not -Be $second.status_fingerprint
+    }
+
     It "Detects content drift when dirty paths and status codes stay unchanged" {
         $repo = Join-Path $TestDrive "same-status-content-drift-repo"
         New-TestAuditGitRepository $repo
@@ -193,6 +215,83 @@ Describe "Audit target hardening" {
         $snapshot.targets[0].status_fingerprint | Should -Not -Be $liveAfter.targets[0].status_fingerprint
         $staleness.is_stale | Should -Be $true
         $staleness.drifted_targets[0].changes | Should -Contain "worktree"
+    }
+
+    It "Accepts an unchanged dirty worktree only for an explicitly skipped scan" {
+        $repo = Join-Path $TestDrive "declared-dirty-repo"
+        New-TestAuditGitRepository $repo
+        Set-ContentUtf8 (Join-Path $repo "README.md") "first tracked change"
+        $runDir = Join-Path $TestDrive "declared-dirty-run"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $scan = New-AuditRepoScan "declared-dirty" $repo $repo
+        $scan.git.dirty | Should -BeTrue
+        $scan.scan_coverage | Add-Member -NotePropertyName confidence_ceiling -NotePropertyValue "skipped_dirty" -Force
+        $scan | Add-Member -NotePropertyName dirty_skip -NotePropertyValue ([pscustomobject]@{
+                declared_at = (Get-Date).ToString("o")
+                scope = "whole_repository"
+                reason = "worktree_dirty"
+            }) -Force
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-declared-dirty" @($scan)
+
+        $scanSnapshotJson = Get-ContentUtf8 (Join-Path $runDir "snapshot.json")
+        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
+        $scanSnapshotJson | Should -Match '"confidence_ceiling":\s*"skipped_dirty"'
+        $liveBefore = Get-AuditTargetRepoLiveState $snapshot
+        $strict = Get-AuditTargetRepoStaleness $snapshot $liveBefore
+        $accepted = Get-AuditTargetRepoStaleness $snapshot $liveBefore -AcceptDeclaredDirtyAtScan
+        $snapshot.targets[0].dirty | Should -BeTrue
+        $liveBefore.targets[0].dirty | Should -BeTrue
+        $strict.is_stale | Should -BeFalse
+        $accepted.is_stale | Should -BeFalse
+        @($accepted.idle_skipped_dirty_targets) | Should -Contain "declared-dirty"
+
+        $snapshot.targets[0].scan_skipped_dirty | Should -BeTrue
+        $accepted.accept_declared_dirty_scope | Should -Be "current_snapshot_only"
+
+        $revertedLive = $liveBefore.PSObject.Copy()
+        $revertedLive.targets = @($liveBefore.targets | ForEach-Object { $_.PSObject.Copy() })
+        $revertedLive.targets[0].status_fingerprint = "snapshot-baseline-fingerprint"
+        $snapshot.targets[0].status_fingerprint = "snapshot-baseline-fingerprint"
+        $reverted = Get-AuditTargetRepoStaleness $snapshot $revertedLive -AcceptDeclaredDirtyAtScan
+        @($reverted.snapshot_changes).Count | Should -Be 0
+        $reverted.previous_dry_run_matched | Should -BeTrue
+        $snapshot.targets[0].status_fingerprint = $liveBefore.targets[0].status_fingerprint
+
+        Set-ContentUtf8 (Join-Path $repo "README.md") "second tracked change with different content"
+        $liveAfterEdit = Get-AuditTargetRepoLiveState $snapshot
+        $changed = Get-AuditTargetRepoStaleness $snapshot $liveAfterEdit -AcceptDeclaredDirtyAtScan
+        @($changed.snapshot_changes)[0].changes | Should -Contain "worktree"
+        $changed.previous_dry_run_matched | Should -BeFalse
+
+        $liveAfterCommit = $liveAfterEdit.PSObject.Copy()
+        $liveAfterCommit.targets = @($liveAfterEdit.targets | ForEach-Object {
+                $target = $_.PSObject.Copy()
+                $target.commit = "post-commit-head"
+                $target
+            })
+        $committed = Get-AuditTargetRepoStaleness $snapshot $liveAfterCommit -AcceptDeclaredDirtyAtScan
+        $committed.is_stale | Should -BeTrue
+        $committed.drifted_targets[0].changes | Should -Contain "head"
+    }
+
+    It "Applies the dirty-skip acceptance only to a declared skipped-dirty snapshot" {
+        $repo = Join-Path $TestDrive "undeclared-dirty-repo"
+        New-TestAuditGitRepository $repo
+        Set-ContentUtf8 (Join-Path $repo "README.md") "dirty but scanned"
+        $runDir = Join-Path $TestDrive "undeclared-dirty-run"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $scan = New-AuditRepoScan "undeclared-dirty" $repo $repo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-undeclared-dirty" @($scan)
+
+        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
+        Set-ContentUtf8 (Join-Path $repo "README.md") "changed after the scanned state"
+        $live = Get-AuditTargetRepoLiveState $snapshot
+        $accepted = Get-AuditTargetRepoStaleness $snapshot $live -AcceptDeclaredDirtyAtScan
+
+        $snapshot.targets[0].scan_skipped_dirty | Should -BeFalse
+        $accepted.is_stale | Should -BeTrue
+        $accepted.drifted_targets[0].changes | Should -Contain "worktree"
+        @($accepted.accepted_skipped_dirty_targets).Count | Should -Be 0
     }
 
     It "Preflight rejects a target repository that drifted after scan" {

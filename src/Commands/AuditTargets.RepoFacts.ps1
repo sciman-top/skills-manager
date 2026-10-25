@@ -800,9 +800,21 @@ function Test-AuditSelfUsageSurface([string]$RelativePath) {
 
 function Test-AuditSelfReferentialAnalysisFile([string]$Content) {
     if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
-    $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
-        [regex]::IsMatch($Content, "(?i)function\s+Add-AuditRequirementFactsFromText\b")
-    if ($definesBothExtractors) { return $true }
+    # 大文件上四条静态正则各自建立/查缓存并逐条扫描全文；先在
+    # OrdinalIgnoreCase 下排除不可能命中的文件。只作快速否定预筛，
+    # 原正则仍是最终裁决。
+    if ($Content.IndexOf("Add-AuditArtifactFactsFromText", [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $Content.IndexOf("Add-AuditRequirementFactsFromText", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $definesBothExtractors = [regex]::IsMatch($Content, "(?i)function\s+Add-AuditArtifactFactsFromText\b") -and
+            [regex]::IsMatch($Content, "(?i)function\s+Add-AuditRequirementFactsFromText\b")
+        if ($definesBothExtractors) { return $true }
+    }
+    if ($Content.IndexOf("New-AuditRepoScan", [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+        $Content.IndexOf("Set-ContentUtf8", [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+        ($Content.IndexOf("artifact_capabilities", [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+            $Content.IndexOf("requirement_signals", [StringComparison]::OrdinalIgnoreCase) -lt 0)) {
+        return $false
+    }
 
     # Fixture code for the scanner describes hypothetical target repositories.  It is
     # evidence about the scanner, not a capability supplied by the scanned target.
@@ -1312,12 +1324,15 @@ function Invoke-AuditGitLines([string[]]$GitArgs, [string]$Operation) {
     return @($lines)
 }
 
-function Get-AuditGitChangedPaths {
+function Get-AuditGitChangedPaths([string]$resolvedPath = "") {
+    # Tests and nested probes may share a process or switch cwd. Bind every Git
+    # child to the target explicitly so one target cannot fingerprint another.
+    $pathArgs = if ([string]::IsNullOrWhiteSpace($resolvedPath)) { @() } else { @("-C", $resolvedPath) }
     $paths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
     $pathGroups = @(
-        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--no-ext-diff") "staged changed paths"),
-        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "diff", "--name-only", "--no-ext-diff") "worktree changed paths"),
-        @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard") "untracked paths")
+        @(Invoke-AuditGitLines ($pathArgs + @("-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--no-ext-diff")) "staged changed paths"),
+        @(Invoke-AuditGitLines ($pathArgs + @("-c", "core.quotepath=false", "diff", "--name-only", "--no-ext-diff")) "worktree changed paths"),
+        @(Invoke-AuditGitLines ($pathArgs + @("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")) "untracked paths")
     )
     foreach ($group in $pathGroups) {
         foreach ($path in @($group)) {
@@ -1367,18 +1382,19 @@ function Get-AuditPlainDirectoryFingerprint([string]$dirPath) {
     return (Get-AuditFingerprintFromVendorFromPairs @($ordered) $true)
 }
 
-function Get-AuditGitPathStatePairs($paths) {
+function Get-AuditGitPathStatePairs($paths, [string]$resolvedPath = "") {
     # 单次全量 ls-files 取代逐路径派生进程（脏路径多时每路径一个 git 进程是扫描
     # 的主要耗时）；pathspec 的目录前缀语义用前缀过滤等价复现。
     $pathList = @($paths | Where-Object { -not [string]::IsNullOrEmpty([string]$_) })
     if ($pathList.Count -eq 0) { return @() }
     # git status/diff/ls-files 输出仓根相对路径：用扫描目录拼接会拼出不存在的
     # 路径（目标指向仓库子目录时）。
-    $repoRootLines = @(Invoke-AuditGitLines @("rev-parse", "--show-toplevel") "repository toplevel")
+    $pathArgs = if ([string]::IsNullOrWhiteSpace($resolvedPath)) { @() } else { @("-C", $resolvedPath) }
+    $repoRootLines = @(Invoke-AuditGitLines ($pathArgs + @("rev-parse", "--show-toplevel")) "repository toplevel")
     $repoRoot = ([string]$repoRootLines[0]).Trim()
     # 批量取证失败必须 fail closed：空 index 会生成看似有效的指纹，掩盖 staged
     # blob 变化，削弱 stale/drift 检测。
-    $allIndexLines = @(Invoke-AuditGitLines @("-c", "core.quotepath=false", "ls-files", "--stage") "index state (ls-files --stage)")
+    $allIndexLines = @(Invoke-AuditGitLines ($pathArgs + @("-c", "core.quotepath=false", "ls-files", "--stage")) "index state (ls-files --stage)")
     $pairs = @()
     foreach ($path in $pathList) {
         $fullPath = Join-Path $repoRoot ([string]$path)
@@ -1392,7 +1408,22 @@ function Get-AuditGitPathStatePairs($paths) {
         $indexFingerprint = Get-AuditFingerprintFromVendorFromPairs $indexState $true
         $worktreeState = "missing"
         if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-            $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
+            # 编译/代理会话可能正在追加日志；单文件暂时被独占读取时不能让
+            # 整轮审查失败。长度与最后写入时间仍参与漂移指纹。
+            try {
+                $fileHash = Get-FileContentHash $fullPath
+            }
+            catch {
+                $fileHash = $null
+                $readFailure = $_.Exception
+            }
+            if ($null -ne $fileHash) {
+                $worktreeState = "file:" + [string]$fileHash
+            }
+            else {
+                $entry = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+                $worktreeState = "unreadable:{0}:{1}:{2}" -f $readFailure.GetType().Name, $entry.Length, $entry.LastWriteTimeUtc.Ticks
+            }
         }
         elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
             # 只有独立仓根才按嵌套仓取证：rev-parse 对父仓内普通目录返回父仓
@@ -1428,35 +1459,34 @@ function Get-AuditGitInfo([string]$resolvedPath) {
     }
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
 
-    Push-Location $resolvedPath
-    try {
-        $inside = (& git rev-parse --is-inside-work-tree 2>$null)
-        if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
-            $info.is_repo = $true
-            $branchLines = @(Invoke-AuditGitLines @("rev-parse", "--abbrev-ref", "HEAD") "branch")
-            $commitLines = @(Invoke-AuditGitLines @("rev-parse", "HEAD") "HEAD")
-            $statusLines = @(Invoke-AuditGitLines @("status", "--porcelain") "status")
-            if ($branchLines.Count -eq 0 -or $commitLines.Count -eq 0) {
-                throw "审计 git 取证失败：branch 或 HEAD 为空；拒绝生成不完整审计状态。"
-            }
-            $info.branch = ([string]$branchLines[0]).Trim()
-            $info.commit = ([string]$commitLines[0]).Trim()
-            # A clean `git status` proves there are no changed paths to fingerprint.
-            # Skip three redundant Git child processes on every clean target.
-            $changedPaths = if ($statusLines.Count -gt 0) { @(Get-AuditGitChangedPaths) } else { @() }
-            $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
-            # Passing an empty array variable unrolls to $null, which the path probe would
-            # read as the repository root and hash the whole worktree into the fingerprint.
-            if (@($changedPaths).Count -gt 0) {
-                $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
-            }
-            $info.dirty = ($statusLines.Count -gt 0)
-            $info.status_count = $statusLines.Count
-            $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+    $inside = (& git -C $resolvedPath rev-parse --is-inside-work-tree 2>$null)
+    if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
+        $info.is_repo = $true
+        $targetArgs = @("-C", $resolvedPath)
+        $branchLines = @(Invoke-AuditGitLines ($targetArgs + @("rev-parse", "--abbrev-ref", "HEAD")) "branch")
+        $commitLines = @(Invoke-AuditGitLines ($targetArgs + @("rev-parse", "HEAD")) "HEAD")
+        $statusLines = @(Invoke-AuditGitLines ($targetArgs + @("status", "--porcelain")) "status")
+        if ($branchLines.Count -eq 0 -or $commitLines.Count -eq 0) {
+            throw "审计 git 取证失败：branch 或 HEAD 为空；拒绝生成不完整审计状态。"
         }
-    }
-    finally {
-        Pop-Location
+        $info.branch = ([string]$branchLines[0]).Trim()
+        $info.commit = ([string]$commitLines[0]).Trim()
+        # A clean `git status` proves there are no changed paths to fingerprint.
+        # Skip three redundant Git child processes on every clean target.
+        $changedPaths = if ($statusLines.Count -gt 0) { @(Get-AuditGitChangedPaths $resolvedPath) } else { @() }
+        $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
+        # Passing an empty array variable unrolls to $null, which the path probe would
+        # read as the repository root and hash the whole worktree into the fingerprint.
+        if (@($changedPaths).Count -gt 0) {
+            $statePairs += @(Get-AuditGitPathStatePairs $changedPaths $resolvedPath)
+        }
+        $info.dirty = ($statusLines.Count -gt 0)
+        $info.status_count = $statusLines.Count
+        $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+        # Re-read HEAD after status to detect a commit/checkout occurring during
+        # the fingerprint window; keep every probe bound to the same target.
+        $info.branch = ([string](@(Invoke-AuditGitLines ($targetArgs + @("rev-parse", "--abbrev-ref", "HEAD")) "branch after status")[0])).Trim()
+        $info.commit = ([string](@(Invoke-AuditGitLines ($targetArgs + @("rev-parse", "HEAD")) "HEAD after status")[0])).Trim()
     }
     return [pscustomobject]$info
 }

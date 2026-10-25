@@ -19,15 +19,16 @@ function Get-DefaultAuditOuterAiPrompt {
 1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。先遵守其中 ``native_ai_review``，再从全仓汇总的 ``target_profile.user_need_summary`` 和 ``target_profile.prioritized_needs.primary_needs`` 开始。``target_scans`` 仅用于逐条证据归属、冲突定位和覆盖统计，不是独立的用户需求画像。用宿主 AI 做跨文件的只读语义综合，核对其 ``requirement_signals``、``artifact_capabilities`` 及逐条 evidence；不得用用户长期偏好、个人技术栈或未扫描仓库事实补充整体需求。
 2. 重点不是原始命中数量：大仓的文件量、接口/持久化/测试/运维等技术上下文，不能自动等同于用户主需求。只有源代码证据能说明核心用户路径时，才可把次级项提升；必须在结论里写出提升依据和不确定性。
 3. 需要澄清语义时，只能读取 snapshot 明确列出的目标仓 evidence 路径及其紧邻实现/测试文件。源代码优先于测试，测试优先于依赖，依赖优先于文档；冲突与低置信度必须保留为 observation 或 ``do_not_install``，不能推断成安装结论。
-4. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
-5. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。usage_evidence.state 可为 ``observed_used``、``observed_unused`` 或 ``unknown``；unknown 保留不确定性，不能伪造为未使用，但也不能阻止有明确替代/过时依据的迁移候选。
-6. 用户报告“从未成功调用”时，必须写入 ``overlap_findings`` 的 report-only 观察：注明这是用户报告而非遥测，并将后续动作限定为核对 current profile 投影、宿主可见清单或任务路由。它不能转换为 ``observed_unused``、``removal_candidate`` 或 MCP 卸载结论。
-7. 初始 ``recommendations.json`` 是未审阅的空基线，不证明名单最优。新增按当前需求、能力缺口、候选收益和可达性判断；退役按替代/过时、迁移和回滚判断。缺少历史调用记录不能单独推出保留或删除。宿主将具名任务证据填入 ``usage_observations``，区分发现、加载、执行和验收，以及实际观察、用户报告和受控重放。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
-8. 执行：
+4. 当任务要求把这些审查结果转换给其他工具或模型时，使用 ``target_profile.user_need_summary.prioritized_needs``（或按目标分区读取）、``score_components`` 与 ``matched_actions``；只有能沿配对证据定位到同一文件或依赖时才使用 ``targets``。不要从拼接后的 ``actions``/``targets`` 推断未证明的组合。``score_components`` 是各维度独立事实，不是再次相加的权重。
+5. ``removal_candidates`` 与 ``mcp_removal_candidates`` 可以产生，但只能由宿主 AI 的语义裁决产生，不是“画像未命中”的反推。逐项读取当前安装能力、触发条件与替代项：在 ``semantic_review`` 中记录 ``decision_owner=host_ai``、实际能力、一般/专用分类、替代覆盖或过时依据、已知使用事实、迁移、回滚、不确定性及 ``requires_user_confirmation=true``。同名、存在 override、配置依赖可满足、或本次重点需求未命中只能是重叠线索，不能单独证明等价、非使用或可删除。
+6. 通用编码能力与专用能力使用同一退役门槛：通用能力不因未成为主需求而降级；专用能力必须比较其独特触发、目标仓主旅程覆盖、替代质量、迁移代价和回滚。usage_evidence.state 可为 ``observed_used``、``observed_unused`` 或 ``unknown``；unknown 保留不确定性，不能伪造为未使用，但也不能阻止有明确替代/过时依据的迁移候选。
+7. 用户报告“从未成功调用”时，必须写入 ``overlap_findings`` 的 report-only 观察：注明这是用户报告而非遥测，并将后续动作限定为核对 current profile 投影、宿主可见清单或任务路由。它不能转换为 ``observed_unused``、``removal_candidate`` 或 MCP 卸载结论。
+8. 初始 ``recommendations.json`` 是未审阅的空基线，不证明名单最优。新增按当前需求、能力缺口、候选收益和可达性判断；退役按替代/过时、迁移和回滚判断。缺少历史调用记录不能单独推出保留或删除。宿主将具名任务证据填入 ``usage_observations``，区分发现、加载、执行和验收，以及实际观察、用户报告和受控重放。每条新增建议必须有扫描画像理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。
+9. 执行：
    ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-9. 预检通过后执行：
+10. 预检通过后执行：
    ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-9. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
+11. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -650,16 +651,30 @@ function Get-AuditNeedEvidenceCoverage($entry) {
     $kinds = @("source_code", "supporting_code", "test", "dependency", "documentation")
     $targetsByKind = @{}
     $countByKind = @{}
+    $implementedFileCounts = @{}
+    $implementedFileTargets = @{}
     foreach ($kind in $kinds) {
         $targetsByKind[$kind] = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
         $countByKind[$kind] = 0
+        $implementedFileCounts[$kind] = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $implementedFileTargets[$kind] = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     }
     foreach ($evidence in @(Convert-AuditObjectArray (Get-CfgObjectProperty $entry "evidence"))) {
         $kind = [string](Get-CfgObjectProperty $evidence "kind")
         if ($kind -notin $kinds) { continue }
         $countByKind[$kind] = [int]$countByKind[$kind] + 1
+        $path = ([string](Get-CfgObjectProperty $evidence "path")).Trim()
         $target = ([string](Get-CfgObjectProperty $evidence "target")).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($target)) { $targetsByKind[$kind].Add($target) | Out-Null }
+        if (-not [string]::IsNullOrWhiteSpace($path) -and $kind -in @("source_code", "supporting_code")) {
+            $fileKey = if ([string]::IsNullOrWhiteSpace($target)) { $path } else { "{0}|{1}" -f $target, $path }
+            $implementedFileCounts[$kind].Add($fileKey) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($target)) {
+            $targetsByKind[$kind].Add($target) | Out-Null
+            if (-not [string]::IsNullOrWhiteSpace($path) -and $kind -in @("source_code", "supporting_code")) {
+                $implementedFileTargets[$kind].Add($target) | Out-Null
+            }
+        }
     }
     $allTargets = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($kind in $kinds) { foreach ($target in $targetsByKind[$kind]) { $allTargets.Add($target) | Out-Null } }
@@ -672,10 +687,43 @@ function Get-AuditNeedEvidenceCoverage($entry) {
             distinct_target_count = $allTargets.Count
             source_code_evidence_count = [int]$countByKind["source_code"]
             supporting_code_evidence_count = [int]$countByKind["supporting_code"]
+            source_code_file_count = $implementedFileCounts["source_code"].Count
+            supporting_code_file_count = $implementedFileCounts["supporting_code"].Count
+            source_code_file_target_count = $implementedFileTargets["source_code"].Count
+            supporting_code_file_target_count = $implementedFileTargets["supporting_code"].Count
             test_evidence_count = [int]$countByKind["test"]
             dependency_evidence_count = [int]$countByKind["dependency"]
             documentation_evidence_count = [int]$countByKind["documentation"]
         })
+}
+
+function Get-AuditNeedMatchedActions($entry) {
+    $pairs = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($evidence in @(Convert-AuditObjectArray (Get-CfgObjectProperty $entry "evidence"))) {
+        # 证据显式携带 action 时优先使用；signal 前缀只是回退——需求类 signal 的
+        # 前缀是 domain，工件类是能力名，都不能伪造成具体动作。
+        $action = ([string](Get-CfgObjectProperty $evidence "action")).Trim().ToLowerInvariant()
+        $signal = [string](Get-CfgObjectProperty $evidence "signal")
+        if ([string]::IsNullOrWhiteSpace($action)) {
+            $sep = $signal.IndexOf(":")
+            if ($sep -le 0) { continue }
+            $action = $signal.Substring(0, $sep).Trim().ToLowerInvariant()
+        }
+        $target = ([string](Get-CfgObjectProperty $evidence "target")).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($action) -and -not [string]::IsNullOrWhiteSpace($target)) {
+            $pairs.Add(("{0}|{1}" -f $action, $target)) | Out-Null
+        }
+    }
+    if ($pairs.Count -eq 0) { return @() }
+    return @($pairs | Sort-Object | ForEach-Object {
+            $parts = ([string]$_).Split("|", 2)
+            [pscustomobject]([ordered]@{ action = $parts[0]; target = $parts[1] })
+        })
+}
+
+function Get-AuditSaturatedPoints([int]$Count, [int]$Points, [int]$SaturationCount = 3) {
+    if ($Count -le 0) { return 0 }
+    return [int]([Math]::Ceiling($Points * [Math]::Min($Count, $SaturationCount) / $SaturationCount))
 }
 
 function Get-AuditNeedRole([string]$Kind, [string]$Domain, [string]$Subject) {
@@ -697,29 +745,49 @@ function New-AuditPrioritizedNeed {
     $subject = if ($Kind -eq "requirement") { [string](Get-CfgObjectProperty $Entry "subject") } else { [string](Get-CfgObjectProperty $Entry "artifact") }
     $role = Get-AuditNeedRole $Kind $domain $subject
     $coverage = Get-AuditNeedEvidenceCoverage $Entry
+    # 饱和覆盖分奖励独立文件与目标仓，不奖励同一应用文件反复命中同一能力。
+    # 旧算法仅凭两个短文件就能越过主需求阈值；这里要求更广的实现证据。
+    $implementedFileCount = [int]$coverage.source_code_file_count + [int]$coverage.supporting_code_file_count
+    # 仅凭多个不同文件不能压倒技术上下文；真正的成长来自跨仓
+    # （target_spread）或多仓核心旅程（target_corroboration）。
+    $spreadPoints = if ($implementedFileCount -ge 4) { 32 } else { Get-AuditSaturatedPoints $implementedFileCount 24 4 }
+    if ($Kind -eq "artifact") { $spreadPoints = Get-AuditSaturatedPoints $implementedFileCount 40 4 }
+    $scoreComponents = [pscustomobject]([ordered]@{
+            implementation_spread = $spreadPoints
+            target_spread = Get-AuditSaturatedPoints ([int]$coverage.source_code_target_count) 20 3
+            single_target_core_journey = if ($Kind -eq "requirement" -and $role -eq "product_workflow" -and [int]$coverage.source_code_target_count -eq 1 -and $implementedFileCount -ge 4 -and [int]$coverage.test_target_count -gt 0) { 20 } else { 0 }
+            test = if ([int]$coverage.test_target_count -gt 0) { 7 } else { 0 }
+            dependency = if ([int]$coverage.dependency_target_count -gt 0) { 4 } else { 0 }
+            documentation = if ([int]$coverage.documentation_target_count -gt 0) { 2 } else { 0 }
+            target_corroboration = if ($Kind -eq "requirement" -and $role -eq "product_workflow" -and [int]$coverage.source_code_target_count -ge 2 -and $implementedFileCount -ge 2) { 23 } else { 0 }
+            role = switch ($role) {
+                "product_workflow" { 18 }
+                "supporting_artifact" { 12 }
+                "delivery_surface" { 4 }
+                default { 0 }
+            }
+        })
     $score = 0
-    if ([int]$coverage.source_code_target_count -gt 0) {
-        $score += 45
-        $score += [Math]::Min(3, [Math]::Max(0, [int]$coverage.source_code_target_count - 1)) * 8
-    }
-    if ([int]$coverage.test_target_count -gt 0) { $score += 6 }
-    if ([int]$coverage.dependency_target_count -gt 0) { $score += 4 }
-    if ([int]$coverage.documentation_target_count -gt 0) { $score += 2 }
-    switch ($role) {
-        "product_workflow" { $score += 18 }
-        "supporting_artifact" { $score += 12 }
-        "delivery_surface" { $score += 4 }
-    }
+    foreach ($component in @($scoreComponents.PSObject.Properties)) { $score += [int]$component.Value }
     if ([int]$coverage.source_code_target_count -eq 0) { $score = [Math]::Min($score, 35) }
     $limitations = New-Object System.Collections.Generic.List[string]
     if ([int]$coverage.source_code_target_count -eq 0) { $limitations.Add("no_implemented_source_evidence") | Out-Null }
     if ([int]$coverage.supporting_code_target_count -gt 0) { $limitations.Add("supporting_code_not_direct_product_journey") | Out-Null }
     if ([int]$coverage.source_code_target_count -lt 2) { $limitations.Add("single_target_or_unattributed_source_support") | Out-Null }
+    if ($implementedFileCount -lt 4) { $limitations.Add("narrow_implementation_spread") | Out-Null }
     if ([int]$coverage.test_target_count -eq 0) { $limitations.Add("no_test_evidence") | Out-Null }
     if ($role -in @("delivery_surface", "engineering_or_operations")) { $limitations.Add("technical_context_not_direct_product_intent") | Out-Null }
     $band = "observation"
     if ([int]$coverage.source_code_target_count -gt 0) {
-        if ($role -eq "product_workflow" -and [int]$coverage.source_code_target_count -ge $MinimumProductWorkflowSourceTargetCount -and $score -ge 63) { $band = "primary_candidate" }
+        # 证据只来自一个仓是其真实边界，不是无来源；扫描器已排除测试/示例/生成物，
+        # 有源代码的已实现动作可作为该仓核心旅程，保留 single_target 限制即可。
+        $singleTargetPortfolioEvidence = ([int]$coverage.source_code_target_count -eq 1 -and
+            ([int]$coverage.source_code_file_count + [int]$coverage.supporting_code_file_count) -gt 0)
+        $singleTargetEvidenceActionCount = @((Get-AuditNeedMatchedActions $Entry) | ForEach-Object { [string]$_.action } | Sort-Object -Unique).Count
+        $singleTargetPortfolioEvidence = $singleTargetPortfolioEvidence -and $singleTargetEvidenceActionCount -gt 0
+        $productWorkflowScopeMatched = ([int]$coverage.source_code_target_count -ge $MinimumProductWorkflowSourceTargetCount) -and
+            (([int]$coverage.source_code_target_count -ge 2) -or [bool]$scoreComponents.single_target_core_journey -or $singleTargetPortfolioEvidence)
+        if ($role -eq "product_workflow" -and $productWorkflowScopeMatched -and ([int]$coverage.source_code_target_count -eq 1 -or $score -ge 63)) { $band = "primary_candidate" }
         elseif ($role -eq "supporting_artifact" -and [int]$coverage.source_code_target_count -ge 2 -and $score -ge 65) { $band = "primary_candidate" }
         else { $band = "secondary" }
     }
@@ -734,11 +802,13 @@ function New-AuditPrioritizedNeed {
             subject = $subject
             role = $role
             priority_score = [int][Math]::Min(100, $score)
+            score_components = $scoreComponents
             priority_band = $band
             confidence = [string](Get-CfgObjectProperty $Entry "confidence")
             evidence_status = [string](Get-CfgObjectProperty $Entry "evidence_status")
             actions = @(Convert-AuditStringArray (Get-CfgObjectProperty $Entry "actions"))
             targets = @(Convert-AuditStringArray (Get-CfgObjectProperty $Entry "targets"))
+            matched_actions = @(Get-AuditNeedMatchedActions $Entry)
             evidence_coverage = $coverage
             limitations = @($limitations.ToArray())
         })
@@ -766,12 +836,14 @@ function New-AuditPrioritizedNeeds($RequirementSignals, $ArtifactCapabilities, [
     $observations = @($requirements | Where-Object priority_band -eq "observation" | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
     return [pscustomobject]([ordered]@{
             schema_version = 1
-            ranking_method = "role_then_source_coverage_v2"
+            ranking_method = "role_then_saturated_evidence_v4"
             policy = @(
-                "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias.",
+                "Raw evidence count does not determine priority; source-backed distinct file and target coverage saturate, and repeated matches in one file do not add score.",
                 "A multi-target portfolio requires implemented source evidence from at least two targets before the scanner automatically promotes a product workflow to primary; a host-AI review may explicitly promote a single-target core user journey with recorded evidence and uncertainty.",
                 "Product workflows can become primary candidates; delivery, engineering, and operations signals remain context unless host AI verifies a core user journey.",
-                "Documentation-only evidence remains an observation and must not justify an install, removal, or MCP mutation."
+                "Documentation-only evidence remains an observation and must not justify an install, removal, or MCP mutation.",
+                "score_components reports independent evidence dimensions; priority_score applies the documented promotion guards and is not remade by summing the components at a downstream layer.",
+                "matched_actions are action-target pairs with at least one evidence record carrying both fields; top-level actions and targets remain deduplicated inventories and do not imply a cross product."
             )
             primary_needs = @($primary.ToArray())
             secondary_needs = @($secondary.ToArray())
@@ -791,18 +863,39 @@ function New-AuditUserNeedSummary($prioritizedNeeds, [int]$TargetCount = 0) {
                     evidence_status = [string](Get-CfgObjectProperty $need "evidence_status")
                     target_scope = @(Convert-AuditStringArray (Get-CfgObjectProperty $need "targets"))
                     source_code_target_count = [int](Get-CfgObjectProperty $coverage "source_code_target_count")
+                    evidence_coverage = $coverage
+                    matched_actions = @(Convert-AuditObjectArray (Get-CfgObjectProperty $need "matched_actions"))
                     limitations = @(Convert-AuditStringArray (Get-CfgObjectProperty $need "limitations"))
                 })) | Out-Null
+    }
+    $prioritized = New-Object System.Collections.Generic.List[object]
+    foreach ($field in @("primary_needs", "secondary_needs", "supporting_artifacts")) {
+        foreach ($need in @(Convert-AuditObjectArray (Get-CfgObjectProperty $prioritizedNeeds $field))) {
+            $prioritized.Add([pscustomobject]([ordered]@{
+                        key = [string](Get-CfgObjectProperty $need "key")
+                        kind = [string](Get-CfgObjectProperty $need "kind")
+                        role = [string](Get-CfgObjectProperty $need "role")
+                        priority_band = [string](Get-CfgObjectProperty $need "priority_band")
+                        priority_score = [int](Get-CfgObjectProperty $need "priority_score")
+                        score_components = Get-CfgObjectProperty $need "score_components"
+                        matched_actions = @(Convert-AuditObjectArray (Get-CfgObjectProperty $need "matched_actions"))
+                        target_scope = @(Convert-AuditStringArray (Get-CfgObjectProperty $need "targets"))
+                        evidence_coverage = Get-CfgObjectProperty $need "evidence_coverage"
+                    })) | Out-Null
+        }
     }
     return [pscustomobject]([ordered]@{
             derivation = "target_scans_only"
             scope = "portfolio"
             profile_kind = "portfolio_capability_profile"
             primary_needs = @($primary.ToArray())
+            prioritized_needs = @($prioritized.ToArray() | Sort-Object @{ Expression = "priority_score"; Descending = $true }, key)
             interpretation_rules = @(
                 "This is the aggregate user-need summary across all enabled target repositories.",
                 "Target-level scan partitions are evidence attribution only; they must not be treated as separate user-need profiles.",
-                "A listed limitation is an uncertainty boundary, not evidence of absence or a reason to add, remove, or configure a capability."
+                "A listed limitation is an uncertainty boundary, not evidence of absence or a reason to add, remove, or configure a capability.",
+                "score_components reports dimension facts; priority_score is the sole final score after promotion guards.",
+                "Only matched_actions prove a particular action-target pair. Top-level actions, targets, and target_scope are deduplicated inventories."
             )
         })
 }

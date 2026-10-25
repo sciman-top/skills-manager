@@ -655,7 +655,7 @@ function Invoke-AuditRecommendationsPreflight {
     else {
         Get-AuditTargetRepoLiveState $targetSnapshotState
     }
-    $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
+    $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState -AcceptDeclaredDirtyAtScan
     if ($null -ne $rec) {
         $removalDependencyCheck = Test-AuditRemovalDependencyClosure -Config (LoadCfg) -RemovalCandidates @($rec.removal_candidates) -RepositoryRoot $Root
     }
