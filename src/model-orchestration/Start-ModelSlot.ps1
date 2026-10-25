@@ -106,10 +106,12 @@ $WorkingDirectory = (Resolve-Path -LiteralPath $WorkingDirectory).Path
 $capability = [ordered]@{
     mode = $CapabilityMode
     host = $targetHost
+    tuple_check = if ($CapabilityMode -eq 'native') { 'codex_model_catalog' } else { 'provider_override_receipt' }
     model = [string]$route.model
     effort = [string]$route.effort
     status = if ($Plan) { 'deferred' } else { 'pending' }
-    native_supported = $null
+    catalog_tuple_supported = $null
+    live_dispatch_compatibility = 'not_evaluated'
     supported_efforts = @()
     upstream_contacted = $false
 }
@@ -138,7 +140,7 @@ function Get-CodexCatalog([string]$Path) {
             -not [DateTimeOffset]::TryParse([string]$snapshot.expires_at, [ref]$expires) -or
             $observed -gt $now -or $expires -le $now -or $expires -le $observed -or
             $expires -gt $observed.AddMinutes(5)) {
-            throw 'Native catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
+            throw 'Codex model catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
         }
         return $snapshot
     }
@@ -273,12 +275,12 @@ if (-not $Plan -and $CapabilityMode -ne 'provider_override') {
     try { $catalog = Get-CodexCatalog $CapabilityProbePath }
     catch { ThrowCapabilityBlock 'probe_failed' $_.Exception.Message }
     $modelInfo = @($catalog.models | Where-Object { $_.slug -ceq $route.model })[0]
-    if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Native catalog does not contain model '$($route.model)'." }
+    if ($null -eq $modelInfo) { ThrowCapabilityBlock 'model_missing' "Codex catalog does not contain model '$($route.model)'." }
     $supported = @($modelInfo.supported_reasoning_levels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.effort } })
     $capability.supported_efforts = $supported
-    $capability.native_supported = ($supported -ccontains $route.effort)
-    if (-not $capability.native_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Native catalog does not declare '$($route.model)/$($route.effort)'." $supported }
-    $capability.status = 'native_supported'
+    $capability.catalog_tuple_supported = ($supported -ccontains $route.effort)
+    if (-not $capability.catalog_tuple_supported) { ThrowCapabilityBlock 'tuple_unsupported' "Codex catalog does not declare '$($route.model)/$($route.effort)'." $supported }
+    $capability.status = 'catalog_supported'
 }
 if ($targetHost -eq 'codex') {
     $cliArgs = @('exec','--profile',$routePreset.Replace('_','-'),'--strict-config','--json','--skip-git-repo-check','-C',$WorkingDirectory,
