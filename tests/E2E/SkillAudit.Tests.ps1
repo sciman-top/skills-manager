@@ -104,8 +104,9 @@ Describe "Skill Audit E2E" {
             $snapshot.scan_contract.aggregation | Should -Be "all_enabled_targets"
             $snapshot.target_profile.scope | Should -Be "portfolio"
             $snapshot.target_profile.schema_version | Should -Be 3
-            $snapshot.target_profile.prioritized_needs.ranking_method | Should -Be "role_then_source_coverage_v2"
-            $snapshot.target_profile.prioritized_needs.policy | Should -Contain "Raw evidence count does not determine priority; source-backed distinct target coverage is capped to avoid large-repository bias."
+            $snapshot.target_profile.prioritized_needs.ranking_method | Should -Be "role_then_saturated_evidence_v4"
+            $snapshot.target_profile.prioritized_needs.policy | Should -Contain "Raw evidence count does not determine priority; source-backed distinct file and target coverage saturate, and repeated matches in one file do not add score."
+            $snapshot.target_profile.user_need_summary.prioritized_needs.Count | Should -Be (@($snapshot.target_profile.prioritized_needs.primary_needs).Count + @($snapshot.target_profile.prioritized_needs.secondary_needs).Count + @($snapshot.target_profile.prioritized_needs.supporting_artifacts).Count)
             $snapshot.native_ai_review.decision_owner | Should -Be "host_ai"
             $snapshot.native_ai_review.schema_version | Should -Be 2
             $snapshot.native_ai_review.mutation_policy | Should -Match "recommendations.json only"

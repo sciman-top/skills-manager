@@ -98,6 +98,39 @@ Describe "Audit Targets" {
         (@($selfScan.detected.requirement_signals | Where-Object { $_.domain -eq "workflow" -and $_.subject -eq "document_processing" })).Count | Should -Be 0
     }
 
+    It "Prefilters self-analysis fixtures without changing the regular-expression decision" {
+        $falseNegativeProneCase = @'
+set-contentutf8 $path "render_pdf(sample.pdf)"
+new-auditreposcan "fixture" $repo "fixture"
+$scan.detected.requirement_signals | Out-Null
+'@
+        $actualFixture = @'
+New-AuditRepoScan "fixture" $repo "fixture"
+Set-ContentUtf8 $path "render_pdf(sample.pdf)"
+$scan.detected.artifact_capabilities | Out-Null
+'@
+        $keywordMentionsOnly = 'This document explains pdf and docx processing without scanner fixture code.'
+
+        Test-AuditSelfReferentialAnalysisFile $falseNegativeProneCase | Should -BeTrue
+        Test-AuditSelfReferentialAnalysisFile $actualFixture | Should -BeTrue
+        Test-AuditSelfReferentialAnalysisFile $keywordMentionsOnly | Should -BeFalse
+
+        $repo = Join-Path $TestDrive "self-analysis-prefilter-fixture"
+        New-Item -ItemType Directory -Path (Join-Path $repo "tests"), (Join-Path $repo "src") -Force | Out-Null
+        foreach ($marker in @("skills.ps1", "build.ps1", "src\Commands\AuditTargets.ps1")) {
+            $path = Join-Path $repo $marker
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+            Set-ContentUtf8 $path "# fixture marker"
+        }
+        Set-ContentUtf8 (Join-Path $repo "tests\fixture.ps1") $falseNegativeProneCase
+        Set-ContentUtf8 (Join-Path $repo "src\document-pipeline.py") 'def render_pdf(path): return save_pdf(path)'
+        $scan = New-AuditRepoScan "self-prefilter" $repo "..\self-analysis-prefilter-fixture"
+        $pdf = @($scan.detected.artifact_capabilities | Where-Object artifact -eq "pdf")
+        $pdf.Count | Should -Be 1
+        @($pdf[0].evidence).Count | Should -BeGreaterThan 0
+        ($pdf[0].evidence | ForEach-Object { [string]$_.path }) | Should -Not -Contain "tests\fixture.ps1"
+    }
+
     It "Does not probe changed-path state for a clean repository, so unrelated worktree content cannot drift it" {
         $repo = Join-Path $TestDrive "clean-fingerprint-repo"
         $null = New-Item -ItemType Directory -Path $repo -Force
@@ -845,6 +878,7 @@ Describe "Audit Targets" {
                 $cleanScan = @($result.scans | Where-Object { $_.target.name -eq "clean" })[0]
 
                 $dirtyScan.git.dirty | Should -Be $true
+                $dirtyScan.scan_coverage.status | Should -Be "skipped"
                 $dirtyScan.scan_coverage.confidence_ceiling | Should -Be "skipped_dirty"
                 @($dirtyScan.risks) | Should -Contain "scan_skipped_dirty"
                 @($dirtyScan.detected.package_managers).Count | Should -Be 0
@@ -1151,7 +1185,7 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $primary = @($priority.primary_needs | Where-Object key -eq "workflow/document_processing")
             $primary.Count | Should -Be 1
             $primary[0].evidence_coverage.source_code_target_count | Should -Be 2
-            $priority.ranking_method | Should -Be "role_then_source_coverage_v2"
+            $priority.ranking_method | Should -Be "role_then_saturated_evidence_v4"
             @($priority.primary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 0
             @($priority.secondary_needs | Where-Object key -eq "interface/web_ui").Count | Should -Be 1
             @($priority.observations | Where-Object key -eq "workflow/ocr").Count | Should -Be 1
@@ -1181,6 +1215,74 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $singleSourceWorkflow = @($singleSourceProfile.prioritized_needs.secondary_needs | Where-Object key -eq "workflow/document_processing")
             $singleSourceWorkflow.Count | Should -Be 1
             $singleSourceWorkflow[0].evidence_coverage.source_code_target_count | Should -Be 1
+
+            $narrowEvidence = @(
+                [pscustomobject]@{ kind = "source_code"; path = "src\\app.py"; signal = "workflow:document_processing@L1" },
+                [pscustomobject]@{ kind = "source_code"; path = "src\\app.py"; signal = "workflow:document_processing@L2" },
+                [pscustomobject]@{ kind = "source_code"; path = "src\\helpers.py"; signal = "workflow:document_processing@L3" }
+            )
+            $broadEvidence = @(
+                [pscustomobject]@{ kind = "source_code"; path = "src\\load.py"; signal = "workflow:document_processing@L1" },
+                [pscustomobject]@{ kind = "source_code"; path = "src\\parse.py"; signal = "workflow:document_processing@L2" },
+                [pscustomobject]@{ kind = "source_code"; path = "src\\render.py"; signal = "workflow:document_processing@L3" },
+                [pscustomobject]@{ kind = "source_code"; path = "src\\store.py"; signal = "workflow:document_processing@L4" }
+            )
+            $narrowNeed = New-AuditPrioritizedNeed ([pscustomobject]@{
+                    domain = "workflow"; subject = "document_processing"; actions = @("process")
+                    confidence = "high"; evidence_status = "implemented"; targets = @(); evidence = $narrowEvidence
+                }) "requirement" 1
+            $broadNeed = New-AuditPrioritizedNeed ([pscustomobject]@{
+                    domain = "workflow"; subject = "document_processing"; actions = @("process")
+                    confidence = "high"; evidence_status = "implemented"; targets = @(); evidence = $broadEvidence
+                }) "requirement" 1
+
+            $narrowNeed.priority_score | Should -Be 30
+            $narrowNeed.priority_band | Should -Be "observation"
+            $narrowNeed.limitations | Should -Contain "narrow_implementation_spread"
+            $broadNeed.priority_score | Should -Be 35
+            $broadNeed.priority_band | Should -Be "observation"
+            ($narrowNeed.score_components.PSObject.Properties.Value | Measure-Object -Sum).Sum | Should -Be $narrowNeed.priority_score
+            # The no-source-evidence cap makes priority_score (35) diverge from the raw
+            # component sum (50); per policy the sum must not be re-derived downstream.
+            ($broadNeed.score_components.PSObject.Properties.Value | Measure-Object -Sum).Sum | Should -Be 50
+
+            $targeted = New-AuditPrioritizedNeed ([pscustomobject]@{
+                    domain = "workflow"; subject = "document_processing"; actions = @("process", "generate")
+                    confidence = "high"; evidence_status = "implemented"; targets = @("one", "two")
+                    evidence = @(
+                        [pscustomobject]@{ kind = "source_code"; path = "src\\process.py"; signal = "workflow:document_processing@L1"; target = "one"; action = "process" },
+                        [pscustomobject]@{ kind = "source_code"; path = "src\\generate.py"; signal = "workflow:document_processing@L1"; target = "two"; action = "generate" }
+                    )
+                }) "requirement" 1
+            ($targeted.matched_actions | ForEach-Object { "{0}->{1}" -f $_.action, $_.target }) | Should -Be @("generate->two", "process->one")
+            $targeted.priority_score | Should -Be 67
+            $targeted.priority_band | Should -Be "primary_candidate"
+        }
+
+        It "Carries auditable scores and paired actions for every portfolio need" {
+            $synthetic = [pscustomobject]@{ domain = "workflow"; subject = "document_processing" }
+            $scan = [pscustomobject]@{
+                target = [pscustomobject]@{ name = "harbor-studio" }
+                detected = [pscustomobject]@{
+                    languages = @(); package_managers = @(); frameworks = @(); build_commands = @(); test_commands = @(); capabilities = @(); agent_rule_files = @(); notable_files = @()
+                    artifact_capabilities = @([pscustomobject]@{ artifact = "pdf"; actions = @("read"); confidence = "high"; evidence_status = "implemented"; targets = @("harbor-studio"); evidence = @([pscustomobject]@{ kind = "source_code"; path = "src\\pdf.py"; signal = "pdf:read@L1"; target = "harbor-studio" }) })
+                    requirement_signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_processing"; actions = @("process"); confidence = "high"; evidence_status = "implemented"; targets = @("harbor-studio"); evidence = @([pscustomobject]@{ kind = "source_code"; path = "src\\process.py"; signal = "workflow:document_processing@L1"; target = "harbor-studio" }) }, $synthetic)
+                }
+                risks = @()
+            }
+            $scan.detected.requirement_signals = @($scan.detected.requirement_signals[0])
+            $profile = New-AuditTargetProfile @($scan)
+            $summary = $profile.user_need_summary
+            $all = @($summary.prioritized_needs)
+            $all.Count | Should -Be (@($profile.prioritized_needs.primary_needs).Count + @($profile.prioritized_needs.secondary_needs).Count + @($profile.prioritized_needs.supporting_artifacts).Count)
+            $all.Count | Should -Be (@($all | Select-Object -ExpandProperty key -Unique).Count)
+            $pdf = @($all | Where-Object key -eq "pdf")
+            $pdf.Count | Should -Be 1
+            $pdf[0].matched_actions[0].action | Should -Be "pdf"
+            $pdf[0].matched_actions[0].target | Should -Be "harbor-studio"
+            $pdf[0].priority_score | Should -Be 29
+            $pdf[0].score_components.psobject.Properties.Name | Should -Contain "implementation_spread"
+            $summary.primary_needs[0].evidence_coverage | Should -Not -BeNullOrEmpty
         }
 
         It "Emits a positive coverage statement mapping needs to current-profile skills" {
@@ -2846,6 +2948,34 @@ Describe "Audit git evidence fail-closed" {
             $changed.Count | Should -Be 2
             @($changed) -contains "a.txt" | Should -Be $true
             @($changed) -contains "b.txt" | Should -Be $true
+        }
+        finally { Pop-Location }
+    }
+
+    It "Keeps a temporarily unreadable worktree file drift-sensitive without aborting the scan" {
+        $repo = Join-Path $TestDrive "audit-git-unreadable-worktree-file"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        & git -C $repo init -q 2>$null
+        Set-ContentUtf8 (Join-Path $repo "locked.txt") "locked"
+        & git -C $repo add locked.txt
+        & git -C $repo commit -q -m init
+        Push-Location $repo
+        try {
+            $script:auditFileHashAttempts = 0
+            Mock Get-FileContentHash -MockWith {
+                param($Path)
+                $script:auditFileHashAttempts++
+                if ($script:auditFileHashAttempts -eq 1) { throw [System.IO.IOException]::new("sharing violation") }
+                Microsoft.PowerShell.Utility\Write-Output ("hash-{0}" -f $script:auditFileHashAttempts)
+            }
+
+            $unreadablePairs = @(Get-AuditGitPathStatePairs @("locked.txt"))
+            $unreadablePairs.Count | Should -Be 1
+            $unreadablePairs[0] | Should -Match '\|worktree\|unreadable:IOException:6:\d+$'
+
+            $readablePairs = @(Get-AuditGitPathStatePairs @("locked.txt"))
+            $readablePairs[0] | Should -Match '\|worktree\|file:hash-2$'
+            $readablePairs[0] | Should -Not -Be $unreadablePairs[0]
         }
         finally { Pop-Location }
     }

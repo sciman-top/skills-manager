@@ -21,10 +21,12 @@
     $targetSnapshot = Get-AuditTargetRepoSnapshotState $dir
     $targetLive = Get-AuditTargetRepoLiveState $targetSnapshot
     $targetFingerprint = [string]$targetLive.fingerprint
+    $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshot $targetLive -AcceptDeclaredDirtyAtScan
     return [pscustomobject]([ordered]@{
         fingerprint = Get-AuditFingerprintFromVendorFromPairs @(("files|{0}" -f $fileFingerprint), ("targets|{0}" -f $targetFingerprint)) $true
         file_fingerprint = $fileFingerprint
         target_repo_fingerprint = $targetFingerprint
+        target_repo_staleness = $targetStaleness
         files = @($files)
         target_repos = $targetLive
     })
@@ -146,6 +148,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
             preflight_matched = $false
             preflight_files_matched = $false
             preflight_target_repos_matched = $false
+            accepted_skipped_dirty_targets = @()
             live_state_matched = $false
             target_repos_matched = $false
             matched = $false
@@ -177,11 +180,13 @@ function Invoke-AuditRecommendationsValidateDryRun {
         $preflightReport = Invoke-AuditRecommendationsPreflight -RecommendationsPath $resolvedRecommendations -InitialWorkflowInputState $report.input_stability.before
         Need ([bool]$preflightReport.success) "preflight_failed：预检报告未通过"
         $report.stages.preflight.status = "passed"
+        $report.input_stability.accepted_skipped_dirty_targets = @($preflightReport.target_staleness.accepted_skipped_dirty_targets)
 
         $currentStage = "input_stability"
         $report.input_stability.after_preflight = Get-AuditWorkflowInputState $resolvedRecommendations
         $report.input_stability.preflight_files_matched = ([string]$report.input_stability.before.file_fingerprint -eq [string]$report.input_stability.after_preflight.file_fingerprint)
-        $report.input_stability.preflight_target_repos_matched = ([string]$report.input_stability.before.target_repo_fingerprint -eq [string]$report.input_stability.after_preflight.target_repo_fingerprint)
+        $preflightTargetStability = $report.input_stability.after_preflight.target_repo_staleness
+        $report.input_stability.preflight_target_repos_matched = ([bool]$preflightTargetStability.previous_dry_run_matched)
         $report.input_stability.preflight_matched = ([bool]$report.input_stability.preflight_files_matched -and [bool]$report.input_stability.preflight_target_repos_matched)
         if (-not [bool]$report.input_stability.preflight_target_repos_matched) {
             throw "target_repo_drift：preflight 前后目标仓 HEAD 或工作树状态发生变化，已停止 dry-run。"
@@ -203,7 +208,8 @@ function Invoke-AuditRecommendationsValidateDryRun {
         $currentStage = "input_stability"
         $report.input_stability.after_dry_run = Get-AuditWorkflowInputState $resolvedRecommendations
         $filesMatched = ([string]$report.input_stability.before.file_fingerprint -eq [string]$report.input_stability.after_dry_run.file_fingerprint)
-        $targetReposMatched = ([string]$report.input_stability.before.target_repo_fingerprint -eq [string]$report.input_stability.after_dry_run.target_repo_fingerprint)
+        $dryRunTargetStability = $report.input_stability.after_dry_run.target_repo_staleness
+        $targetReposMatched = [bool]$dryRunTargetStability.previous_dry_run_matched
         $liveStaleness = Get-AuditInstalledSnapshotStaleness $preflightReport.live_state $dryRunReport.live_state
         $report.input_stability.live_state_matched = (-not [bool]$liveStaleness.is_stale)
         $report.input_stability.target_repos_matched = $targetReposMatched
