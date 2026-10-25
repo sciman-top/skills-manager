@@ -157,7 +157,7 @@
         "zcode",
         "codex"
       ],
-      "native_subagent": false,
+      "native_subagent": true,
       "menu": [
         {
           "model": "glm-5.3-flash",
@@ -188,7 +188,7 @@
       "hosts": [
         "codex"
       ],
-      "native_subagent": false,
+      "native_subagent": true,
       "menu": [
         {
           "model": "gemini-3.8-flash-high",

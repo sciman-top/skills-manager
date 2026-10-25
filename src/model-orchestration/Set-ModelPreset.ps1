@@ -26,6 +26,8 @@ $allowedModelEffortByHost = [ordered]@{
 $allowedNativeCodexModelEffortTuples = @(
     'gpt-6-luna|max'
     'deepseek-v4.1-flash|xhigh'
+    'glm-5.3-flash|xhigh'
+    'gemini-3.8-flash-high|high'
 )
 $allowedModelEffortTuples = @($allowedModelEffortByHost.Values | ForEach-Object { $_ } | Select-Object -Unique)
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
