@@ -3,16 +3,19 @@
   "default_preset": "gpt6_luna_only",
   "active_presets": [
     "gpt6_luna_only",
+    "deepseek41_flash_only",
     "glm53_flash_only",
     "gemini38_flash_only"
   ],
   "role_prefixes": {
     "gpt6_luna_only": "luna",
+    "deepseek41_flash_only": "deepseek",
     "glm53_flash_only": "glm",
     "gemini38_flash_only": "gemini"
   },
   "codex_order": [
     "gpt6_luna_only",
+    "deepseek41_flash_only",
     "glm53_flash_only",
     "gemini38_flash_only"
   ],
@@ -21,7 +24,7 @@
     "quick_triage": "gemini38_flash_only",
     "routine_maintenance": "glm53_flash_only",
     "standard_review": "gemini38_flash_only",
-    "bounded_implementation": "glm53_flash_only",
+    "bounded_implementation": "deepseek41_flash_only",
     "deep_investigation": "gpt6_luna_only",
     "deep_implementation": "gemini38_flash_only",
     "test_execution": "glm53_flash_only",
@@ -58,39 +61,48 @@
   "fallbacks": {
     "quick_triage": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "routine_maintenance": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "standard_review": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" }
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "bounded_implementation": [
+      { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
     ],
     "deep_investigation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "deep_implementation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "test_execution": [
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" }
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "documentation_review": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "architecture_review": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ]
   },
   "presets": {
@@ -103,6 +115,29 @@
         {
           "model": "gpt-6-luna",
           "effort": "max"
+        }
+      ],
+      "slot_map": {
+        "quick_triage": 0,
+        "routine_maintenance": 0,
+        "standard_review": 0,
+        "bounded_implementation": 0,
+        "deep_investigation": 0,
+        "deep_implementation": 0,
+        "test_execution": 0,
+        "documentation_review": 0,
+        "architecture_review": 0
+      }
+    },
+    "deepseek41_flash_only": {
+      "hosts": [
+        "codex"
+      ],
+      "native_subagent": true,
+      "menu": [
+        {
+          "model": "deepseek-v4.1-flash",
+          "effort": "xhigh"
         }
       ],
       "slot_map": {

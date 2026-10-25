@@ -16,12 +16,17 @@ $ErrorActionPreference = 'Stop'
 $allowedModelEffortByHost = [ordered]@{
     codex = @(
         'gpt-6-luna|max'
+        'deepseek-v4.1-flash|xhigh'
         'glm-5.3-flash|xhigh'
         # The current Codex native catalog exposes this Gemini Flash model ID with the high tier in its slug.
         'gemini-3.8-flash-high|high'
     )
     zcode = @('glm-5.3-flash|max')
 }
+$allowedNativeCodexModelEffortTuples = @(
+    'gpt-6-luna|max'
+    'deepseek-v4.1-flash|xhigh'
+)
 $allowedModelEffortTuples = @($allowedModelEffortByHost.Values | ForEach-Object { $_ } | Select-Object -Unique)
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 # Fail closed on any malformed preset, not only the selected one: slot_map keys,
@@ -56,9 +61,9 @@ function Get-PresetMenu {
     }
     return @($PresetPolicy['menu'])
 }
-# Host-scoped strict subagent allowlist (user requirement, 2026-10-18): every menu and host
-# menu tuple must be one of these; a host facet may only use its own tuples. gemini-3.8-flash
-# is the relay slug gemini-3.8-flash-high.
+# Host-scoped strict subagent allowlist: every menu and host menu tuple must be
+# one of these; a host facet may only use its own tuples. Gemini's Codex catalog
+# slug is gemini-3.8-flash-high.
 function Assert-PresetMenu {
     param([string]$PresetId, [string]$HostName, $Menu)
     $menu = @($Menu)
@@ -103,15 +108,15 @@ foreach ($id in $policy.presets.Keys) {
         }
     }
 }
-# Native Codex subagents carry opaque agent_message.encrypted_content that only
-# GPT-family upstreams decode; the CPA admission layer rejects claude-/glm-/gemini-
-# routes before contacting upstream. Enforce that invariant at policy load.
+# Native Codex roles use a narrower exact tuple allowlist than the one-shot Codex
+# pool: the deployed gateway rejects encrypted subagent payloads for GLM/Gemini.
+# Codex catalog preflight checks tuple availability, not encrypted dispatch support.
 foreach ($id in $policy.presets.Keys) {
     $p = $policy.presets[$id]
     if (-not [bool]$p.native_subagent) { continue }
     if ('codex' -notin @($p.hosts)) { throw "Preset $id declares native_subagent without a codex host." }
     foreach ($entry in @(Get-PresetMenu $p 'codex')) {
-        if (([string]$entry.model) -notmatch '^gpt-') { throw "Preset $id declares native_subagent but exposes non-GPT codex tuple $($entry.model)/$($entry.effort)." }
+        if ("$($entry.model)|$($entry.effort)" -cnotin $allowedNativeCodexModelEffortTuples) { throw "Preset $id declares native_subagent but exposes a tuple outside the encrypted native dispatch allowlist: $($entry.model)/$($entry.effort)." }
     }
 }
 foreach ($slot in $slotNames) {
@@ -236,7 +241,7 @@ foreach ($id in $activePresets) {
 # Native subagent roles must resolve to a native_subagent preset; the launcher/one-shot
 # lane keeps using auto_routes because `codex exec` sends a plain prompt, not an envelope.
 function Test-NativePreset([string]$Id) { return [bool]$policy.presets[$Id].native_subagent }
-function Test-NativeCodexTuple($Entry) { return ([string]$Entry.model) -match '^gpt-' }
+function Test-NativeCodexTuple($Entry) { return ("$($Entry.model)|$($Entry.effort)" -cin $allowedNativeCodexModelEffortTuples) }
 $nativePresetIds = @($policy.codex_order | Where-Object {
     $activePresets -ccontains $_ -and 'codex' -in @($policy.presets[$_].hosts) -and (Test-NativePreset $_)
 })
@@ -245,7 +250,8 @@ $nativeRoutes = [ordered]@{}
 $nativeRoutePresetIds = [ordered]@{}
 foreach ($slot in $slotNames) {
     if ($nativePresetIds.Count -eq 0) { break }
-    $nativePreset = $nativePresetIds[0]
+    $requestedNativePreset = [string]$routePresetIds[$slot]
+    $nativePreset = if ($requestedNativePreset -cin $nativePresetIds) { $requestedNativePreset } else { $nativePresetIds[0] }
     $nativeMenu = @(Get-PresetMenu $policy.presets[$nativePreset] 'codex')
     $nativeEntry = $nativeMenu[$policy.presets[$nativePreset].slot_map[$slot]]
     $nativeRoutePresetIds[$slot] = $nativePreset
@@ -254,16 +260,15 @@ foreach ($slot in $slotNames) {
 if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; native_routes = $nativeRoutes; native_agent_available = $nativeAgentAvailable; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 if ($Action -eq 'Verify') {
-    # Read-only host preflight: a native Codex subagent route is only usable when
-    # every role it exposes and the default subagent model use a GPT-family model.
-    # The CPA admission layer rejects opaque agent_message.encrypted_content for
-    # claude-/glm-/gemini- routes before contacting upstream, so a non-GPT native
-    # route can only fail. This never writes host files.
+    # Read-only host preflight: confirm configured child routes use an exact
+    # approved model/effort tuple. This is configuration evidence only; catalog
+    # support and live request compatibility are separate checks.
     $verifyConfigPath = Join-Path $CodexRoot 'config.toml'
     if (-not (Test-Path -LiteralPath $verifyConfigPath -PathType Leaf)) { throw "Codex config not found: $verifyConfigPath" }
     $verifyText = [IO.File]::ReadAllText($verifyConfigPath)
     $verifyEnabled = $null
     $verifyDefaultModel = $null
+    $verifyDefaultEffort = $null
     $agentsHeader = [regex]::Match($verifyText, '(?m)^\[agents\]\s*(?:#.*)?$')
     if ($agentsHeader.Success) {
         $sectionStart = $agentsHeader.Index + $agentsHeader.Length
@@ -273,6 +278,8 @@ if ($Action -eq 'Verify') {
         if ($enabledMatch.Success) { $verifyEnabled = $enabledMatch.Groups[1].Value }
         $defaultMatch = [regex]::Match($sectionText, '(?m)^\s*default_subagent_model\s*=\s*"([^"]*)"')
         if ($defaultMatch.Success) { $verifyDefaultModel = $defaultMatch.Groups[1].Value }
+        $defaultEffortMatch = [regex]::Match($sectionText, '(?m)^\s*default_subagent_reasoning_effort\s*=\s*"([^"]*)"')
+        if ($defaultEffortMatch.Success) { $verifyDefaultEffort = $defaultEffortMatch.Groups[1].Value }
     }
     $verifyRoles = [Collections.Generic.List[object]]::new()
     $verifyIssues = [Collections.Generic.List[string]]::new()
@@ -280,24 +287,32 @@ if ($Action -eq 'Verify') {
         $roleName = $roleMatch.Groups[1].Value
         $configMatch = [regex]::Match($roleMatch.Value, "(?m)^\s*config_file\s*=\s*['""]([^'""]+)['""]")
         $roleModel = $null
+        $roleEffort = $null
         $configFile = if ($configMatch.Success) { $configMatch.Groups[1].Value } else { $null }
         if ($configFile -and (Test-Path -LiteralPath $configFile -PathType Leaf)) {
             $roleText = [IO.File]::ReadAllText($configFile)
             $modelMatch = [regex]::Match($roleText, '(?m)^\s*model\s*=\s*"([^"]*)"')
             if ($modelMatch.Success) { $roleModel = $modelMatch.Groups[1].Value }
+            $effortMatch = [regex]::Match($roleText, '(?m)^\s*model_reasoning_effort\s*=\s*"([^"]*)"')
+            if ($effortMatch.Success) { $roleEffort = $effortMatch.Groups[1].Value }
         }
-        $verifyRoles.Add(@{ name=$roleName; config_file=$configFile; model=$roleModel; native_compatible=([bool]($roleModel -and $roleModel -match '^gpt-')) })
-        if ($roleModel -and $roleModel -notmatch '^gpt-') { $verifyIssues.Add("agent role '$roleName' uses non-GPT model '$roleModel'") }
+        $approvedTuple = "$roleModel|$roleEffort" -cin $allowedNativeCodexModelEffortTuples
+        $verifyRoles.Add(@{ name=$roleName; config_file=$configFile; model=$roleModel; effort=$roleEffort; approved_tuple=$approvedTuple })
+        if ($roleModel -and -not $approvedTuple) { $verifyIssues.Add("agent role '$roleName' uses an unapproved model/effort tuple '$roleModel/$roleEffort'") }
     }
     $verifyEnabledNow = ($verifyEnabled -ne 'false')
-    if ($verifyEnabledNow -and $verifyDefaultModel -and $verifyDefaultModel -notmatch '^gpt-') {
-        $verifyIssues.Add("default_subagent_model '$verifyDefaultModel' is not GPT-family")
+    $verifyDefaultTuple = "$verifyDefaultModel|$verifyDefaultEffort"
+    if ($verifyEnabledNow -and $verifyDefaultModel -and $verifyDefaultTuple -cnotin $allowedNativeCodexModelEffortTuples) {
+        $verifyIssues.Add("default subagent model/effort '$verifyDefaultModel/$verifyDefaultEffort' is outside the encrypted native dispatch allowlist")
     }
     [ordered]@{
         status = $(if ($verifyIssues.Count -eq 0) { 'pass' } else { 'fail' })
+        evidence_kind = 'static_host_config_preflight'
+        live_acceptance = 'not_evaluated'
         codex_root = $CodexRoot
         enabled = $verifyEnabled
         default_subagent_model = $verifyDefaultModel
+        default_subagent_reasoning_effort = $verifyDefaultEffort
         roles = @($verifyRoles)
         issues = @($verifyIssues)
         checked_at = [DateTimeOffset]::UtcNow.ToString('o')
@@ -455,7 +470,7 @@ function Get-CodexCatalog([string]$Path) {
             -not [DateTimeOffset]::TryParse([string]$snapshot.expires_at, [ref]$expires) -or
             $observed -gt $now -or $expires -le $now -or $expires -le $observed -or
             $expires -gt $observed.AddMinutes(5)) {
-            throw 'Native catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
+            throw 'Codex model catalog snapshot must bind source=codex debug models, target codex_root and a current validity window of at most five minutes.'
         }
         return $snapshot
     }
@@ -493,7 +508,7 @@ function Get-CodexCatalog([string]$Path) {
     try { return ($output.Trim() | ConvertFrom-Json) }
     catch { throw "codex debug models did not return JSON: $($_.Exception.Message)" }
 }
-function Test-CodexNativeTuples($Catalog, $Entries, [string]$Source) {
+function Test-CodexCatalogTuples($Catalog, $Entries, [string]$Source) {
     $models = @($Catalog.models)
     if ($models.Count -eq 0) { throw 'Codex capability catalog contains no models.' }
     $tupleResults = [Collections.Generic.List[object]]::new()
@@ -517,9 +532,11 @@ function Test-CodexNativeTuples($Catalog, $Entries, [string]$Source) {
         if ($status -ne 'supported') { $unsupported.Add($record) }
     }
     return [ordered]@{
-        status = if ($unsupported.Count -eq 0) { 'native_supported' } else { 'blocked' }
+        status = if ($unsupported.Count -eq 0) { 'catalog_supported' } else { 'blocked' }
         host = 'codex'
         source = $Source
+        tuple_check = 'codex_model_catalog'
+        live_dispatch_compatibility = 'not_evaluated'
         tuples = @($tupleResults)
         unsupported = @($unsupported)
     }
@@ -529,7 +546,7 @@ if ($ExecutionHost -eq 'codex' -and 'codex' -in @($modelPreset.hosts)) {
     try {
         $catalog = Get-CodexCatalog $CapabilityProbePath
         $capabilitySource = if ($CapabilityProbePath) { $CapabilityProbePath } else { 'codex debug models' }
-        $capability = Test-CodexNativeTuples $catalog $codexEntries $capabilitySource
+        $capability = Test-CodexCatalogTuples $catalog $codexEntries $capabilitySource
         $capability.codex_root = $CodexRoot
         $capability.observed_at = if ($CapabilityProbePath) { ([DateTimeOffset]$catalog.observed_at).ToString('o') } else { [DateTimeOffset]::UtcNow.ToString('o') }
         $capability.evidence_kind = if ($CapabilityProbePath) { 'bound_snapshot' } else { 'live_target_catalog' }
@@ -538,11 +555,11 @@ if ($ExecutionHost -eq 'codex' -and 'codex' -in @($modelPreset.hosts)) {
         $capability.status = 'probe_failed'
         $capability.reason = $_.Exception.Message
         $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 12 -Compress
-        throw "Codex native capability preflight failed; no host files were written. $doc"
+        throw "Codex model catalog capability preflight failed; no host files were written. $doc"
     }
     if (@($capability.unsupported).Count -gt 0) {
         $doc = @{ capability_blocked = $capability } | ConvertTo-Json -Depth 12 -Compress
-        throw "Codex native capability preflight blocked projection; no host files were written. $doc"
+        throw "Codex model catalog capability preflight blocked projection; no host files were written. $doc"
     }
 }
 if ($ExecutionHost -eq 'codex' -and 'codex' -in $modelPreset.hosts) {
@@ -559,7 +576,7 @@ foreach ($id in $codexIds) {
     $profileNativeAgentAvailable = Test-NativePreset $id
     foreach ($slot in $slotNames) {
         $entry = $codexMenu[$p.slot_map[$slot]]
-        if (-not (Test-NativeCodexTuple $entry)) { continue }
+        if (-not $profileNativeAgentAvailable -or -not (Test-NativeCodexTuple $entry)) { continue }
         $rolePath = Join-Path $PSScriptRoot ".generated/codex/$id/$slot.toml"
         $readOnly = $slot -cin @($policy.read_only_slots)
         $guidance = if ($slotGuidance.ContainsKey($slot)) { $slotGuidance[$slot] } else { 'Select for the configured bounded task; the parent supplies scope, proof and stop.' }
