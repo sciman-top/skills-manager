@@ -5,8 +5,6 @@ description: Complete implementation and maintenance tasks with repository-groun
 
 # AI coding workflow
 
-Use `ai-coding` for RO templates.
-
 Minimize delivery, rework and maintenance cost within the goal, compatibility
 and asset boundaries. Use native capabilities and the shortest complete path.
 New structures need a current caller, demonstrated gap and minimum proof;
@@ -62,9 +60,10 @@ Reversible low-impact edits can use direct observation. Defend real trust/data
 boundaries; fallbacks need defined triggers and correct observable behavior.
 
 Classify failures: missing input, tool/environment, auth/rate limit, code.
-After two failed corrections, summarize facts, attempts and the open question;
-clarify or use fresh/cleared or compacted context when helpful. Preserve
-evidence, authorization and stop.
+After two failed corrections to the same problem, or conflicting acceptance
+criteria, summarize facts, attempts and the open question, then ask the user
+for clarification. Context compaction or handoff does not replace clarification;
+preserve evidence, authorization and stop.
 
 Show the command, exit code and relevant result. Keep `repo_verified`,
 `filesystem_projected`, `host_loaded`, and `live_accepted` separate; lower
@@ -73,10 +72,11 @@ behavior directly; report unproven acceptance.
 
 ## Executor, tools and review
 
-GPT/Codex and GLM/ZCode are not stages in a fixed pipeline;
-use same-task acceptance; verify current help, schema, documentation and actual inputs.
-Keep one primary executor. Delegate only with explicit authorization, disjoint
-write sets, independent proof and net benefit; prove 2-3 items before scaling.
+Choose tools and executors by task fit and available capabilities; do not impose
+a fixed model pipeline. Verify current help, schema and actual inputs when
+capability uncertainty affects the task.
+Keep one executor. Delegate only with explicit authorization, disjoint
+write sets, independent proof and net benefit.
 Use visible skills; `capability-router` is only a bounded fallback for missing
 named/required skills. Never cascade every workflow skill.
 
