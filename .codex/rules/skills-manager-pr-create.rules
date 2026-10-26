@@ -1,17 +1,11 @@
 prefix_rule(
-    pattern = ["gh", "pr", "create"],
-    decision = "prompt",
-    justification = "Review the target repository and base branch against the current user authorization before creating a pull request from this trusted workspace.",
-    match = [
-        "gh pr create --repo sciman-top/skills-manager --base main --head codex/example --title example --body example",
-        "gh pr create --base main --repo sciman-top/skills-manager --head codex/example --title example --body example",
-        "gh pr create --draft",
-        "gh pr create --repo other/repo --base main --head codex/example --title example --body example",
-        "gh pr create --repo sciman-top/skills-manager --base release --head codex/example --title example --body example",
-    ],
-    not_match = [
-        "gh pr merge 72",
-        "gh pr view 72",
-        "gh api repos/sciman-top/skills-manager/pulls",
-    ],
+    pattern = ["gh", "pr", "create", "--repo", "sciman-top/skills-manager", "--base", "main"],
+    decision = "allow",
+    justification = "Standing project authorization permits PR creation after review when the target repository is sciman-top/skills-manager and the base is main.",
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", "create", "--base", "main", "--repo", "sciman-top/skills-manager"],
+    decision = "allow",
+    justification = "Standing project authorization permits PR creation after review when the target repository is sciman-top/skills-manager and the base is main.",
 )

@@ -170,6 +170,31 @@ Describe "Audit target hardening" {
         $stale.drifted_targets[0].changes | Should -Contain "worktree"
     }
 
+    It "Reports a target removed after scan as stale instead of failing live-state collection" {
+        $repo = Join-Path $TestDrive "target-removed-after-scan-repo"
+        New-TestAuditGitRepository $repo
+        $runDir = Join-Path $TestDrive "target-removed-after-scan-run"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $scan = New-AuditRepoScan "target-removed-after-scan" $repo $repo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-target-removed-after-scan" @($scan)
+
+        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
+        $movedRepo = "{0}.moved" -f $repo
+        Move-Item -LiteralPath $repo -Destination $movedRepo
+        try {
+            $live = Get-AuditTargetRepoLiveState $snapshot
+            $staleness = Get-AuditTargetRepoStaleness $snapshot $live
+        }
+        finally {
+            Move-Item -LiteralPath $movedRepo -Destination $repo
+        }
+
+        $live.targets[0].exists | Should -BeFalse
+        $live.targets[0].is_repo | Should -BeFalse
+        $staleness.is_stale | Should -BeTrue
+        $staleness.drifted_targets[0].changes | Should -Contain "exists"
+    }
+
     It "Reads target git facts from the requested repository rather than the caller cwd" {
         $firstRepo = Join-Path $TestDrive "first-git-repo"
         $secondRepo = Join-Path $TestDrive "second-git-repo"

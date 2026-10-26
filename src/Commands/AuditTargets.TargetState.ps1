@@ -72,11 +72,9 @@ function Get-AuditTargetRepoLiveState($snapshotState) {
     foreach ($snapshotTarget in @($snapshotState.targets)) {
         $resolvedPath = [string]$snapshotTarget.resolved_path
         $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
-        # Get-AuditGitInfo 以调用方 cwd 取证。显式进入目标仓，才能保证多目标
-        # 审查时不会把 skills-manager 自己的工作树当成别的目标仓。
-        Push-Location $resolvedPath
-        try { $git = Get-AuditGitInfo $resolvedPath }
-        finally { Pop-Location }
+        # Get-AuditGitInfo 将每条 Git 命令绑定到目标路径；不依赖切换 cwd，
+        # 这样目标仓在扫描后被移走时仍能返回 exists=false 并报告 stale。
+        $git = Get-AuditGitInfo $resolvedPath
         $targets += [pscustomobject]([ordered]@{
                 name = [string]$snapshotTarget.name
                 resolved_path = $resolvedPath
