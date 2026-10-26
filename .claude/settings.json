@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-generated.ps1\""
+            "command": "pwsh -NoProfile -File \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-generated.ps1\""
           }
         ]
       }

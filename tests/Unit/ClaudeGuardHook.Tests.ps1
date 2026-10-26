@@ -110,4 +110,31 @@ Describe 'Claude guard registration covers Bash alongside Edit and Write' {
         $matchers = @($settings.hooks.PreToolUse | ForEach-Object { [string]$_.matcher })
         $matchers | Should -Contain 'Edit|MultiEdit|Write|Bash'
     }
+
+    It 'uses braced ${CLAUDE_PROJECT_DIR} for macro expansion and avoids unbraced $CLAUDE_PROJECT_DIR' {
+        $settings = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.claude\settings.json') -Raw | ConvertFrom-Json
+        $command = [string]$settings.hooks.PreToolUse[0].hooks[0].command
+        $command | Should -Match '\$\{CLAUDE_PROJECT_DIR\}'
+        $command | Should -Not -Match '(?<!\{)\$CLAUDE_PROJECT_DIR\b'
+    }
+
+    It 'resolves to the real guard script when ${CLAUDE_PROJECT_DIR} is expanded' {
+        $settings = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.claude\settings.json') -Raw | ConvertFrom-Json
+        $rawCommand = [string]$settings.hooks.PreToolUse[0].hooks[0].command
+        $expanded = $rawCommand.Replace('${CLAUDE_PROJECT_DIR}', $script:RepoRoot.Replace('\', '/'))
+        $filePathMatch = [regex]::Match($expanded, '-File\s+"([^"]+)"')
+        $filePathMatch.Success | Should -BeTrue
+        Test-Path $filePathMatch.Groups[1].Value | Should -BeTrue
+    }
+
+    It 'simulates Claude Code invocation of the expanded command and blocks generated file edits' {
+        $settings = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.claude\settings.json') -Raw | ConvertFrom-Json
+        $rawCommand = [string]$settings.hooks.PreToolUse[0].hooks[0].command
+        $expanded = $rawCommand.Replace('${CLAUDE_PROJECT_DIR}', $script:RepoRoot.Replace('\', '/'))
+        $filePathMatch = [regex]::Match($expanded, '-File\s+"([^"]+)"')
+        $targetScript = $filePathMatch.Groups[1].Value
+        $eventJson = New-EditEvent 'skills.ps1'
+        $null = $eventJson | & pwsh -NoProfile -File $targetScript 2>&1
+        $LASTEXITCODE | Should -Be 2
+    }
 }
