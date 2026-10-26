@@ -72,7 +72,7 @@ pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <recei
 pwsh -NoProfile -File ./Test-ModelPreset.ps1
 ```
 
-Plan before Apply. Generated role files live in ignored `.generated/`; ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
+Plan before Apply. Generated role files live in ignored `.generated/`; active Codex task slots and tuple roles are additionally projected as marked standalone files under `<CODEX_HOME>\agents\`. The shared `config.toml` therefore carries only the global subagent defaults, availability rules and a managed-agent manifest, while profile files retain their frozen role registrations. Ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
 
 ZCode supports Plan/Apply with `-SubagentsOnly -ExecutionHost zcode`, using the exact selector in its existing `~/.zcode/agents/glm-max.md`. It creates only marked namespaced slot definitions at max and leaves the source definition intact. Antigravity/WorkBuddy have no verified exact-tuple writer. Claude has no active facet after the prior user retirement decision and fails closed.
 
