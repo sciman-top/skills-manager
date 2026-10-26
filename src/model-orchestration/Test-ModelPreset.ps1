@@ -361,6 +361,10 @@ try {
     Set-ModelSlotFixtureRunner (Join-Path $fixture 'Start-ModelSlot.ps1')
     $target = Join-Path $fixture 'codex'
     [IO.Directory]::CreateDirectory($target) | Out-Null
+    $codexAgents = Join-Path $target 'agents'
+    [IO.Directory]::CreateDirectory($codexAgents) | Out-Null
+    $userAgentPath = Join-Path $codexAgents 'user-owned.toml'
+    [IO.File]::WriteAllText($userAgentPath, "name = `"user-owned`"`ndescription = `"Preserve unrelated agents`"`ndeveloper_instructions = `"Do not modify this file.`"`n")
     $cfg = Join-Path $target 'config.toml'
     $original = "model = `"old`"`r`nmodel_provider = `"preserve-provider`"`r`n[agents]`r`nenabled = true`r`nmax_concurrent_threads_per_session = 2`r`n"
     [IO.File]::WriteAllText($cfg,$original,[Text.UTF8Encoding]::new($true))
@@ -379,6 +383,14 @@ try {
         @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
     )
     [IO.File]::WriteAllText($projectionCapabilityPath, ($projectionCatalog | ConvertTo-Json -Depth 8))
+    $collisionPath = Join-Path $codexAgents 'quick_triage.toml'
+    [IO.File]::WriteAllText($collisionPath, "name = `"user-owned`"`ndescription = `"Collision`"`ndeveloper_instructions = `"Do not modify this file.`"`n")
+    $collisionHash = (Get-FileHash -LiteralPath $collisionPath).Hash
+    $collisionRejected = $false
+    try { & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | Out-Null }
+    catch { $collisionRejected = $_.Exception.Message -like '*Refusing to overwrite user-owned Codex agent*' }
+    Assert ($collisionRejected -and (Get-FileHash -LiteralPath $collisionPath).Hash -ceq $collisionHash) 'Codex projection refuses an unowned agent collision'
+    Remove-Item -LiteralPath $collisionPath -Force
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($receipt.capability.status -ceq 'catalog_supported' -and $receipt.capability.tuple_check -ceq 'codex_model_catalog' -and $receipt.capability.live_dispatch_compatibility -ceq 'not_evaluated' -and @($receipt.capability.tuples).Count -eq 4) 'Apply records all four catalog-verified tuples without claiming live dispatch compatibility'
@@ -396,17 +408,29 @@ try {
     Assert ($deepseekProfileText.Contains('default_subagent_model = "deepseek-v4.1-flash"') -and $deepseekProfileText.Contains('default_subagent_reasoning_effort = "xhigh"')) 'DeepSeek profile pins the approved native default tuple'
     $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
-    $projectedAgentTables = @([regex]::Matches($projectedConfig, '(?m)^\[agents\.([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-    Assert ($projectedAgentTables.Count -eq ($slots.Count + $expectedNativeTuples.Count)) 'Shared Codex config registers nine native task slots and four exact tuple roles'
-    foreach ($slot in $slots) { Assert ($projectedConfig.Contains("[agents.$slot]")) "Shared Codex config registers task slot $slot" }
+    Assert (-not $projectedConfig.Contains('[agents.')) 'Shared Codex config carries no managed role tables'
+    Assert ($projectedConfig.Contains('# managed-agents-directory: agents') -and $projectedConfig.Contains('# managed-agent-names: ')) 'Shared Codex config records the managed agents manifest'
+    foreach ($slot in $slots) {
+        $agentPath = Join-Path $codexAgents "$slot.toml"
+        $agentText = Get-Content -LiteralPath $agentPath -Raw
+        Assert ($agentText.Contains("name = `"$slot`"") -and $agentText.Contains('managed-by: skills-manager/model-orchestration')) "Codex agents directory contains managed task slot $slot"
+    }
+    foreach ($tuple in @('luna_max','deepseek_xhigh','glm_xhigh','gemini_high')) {
+        $agentPath = Join-Path $codexAgents "$tuple.toml"
+        $agentText = Get-Content -LiteralPath $agentPath -Raw
+        Assert ($agentText.Contains("name = `"$tuple`"") -and $agentText.Contains('managed-by: skills-manager/model-orchestration')) "Codex agents directory contains managed tuple role $tuple"
+    }
     Assert (-not (Test-Path -LiteralPath (Join-Path $target 'hooks.json'))) 'Projection must not install hooks'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Not idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
+    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 0) 'Rollback removes only managed Codex agent files'
     $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $nonLunaConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($nonLunaConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $nonLunaConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'A GLM/Gemini pool keeps native delegation enabled with its selected tuple'
-    Assert (@([regex]::Matches($nonLunaConfig, '(?m)^\[agents\.([^\]]+)\]')).Count -eq ($slots.Count + 2)) 'Pool with GLM/Gemini projects task slots and exact tuple roles'
+    Assert (-not $nonLunaConfig.Contains('[agents.')) 'Pool with GLM/Gemini keeps managed role tables out of shared config'
+    $expectedNonLunaAgentNames = @($slots + @('glm_xhigh','gemini_high'))
+    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq $expectedNonLunaAgentNames.Count) 'Pool with GLM/Gemini projects task slots and exact tuple roles'
     foreach ($profileId in @('glm53_flash_only','gemini38_flash_only')) {
         $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
         Assert ($profileConfigText.Contains('default_subagent_model =') -and $profileConfigText.Contains('[agents.')) "GLM/Gemini profile projects native task slots: $profileId"
@@ -420,6 +444,7 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $restoredReceipt.receipt | Out-Null
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $nonLunaReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Non-Luna native projection and restore sequence rolls back to the exact original config'
+    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 0) 'Pool restore sequence rolls back managed Codex agent files'
     $zcodeTarget = Join-Path $fixture 'zcode'
     $zcodeAgents = Join-Path $zcodeTarget 'agents'
     [IO.Directory]::CreateDirectory($zcodeAgents) | Out-Null
@@ -493,25 +518,29 @@ try {
     foreach ($entry in $defaultResolved.enabled_routes) {
         $nativeTuple = "$($entry.model)/$($entry.effort)" -cin $expectedNativeTuples
         $rolePath = Join-Path $fixture ".generated/codex/pool/$($entry.role).toml"
-        Assert (($subagentConfig.Contains("[agents.$($entry.role)]")) -eq $nativeTuple) "Exact allowlisted tuple role registration: $($entry.role)"
         Assert ((Test-Path -LiteralPath $rolePath) -eq $nativeTuple) "Generated native tuple file matches the verified pool: $($entry.role)"
         if ($nativeTuple) {
+            $agentPath = Join-Path $codexAgents "$($entry.role).toml"
+            $agentText = Get-Content -LiteralPath $agentPath -Raw
             $roleText = Get-Content -LiteralPath $rolePath -Raw
-            Assert ($roleText.Contains("model = `"$($entry.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and -not $roleText.Contains('[agents]') -and -not $roleText.Contains('sandbox_mode')) "Native tuple role pins its exact approved model/effort without embedding parent-session settings: $($entry.role)"
-            Assert ($roleText.Contains('Do not delegate')) 'Native tuple role instructs the child not to delegate'
+            Assert ($agentText.Contains("model = `"$($entry.model)`"") -and $agentText.Contains("model_reasoning_effort = `"$($entry.effort)`"") -and -not $agentText.Contains('[agents]') -and -not $agentText.Contains('sandbox_mode')) "Native tuple role pins its exact approved model/effort without embedding parent-session settings: $($entry.role)"
+            Assert ($agentText.Contains('Do not delegate')) 'Native tuple role instructs the child not to delegate'
         }
     }
     foreach ($slot in $slots) {
         $route = $defaultResolved.native_routes.$slot
         $rolePath = Join-Path $fixture ".generated/codex/$($route.preset)/$slot.toml"
         $roleText = Get-Content -LiteralPath $rolePath -Raw
-        Assert ($subagentConfig.Contains("[agents.$slot]") -and $roleText.Contains("name = `"$slot`"") -and $roleText.Contains("model = `"$($route.model)`"") -and $roleText.Contains("model_reasoning_effort = `"$($route.effort)`"") -and $roleText.Contains('Do not delegate or change models.')) "Native execution slot pins the assigned tuple: $slot -> $($route.model)/$($route.effort)"
+        $agentPath = Join-Path $codexAgents "$slot.toml"
+        $agentText = Get-Content -LiteralPath $agentPath -Raw
+        Assert (-not $subagentConfig.Contains("[agents.$slot]") -and $agentText.Contains("name = `"$slot`"") -and $agentText.Contains("model = `"$($route.model)`"") -and $agentText.Contains("model_reasoning_effort = `"$($route.effort)`"") -and $agentText.Contains('Do not delegate or change models.')) "Native execution slot pins the assigned tuple: $slot -> $($route.model)/$($route.effort)"
         Assert ($roleText.Contains("model = `"$($route.model)`"")) "Native slot role pins its assigned task-shape model: $slot"
     }
     Assert (-not $subagentConfig.Contains('[agents.terra') -and -not $subagentConfig.Contains('default_subagent_model = "gpt-5.6-terra"')) 'Managed projection excludes removed Terra roles and defaults'
     Assert ((& (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -SubagentsOnly -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json).files.Count -eq 0) 'Subagent projection is idempotent'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $subagentReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $parentBefore) 'Subagent rollback restores exact parent config bytes'
+    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 0) 'Subagent rollback removes managed Codex agent files'
     $catalogPath = Join-Path $fixture 'models.json'
     $catalog = $catalogBinding.Clone()
     $catalog.models = @(
@@ -597,7 +626,9 @@ try {
     $customGlmProfile = Get-Content -LiteralPath (Join-Path $target 'glm53-flash-only.config.toml') -Raw
     $customResolved = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
     $customGlmRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/glm53_flash_only/custom_task.toml') -Raw
-    Assert ($customRootConfig.Contains('[agents.custom_task]') -and $customNativeRole.Contains('model = "gpt-6-luna"') -and $customNativeRole.Contains('model_reasoning_effort = "max"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaProfile.Contains('default_subagent_model = "gpt-6-luna"') -and $customGlmProfile.Contains('default_subagent_model = "glm-5.3-flash"') -and $customGlmProfile.Contains('[agents.custom_task]') -and $customGlmRole.Contains('model = "glm-5.3-flash"') -and $customResolved.routes.custom_task.model -ceq 'glm-5.3-flash') 'Additional slots follow the automatic native GLM route'
+    $customAgentPath = Join-Path $codexAgents 'custom_task.toml'
+    $customAgentText = Get-Content -LiteralPath $customAgentPath -Raw
+    Assert (-not $customRootConfig.Contains('[agents.custom_task]') -and $customAgentText.Contains('name = "custom_task"') -and $customAgentText.Contains('model = "glm-5.3-flash"') -and $customAgentText.Contains('model_reasoning_effort = "xhigh"') -and $customNativeRole.Contains('model = "gpt-6-luna"') -and $customNativeRole.Contains('model_reasoning_effort = "max"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaProfile.Contains('default_subagent_model = "gpt-6-luna"') -and $customGlmProfile.Contains('default_subagent_model = "glm-5.3-flash"') -and $customGlmProfile.Contains('[agents.custom_task]') -and $customGlmRole.Contains('model = "glm-5.3-flash"') -and $customResolved.routes.custom_task.model -ceq 'glm-5.3-flash') 'Additional slots follow the automatic native GLM route'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable

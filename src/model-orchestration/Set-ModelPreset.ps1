@@ -302,6 +302,39 @@ if ($Action -eq 'Verify') {
         $verifyRoles.Add(@{ name=$roleName; config_file=$configFile; model=$roleModel; effort=$roleEffort; approved_tuple=$approvedTuple })
         if ($roleModel -and -not $approvedTuple) { $verifyIssues.Add("agent role '$roleName' uses an unapproved model/effort tuple '$roleModel/$roleEffort'") }
     }
+    $verifyAgentsRoot = Join-Path $CodexRoot 'agents'
+    if (Test-Path -LiteralPath $verifyAgentsRoot -PathType Container) {
+        function Get-VerifiedTomlString([string]$Text,[string]$Key) {
+            $tripleDouble = [regex]::Match($Text, '(?ms)^\s*' + [regex]::Escape($Key) + '\s*=\s*"""(.*?)"""')
+            if ($tripleDouble.Success) { return $tripleDouble.Groups[1].Value }
+            $tripleSingle = [regex]::Match($Text, '(?ms)^\s*' + [regex]::Escape($Key) + '\s*=\s*''''''(.*?)''''''')
+            if ($tripleSingle.Success) { return $tripleSingle.Groups[1].Value }
+            $double = [regex]::Match($Text, '(?m)^\s*' + [regex]::Escape($Key) + '\s*=\s*"((?:\\.|[^"\\])*)"')
+            if ($double.Success) { return [regex]::Unescape($double.Groups[1].Value) }
+            $single = [regex]::Match($Text, "(?m)^\s*" + [regex]::Escape($Key) + "\s*=\s*'((?:[^']|'')*)'")
+            if ($single.Success) { return $single.Groups[1].Value.Replace("''","'") }
+            return $null
+        }
+        foreach ($agentFile in @(Get-ChildItem -LiteralPath $verifyAgentsRoot -Filter '*.toml' -File)) {
+            $agentText = [IO.File]::ReadAllText($agentFile.FullName)
+            $name = Get-VerifiedTomlString $agentText 'name'
+            $description = Get-VerifiedTomlString $agentText 'description'
+            $instructions = Get-VerifiedTomlString $agentText 'developer_instructions'
+            $modelMatch = [regex]::Match($agentText, '(?m)^\s*model\s*=\s*"([^"]*)"')
+            $effortMatch = [regex]::Match($agentText, '(?m)^\s*model_reasoning_effort\s*=\s*"([^"]*)"')
+            $roleModel = if ($modelMatch.Success) { $modelMatch.Groups[1].Value } else { $null }
+            $roleEffort = if ($effortMatch.Success) { $effortMatch.Groups[1].Value } else { $null }
+            $approvedTuple = "$roleModel|$roleEffort" -cin $allowedNativeCodexModelEffortTuples
+            $verifyRoles.Add(@{
+                name=$name; source='agents_directory'; path=$agentFile.FullName; managed=($agentText -cmatch '(?m)^# managed-by: skills-manager/model-orchestration\s*$');
+                model=$roleModel; effort=$roleEffort; approved_tuple=$approvedTuple
+            })
+            if (-not $name) { $verifyIssues.Add("agent file '$($agentFile.Name)' omits name") }
+            if (-not $description) { $verifyIssues.Add("agent file '$($agentFile.Name)' omits description") }
+            if (-not $instructions) { $verifyIssues.Add("agent file '$($agentFile.Name)' omits developer_instructions") }
+            if ($roleModel -and -not $approvedTuple) { $verifyIssues.Add("agent file '$($agentFile.Name)' uses an unapproved model/effort tuple '$roleModel/$roleEffort'") }
+        }
+    }
     $verifyEnabledNow = ($verifyEnabled -ne 'false')
     $verifyDefaultTuple = "$verifyDefaultModel|$verifyDefaultEffort"
     if ($verifyEnabledNow -and $verifyDefaultModel -and $verifyDefaultTuple -cnotin $allowedNativeCodexModelEffortTuples) {
@@ -424,6 +457,21 @@ $files = [Collections.Generic.List[object]]::new()
 function AddFile([string]$Path,[string]$Text) {
     $files.Add(@{path=[IO.Path]::GetFullPath($Path); text=$Text; before_hash=(Hash $Path)})
 }
+$codexManagedMarker = '# managed-by: skills-manager/model-orchestration'
+$managedCodexAgentNames = [Collections.Generic.List[string]]::new()
+$generatedCodexRoleText = @{}
+function AddCodexAgentFile([string]$Name,[string]$Text) {
+    if ($Name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_-]*$') { throw "Invalid managed Codex agent name: $Name" }
+    $agentRoot = [IO.Path]::GetFullPath((Join-Path $CodexRoot 'agents'))
+    $agentPath = Join-Path $agentRoot "$Name.toml"
+    if (Test-Path -LiteralPath $agentPath -PathType Container) { throw "Codex agent target is a directory: $agentPath" }
+    if (Test-Path -LiteralPath $agentPath -PathType Leaf) {
+        $existingText = [IO.File]::ReadAllText($agentPath)
+        if (-not $existingText.Contains($codexManagedMarker)) { throw "Refusing to overwrite user-owned Codex agent: $agentPath" }
+    }
+    $script:managedCodexAgentNames.Add($Name)
+    AddFile $agentPath ($Text + "`n$codexManagedMarker`n")
+}
 $profileNames = @{}
 $projectionScope = if ($SubagentsOnly) { 'subagents_only' } else { 'full_preset' }
 $slotGuidance = @{
@@ -447,6 +495,7 @@ foreach ($entry in $enabledRoutes) {
     $instructions = 'Execute the assigned bounded task and obey its read-only or write scope. Preserve unrelated work. Do not delegate, change models or replay completed writes. Return verification evidence and unresolved uncertainty to the parent, then stop.'
     $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
     AddFile $rolePath $roleText
+    AddCodexAgentFile $entry.role $roleText
     $tupleBlocks.Add("[agents.$($entry.role)]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
 }
 $capability = [ordered]@{
@@ -587,6 +636,7 @@ foreach ($id in $codexIds) {
         if ($readOnly) { $instructions += ' Do not modify files or external state.' }
         $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
         AddFile $rolePath $roleText
+        $generatedCodexRoleText[[IO.Path]::GetFullPath($rolePath)] = $roleText
         $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
     $profileAgentSection = if ($profileNativeAgentAvailable) {
@@ -604,6 +654,9 @@ foreach ($slot in $slotNames) {
     $routePreset = $nativeRoutePresetIds[$slot]
     $route = $nativeRoutes[$slot]
     $routePath = Join-Path $PSScriptRoot ".generated/codex/$routePreset/$slot.toml"
+    $routeRoleText = $generatedCodexRoleText[[IO.Path]::GetFullPath($routePath)]
+    if (-not $routeRoleText) { throw "Active Codex role was not generated: $routePath" }
+    AddCodexAgentFile $slot $routeRoleText
     $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Native route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
 $activeBlocks = $activeRoleBlocks -join "`n"
@@ -648,7 +701,10 @@ else {
     $config = RemoveScalar $config 'agents' 'default_subagent_reasoning_effort'
 }
 $nativeEnableMarkerText = if (-not $nativeAgentAvailable) { "`n# model-orchestration-native-agents-enabled-prior=$nativeAgentPrior" } else { '' }
-$config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary$nativeEnableMarkerText`n$activeBlocks`n$($tupleBlocks -join "`n")`n# model-orchestration end`n"
+$managedAgentManifest = if ($managedCodexAgentNames.Count -gt 0) {
+    "`n# managed-agents-directory: agents`n# managed-agent-names: $(($managedCodexAgentNames | Select-Object -Unique) -join ',')"
+} else { '' }
+$config = $config.TrimEnd() + "`n# model-orchestration begin`n# availability-rules: $reselectionSummary$nativeEnableMarkerText$managedAgentManifest`n# model-orchestration end`n"
 AddFile $configPath $config
 }
 # Not elseif: a preset may carry both facets (one Apply can project Claude Code
