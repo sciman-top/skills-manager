@@ -63,3 +63,4 @@
 ## 5. 证据与回滚
 - 留证：apply 的 `receipt.json`（schema v2）与第二次 `global-rules-check` 输出；普通同步不为它新增审计文档。
 - 回滚：用户级规则用 `global-rules-rollback --receipt ... --token <receipt.rollback.required_token>` 精确撤销；目标仓规则用 `git revert` 撤销对应切片。
+<!-- desktop live-probe 2026-10-26: gh pr create execpolicy acceptance marker, safe to revert -->
