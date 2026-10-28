@@ -46,7 +46,8 @@
 3. `.\skills.ps1 global-rules-check`：应 `pass=True, findings=0`；budget 摘要显示受管源文件的保守预算压力（Antigravity 保留 12000 字符旧版兼容预算，其余按 16 KiB/130 行；不是当前宿主完整加载预算，详见 `rules/global/README.md`）。
 4. `global-rules-plan --out reports/global-rule-projection/plan.json`，再用 plan 输出的 `apply.required_token` 执行 `global-rules-apply`；中断后仅可用同一 plan、receipt、roots 加 `--resume` 续跑。
 5. 重跑一次 `global-rules-check` 留证；文件相等只证明 `filesystem_projected`，`host_loaded` 需各宿主新会话探针（方法见第 4 节），不得自动外推。
-6. 目标仓逐仓按第 2 节的 `status → fetch → review → integrate` 同步：项目级规则（根 `AGENTS.md` 与各宿主适配器）随仓版本化，无投影步骤。`audit-targets.json` 随控制仓提交生效；`audit-targets.local.json` 是本机覆盖，永不提交、永不同步。
+6. 模型编排投影核验：`pwsh -NoProfile -File src/model-orchestration/Set-ModelPreset.ps1 -Action Verify` 应 `status=pass, issues=[]`；仅子代理面漂移时 `Apply -SubagentsOnly` 修复并留 receipt。父根标量（`model`/`review_model`/`model_reasoning_effort`/`model_verbosity`）与模型目录归本机操作者及宿主配置工具所有：Plan 报 `config.toml` 父根待写时只记录、不 Apply；宿主配置正被外部进程活跃改写时暂停一切宿主写入（边界详见 `src/model-orchestration/AGENTS.md`）。
+7. 目标仓逐仓按第 2 节的 `status → fetch → review → integrate` 同步：项目级规则（根 `AGENTS.md` 与各宿主适配器）随仓版本化，无投影步骤。`audit-targets.json` 随控制仓提交生效；`audit-targets.local.json` 是本机覆盖，永不提交、永不同步。
    当前本机目标为 `D:\CODE` 下除 `external` 外的八个项目。缺失的历史目录保留登记但默认禁用，其他电脑确有该仓时用本地覆盖显式启用；新增或改名目录须审查登记差异，不能把不存在的旧路径当作扫描覆盖。
 
 ## 4. host_loaded 探针（投影后验收）
