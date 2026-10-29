@@ -490,6 +490,30 @@ function Test-DoctorColdSourceParity {
     return $result
 }
 
+function Get-DoctorProjectionHostRoots {
+    # Host routing: user_skill_root belongs to Codex.  Every other root
+    # comes from the same managed-link target declarations used to project
+    # skills; optional compatibility declarations are additive only.  A host
+    # may legitimately declare several roots (dual-edition WorkBuddy):
+    # identical duplicates collapse and distinct roots are all checked
+    # independently, so there is intentionally no single-root conflict signal.
+    param($Projection, $Config, [string]$RepoRoot)
+    $rootByHost = [ordered]@{}
+    $rootByHost['codex'] = @((Resolve-SkillProjectionPath ([string]$Projection.user_skill_root) $RepoRoot))
+    $declaredHosts = @('codex')
+    foreach ($declaration in @(Get-SkillProjectionHostRootDeclarations $Config)) {
+        $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
+        $hostRoot = Resolve-SkillProjectionPath ([string]$declaration.path) $RepoRoot
+        if ($rootByHost.Contains($hostName)) {
+            if (@($rootByHost[$hostName] | Where-Object { [string]::Equals([string]$_, [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) { $rootByHost[$hostName] += $hostRoot }
+            continue
+        }
+        $rootByHost[$hostName] = @($hostRoot)
+        if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
+    }
+    return [pscustomobject]@{ roots = $rootByHost; declared_hosts = $declaredHosts }
+}
+
 function Get-DoctorSkillProjectionConsistency {
     # Configuration/profile declaration drift silently changes what each host
     # actually projects; check every declared host, not just the Codex surface.
@@ -504,22 +528,9 @@ function Get-DoctorSkillProjectionConsistency {
             return $result
         }
 
-        # Host routing: user_skill_root belongs to Codex.  Every other root
-        # comes from the same managed-link target declarations used to project
-        # skills; optional compatibility declarations are additive only.
-        $rootByHost = @{}
-        $rootByHost['codex'] = @((Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root))
-        $declaredHosts = @('codex')
-        foreach ($declaration in @(Get-SkillProjectionHostRootDeclarations $cfg)) {
-            $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
-            $hostRoot = Resolve-SkillProjectionPath ([string]$declaration.path) $Root
-            if ($rootByHost.ContainsKey($hostName)) {
-                if (@($rootByHost[$hostName] | Where-Object { [string]::Equals([string]$_, [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) { $rootByHost[$hostName] += $hostRoot }
-                continue
-            }
-            $rootByHost[$hostName] = @($hostRoot)
-            if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
-        }
+        $hostRootMap = Get-DoctorProjectionHostRoots -Projection $projection -Config $cfg -RepoRoot $Root
+        $rootByHost = $hostRootMap.roots
+        $declaredHosts = @($hostRootMap.declared_hosts)
         if (Test-OperationObjectProperty $projection 'projection_profiles') {
             $profilesConfig = Get-OperationObjectProperty $projection 'projection_profiles'
             $hostsConfig = Get-OperationObjectProperty $profilesConfig 'hosts'
@@ -568,7 +579,7 @@ function Get-DoctorSkillProjectionConsistency {
                 $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
             }
             $expectedNames = @($expectedNames | Where-Object { @($selection.excluded_names) -notcontains $_ })
-            if (-not $rootByHost.ContainsKey($hostName)) {
+            if (-not $rootByHost.Contains($hostName)) {
                 $result.warnings += ("{0}: host_root_not_declared: projection profile has no managed-link target or compatibility root declaration." -f $hostName)
                 $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
                 continue
@@ -761,7 +772,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     try {
         $compatibility = @(Get-AgentHostCompatibilityStatus)
         $report.checks.host_compatibility = [ordered]@{
-            max_age_days = 30
+            max_age_days = (Get-AgentHostCompatibilityMaxAgeDays)
             hosts = @($compatibility)
             stale_hosts = @($compatibility | Where-Object status -in @('stale', 'missing', 'future') | ForEach-Object host)
             read_only = $true

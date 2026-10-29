@@ -35,6 +35,17 @@ Describe 'Agent host registry' {
         @($stale | Where-Object status -eq 'stale').Count | Should -Be 5
     }
 
+    It 'treats same-day verified_on as current at any hour, not future' {
+        # 回归钉：verified_on 是本地日历日期。UTC+ 时区当天清晨曾因
+        # AssumeUniversal+ToUniversalTime 折算被误判为 future。
+        $sameDay = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-25 06:30') -MaxAgeDays 30)
+        @($sameDay | Where-Object status -ne 'current').Count | Should -Be 0
+        @($sameDay | Where-Object { $_.age_days -ne 0 }).Count | Should -Be 0
+
+        $future = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-20') -MaxAgeDays 30)
+        @($future | Where-Object status -eq 'future').Count | Should -Be 5
+    }
+
     It 'keeps every host ValidateSet in product source in sync with the registry' {
         # AST 校验已知函数参数的 ValidateSet；再扫描 src 源文本，任何以
         # codex 起头的宿主 ValidateSet 字面量都必须与注册表全等，防止出现
