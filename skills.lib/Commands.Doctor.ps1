@@ -504,7 +504,7 @@ function Get-DoctorProjectionHostRoots {
     foreach ($declaration in @(Get-SkillProjectionHostRootDeclarations $Config)) {
         $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
         $hostRoot = Resolve-SkillProjectionPath ([string]$declaration.path) $RepoRoot
-        if ($rootByHost.ContainsKey($hostName)) {
+        if ($rootByHost.Contains($hostName)) {
             if (@($rootByHost[$hostName] | Where-Object { [string]::Equals([string]$_, [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) { $rootByHost[$hostName] += $hostRoot }
             continue
         }
@@ -579,7 +579,7 @@ function Get-DoctorSkillProjectionConsistency {
                 $expectedNames = @($selection.included_names | Where-Object { @($selection.excluded_names) -notcontains $_ } | ForEach-Object { [string]$_ })
             }
             $expectedNames = @($expectedNames | Where-Object { @($selection.excluded_names) -notcontains $_ })
-            if (-not $rootByHost.ContainsKey($hostName)) {
+            if (-not $rootByHost.Contains($hostName)) {
                 $result.warnings += ("{0}: host_root_not_declared: projection profile has no managed-link target or compatibility root declaration." -f $hostName)
                 $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
                 continue
