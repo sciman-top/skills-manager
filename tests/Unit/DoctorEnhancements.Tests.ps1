@@ -272,6 +272,48 @@ Describe "Doctor Enhancements" {
         }
     }
 
+    Context "Get-DoctorProjectionHostRoots" {
+        It "collects multiple distinct roots per host without a conflict signal" {
+            $codexRoot = Join-Path $TestDrive 'roots\codex-skills'
+            $workbuddyIntl = Join-Path $TestDrive 'roots\workbuddy-intl'
+            $workbuddyCn = Join-Path $TestDrive 'roots\workbuddy-cn'
+            $projection = [pscustomobject]@{ user_skill_root = $codexRoot }
+            $cfg = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{}
+                targets = @(
+                    [pscustomobject]@{ path = $workbuddyIntl; managed_link_only = $true; host = 'workbuddy' },
+                    [pscustomobject]@{ path = $workbuddyCn; managed_link_only = $true; host = 'workbuddy' }
+                )
+            }
+
+            $map = Get-DoctorProjectionHostRoots -Projection $projection -Config $cfg -RepoRoot $TestDrive
+
+            @($map.roots['workbuddy']).Count | Should -Be 2
+            @($map.roots['workbuddy'])[0] | Should -Be $workbuddyIntl
+            @($map.roots['workbuddy'])[1] | Should -Be $workbuddyCn
+            @($map.roots['codex']).Count | Should -Be 1
+            @($map.declared_hosts) | Should -Be @('codex', 'workbuddy')
+        }
+
+        It "collapses duplicate identical root declarations for the same host" {
+            $codexRoot = Join-Path $TestDrive 'roots\codex-skills'
+            $sharedRoot = Join-Path $TestDrive 'roots\workbuddy-shared'
+            $projection = [pscustomobject]@{ user_skill_root = $codexRoot }
+            $cfg = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{}
+                targets = @(
+                    [pscustomobject]@{ path = $sharedRoot; managed_link_only = $true; host = 'workbuddy' },
+                    [pscustomobject]@{ path = $sharedRoot; managed_link_only = $true; host = 'workbuddy' }
+                )
+            }
+
+            $map = Get-DoctorProjectionHostRoots -Projection $projection -Config $cfg -RepoRoot $TestDrive
+
+            @($map.roots['workbuddy']).Count | Should -Be 1
+            @($map.roots['workbuddy'])[0] | Should -Be $sharedRoot
+        }
+    }
+
     Context "Test-DoctorColdCatalogHealth" {
         BeforeAll {
             # Minimal managed source in fixture form: one skill with real hashes

@@ -528,6 +528,25 @@ Describe 'Global rule CLI boundaries' {
         }
     }
 
+    It 'falls back to an existing .workbuddy root when .workbuddy-ai is absent' {
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
+        $profileRoot=[Environment]::GetFolderPath('UserProfile')
+        $legacy=Join-Path $profileRoot '.workbuddy-ai';$cn=Join-Path $profileRoot '.workbuddy'
+        $hadLegacy=Test-Path -LiteralPath $legacy;$hadCn=Test-Path -LiteralPath $cn
+        if($hadLegacy){Set-ItResult -Skipped -Because 'a real .workbuddy-ai root exists; hiding it on a live host is too invasive';return}
+        try{
+            # env 未设、无 .workbuddy-ai、有 .workbuddy：中间优先级分支。
+            $env:CODEBUDDY_CONFIG_DIR=$null;$env:WORKBUDDY_CONFIG_DIR=$null
+            if(-not $hadCn){New-Item -ItemType Directory -Path $cn -Force|Out-Null}
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $cn
+            $parsed.workbuddy_user_root_source|Should -Be 'default'
+        }finally{
+            $env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork
+            if(-not $hadCn -and (Test-Path -LiteralPath $cn)){Remove-Item -LiteralPath $cn -Recurse -Force}
+        }
+    }
+
     It 'rejects a missing CODEBUDDY_CONFIG_DIR root instead of treating it as disabled' {
         $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
         try{

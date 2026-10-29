@@ -15,11 +15,16 @@ function Get-AgentHostFacts {
     )
 }
 
+function Get-AgentHostCompatibilityMaxAgeDays {
+    # Freshness window (days) for repo-verified host contract declarations.
+    return 30
+}
+
 function Get-AgentHostCompatibilityStatus {
     [CmdletBinding()]
     param(
         [datetime]$AsOf = (Get-Date),
-        [int]$MaxAgeDays = 30
+        [int]$MaxAgeDays = (Get-AgentHostCompatibilityMaxAgeDays)
     )
 
     if ($MaxAgeDays -lt 0) { throw 'MaxAgeDays must be non-negative.' }
@@ -27,11 +32,14 @@ function Get-AgentHostCompatibilityStatus {
         $verifiedOn = $null
         $parseOk = $false
         try {
+            # verified_on 是操作者写下的本地日历日期，与 AsOf 按本地日历日
+            # 粒度比较。之前的 AssumeUniversal+ToUniversalTime 折算会在
+            # UTC+ 时区的当天清晨把同日复验误判为 future。
             $verifiedOn = [datetime]::ParseExact(
                 [string]$fact.verified_on,
                 'yyyy-MM-dd',
                 [Globalization.CultureInfo]::InvariantCulture,
-                [Globalization.DateTimeStyles]::AssumeUniversal
+                [Globalization.DateTimeStyles]::AssumeLocal
             )
             $parseOk = $true
         }
@@ -39,7 +47,7 @@ function Get-AgentHostCompatibilityStatus {
         $ageDays = $null
         $status = 'missing'
         if ($parseOk) {
-            $ageDays = [math]::Floor(($AsOf.ToUniversalTime() - $verifiedOn.ToUniversalTime()).TotalDays)
+            $ageDays = [math]::Floor(($AsOf.Date - $verifiedOn.Date).TotalDays)
             $status = if ($ageDays -lt 0) { 'future' } elseif ($ageDays -le $MaxAgeDays) { 'current' } else { 'stale' }
         }
         [pscustomobject][ordered]@{

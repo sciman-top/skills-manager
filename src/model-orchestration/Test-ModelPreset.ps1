@@ -340,7 +340,9 @@ try {
     $stringFailure = ''
     try { & $acceptanceLauncher -Slot architecture_review -Model gpt-6-luna -Effort max -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Classify compact string error events' | Out-Null }
     catch { $stringFailure = $_.Exception.Message }
-    $stringDoc = (([regex]::Match($stringFailure, '{.*}')).Value | ConvertFrom-Json).slot_failure
+    $stringJson = [regex]::Match($stringFailure, '\{.*\}')
+    Assert $stringJson.Success 'String failure emits structured evidence'
+    $stringDoc = ($stringJson.Value | ConvertFrom-Json).slot_failure
     Assert ($stringDoc.failure_class -ceq 'rate_limit' -and $stringDoc.retry_policy.next_action -ceq 'stop_and_wait_for_fresh_parent_selection') 'Compact string error events retain rate-limit stop semantics'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq ($beforeStringCalls + 1)) 'Compact string failure makes one controlled launch without replay'
     $global:ModelSlotAcceptanceExitCode = 0
