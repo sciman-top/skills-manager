@@ -24,6 +24,17 @@ Describe 'Agent host registry' {
         { Get-AgentHostFact 'unknown-host' } | Should -Throw
     }
 
+    It 'reports compatibility freshness without claiming host loading or live acceptance' {
+        $current = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-29') -MaxAgeDays 30)
+        $current.Count | Should -Be 5
+        @($current | Where-Object status -ne 'current').Count | Should -Be 0
+        @($current | Where-Object host_loaded).Count | Should -Be 0
+        @($current | Where-Object live_accepted).Count | Should -Be 0
+
+        $stale = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-12-01') -MaxAgeDays 30)
+        @($stale | Where-Object status -eq 'stale').Count | Should -Be 5
+    }
+
     It 'keeps every host ValidateSet in product source in sync with the registry' {
         # AST 校验已知函数参数的 ValidateSet；再扫描 src 源文本，任何以
         # codex 起头的宿主 ValidateSet 字面量都必须与注册表全等，防止出现

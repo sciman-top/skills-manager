@@ -980,7 +980,7 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
         $norm = $path.Replace("/", "\")
         $lower = $norm.ToLowerInvariant()
 
-        $dotDirs = @(".claude", ".codex", ".gemini", ".trae", ".zcode")
+        $dotDirs = @(".claude", ".codex", ".gemini", ".trae", ".zcode", ".workbuddy", ".workbuddy-ai")
         $matched = $false
         $bestIdx = -1
         $bestNeedleLen = 0

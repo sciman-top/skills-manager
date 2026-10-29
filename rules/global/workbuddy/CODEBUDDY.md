@@ -3,7 +3,7 @@
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引
-- 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
+- 本文件定义全局共性语义（WHAT）；每个语义域只保留一个真源：宿主差异由 platforms/<host>.md 定义，项目事实与动作（WHERE/HOW）由目标仓根 AGENTS.md 定义；其他文件只能是生成物、适配器或受控投影。
 - 宿主的 system、developer、user 与 managed policy 优先；运行事实与代码优先于项目文档与规则默认值。
 - 结构 `1/A/C/D` 共用，`B` 为宿主差异。宿主规则文件由本文件与平台章节生成，不手改。
 ## A. 共性基线
@@ -40,7 +40,7 @@
 ## B. WorkBuddy 平台差异
 <!-- verified: 2026-10-05 | 本机 CODEBUDDY_CONFIG_DIR 实测 | WorkBuddy / CodeBuddy -->
 ### B.1 加载链
-- 用户规则根优先取 `WORKBUDDY_CONFIG_DIR`，其次取兼容变量 `CODEBUDDY_CONFIG_DIR`；均未设置时，已有 `~/.workbuddy-ai` 优先于 `~/.codebuddy`。依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
+- 用户规则根优先取 `WORKBUDDY_CONFIG_DIR`，其次取兼容变量 `CODEBUDDY_CONFIG_DIR`；均未设置时按已有 `~/.workbuddy-ai`、`~/.workbuddy`、`~/.codebuddy` 顺序选择。国内版与国际版同时存在时必须显式指定对应 root，避免把两个登录态的规则或技能投影混为一个执行面。依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`，取首个成功解析的文件，并加载该根下 `rules/` 中的 `.md`/`.mdc`。
 - 项目从 cwd 向上遍历到盘符根之前，再按外层到内层加载；每层分别在目录本身与 `.codebuddy/` 中依次尝试 `CODEBUDDY.md`、`CODEBUDDY.mdc`、`AGENTS.md`、`AGENTS.mdc`，各取首个成功解析项。
 - 当前 cwd 的 `.codebuddy/rules/` 与 `CODEBUDDY.local.md`/`CODEBUDDY.local.mdc` 另行加载；个人主目录的 `AGENTS.md` 可能是祖先项目规则，不等同于用户级规则。
 - 项目根 `AGENTS.md` 保持唯一项目真源；优先候选存在时先审查遮蔽与 import。静态审查只读取授权仓内候选；祖先、imports、条件规则和加载顺序须由 fresh host evidence 补证。
@@ -53,7 +53,7 @@
 - 加载模型以当前安装包实现与本机实测为准；解析失败、条件规则、import 或配置根不确定时保留 `platform_na` 与 fresh-session 复测条件，不把静态候选报告升级为 `host_loaded`。
 ## C. 项目级承接契约
 ### C.1 边界与版本
-- 项目根 `AGENTS.md` 是宿主中立的共同契约，记录 `**项目契约**: 2.0` 与 `**全局规则复核**`。Claude 用无 BOM 的 `CLAUDE.md` 以 `@AGENTS.md` 承接；适配器只放引用。
+- 项目根 `AGENTS.md` 是目标仓的宿主中立项目真源，记录 `**项目契约**: 2.0` 与 `**全局规则复核**`。Claude 用 `CLAUDE.md` 的 `@AGENTS.md` 承接；适配器只放引用。
 - 项目规则不复述全局 R/E 正文、语言偏好或宿主加载教程，也不复制 README/PRD 全文。
 ### C.2 必填落点
 - 项目根须明确：source of truth、entrypoint、领域不变量、最低门禁与回滚入口。
