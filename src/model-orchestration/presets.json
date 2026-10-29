@@ -26,9 +26,9 @@
     "standard_review": "gemini38_flash_only",
     "bounded_implementation": "deepseek41_flash_only",
     "deep_investigation": "gpt6_luna_only",
-    "deep_implementation": "gemini38_flash_only",
+    "deep_implementation": "deepseek41_flash_only",
     "test_execution": "glm53_flash_only",
-    "documentation_review": "gpt6_luna_only",
+    "documentation_review": "gemini38_flash_only",
     "architecture_review": "gpt6_luna_only"
   },
   "dispatch_policy": {
@@ -58,6 +58,31 @@
     "documentation_review",
     "architecture_review"
   ],
+  "routing_receipt": {
+    "schema_version": 1,
+    "requested_fields": [
+      "slot",
+      "requested_preset",
+      "model",
+      "effort",
+      "read_only",
+      "declared_fallback"
+    ],
+    "observed_fields": [
+      "actual_model",
+      "actual_effort",
+      "actual_model_observed"
+    ],
+    "observation_source": "host_subagent_activity_or_child_turn_context",
+    "unknown_policy": "Record actual_model_observed=false when the host does not expose the child tuple; do not infer it from the parent model or picker.",
+    "selection_precedence": [
+      "A custom agent file model or model_reasoning_effort takes precedence.",
+      "An explicit spawn model or effort takes precedence over defaults.",
+      "The [agents] default applies when the spawn value is absent.",
+      "Otherwise the child inherits the parent model and effort."
+    ],
+    "provider_boundary": "A custom agent inherits the parent provider and cannot switch provider."
+  },
   "fallbacks": {
     "quick_triage": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
@@ -87,7 +112,7 @@
     "deep_implementation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" }
     ],
     "test_execution": [
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
@@ -96,7 +121,7 @@
     ],
     "documentation_review": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
+      { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
     ],
     "architecture_review": [

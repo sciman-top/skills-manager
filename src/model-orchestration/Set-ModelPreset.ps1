@@ -55,6 +55,35 @@ if (-not $dispatchPolicy -or
     $dispatchPolicy.overload_action -cne 'one_explicit_reselection_only') {
     throw 'dispatch_policy must enforce one attempt, one explicit reselection, and no duplicate replay.'
 }
+$routingReceipt = $policy.routing_receipt
+if (-not $routingReceipt) {
+    $routingReceipt = [ordered]@{
+        schema_version = 1
+        requested_fields = @('slot','requested_preset','model','effort','read_only','declared_fallback')
+        observed_fields = @('actual_model','actual_effort','actual_model_observed')
+        observation_source = 'host_subagent_activity_or_child_turn_context'
+        unknown_policy = 'Record actual_model_observed=false when the host does not expose the child tuple; do not infer it from the parent model or picker.'
+        selection_precedence = @(
+            'A custom agent file model or model_reasoning_effort takes precedence.',
+            'An explicit spawn model or effort takes precedence over defaults.',
+            'The [agents] default applies when the spawn value is absent.',
+            'Otherwise the child inherits the parent model and effort.'
+        )
+        provider_boundary = 'A custom agent inherits the parent provider and cannot switch provider.'
+    }
+}
+$requiredRequestedFields = @('slot','requested_preset','model','effort','read_only','declared_fallback')
+$requiredObservedFields = @('actual_model','actual_effort','actual_model_observed')
+if (-not $routingReceipt -or
+    [int]$routingReceipt.schema_version -ne 1 -or
+    (@($routingReceipt.requested_fields) -join ',') -cne ($requiredRequestedFields -join ',') -or
+    (@($routingReceipt.observed_fields) -join ',') -cne ($requiredObservedFields -join ',') -or
+    [string]::IsNullOrWhiteSpace([string]$routingReceipt.observation_source) -or
+    [string]::IsNullOrWhiteSpace([string]$routingReceipt.unknown_policy) -or
+    [string]::IsNullOrWhiteSpace([string]$routingReceipt.provider_boundary) -or
+    @($routingReceipt.selection_precedence).Count -ne 4) {
+    throw 'routing_receipt must declare the v1 requested/observed fields, precedence, unknown policy and provider boundary.'
+}
 function Get-PresetMenu {
     param($PresetPolicy, [string]$HostName)
     $hostMenus = $PresetPolicy['host_menus']
@@ -259,7 +288,7 @@ foreach ($slot in $slotNames) {
     $nativeRoutePresetIds[$slot] = $nativePreset
     $nativeRoutes[$slot] = @{ preset = $nativePreset; model = [string]$nativeEntry.model; effort = [string]$nativeEntry.effort }
 }
-if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; native_routes = $nativeRoutes; native_agent_available = $nativeAgentAvailable; enabled_routes=$enabledRoutes; slots=$slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
+if ($Action -eq 'Resolve') { @{ preset = $Preset; host = $ExecutionHost; auto_routing = (-not $explicitPreset); active_presets=$activePresets; hosts = @($modelPreset.hosts); routes = $routes; native_routes = $nativeRoutes; native_agent_available = $nativeAgentAvailable; enabled_routes=$enabledRoutes; slots = $slotNames; read_only_slots=@($policy.read_only_slots); availability = 'operator_declared'; dispatch_policy=$dispatchPolicy; routing_receipt=$routingReceipt; reselection = (Get-ReselectionContract $policy $activePresets $ExecutionHost) } | ConvertTo-Json -Depth 8; return }
 $CodexRoot = [IO.Path]::GetFullPath($CodexRoot)
 if ($Action -eq 'Verify') {
     # Read-only host preflight: confirm configured child routes use an exact
@@ -485,7 +514,7 @@ $slotGuidance = @{
     documentation_review = 'Select for read-only documentation and contract consistency checks.'
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
-$parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch.'
+$parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch. Record a routing receipt for each child: slot, requested preset, model, effort, read-only status, declared fallback, and the host-reported actual model/effort when available. Set actual_model_observed=false instead of inferring the child model from the parent picker. A custom agent file pins model/effort and overrides spawn values; its provider remains the parent provider.'
 $tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
     if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
