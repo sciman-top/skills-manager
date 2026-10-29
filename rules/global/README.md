@@ -13,6 +13,7 @@
 ```
 
 可选宿主通过 `--zcode-user-root`、`--antigravity-user-root`、`--workbuddy-user-root` 指定既有用户规则目录。WorkBuddy 优先采用环境变量选择的根，否则采用已有 `.workbuddy-ai` 或 `.codebuddy`；选定根目录存在即可启用，不要求预先存在规则文件，也不自动创建根目录。apply、resume 和 rollback 必须提供与 plan/receipt 相同的根目录。
+WorkBuddy 国内版与国际版必须视为两个独立投影实例：分别使用 `--workbuddy-user-root ~/.workbuddy` 与 `--workbuddy-user-root ~/.workbuddy-ai` 生成各自 plan、receipt、backup 和 rollback；一个根的成功不代表另一个根已投影或已加载。
 
 `global-rules-check` 检查 WorkBuddy 时可通过 `--workbuddy-user-root` 显式指定用户根。
 

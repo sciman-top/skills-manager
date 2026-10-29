@@ -508,18 +508,16 @@ function Get-DoctorSkillProjectionConsistency {
         # comes from the same managed-link target declarations used to project
         # skills; optional compatibility declarations are additive only.
         $rootByHost = @{}
-        $rootByHost['codex'] = Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root
+        $rootByHost['codex'] = @((Resolve-SkillProjectionPath ([string]$projection.user_skill_root) $Root))
         $declaredHosts = @('codex')
         foreach ($declaration in @(Get-SkillProjectionHostRootDeclarations $cfg)) {
             $hostName = ([string]$declaration.host).Trim().ToLowerInvariant()
             $hostRoot = Resolve-SkillProjectionPath ([string]$declaration.path) $Root
             if ($rootByHost.ContainsKey($hostName)) {
-                if (-not [string]::Equals([string]$rootByHost[$hostName], [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                    $result.warnings += ("{0}: host_root_declaration_conflict: {1} 与 {2} 指向不同目录。" -f $hostName, [string]$rootByHost[$hostName], [string]$hostRoot)
-                }
+                if (@($rootByHost[$hostName] | Where-Object { [string]::Equals([string]$_, [string]$hostRoot, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) { $rootByHost[$hostName] += $hostRoot }
                 continue
             }
-            $rootByHost[$hostName] = $hostRoot
+            $rootByHost[$hostName] = @($hostRoot)
             if ($hostName -notin $declaredHosts) { $declaredHosts += $hostName }
         }
         if (Test-OperationObjectProperty $projection 'projection_profiles') {
@@ -575,32 +573,33 @@ function Get-DoctorSkillProjectionConsistency {
                 $details += ("{0} declared={1} projected=0" -f $hostName, @($expectedNames).Count)
                 continue
             }
-            $hostRoot = $rootByHost[$hostName]
-            $actualNames = @()
-            $managedNames = @()
-            if (Test-Path -LiteralPath $hostRoot -PathType Container) {
-                $actualEntries = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf })
-                $actualNames = @($actualEntries | ForEach-Object { [string]$_.Name })
-                $managedNames = @($actualEntries | Where-Object {
-                    $linkTargetProperty = $_.PSObject.Properties['Target']
-                    if (($null -eq $linkTargetProperty) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $false }
-                    $linkTarget = [string](@($linkTargetProperty.Value)[0])
-                    if ([string]::IsNullOrWhiteSpace($linkTarget)) { return $false }
-                    $resolvedLinkTarget = if ([IO.Path]::IsPathRooted($linkTarget)) { [IO.Path]::GetFullPath($linkTarget) } else { [IO.Path]::GetFullPath((Join-Path $hostRoot $linkTarget)) }
-                    return $resolvedLinkTarget.StartsWith(($managedSource.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
-                } | ForEach-Object { [string]$_.Name })
+            foreach ($hostRoot in @($rootByHost[$hostName])) {
+                $actualNames = @()
+                $managedNames = @()
+                if (Test-Path -LiteralPath $hostRoot -PathType Container) {
+                    $actualEntries = @(Get-ChildItem -LiteralPath $hostRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf })
+                    $actualNames = @($actualEntries | ForEach-Object { [string]$_.Name })
+                    $managedNames = @($actualEntries | Where-Object {
+                        $linkTargetProperty = $_.PSObject.Properties['Target']
+                        if (($null -eq $linkTargetProperty) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $false }
+                        $linkTarget = [string](@($linkTargetProperty.Value)[0])
+                        if ([string]::IsNullOrWhiteSpace($linkTarget)) { return $false }
+                        $resolvedLinkTarget = if ([IO.Path]::IsPathRooted($linkTarget)) { [IO.Path]::GetFullPath($linkTarget) } else { [IO.Path]::GetFullPath((Join-Path $hostRoot $linkTarget)) }
+                        return $resolvedLinkTarget.StartsWith(($managedSource.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+                    } | ForEach-Object { [string]$_.Name })
+                }
+                else {
+                    $result.warnings += ("{0}: 宿主技能根缺失: {1}" -f $hostName, $hostRoot)
+                }
+                $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
+                $extra = @($managedNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
+                if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}] ({2})" -f $hostName, ($missing -join ','), $hostRoot) }
+                if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}] ({2})" -f $hostName, ($extra -join ','), $hostRoot) }
+                $details += ("{0} root={1} declared={2} projected={3} unmanaged={4}" -f $hostName, $hostRoot, @($expectedNames).Count, @($managedNames).Count, @($actualNames | Where-Object { $managedNames -notcontains $_ }).Count)
+                $coldForm = Test-DoctorColdSkillForm -HostRoot $hostRoot -ExpectedSkillNames $expectedNames
+                foreach ($coldWarning in $coldForm.warnings) { $result.warnings += ("{0}: {1}" -f $hostName, $coldWarning) }
+                if (-not $coldForm.ok) { $result.ok = $false }
             }
-            else {
-                $result.warnings += ("{0}: 宿主技能根缺失: {1}" -f $hostName, $hostRoot)
-            }
-            $missing = @($expectedNames | Where-Object { $actualNames -notcontains $_ } | Sort-Object)
-            $extra = @($managedNames | Where-Object { $expectedNames -notcontains $_ } | Sort-Object)
-            if ($missing.Count -gt 0) { $result.warnings += ("{0}: 声明未投影 [{1}]" -f $hostName, ($missing -join ',')) }
-            if ($extra.Count -gt 0) { $result.warnings += ("{0}: 投影未声明 [{1}]" -f $hostName, ($extra -join ',')) }
-            $details += ("{0} declared={1} projected={2} unmanaged={3}" -f $hostName, @($expectedNames).Count, @($managedNames).Count, @($actualNames | Where-Object { $managedNames -notcontains $_ }).Count)
-            $coldForm = Test-DoctorColdSkillForm -HostRoot $hostRoot -ExpectedSkillNames $expectedNames
-            foreach ($coldWarning in $coldForm.warnings) { $result.warnings += ("{0}: {1}" -f $hostName, $coldWarning) }
-            if (-not $coldForm.ok) { $result.ok = $false }
         }
         $coldCatalog = Test-DoctorColdCatalogHealth -ManagedSourceRoot ([string]$managedSource)
         foreach ($coldWarning in $coldCatalog.warnings) { $result.warnings += $coldWarning }
@@ -755,6 +754,29 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         $report.checks.git = [ordered]@{ ok = $false; value = "" }
         if (-not $opts.json) { Write-Host "❌ Git: Not found or error" -ForegroundColor Red }
         $pass = $false
+    }
+
+    # 2.1 Host compatibility freshness. This is repository evidence only;
+    # it must never be promoted to host_loaded or live_accepted.
+    try {
+        $compatibility = @(Get-AgentHostCompatibilityStatus)
+        $report.checks.host_compatibility = [ordered]@{
+            max_age_days = 30
+            hosts = @($compatibility)
+            stale_hosts = @($compatibility | Where-Object status -in @('stale', 'missing', 'future') | ForEach-Object host)
+            read_only = $true
+            evidence_level = 'repo_verified'
+        }
+        if (-not $opts.json) {
+            foreach ($entry in $compatibility) {
+                $icon = if ($entry.status -eq 'current') { '✅' } else { '⚠️' }
+                Write-Host ("{0} Host contract {1}: {2} ({3})" -f $icon, $entry.host, $entry.status, $entry.verified_on)
+            }
+        }
+    }
+    catch {
+        $report.checks.host_compatibility = [ordered]@{ read_only = $true; evidence_level = 'unknown'; error = [string]$_.Exception.Message }
+        if (-not $opts.json) { Write-Host ("⚠️ Host compatibility: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
     }
 
     # 2.5 Skill Projection Consistency

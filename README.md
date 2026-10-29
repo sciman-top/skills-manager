@@ -56,13 +56,15 @@
 
 ## 宿主支持矩阵
 
-| AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 |
-| :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | 原生 Codex MCP 配置 |
-| **Claude Code** | 用户级 `~/.claude/skills` 链接；Agent Bridge 另写 `~/.claude/agents` 子代理定义 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 |
-| **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` |
-| **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` |
-| **WorkBuddy** | 受管本地目标投影 | `core-ops` (8 个运维增强) | 内部工作区标准配置 |
+| AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 | 兼容性证据 |
+| :--- | :--- | :--- | :--- | :--- |
+| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | 原生 Codex MCP 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **Claude Code** | 用户级 `~/.claude/skills` 链接；Agent Bridge 另写 `~/.claude/agents` 子代理定义 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` | 仓库适配；宿主能力限制单独记录 |
+| **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` | 配置适配；不由投影推断宿主已加载 |
+| **WorkBuddy** | 受管本地目标投影 | `core-ops` (8 个运维增强) | 内部工作区标准配置 | 受管目标适配；需独立宿主/任务验收 |
+
+`doctor --json --offline-contract` 会输出当前宿主契约的仓库核实日期和 freshness 状态。`repo_verified`、`filesystem_projected`、`host_loaded` 与 `live_accepted` 是四个独立层级；配置解析、投影 receipt 或模型可列举都不会自动提升后两个层级。
 
 ---
 

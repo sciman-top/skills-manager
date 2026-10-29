@@ -42,7 +42,7 @@ Describe 'Independent model preset behavior' {
         $scriptPath = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) 'src/model-orchestration/Set-ModelPreset.ps1'
         $claudeRoot = Join-Path $TestDrive 'claude-retired'
         foreach ($action in @('Plan','Apply')) {
-            { & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action $action -SubagentsOnly } | Should -Throw '*No active preset is available on host claude*'
+            { & $scriptPath -ExecutionHost claude -ClaudeRoot $claudeRoot -Action $action -SubagentsOnly } | Should -Throw 'No active preset is available on host claude.'
             Test-Path -LiteralPath $claudeRoot | Should -BeFalse
         }
     }

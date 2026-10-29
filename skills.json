@@ -1005,6 +1005,12 @@
       "host": "workbuddy",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/workbuddy-native-receipt.json"
+    },
+    {
+      "path": "~/.workbuddy/skills",
+      "host": "workbuddy",
+      "managed_link_only": true,
+      "receipt_path": "reports/skill-projection/workbuddy-cn-native-receipt.json"
     }
   ],
   "update_force": true,

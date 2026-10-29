@@ -5,11 +5,11 @@
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
     # WorkBuddy/CodeBuddy has shipped both names for its user config root.
     # Match the host resolver: explicit WORKBUDDY_CONFIG_DIR wins, then the
-    # legacy CODEBUDDY_CONFIG_DIR, then an existing .workbuddy-ai root, and
+    # legacy CODEBUDDY_CONFIG_DIR, then an existing .workbuddy-ai/.workbuddy root, and
     # finally the documented .codebuddy default.  Do not create a root here.
     $workbuddyEnvName = if(-not[string]::IsNullOrWhiteSpace($env:WORKBUDDY_CONFIG_DIR)){'WORKBUDDY_CONFIG_DIR'}elseif(-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)){'CODEBUDDY_CONFIG_DIR'}else{''}
     $workbuddyFromEnv = $workbuddyEnvName -ne ''
-    $workbuddyDefaultRoot = if($workbuddyFromEnv){if($workbuddyEnvName -eq 'WORKBUDDY_CONFIG_DIR'){$env:WORKBUDDY_CONFIG_DIR}else{$env:CODEBUDDY_CONFIG_DIR}}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy-ai') -PathType Container){Join-Path $userProfile '.workbuddy-ai'}else{Join-Path $userProfile '.codebuddy'}
+    $workbuddyDefaultRoot = if($workbuddyFromEnv){if($workbuddyEnvName -eq 'WORKBUDDY_CONFIG_DIR'){$env:WORKBUDDY_CONFIG_DIR}else{$env:CODEBUDDY_CONFIG_DIR}}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy-ai') -PathType Container){Join-Path $userProfile '.workbuddy-ai'}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy') -PathType Container){Join-Path $userProfile '.workbuddy'}else{Join-Path $userProfile '.codebuddy'}
     # 默认启用只看宿主根目录是否存在，不依赖已投影文件（宿主重置删除规则文件后可自动重建投影）；
     # CODEBUDDY_CONFIG_DIR 指向不存在目录时由 Resolve-OptionalWorkBuddyGlobalRuleRoot 抛错。
     $antigravityDefaultEnabled=Test-Path -LiteralPath $antigravityDefaultRoot -PathType Container

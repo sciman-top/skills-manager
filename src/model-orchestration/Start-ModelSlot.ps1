@@ -353,16 +353,27 @@ function Classify-Failure([object[]]$Output) {
         if ($null -eq $event) { continue }
         foreach ($property in @('error','errors')) {
             if ($event.PSObject.Properties.Name -contains $property) {
-                foreach ($errorRecord in @($event.$property)) { if ($null -ne $errorRecord -and $errorRecord -isnot [string]) { $errors.Add($errorRecord) } }
+                foreach ($errorRecord in @($event.$property)) {
+                    # Providers commonly emit either an object error or a
+                    # compact string (for example {"error":"rate_limit"}).
+                    # Keep both forms so quota and account-risk stops cannot
+                    # be downgraded to an unclassified failure.
+                    if ($null -ne $errorRecord) { $errors.Add($errorRecord) }
+                }
             }
         }
     }
     # Classify the complete failure stream before deciding whether reselection
     # is allowed. A later rate/auth/risk event must dominate an earlier overload.
     $tokens = @(foreach ($errorRecord in $errors) {
-        @(
-            $errorRecord.code, $errorRecord.reason_code, $errorRecord.category, $errorRecord.type, $errorRecord.status, $errorRecord.http_status
-        ) | ForEach-Object { if ($null -ne $_) { ([string]$_).Trim().ToLowerInvariant() } } | Where-Object { $_ }
+        if ($errorRecord -is [string]) {
+            ([string]$errorRecord).Trim().ToLowerInvariant()
+        }
+        else {
+            @(
+                $errorRecord.code, $errorRecord.reason_code, $errorRecord.category, $errorRecord.type, $errorRecord.status, $errorRecord.http_status
+            ) | ForEach-Object { if ($null -ne $_) { ([string]$_).Trim().ToLowerInvariant() } } | Where-Object { $_ }
+        }
     })
     if (@($tokens | Where-Object { $_ -in @('risk','account_risk','policy_violation','safety_block','fraud','banned') }).Count -gt 0) { return [pscustomobject]@{ class='account_risk'; source='structured_error_event' } }
     if (@($tokens | Where-Object { $_ -in @('401','403','auth','authentication','unauthorized','forbidden','permission') }).Count -gt 0) { return [pscustomobject]@{ class='auth_or_permission'; source='structured_error_event' } }

@@ -3,6 +3,14 @@ BeforeAll {
 
 }
 Describe "Doctor Enhancements" {
+    It "reports host compatibility freshness as repository evidence" {
+        $report = Invoke-Doctor @("--json", "--offline-contract")
+        $report.checks.host_compatibility.read_only | Should -BeTrue
+        $report.checks.host_compatibility.evidence_level | Should -Be 'repo_verified'
+        @($report.checks.host_compatibility.hosts).Count | Should -Be 5
+        @($report.checks.host_compatibility.hosts | Where-Object host_loaded).Count | Should -Be 0
+    }
+
     Context "Get-DoctorLegacyAutoUpdateTaskStatus" {
         It "recognizes the current runner as externally scheduled" {
             $runner = Join-Path $Root 'scripts\weekly-skills-update.ps1'

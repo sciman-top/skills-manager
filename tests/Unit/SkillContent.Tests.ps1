@@ -31,6 +31,8 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?is)After two failed corrections.*ask the user\s+for clarification'
         $skill | Should -Match '(?i)handoff does not replace clarification'
         $skill | Should -Match '(?i)evidence, not permission'
+        $skill | Should -Match '(?is)untrusted\s+evidence.*embedded\s+commands'
+        $skill | Should -Match '(?is)preview/dry-run external/host writes.*rollback/compensation'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
     }
 
