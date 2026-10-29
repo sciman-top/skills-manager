@@ -301,7 +301,20 @@ else {
     $executable = 'claude'
 }
 if ($Plan) {
-    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;declared_fallback=$declaredFallback;dispatch_policy=$resolved.dispatch_policy;timeout_seconds=$TimeoutSeconds;probe_timeout_seconds=$ProbeTimeoutSeconds} | ConvertTo-Json -Depth 8
+    $routingReceipt = [ordered]@{
+        schema_version = [int]$resolved.routing_receipt.schema_version
+        slot = $Slot
+        requested_preset = $route.preset
+        model = [string]$route.model
+        effort = [string]$route.effort
+        read_only = [bool]$readOnlyTask
+        declared_fallback = @($declaredFallback)
+        actual_model = $null
+        actual_effort = $null
+        actual_model_observed = $false
+        observation_source = [string]$resolved.routing_receipt.observation_source
+    }
+    @{preset=$Preset;active_presets=$resolved.active_presets;slot=$Slot;model=$route.model;effort=$route.effort;route_preset=$route.preset;auto_routing=$resolved.auto_routing;host=$targetHost;read_only=$readOnlyTask;delegation_enabled=$false;working_directory=$WorkingDirectory;capability=$capability;declared_fallback=$declaredFallback;routing_receipt=$routingReceipt;dispatch_policy=$resolved.dispatch_policy;timeout_seconds=$TimeoutSeconds;probe_timeout_seconds=$ProbeTimeoutSeconds} | ConvertTo-Json -Depth 8
     return
 }
 if ([string]::IsNullOrWhiteSpace($Prompt)) { throw 'Prompt is required to execute a slot.' }
@@ -407,6 +420,19 @@ try {
                 failure_source = [string]$classification.source
                 failed_tuple = $failedTuple
                 capability = $capability
+                routing_receipt = [ordered]@{
+                    schema_version = [int]$resolved.routing_receipt.schema_version
+                    slot = $Slot
+                    requested_preset = $routePreset
+                    model = [string]$route.model
+                    effort = [string]$route.effort
+                    read_only = [bool]$readOnlyTask
+                    declared_fallback = @($declaredFallback)
+                    actual_model = $null
+                    actual_effort = $null
+                    actual_model_observed = $false
+                    observation_source = [string]$resolved.routing_receipt.observation_source
+                }
                 upstream_contacted = [bool]$launchResult.started
                 execution = @{ timed_out=[bool]$launchResult.timed_out; timeout_kind=$launchResult.timeout_kind; timeout_seconds=$TimeoutSeconds }
                 retry_policy = [ordered]@{

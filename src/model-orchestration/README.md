@@ -21,19 +21,25 @@ The executable enforces the closed per-host tuple allowlist. Adding arbitrary JS
 
 Slots describe responsibility, not a fixed agent count, concurrency quota or measured model ranking. `presets.json` owns the exact defaults and ordered alternate tuples; inspect `-Action Resolve` for current values.
 
-| Slot | Task boundary | Access intent |
-| --- | --- | --- |
-| `quick_triage` | Concrete lookup, known error classification | Read only |
-| `routine_maintenance` | Small fix with an understood cause | Bounded writes |
-| `standard_review` | Review an existing bounded change | Read only |
-| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes |
-| `deep_investigation` | Unresolved root cause across modules | Read only; return proposed write set |
-| `deep_implementation` | Complex implementation after scope is established | Bounded writes |
-| `test_execution` | Scoped test command and concrete failure diagnosis | Bounded writes when assigned |
-| `documentation_review` | Documentation and contract consistency | Read only |
-| `architecture_review` | Interacting constraints and security boundaries | Read only |
+| Slot | Task boundary | Access intent | Codex route |
+| --- | --- | --- | --- |
+| `quick_triage` | Concrete lookup, known error classification | Read only | `gemini-3.8-flash-high/high` |
+| `routine_maintenance` | Small fix with an understood cause | Bounded writes | `glm-5.3-flash/xhigh` |
+| `standard_review` | Review an existing bounded change | Read only | `gemini-3.8-flash-high/high` |
+| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes | `deepseek-v4.1-flash/xhigh` |
+| `deep_investigation` | Unresolved root cause across modules | Read only; return proposed write set | `gpt-6-luna/max` |
+| `deep_implementation` | Complex implementation after scope is established | Bounded writes | `deepseek-v4.1-flash/xhigh` |
+| `test_execution` | Scoped test command and concrete failure diagnosis | Bounded writes when assigned | `glm-5.3-flash/xhigh` |
+| `documentation_review` | Documentation and contract consistency | Read only | `gemini-3.8-flash-high/high` |
+| `architecture_review` | Interacting constraints and security boundaries | Read only | `gpt-6-luna/max` |
 
-Keep the nine slots; there is no demonstrated need for more. Classify the task first, then select a supported tuple. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
+Keep the nine slots; there is no demonstrated need for more. Classify the task first, then select a supported tuple. `deep_implementation` uses DeepSeek because it is the code-focused route; `documentation_review` uses Gemini high because document and visual consistency do not justify a Luna/max child. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
+
+## Routing receipt
+
+`presets.json.routing_receipt` is the v1 contract for explaining which route was chosen. A receipt records the requested slot, preset, model, effort, read-only state and fallback candidates. It separately records the host-reported actual model and effort, with `actual_model_observed=false` when the client does not expose them. Do not infer the child tuple from the parent model pill or the Desktop picker.
+
+The effective child selection follows this order: a custom agent file's model/effort, then an explicit spawn value, then the `[agents]` default, then parent inheritance. A custom agent file also inherits the parent provider; it cannot switch to another provider. `Start-ModelSlot.ps1 -Plan` emits the requested portion of this receipt and leaves the observed fields unset.
 
 The route defaults are editable policy hypotheses. The earlier [108-call evaluation](https://github.com/sciman-top/skills-manager/pull/143) used three short questions per slot, one run per candidate, and grading adjusted after inspection; most candidates tied. It did not evaluate the restored DeepSeek tuple or long-horizon native child tasks. It cannot establish a universal ordering among these four models. Vendor descriptions also do not establish endpoint latency, tool reliability or project acceptance quality. Luna is positioned by OpenAI for focused, efficient subagent work; selecting max does not make it universally strongest. DeepSeek/GLM/Gemini task fit should be refined from ordinary accepted project outcomes, with identical scope and acceptance, rather than a new broad synthetic sweep. Higher effort may increase time and token use; `xhigh` and `max` are not proven equivalent across hosts.
 

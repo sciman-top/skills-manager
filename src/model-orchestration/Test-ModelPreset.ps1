@@ -77,12 +77,28 @@ $autoRoutes = @{
     standard_review = 'gemini38_flash_only'
     bounded_implementation = 'deepseek41_flash_only'
     deep_investigation = 'gpt6_luna_only'
-    deep_implementation = 'gemini38_flash_only'
+    deep_implementation = 'deepseek41_flash_only'
     test_execution = 'glm53_flash_only'
-    documentation_review = 'gpt6_luna_only'
+    documentation_review = 'gemini38_flash_only'
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
+Assert ($defaultResolved.routes.deep_implementation.model -ceq 'deepseek-v4.1-flash' -and $defaultResolved.routes.deep_implementation.effort -ceq 'xhigh') 'Deep implementation uses the code-focused DeepSeek tuple'
+Assert ($defaultResolved.routes.documentation_review.model -ceq 'gemini-3.8-flash-high' -and $defaultResolved.routes.documentation_review.effort -ceq 'high') 'Documentation review uses Gemini high'
+Assert ($defaultResolved.routing_receipt.schema_version -eq 1 -and @($defaultResolved.routing_receipt.requested_fields).Count -eq 6 -and @($defaultResolved.routing_receipt.observed_fields).Count -eq 3) 'Resolve exposes the v1 routing receipt contract'
+Assert ($defaultResolved.routing_receipt.unknown_policy -like '*actual_model_observed=false*' -and @($defaultResolved.routing_receipt.selection_precedence).Count -eq 4) 'Routing receipt distinguishes requested and host-observed tuples'
+$compatPolicyPath = Join-Path $acceptanceFixture 'presets.json'
+$compatPolicyText = Get-Content -LiteralPath $compatPolicyPath -Raw
+try {
+    $compatPolicy = $compatPolicyText | ConvertFrom-Json -AsHashtable
+    $compatPolicy.Remove('routing_receipt')
+    [IO.File]::WriteAllText($compatPolicyPath, ($compatPolicy | ConvertTo-Json -Depth 12))
+    $compatResolved = & (Join-Path $acceptanceFixture 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
+    Assert ($compatResolved.routing_receipt.schema_version -eq 1 -and @($compatResolved.routing_receipt.requested_fields).Count -eq 6) 'Legacy schema-v7 policy receives the default routing receipt contract'
+}
+finally {
+    [IO.File]::WriteAllText($compatPolicyPath, $compatPolicyText)
+}
 Assert ($defaultResolved.routes.routine_maintenance.model -ceq 'glm-5.3-flash' -and $defaultResolved.native_routes.routine_maintenance.model -ceq 'glm-5.3-flash' -and $defaultResolved.native_agent_available) 'GLM automatic route is a native route'
 foreach ($slot in $slots) {
     Assert ($defaultResolved.native_routes.$slot.preset -ceq $autoRoutes[$slot]) "Native slot route follows the automatic task-shape route: $slot"
@@ -111,6 +127,7 @@ Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZC
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high') 'Alternates stay inside the active pool and exclude the substituted route'
 $cliSelection = & $acceptanceLauncher -Slot deep_investigation -AvailablePreset 'glm53_flash_only,gemini38_flash_only' -Plan | ConvertFrom-Json
 Assert ($null -ne $cliSelection.preset -and $cliSelection.preset -eq 'glm53_flash_only' -and $cliSelection.route_preset -eq 'glm53_flash_only' -and $cliSelection.effort -eq 'xhigh' -and $cliSelection.delegation_enabled -eq $false) 'Native CLI chooses the first available preset when the deep investigation route (Luna) is excluded'
+Assert ($cliSelection.routing_receipt.slot -ceq 'deep_investigation' -and $cliSelection.routing_receipt.model -ceq 'glm-5.3-flash' -and $cliSelection.routing_receipt.effort -ceq 'xhigh' -and $cliSelection.routing_receipt.actual_model_observed -eq $false) 'Controlled launcher plan emits a requested route receipt with observed fields unset'
 foreach ($legacyId in $policy.aliases.Keys) {
     $legacyResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $legacyId | ConvertFrom-Json
     Assert ($legacyResolved.preset -ceq $policy.aliases[$legacyId]) 'Legacy preset alias'
