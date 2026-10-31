@@ -25,6 +25,7 @@ Describe 'Checked-in skill content' {
     It 'keeps the reusable task contract and failure recovery in the resident entrypoint' {
         $skill = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/custom/ai-coding-workflow/SKILL.md') -Raw
 
+        $skill | Should -Match '(?i)full-stack'
         foreach ($field in @('Goal:', 'Context:', 'Constraints:', 'Exact write set:', 'Minimum proof:', 'Done when:', 'Stop:')) {
             $skill | Should -Match ([regex]::Escape($field))
         }
@@ -33,6 +34,11 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?i)evidence, not permission'
         $skill | Should -Match '(?is)untrusted\s+evidence.*embedded\s+commands'
         $skill | Should -Match '(?is)preview/dry-run external/host writes.*rollback/compensation'
+        $skill | Should -Match '(?is)never reconstruct APIs.*from memory'
+        $skill | Should -Match '(?is)vertical slice.*UI/API/service/data'
+        $skill | Should -Match '(?is)Tests must not only mirror mocks'
+        $skill | Should -Match '(?is)API, schema, or data changes.*every known consumer.*migration rollback'
+        $skill | Should -Match '(?is)Redact secrets from logs.*screenshots.*receipts'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
     }
 
@@ -42,5 +48,17 @@ Describe 'Checked-in skill content' {
         $metadata | Should -Match 'allow_implicit_invocation:\s*true'
         $skill | Should -Match '(?i)user explicitly requests strict TDD'
         $skill | Should -Match '(?i)Do not require TDD for routine implementation'
+    }
+
+    It 'keeps the reference guide evidence-backed and focused on recurring AI coding failures' {
+        $guide = Get-Content -LiteralPath (Join-Path $repoRoot 'docs/product/ai-coding-workflow-guide.md') -Raw
+
+        $guide | Should -Match '## 3\. 常见失效模式与防线'
+        $guide | Should -Match '虚构 API 或依赖'
+        $guide | Should -Match '测试假阳性'
+        $guide | Should -Match '全栈接缝断裂'
+        $guide | Should -Match 'https://developers\.openai\.com/codex/prompting'
+        $guide | Should -Match 'https://code\.claude\.com/docs/en/best-practices'
+        $guide | Should -Match 'https://github\.com/github/spec-kit'
     }
 }
