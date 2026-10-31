@@ -134,6 +134,23 @@ function Write-CommandResult($Result) {
     if ($Result.exit_code -ne 0) { exit $Result.exit_code }
 }
 
+function Assert-NoUnhandledCommandArgs([string]$Command, [object[]]$CommandArgs) {
+    # These commands own no positional or --long-option parser. PowerShell's
+    # ValueFromRemainingArguments would otherwise silently discard typos such
+    # as "-Help" and continue into an interactive or host-writing command.
+    $commandsWithoutExtraArgs = @(
+        'menu', '初始化', '新增技能库', '删除技能库', '发现', '命令导入安装',
+        '安装', '选择', '构建生效', '更新', '锁定', '验证锁定',
+        '打开配置', '解除关联', '清理备份'
+    )
+    if ($commandsWithoutExtraArgs -notcontains $Command) { return }
+    $extra = @($CommandArgs | ForEach-Object { [string]$_ } | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+        })
+    if ($extra.Count -eq 0) { return }
+    throw ("命令 '{0}' 不支持额外参数：{1}。请运行 .\skills.ps1 帮助 查看支持的调用形式。" -f $Command, ($extra -join ', '))
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         # Command-specific parsers own all remaining tokens, including --long-options.
@@ -158,6 +175,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             Write-Warning ("命令别名 '{0}' 已弃用；请改用 '{1}'。" -f $Cmd, $canonicalCmd)
             $Cmd = $canonicalCmd
         }
+        Assert-NoUnhandledCommandArgs $Cmd $args
         switch ($Cmd) {
             "menu" { 菜单 }
             "初始化" { 初始化 }

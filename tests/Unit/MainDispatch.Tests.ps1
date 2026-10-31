@@ -1,3 +1,7 @@
+BeforeAll {
+    . (Join-Path $PSScriptRoot '../../src/Main.ps1')
+}
+
 Describe 'CLI alias dispatch' {
     It 'routes <Command> once and preserves its arguments' -ForEach @(
         @{ Command = '安装MCP'; Expected = 'install'; Tokens = @('fixture', '--json') }
@@ -41,6 +45,48 @@ Describe 'CLI alias dispatch' {
             $record.handler | Should -Be $Expected
             @($record.tokens).Count | Should -Be $Tokens.Count
             (@($record.tokens) -join '|') | Should -Be ($Tokens -join '|')
+        }
+        finally { $pipeline.Dispose() }
+    }
+}
+
+Describe 'Unhandled command arguments fail closed' {
+    It 'rejects extra tokens for commands that have no command-argument parser' {
+        { Assert-NoUnhandledCommandArgs '构建生效' @('-Help') } |
+            Should -Throw '*命令 ''构建生效'' 不支持额外参数：-Help*'
+        { Assert-NoUnhandledCommandArgs '更新' @('--dry-run') } |
+            Should -Throw '*命令 ''更新'' 不支持额外参数*'
+    }
+
+    It 'leaves command-owned argument parsers untouched' {
+        { Assert-NoUnhandledCommandArgs 'ai-coding' @('--help') } | Should -Not -Throw
+        { Assert-NoUnhandledCommandArgs '审查目标' @('列表') } | Should -Not -Throw
+        { Assert-NoUnhandledCommandArgs '构建生效' @() } | Should -Not -Throw
+    }
+
+    It 'stops build dispatch before the handler executes' {
+        $pipeline = [powershell]::Create()
+        try {
+            $driver = {
+                param($MainPath)
+                $Cmd = '构建生效'
+                $CommandArgs = @('-Help')
+                $Filter = ''
+                $RunPlan = $false
+                function Merge-FilterAndArgs($Filter, $Remaining) { return ,(@($Filter) + $Remaining) }
+                function ConvertTo-AsciiJson([string]$Json) { return $Json }
+                function Log {}
+                function Write-Host {
+                    param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Messages)
+                    Write-Output ($Messages -join ' ')
+                }
+                function 构建生效 { Write-Output 'BUILD_RAN' }
+                & $MainPath
+            }
+            $mainPath = Join-Path $PSScriptRoot '../../src/Main.ps1'
+            $output = @($pipeline.AddScript($driver.ToString()).AddArgument($mainPath).Invoke())
+            ($output -join "`n") | Should -Match '不支持额外参数'
+            ($output -join "`n") | Should -Not -Match 'BUILD_RAN'
         }
         finally { $pipeline.Dispose() }
     }
