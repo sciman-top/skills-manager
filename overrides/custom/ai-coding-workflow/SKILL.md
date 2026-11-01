@@ -33,6 +33,22 @@ versions, generated files and callers. Use source, types, local help or current
 official docs; never reconstruct APIs, configuration keys, package versions or
 framework behavior from memory.
 
+## Shape the task before coding
+
+Turn an underspecified request into a short contract before touching code:
+
+- state the user-visible outcome, affected entrypoints and non-goals;
+- identify the current behavior and one concrete failure, example or acceptance
+  case; if none exists, add a disposable reproduction rather than guessing;
+- split work at dependency boundaries (producer/consumer, UI/API, or service/data),
+  and give each slice an owner, disjoint write set and independent proof;
+- record open assumptions and ask only when the answer changes scope, safety or
+  compatibility. Otherwise choose the smallest reversible default and report it.
+
+For long tasks, keep a compact decision log containing the contract, changed
+paths, proof receipts and unresolved risks. After compaction or handoff, reload
+that log and recheck mutable repository state before continuing.
+
 ## Choose the lightest path
 
 - **tiny/direct**: clear local change; inspect, edit and run focused proof.
@@ -76,6 +92,14 @@ After two failed corrections to the same problem, or conflicting acceptance
 criteria, summarize facts, attempts and the open question, then ask the user
 for clarification. Context compaction or handoff does not replace clarification;
 preserve evidence, authorization and stop.
+
+Common AI failure modes are treated as gates: invented APIs or versions require
+source/help confirmation; broad rewrites require a demonstrated gap; green
+mock-only tests require a real boundary check; generated-file edits require a
+source rebuild; hidden fallback or retry behavior requires an explicit trigger,
+budget and observable receipt; secrets, access-bearing URLs and full payloads
+must be redacted before output. If a check cannot observe the claimed boundary,
+label that boundary unverified instead of upgrading the claim.
 
 Show the command, exit code and relevant result. Keep `repo_verified`,
 `filesystem_projected`, `host_loaded`, and `live_accepted` separate; lower
