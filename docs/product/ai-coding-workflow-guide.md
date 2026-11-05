@@ -1,7 +1,7 @@
 # AI 编码工作流与约束（参考件）
 
 **定位**：本文件是参考件，不是规则、不是门禁，不进入任何宿主上下文。高频稳定闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`。本文合并原《AI 编码效能手册》与《通用指南》，取代二者。
-**核实日期**：2026-11-01。外部依据见第 7 节。
+**核实日期**：2026-11-05。外部依据见第 7 节。
 
 ## 1. 顶层宗旨
 
@@ -84,6 +84,7 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 - 冻结面：PRD §3.1 为唯一清单，AGENTS.md 只指向它。
 - 生成物：`build.ps1 -Check` 与 CI `-CheckGenerated`；hook 只是辅助，Bash 写入不受 hook 覆盖，最终裁决是 CI。
 - 门禁：`scripts/quality/run-local-quality-gates.ps1`，选档以 `resolve-gate-profile.ps1` 为准。
+- 全局规则宿主：六份（9.93 起新增 dsh）。dsh 只投影 `~/.dsh/AGENTS.md`，共享槽 `~/.agents/AGENTS.md` 保持空缺；技能面仍五宿主共享 `~/.agents/skills`，dsh 天然流入。真源见 `rules/global/README.md` 与 `rules/global/platforms/dsh.md`。
 - 已知缺口：Bash 写入生成物未被 hook 拦截；PR 章程仍为表单式校验（只查占位符，不查语义）。
 
 ## 7. 依据

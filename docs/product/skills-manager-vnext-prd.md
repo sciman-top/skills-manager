@@ -1,5 +1,7 @@
 # skills-manager PRD
 
+**最后更新**：2026-11-05（全局规则宿主扩至六份，新增 DeepSeek Harness/dsh）。
+
 ## 1. 产品目标
 
 在 Windows 和 PowerShell 7 环境中，用一个本地、可审查、可回滚的配置管理技能来源、安装映射、MCP server、目标仓审查、规则审查和宿主原生技能投影。
@@ -8,7 +10,7 @@
 
 ## 2. 用户与任务
 
-主要用户是使用 ChatGPT Desktop/Codex、Claude Code、ZCode 或 Antigravity 等宿主，并维护多个技能来源和 Windows 项目仓库的个人开发者；他们按任务选择当前可用的模型与宿主，不预设固定接力链。这里的 Claude 支持面是 Claude Code 的本机配置与技能投影，包括 Claude Desktop 内的 Code 会话；普通 Claude Desktop 聊天使用账号同步 skills/plugins，不由本机 `.claude` 投影管理或验收。核心任务：
+主要用户是使用 ChatGPT Desktop/Codex、Claude Code、ZCode、Antigravity、WorkBuddy 或 DeepSeek Harness（dsh）等宿主，并维护多个技能来源和 Windows 项目仓库的个人开发者；他们按任务选择当前可用的模型与宿主，不预设固定接力链。这里的 Claude 支持面是 Claude Code 的本机配置与技能投影，包括 Claude Desktop 内的 Code 会话；普通 Claude Desktop 聊天使用账号同步 skills/plugins，不由本机 `.claude` 投影管理或验收。核心任务：
 
 1. 浏览、安装、卸载、更新和锁定技能。
 2. 管理 MCP server 清单及目标配置。

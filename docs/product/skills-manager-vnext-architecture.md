@@ -117,7 +117,7 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 
 ### Hermes consumer 与受控技能演进（未来、POC 门禁）
 
-Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 runtime。它是一个可能消费技能的外部宿主；目前不存在 `HermesAdapter`、Gateway controller、Kanban bridge 或任何对 `~/.hermes` 的写路径。Codex `~/.codex/agents` 的 native-agent bridge 是独立、可选且受投影晋级合同约束的宿主适配，不改变 Hermes 边界。
+Hermes 不是本仓的运行主链，也不是本仓需要嵌入的 runtime。它是一个可能消费技能的外部宿主；目前不存在 `HermesAdapter`、Gateway controller、Kanban bridge 或任何对 `~/.hermes` 的写路径。Codex `~/.codex/agents` 的 native-agent bridge 是独立、可选且受投影晋级合同约束的宿主适配，不改变 Hermes 边界。
 
 在隔离 POC 未证明真实差异前，Hermes 只应消费项目级 `.agents/skills`，或消费经 ACL/独立用户保护的只读副本。现有 native projection 已能表达 source、package hash、managed/external ownership、receipt 和 rollback 时，不新增 consumer module。
 
