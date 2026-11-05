@@ -5,7 +5,7 @@ BeforeAll {
 
 Describe 'Agent host registry' {
     It 'keeps the ordered host list stable' {
-        Get-AgentHostIds | Should -Be @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')
+        Get-AgentHostIds | Should -Be @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')
     }
 
     It 'binds every host fact to the repository rule tree' {
@@ -25,36 +25,38 @@ Describe 'Agent host registry' {
     }
 
     It 'reports compatibility freshness without claiming host loading or live acceptance' {
-        $current = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-29') -MaxAgeDays 30)
-        $current.Count | Should -Be 5
+        $current = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-11-09') -MaxAgeDays 30)
+        $current.Count | Should -Be 6
         @($current | Where-Object status -ne 'current').Count | Should -Be 0
         @($current | Where-Object host_loaded).Count | Should -Be 0
         @($current | Where-Object live_accepted).Count | Should -Be 0
 
-        $stale = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-12-01') -MaxAgeDays 30)
-        @($stale | Where-Object status -eq 'stale').Count | Should -Be 5
+        $stale = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-12-15') -MaxAgeDays 30)
+        @($stale | Where-Object status -eq 'stale').Count | Should -Be 6
     }
 
     It 'treats same-day verified_on as current at any hour, not future' {
         # 回归钉：verified_on 是本地日历日期。UTC+ 时区当天清晨曾因
         # AssumeUniversal+ToUniversalTime 折算被误判为 future。
-        $sameDay = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-25 06:30') -MaxAgeDays 30)
+        $sameDay = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-11-05 06:30') -MaxAgeDays 30)
         @($sameDay | Where-Object status -ne 'current').Count | Should -Be 0
-        @($sameDay | Where-Object { $_.age_days -ne 0 }).Count | Should -Be 0
+        @($sameDay | Where-Object { $_.host -eq 'dsh' }).age_days | Should -Be 0
 
         $future = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-20') -MaxAgeDays 30)
-        @($future | Where-Object status -eq 'future').Count | Should -Be 5
+        @($future | Where-Object status -eq 'future').Count | Should -Be 6
     }
 
-    It 'keeps every host ValidateSet in product source in sync with the registry' {
+    It 'keeps every host ValidateSet in product source in sync with its surface' {
         # AST 校验已知函数参数的 ValidateSet；再扫描 src 源文本，任何以
-        # codex 起头的宿主 ValidateSet 字面量都必须与注册表全等，防止出现
-        # 新的平行枚举。
-        $expected = @(Get-AgentHostIds)
+        # codex 起头的宿主 ValidateSet 字面量都必须与其表面的宿主清单全等，
+        # 防止出现新的平行枚举。规则面=注册表全量；技能面=五个技能 target
+        # 宿主（dsh 经 ~/.agents/skills 共享根覆盖，刻意无独立技能 target）。
+        $ruleSurface = @(Get-AgentHostIds)
+        $skillSurface = @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')
         $reflectionTargets = @(
-            @{ Command = 'Get-RuleDiscovery'; Parameter = 'HostName'; File = 'src\Application\RuleDiscovery.ps1' }
-            @{ Command = 'Resolve-SkillProjectionSelection'; Parameter = 'HostName'; File = 'src\Application\SkillProjection.ps1' }
-            @{ Command = 'Get-SkillProjectionEffectiveSelection'; Parameter = 'DefaultHost'; File = 'src\Application\SkillProjection.ps1' }
+            @{ Command = 'Get-RuleDiscovery'; Parameter = 'HostName'; File = 'src\Application\RuleDiscovery.ps1'; Expected = $ruleSurface }
+            @{ Command = 'Resolve-SkillProjectionSelection'; Parameter = 'HostName'; File = 'src\Application\SkillProjection.ps1'; Expected = $skillSurface }
+            @{ Command = 'Get-SkillProjectionEffectiveSelection'; Parameter = 'DefaultHost'; File = 'src\Application\SkillProjection.ps1'; Expected = $skillSurface }
         )
         foreach ($target in $reflectionTargets) {
             $tokens = $null; $errors = $null
@@ -67,16 +69,20 @@ Describe 'Agent host registry' {
             $paramDef | Should -Not -BeNullOrEmpty
             $validateSet = @($paramDef.Attributes | Where-Object { $_.TypeName.Name -eq 'ValidateSet' })[0]
             $validateSet | Should -Not -BeNullOrEmpty
-            @($validateSet.PositionalArguments | ForEach-Object { $_.Value }) | Should -Be $expected
+            @($validateSet.PositionalArguments | ForEach-Object { $_.Value }) | Should -Be $target.Expected
         }
         $sourceRoot = Join-Path $repoRoot 'src'
         $sourceFiles = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -Filter '*.ps1' -File | Where-Object { $_.FullName -notlike '*model-orchestration*' })
         $sourceFiles.Count | Should -BeGreaterThan 0
+        $allowedSurfaces = @(
+            ($ruleSurface -join '|'),
+            ($skillSurface -join '|')
+        )
         foreach ($file in $sourceFiles) {
             $text = [IO.File]::ReadAllText($file.FullName)
             foreach ($match in [regex]::Matches($text, "ValidateSet\('codex',\s*'claude'[^)]*\)")) {
                 $values = @([regex]::Matches($match.Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-                $values | Should -Be $expected
+                ($values -join '|') | Should -BeIn $allowedSurfaces
             }
         }
     }

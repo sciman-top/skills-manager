@@ -7,7 +7,7 @@ Describe "Doctor Enhancements" {
         $report = Invoke-Doctor @("--json", "--offline-contract")
         $report.checks.host_compatibility.read_only | Should -BeTrue
         $report.checks.host_compatibility.evidence_level | Should -Be 'repo_verified'
-        @($report.checks.host_compatibility.hosts).Count | Should -Be 5
+        @($report.checks.host_compatibility.hosts).Count | Should -Be 6
         @($report.checks.host_compatibility.hosts | Where-Object host_loaded).Count | Should -Be 0
     }
 

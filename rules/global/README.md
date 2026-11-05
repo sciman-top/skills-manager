@@ -2,7 +2,7 @@
 
 `common.md` 是共同规则的唯一源，包含 `1/A/C/D` 节和独立一行的 `{{PLATFORM}}` 占位符。`platforms/<host>.md` 只保存该宿主的 B 节。发布版本与日期在共同源中维护。
 
-`build.ps1` 确定性生成 Codex、Claude、ZCode、Antigravity 和 WorkBuddy 的宿主文件，同时生成 `skills.ps1`。全部输入先完成结构和预算校验，再写入生成文件；`build.ps1 -Check` 只读检查漂移。
+`build.ps1` 确定性生成 Codex、Claude、ZCode、Antigravity、WorkBuddy 和 DeepSeek Harness 的宿主文件，同时生成 `skills.ps1`。全部输入先完成结构和预算校验，再写入生成文件；`build.ps1 -Check` 只读检查漂移。
 
 ```powershell
 ./build.ps1
@@ -12,7 +12,7 @@
 ./skills.ps1 global-rules-apply --plan reports/global-rule-projection/plan.json --token <plan-token> --out reports/global-rule-projection/receipt.json --json
 ```
 
-可选宿主通过 `--zcode-user-root`、`--antigravity-user-root`、`--workbuddy-user-root` 指定既有用户规则目录。WorkBuddy 优先采用环境变量选择的根，否则采用已有 `.workbuddy-ai` 或 `.codebuddy`；选定根目录存在即可启用，不要求预先存在规则文件，也不自动创建根目录。apply、resume 和 rollback 必须提供与 plan/receipt 相同的根目录。
+可选宿主通过 `--zcode-user-root`、`--antigravity-user-root`、`--workbuddy-user-root`、`--dsh-user-root` 指定既有用户规则目录。WorkBuddy 优先采用环境变量选择的根，否则采用已有 `.workbuddy-ai` 或 `.codebuddy`；DeepSeek Harness 默认采用已存在的 `~/.dsh`；选定根目录存在即可启用，不要求预先存在规则文件，也不自动创建根目录。apply、resume 和 rollback 必须提供与 plan/receipt 相同的根目录。
 WorkBuddy 国内版与国际版必须视为两个独立投影实例：分别使用 `--workbuddy-user-root ~/.workbuddy` 与 `--workbuddy-user-root ~/.workbuddy-ai` 生成各自 plan、receipt、backup 和 rollback；一个根的成功不代表另一个根已投影或已加载。
 
 `global-rules-check` 检查 WorkBuddy 时可通过 `--workbuddy-user-root` 显式指定用户根。
@@ -26,3 +26,5 @@ WorkBuddy 国内版与国际版必须视为两个独立投影实例：分别使�
 Claude Desktop 的 Code tab 使用 Claude Code 本机规则；普通 Chat 与 Cowork 的 Customize instructions 是独立 profile 配置，不属于本文件投影。依据：[Claude Code memory](https://code.claude.com/docs/en/memory)、[Claude Desktop](https://code.claude.com/docs/en/desktop)（2026-10-17 读取）。
 
 Codex 的本机 `AGENTS.md`、ChatGPT Personalization 与 Work Web instructions 分属不同配置面，不因本机投影而自动互投。ZCode 仅自动拼接用户全局与当前 Workspace 根 `AGENTS.md`，不展开嵌套规则或 import；子目录的必要边界应在根规则给出按需读取入口。依据：[Codex instructions](https://developers.openai.com/codex/guides/agents-md)、[ZCode Agent](https://zcode.z.ai/cn/docs/agents)（2026-10-25 读取）。
+
+DeepSeek Harness（dsh）的用户全局链按序加载 `~/.dsh/AGENTS.md` 与共享槽 `~/.agents/AGENTS.md`（64 KiB/链独立预算）；本仓只投影前者，共享槽保持空缺——内容不同的文件不去重会双渲染，宿主专属差异入共享槽会泄漏给其它读取方。项目链由 dsh 原生消费各仓 `AGENTS.md`（`.git` 根向下逐层 + `AGENTS.local.md` 叠加），目标仓无需新增适配器；技能面经既有 `~/.agents/skills` 投影天然覆盖，不注册独立 skills target 以免双载。契约依据：dsh 内置插件文档 `@deepseek-ai/dsh-agent-instructions` 与 `@deepseek-ai/dsh-skill-filesystem`（安装包 app.asar 提取，2026-11-05 读取）。

@@ -1,5 +1,5 @@
-# AGENTS.md - Universal Agent Protocol v9.92 | ZCode / GLM
-**版本**: 9.92
+# AGENTS.md - Universal Agent Protocol v9.93 | ZCode / GLM
+**版本**: 9.93
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 ## 1. 阅读指引

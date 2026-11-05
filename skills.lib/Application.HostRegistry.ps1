@@ -1,4 +1,4 @@
-﻿# 五宿主事实的唯一登记点（单一真源）。收编此前散布在
+﻿# 六宿主事实的唯一登记点（单一真源）。收编此前散布在
 # RuleDiscovery、GlobalRuleProjection、SkillProjection 等处的平行枚举：
 # 宿主清单与顺序、全局规则文件名、用户根目录名、显示名。宿主能力、加载
 # 语义与各适配器差异留在用点建模，不在注册表内预抽象。
@@ -12,6 +12,7 @@ function Get-AgentHostFacts {
         [pscustomobject]@{ id = 'zcode'; display = 'ZCode'; label = 'ZCode / GLM'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.zcode'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
         [pscustomobject]@{ id = 'antigravity'; display = 'Antigravity'; label = 'Antigravity / Gemini'; file = 'GEMINI.md'; discovery_files = @('GEMINI.md'); root_dir = '.gemini'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
         [pscustomobject]@{ id = 'workbuddy'; display = 'WorkBuddy'; label = 'WorkBuddy / CodeBuddy'; file = 'CODEBUDDY.md'; discovery_files = @('CODEBUDDY.md', 'CODEBUDDY.mdc'); root_dir = '.workbuddy-ai'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'dsh'; display = 'DeepSeek Harness'; label = 'DeepSeek Harness'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.dsh'; contract_version = '2026-11'; verified_on = '2026-11-05'; verification_level = 'repo_verified' }
     )
 }
 

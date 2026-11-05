@@ -13,7 +13,7 @@ param(
 # exit code 0; only parameter usage errors exit 1.
 
 $riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
-$rulePath = '^(?:rules/global/(?:common\.md|platforms/(?:codex|claude|zcode|antigravity|workbuddy)\.md|(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS|antigravity/GEMINI|workbuddy/CODEBUDDY)\.md)|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
+$rulePath = '^(?:rules/global/(?:common\.md|platforms/(?:codex|claude|zcode|antigravity|workbuddy|dsh)\.md|(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS|antigravity/GEMINI|workbuddy/CODEBUDDY|dsh/AGENTS)\.md)|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
 $sourcePath = '^(src/|tests/Unit/)'
 $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|rules/global/README\.md$|src/model-orchestration/(?:README|AGENTS)\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
 $skillFocusedPath = '^overrides/(custom|patches)/[^/]+/(?:SKILL\.md|agents/openai\.yaml)$'
