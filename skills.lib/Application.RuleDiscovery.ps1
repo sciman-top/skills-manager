@@ -103,7 +103,7 @@ function Get-RuleDiscovery {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [string]$CurrentDirectory = $RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')][string]$HostName,
         [string]$UserRuleRoot,
         [string[]]$FallbackNames = @(),
         [int]$MaxCombinedBytes = 32768

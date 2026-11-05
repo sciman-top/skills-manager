@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.92
-**最后更新**: 2026-10-25
+**全局规则复核**: 9.93
+**最后更新**: 2026-11-05
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。
@@ -11,7 +11,7 @@
 - 真值层级 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`，低层证据不得外推。
 
 ## 2. 构建与生成物
-- `build.ps1` 从 `src/` 生成根 `skills.ps1` 与 `skills.lib/`，并从 `rules/global/` 生成五份全局宿主规则。`-Check` 只读核对漂移。禁止手改生成物。
+- `build.ps1` 从 `src/` 生成根 `skills.ps1` 与 `skills.lib/`，并从 `rules/global/` 生成六份全局宿主规则。`-Check` 只读核对漂移。禁止手改生成物。
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录：先改 source、config 或 override，再构建。
 - `skills.ps1 构建生效` 会写宿主目录，属于外部投影动作；仓库内开发验证只运行 `build.ps1` 与测试。
 - runtime 为 PowerShell 7-only，Windows 优先。
