@@ -478,6 +478,19 @@ Describe 'Global rule CLI boundaries' {
         }finally{$env:CODEX_HOME=$oldCodex;$env:CLAUDE_CONFIG_DIR=$oldClaude}
     }
 
+    It 'uses an explicit DSH_HOME root and rejects a missing one instead of disabling' {
+        $oldDsh=$env:DSH_HOME
+        try{
+            $env:DSH_HOME=$codex
+            $parsed=Parse-GlobalRuleOptions @() check;$parsed.dsh_user_root|Should -Be $codex;$parsed.dsh_user_root_source|Should -Be 'DSH_HOME'
+            $parsed=Parse-GlobalRuleOptions @('--dsh-user-root',$claude) check;$parsed.dsh_user_root|Should -Be $claude;$parsed.dsh_user_root_source|Should -Be 'cli'
+            $env:DSH_HOME=Join-Path $TestDrive 'missing-dsh-root'
+            {
+                Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude)
+            } | Should -Throw '*DSH user root does not exist or is not a directory*'
+        }finally{$env:DSH_HOME=$oldDsh}
+    }
+
     It 'rejects a missing explicit ZCode root instead of treating it as disabled' {
         $missing = Join-Path $TestDrive 'missing-zcode-root'
         {
