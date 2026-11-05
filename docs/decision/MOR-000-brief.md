@@ -5,6 +5,12 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-11-05 池修订：DeepSeek/max（通道目录漂移对齐）
+
+操作者钉定四元组池为 gpt-6-luna/max、deepseek-v4.1-flash/max、glm-5.3-flash（Codex=xhigh、ZCode=max 分面不变）与 gemini-3.8-flash-high/high。同日通道目录一手实测（`codex debug models`）证明 deepseek-v4.1-flash 声明 low/high/max 且 **xhigh 已被目录移除**——2026-10-13 起钉定的 deepseek/xhigh 属潜伏失效元组（launcher 预检与 Apply 目录预检都会 tuple_unsupported），本次修订同时消除该漂移。GLM 的 max 仍不在目录声明内，Codex 面白名单维持拒绝。deepseek/max 经 `Start-ModelSlot` 严格入口最小请求 1 次 turn.completed 返回 agent_message=OK（read-only ephemeral，input≈17.4k tok，C13）。池沿革：2026-10-20 haiku 退役、2026-10-25 四族恢复（当时 DeepSeek 钉 xhigh），presets.json 为唯一真源。本节取代下文各节的启用池描述，其余原则（一请求/一显式重选/停等、ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论）不变。
+
+下文 2026-10-18/2026-10-17/2026-10-12/2026-10-13/2026-10-11/2026-10-07 各节描述的启用池与路由已由 presets.json 现值与本节取代，仅保留为历史。
+
 ## 2026-10-18 槽位路由与原生宿主分面修订
 
 当前 schema v7 的 Codex 分工映射以 `src/model-orchestration/presets.json` 为准：`quick_triage`→Haiku/medium；`routine_maintenance`、`bounded_implementation`、`test_execution`→GLM/xhigh；`standard_review`→Haiku/high；`deep_implementation`→Gemini/high；`deep_investigation`、`documentation_review`、`architecture_review`→Luna/max。Haiku 自身槽位表为 medium（triage）、high（routine/standard/test/docs）、xhigh（bounded/deep/architecture），供选择 Haiku preset 时使用。九槽位描述任务职责，六个精确元组角色描述模型选择，不增加并发配额。
