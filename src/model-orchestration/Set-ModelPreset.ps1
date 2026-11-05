@@ -16,7 +16,8 @@ $ErrorActionPreference = 'Stop'
 $allowedModelEffortByHost = [ordered]@{
     codex = @(
         'gpt-6-luna|max'
-        'deepseek-v4.1-flash|xhigh'
+        # The 2026-11-05 Codex catalog declares DeepSeek reasoning levels low/high/max (xhigh is gone).
+        'deepseek-v4.1-flash|max'
         'glm-5.3-flash|xhigh'
         # The current Codex native catalog exposes this Gemini Flash model ID with the high tier in its slug.
         'gemini-3.8-flash-high|high'
@@ -25,7 +26,7 @@ $allowedModelEffortByHost = [ordered]@{
 }
 $allowedNativeCodexModelEffortTuples = @(
     'gpt-6-luna|max'
-    'deepseek-v4.1-flash|xhigh'
+    'deepseek-v4.1-flash|max'
     'glm-5.3-flash|xhigh'
     'gemini-3.8-flash-high|high'
 )
@@ -486,8 +487,14 @@ $files = [Collections.Generic.List[object]]::new()
 function AddFile([string]$Path,[string]$Text) {
     $files.Add(@{path=[IO.Path]::GetFullPath($Path); text=$Text; before_hash=(Hash $Path)})
 }
+function AddFileDelete([string]$Path) {
+    # Deletion entry: text=$null removes the file during Apply; RestoreFile recreates
+    # it from before_hash/backup on rollback.
+    $files.Add(@{path=[IO.Path]::GetFullPath($Path); text=$null; before_hash=(Hash $Path)})
+}
 $codexManagedMarker = '# managed-by: skills-manager/model-orchestration'
 $managedCodexAgentNames = [Collections.Generic.List[string]]::new()
+$sweptAgentNames = [Collections.Generic.List[string]]::new()
 $generatedCodexRoleText = @{}
 function AddCodexAgentFile([string]$Name,[string]$Text) {
     if ($Name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_-]*$') { throw "Invalid managed Codex agent name: $Name" }
@@ -689,6 +696,21 @@ foreach ($slot in $slotNames) {
     $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Native route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
 $activeBlocks = $activeRoleBlocks -join "`n"
+# Retire managed agent files that no longer belong to the projected set: a renamed
+# tuple role (e.g. deepseek_xhigh -> deepseek_max) must not leave its stale managed
+# file behind, or Verify flags it forever. Unmarked files stay untouched (fail closed).
+if ($ExecutionHost -ceq 'codex' -and $managedCodexAgentNames.Count -gt 0) {
+    $agentRoot = Join-Path $CodexRoot 'agents'
+    if (Test-Path -LiteralPath $agentRoot -PathType Container) {
+        foreach ($stale in @(Get-ChildItem -LiteralPath $agentRoot -Filter '*.toml' -File)) {
+            $staleName = [IO.Path]::GetFileNameWithoutExtension($stale.Name)
+            if ($staleName -cin @($managedCodexAgentNames)) { continue }
+            if (([IO.File]::ReadAllText($stale.FullName)) -cnotmatch [regex]::Escape($codexManagedMarker)) { continue }
+            AddFileDelete $stale.FullName
+            $sweptAgentNames.Add($staleName)
+        }
+    }
+}
 $configPath = Join-Path $CodexRoot 'config.toml'
 $standard = @(Get-PresetMenu $modelPreset 'codex')[$modelPreset.slot_map['routine_maintenance']]
 $defaultSubagent = $nativeRoutes['routine_maintenance']
@@ -827,7 +849,11 @@ if ($ExecutionHost -eq 'zcode' -and 'zcode' -in $modelPreset.hosts) {
         AddFile $path (($body -join "`n")+"`n")
     }
 }
-$changed = @($files | Where-Object { -not (Test-Path -LiteralPath $_.path) -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") })
+$changed = @($files | Where-Object {
+    $exists = Test-Path -LiteralPath $_.path
+    if ($null -ceq $_.text) { $exists }
+    else { -not $exists -or [IO.File]::ReadAllText($_.path).Replace("`r`n","`n") -cne $_.text.Replace("`r`n","`n") }
+})
 if ($Action -eq 'Plan') {
     $nativeTupleRoles = @($enabledRoutes | Where-Object { Test-NativePreset $_.preset } | ForEach-Object { @{ role=$_.role; model=$_.model; effort=$_.effort } })
     $nativePolicy = @{ enabled=$nativeAgentAvailable; default_slot='routine_maintenance'; default_model=$defaultSubagent.model; default_effort=$defaultSubagent.effort; tuple_roles=$nativeTupleRoles; direct_cli_path='Start-ModelSlot.ps1' }
@@ -837,7 +863,7 @@ if ($Action -eq 'Plan') {
 if ($changed.Count -eq 0) { 'No changes.'; return }
 $run = Join-Path $stateRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($run) | Out-Null
-$receipt = @{schema_version=2;preset=$Preset;active_presets=$activePresets;scope=$projectionScope;status='prepared';capability=$capability;files=@()}
+$receipt = @{schema_version=2;preset=$Preset;active_presets=$activePresets;scope=$projectionScope;status='prepared';capability=$capability;swept_managed_agents=@($sweptAgentNames);files=@()}
 foreach ($f in $changed) {
     if ((Hash $f.path) -cne $f.before_hash) { throw "Before-hash drift: $($f.path)" }
     $backup = Join-Path $run ("$($receipt.files.Count).bak")
@@ -850,7 +876,7 @@ try {
     for ($i=0; $i -lt $changed.Count; $i++) {
         $f=$changed[$i]
         if ((Hash $f.path) -cne $f.before_hash) { throw "Apply drift: $($f.path)" }
-        WriteAtomic $f.path $f.text
+        if ($null -ceq $f.text) { Remove-Item -LiteralPath $f.path } else { WriteAtomic $f.path $f.text }
         $receipt.files[$i].after_hash = Hash $f.path
         WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
     }
@@ -860,7 +886,7 @@ try {
 catch {
     $failure = $_
     $receipt.status='apply_failed'; WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
-    $applied = @($receipt.files | Where-Object after_hash)
+    $applied = @($receipt.files | Where-Object { $_.after_hash -ne $null -or ($_.before_hash -and -not (Test-Path -LiteralPath $_.path)) })
     try {
         for ($j=$applied.Count-1; $j -ge 0; $j--) { RestoreFile $applied[$j] }
         $receipt.status='rolled_back'
@@ -869,4 +895,4 @@ catch {
     WriteAtomic $receiptFile ($receipt | ConvertTo-Json -Depth 12)
     throw "Apply failed ($($failure.Exception.Message)); $($receipt.status). Receipt: $receiptFile"
 }
-@{preset=$Preset;host=$ExecutionHost;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;capability=$capability;host_loaded=$false;execution_boundary='Codex projects named model-pinned native slots and tuple roles; Start-ModelSlot.ps1 is a separate explicitly invoked one-shot CLI path'} | ConvertTo-Json -Depth 12
+@{preset=$Preset;host=$ExecutionHost;active_presets=$activePresets;scope=$projectionScope;receipt=$receiptFile;changed=$changed.Count;swept_managed_agents=@($sweptAgentNames);capability=$capability;host_loaded=$false;execution_boundary='Codex projects named model-pinned native slots and tuple roles; Start-ModelSlot.ps1 is a separate explicitly invoked one-shot CLI path'} | ConvertTo-Json -Depth 12

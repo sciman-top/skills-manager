@@ -87,17 +87,17 @@
     "quick_triage": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "routine_maintenance": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "standard_review": [
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "bounded_implementation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
@@ -107,7 +107,7 @@
     "deep_investigation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "deep_implementation": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
@@ -117,17 +117,17 @@
     "test_execution": [
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "documentation_review": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gpt6_luna_only", "model": "gpt-6-luna", "effort": "max" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ],
     "architecture_review": [
       { "preset": "glm53_flash_only", "model": "glm-5.3-flash", "effort": "xhigh" },
       { "preset": "gemini38_flash_only", "model": "gemini-3.8-flash-high", "effort": "high" },
-      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "xhigh" }
+      { "preset": "deepseek41_flash_only", "model": "deepseek-v4.1-flash", "effort": "max" }
     ]
   },
   "presets": {
@@ -162,7 +162,7 @@
       "menu": [
         {
           "model": "deepseek-v4.1-flash",
-          "effort": "xhigh"
+          "effort": "max"
         }
       ],
       "slot_map": {
