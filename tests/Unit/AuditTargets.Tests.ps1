@@ -900,6 +900,105 @@ $scan.detected.artifact_capabilities | Out-Null
             }
         }
 
+        It "Carries forward the most recent prior snapshot for skipped dirty targets with provenance" {
+            $oldRoot = $script:Root
+            try {
+                $fixtureId = [Guid]::NewGuid().ToString("N")
+                $script:Root = Join-Path $TestDrive ("carry-scan-root-{0}" -f $fixtureId)
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $outBase = Join-Path $TestDrive ("carry-bundle-base-{0}" -f $fixtureId)
+                $outDir = Join-Path $outBase "20261104-000000-000"
+                New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+                $dirtyRepo = Join-Path $TestDrive ("carry-dirty-target-{0}" -f $fixtureId)
+                New-Item -ItemType Directory -Path $dirtyRepo -Force | Out-Null
+                Push-Location $dirtyRepo
+                try {
+                    git init | Out-Null
+                    Set-ContentUtf8 (Join-Path $dirtyRepo "package.json") '{"name":"audit-carry-fixture","scripts":{"test":"vitest"}}'
+                    git add . | Out-Null
+                    git commit -m init | Out-Null
+                }
+                finally {
+                    Pop-Location
+                }
+                Set-ContentUtf8 (Join-Path $dirtyRepo "uncommitted.ps1") "Write-Output 'dirty'"
+                $resolvedRepo = [IO.Path]::GetFullPath((Resolve-AuditTargetPath $dirtyRepo))
+                $priorRunId = "20261104-000000-000"
+                $priorSnapshot = [ordered]@{
+                    schema_version = 2
+                    snapshot_kind = "audit_input"
+                    run_id = $priorRunId
+                    target_scans = @(
+                        [pscustomobject]@{
+                            schema_version = 1
+                            scanned_at = "2026-11-04T00:00:00.0000000+08:00"
+                            target = [pscustomobject]@{ name = "dirty"; path = $dirtyRepo; resolved_path = $resolvedRepo; exists = $true }
+                            git = [pscustomobject]@{ is_repo = $true; dirty = $false }
+                            detected = [ordered]@{
+                                languages = @("javascript")
+                                package_managers = @("npm")
+                                frameworks = @("vite")
+                                build_commands = @()
+                                test_commands = @("npm test")
+                                capabilities = @()
+                                artifact_capabilities = @()
+                                requirement_signals = @()
+                                agent_rule_files = @()
+                                notable_files = @("package.json")
+                            }
+                            scan_coverage = [pscustomobject]@{
+                                status = "complete"
+                                population_count = 10
+                                sampled_count = 10
+                                sample_limit = 600
+                                truncated = $false
+                                large_file_count = 0
+                                text_truncated_count = 0
+                                self_referential_count = 0
+                                read_failure_count = 0
+                                sampled_by_kind = [pscustomobject]@{ source_code = 8; supporting_code = 0; test = 2; non_product_code = 0 }
+                                confidence_ceiling = "complete_source_population"
+                            }
+                            risks = @()
+                        }
+                    )
+                }
+                Set-ContentUtf8 (Join-Path $outDir "snapshot.json") ($priorSnapshot | ConvertTo-Json -Depth 12)
+                $scanConfig = [pscustomobject]@{
+                    version = 3
+                    path_base = "skills_manager_root"
+                    targets = @(
+                        [pscustomobject]@{ name = "dirty"; path = $dirtyRepo; enabled = $true; tags = @(); notes = "" }
+                    )
+                }
+                Mock Load-AuditTargetsEffectiveConfig { $scanConfig }
+                Mock Write-AuditThreeFileBundle {
+                    param($ReportRoot, $RunId, $Mode, $Query, $Config, [object[]]$Scans)
+                    [pscustomobject]@{ scans = @($Scans) }
+                }
+
+                $result = Invoke-AuditTargetsScan -OutDir (Join-Path $outBase "20261105-120000-000") -SkipDirty
+                $dirtyScan = @($result.scans)[0]
+
+                $dirtyScan.git.dirty | Should -Be $true
+                $dirtyScan.scan_coverage.status | Should -Be "carried_forward"
+                # 新鲜度契约：结转画像仍按 skipped_dirty 处理，组合汇总不视为新鲜扫描。
+                $dirtyScan.scan_coverage.confidence_ceiling | Should -Be "skipped_dirty"
+                $dirtyScan.dirty_skip.carried_from_run_id | Should -Be $priorRunId
+                $dirtyScan.dirty_skip.carried_from_scanned_at | Should -Be "2026-11-04T00:00:00.0000000+08:00"
+                @($dirtyScan.detected.package_managers) | Should -Contain "npm"
+                @($dirtyScan.detected.frameworks) | Should -Contain "vite"
+                @($dirtyScan.risks) | Should -Contain "scan_skipped_dirty"
+                $profile = New-AuditTargetProfile @($dirtyScan)
+                $profile.scanned_target_count | Should -Be 0
+                $profile.skipped_target_count | Should -Be 1
+                @($profile.target_names) | Should -Contain "dirty"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Extracts dotnet/python/ci command hints from repo scan inputs" {
             $repo = Join-Path $TestDrive "target-repo-granular"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null

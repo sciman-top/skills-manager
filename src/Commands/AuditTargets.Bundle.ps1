@@ -168,6 +168,55 @@ function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [sw
     return $reportRoot
 }
 
+function Get-AuditCarriedTargetScanMap([string]$ReportRoot, [string]$CurrentRunId, [object[]]$Targets) {
+    # --skip-dirty 结转：在途修改仓以最近一次真实扫描画像参与评估（用户裁决
+    # 2026-11-05）。证据必须带显式来源（dirty_skip.carried_from_*），且
+    # confidence_ceiling 保持 skipped_dirty——New-AuditTargetProfile 据此把
+    # 结转仓排除在组合汇总之外，旧信号不会在需求排序里冒充新鲜扫描。
+    $map = @{}
+    $base = Split-Path -Parent ([IO.Path]::GetFullPath($ReportRoot))
+    $pending = @(
+        @($Targets) | ForEach-Object {
+            [pscustomobject]@{
+                name = [string]$_.name
+                resolved = ([IO.Path]::GetFullPath((Resolve-AuditTargetPath ([string]$_.path)))).TrimEnd('\', '/').ToLowerInvariant()
+            }
+        }
+    )
+    if ([string]::IsNullOrWhiteSpace($base) -or -not [IO.Directory]::Exists($base) -or @($pending).Count -eq 0) { return $map }
+    $runDirs = @(
+        Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne $CurrentRunId } |
+            Sort-Object Name -Descending
+    )
+    foreach ($dir in $runDirs) {
+        if (@($pending).Count -eq 0) { break }
+        $snapshotPath = Join-Path $dir.FullName "snapshot.json"
+        if (-not [IO.File]::Exists($snapshotPath)) { continue }
+        $prior = $null
+        try { $prior = Get-ContentUtf8 $snapshotPath | ConvertFrom-Json } catch { continue }
+        # 两跳惯用法：Get-CfgObjectProperty 对数组属性走 Write-Output -NoEnumerate，
+        # 直接 @(<调用>) 会把未枚举数组包成嵌套 [[entry]]；先赋变量再 @() 才是平铺。
+        $priorScans = Get-CfgObjectProperty $prior "target_scans"
+        if ($null -eq $priorScans) { $priorScans = @() }
+        $priorScans = @($priorScans)
+        $stillPending = @()
+        foreach ($item in @($pending)) {
+            $match = @($priorScans | Where-Object {
+                $scanTarget = Get-CfgObjectProperty $_ "target"
+                $coverage = Get-CfgObjectProperty $_ "scan_coverage"
+                (([string](Get-CfgObjectProperty $scanTarget "name")) -eq $item.name) -and
+                ((([IO.Path]::GetFullPath([string](Get-CfgObjectProperty $scanTarget "resolved_path")))).TrimEnd('\', '/').ToLowerInvariant() -eq $item.resolved) -and
+                (([string](Get-CfgObjectProperty $coverage "confidence_ceiling")) -ne "skipped_dirty")
+            } | Select-Object -First 1)
+            if (@($match).Count -gt 0) { $map[$item.name] = [pscustomobject]@{ scan = $match[0]; run_id = $dir.Name } }
+            else { $stillPending += $item }
+        }
+        $pending = @($stillPending)
+    }
+    return $map
+}
+
 function Invoke-AuditTargetsScan {
     param([string]$Target, [string]$Query = "", [string]$OutDir, [switch]$Force, [switch]$SkipDirty)
     $cfg = Load-AuditTargetsEffectiveConfig
@@ -179,6 +228,7 @@ function Invoke-AuditTargetsScan {
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
     $runId = Get-AuditRunId
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
+    $carriedScans = if ($SkipDirty) { Get-AuditCarriedTargetScanMap $reportRoot $runId $targets } else { @{} }
     # 2026-10-09 实测（8 逻辑核）：ForEach-Object -Parallel runspaces 下每仓
     # 耗时为串行的 2-4 倍（12-22s vs 2.5-6.5s），总墙钟不降反升——解释型 PS
     # 循环 + 正则在共享进程内争抢 GC/引擎锁，扫描是 CPU 串行型负载，保持
@@ -187,13 +237,66 @@ function Invoke-AuditTargetsScan {
         $resolved = Resolve-AuditTargetPath ([string]$_.path)
         Write-Host ("Scanning {0} ..." -f $_.name)
         $timer = [Diagnostics.Stopwatch]::StartNew()
-        # --skip-dirty：在途修改的仓未采集画像，预检到 dirty 直接落同 schema 的空画像。
+        # --skip-dirty：在途修改的仓不重新采集画像，预检到 dirty 落同 schema 的
+        # 跳过画像；有最近真实扫描时结转该画像并带 carried_from_* 来源标记
+        # （confidence_ceiling 保持 skipped_dirty，组合汇总不把它当新鲜扫描）。
         # dirty_skip 是人工声明的“whole repository deferred”范围；preflight 只忽略
         # 该仓的整个快照/工作树差异，仍要求 exists/is_repo 与当前目标匹配。
-        # 内容变化不能从跳过仓的旧画像被推断为新的用户需求。
         # 仅在显式 -SkipDirty 时预检，不给常规扫描增加重复 git 取证。
         $gitInfo = if ($SkipDirty) { Get-AuditGitInfo $resolved } else { $null }
         if ($SkipDirty -and $gitInfo.dirty) {
+            $carried = if ($carriedScans.ContainsKey([string]$_.name)) { $carriedScans[[string]$_.name] } else { $null }
+            if ($null -ne $carried) {
+                Write-Host ("Skipped {0}: dirty worktree (在途修改，结转最近快照 {1})" -f $_.name, [string]$carried.run_id)
+                $carriedScan = $carried.scan
+                $carriedDetected = Get-CfgObjectProperty $carriedScan "detected"
+                $detectedCopy = [ordered]@{}
+                foreach ($detectedField in @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "artifact_capabilities", "requirement_signals", "agent_rule_files", "notable_files")) {
+                    # 两跳取值：避免 @(<调用>) 把未枚举数组属性包成嵌套数组。
+                    $detectedValue = Get-CfgObjectProperty $carriedDetected $detectedField
+                    $detectedCopy[$detectedField] = if ($null -eq $detectedValue) { @() } else { @($detectedValue) }
+                }
+                $carriedCoverage = Get-CfgObjectProperty $carriedScan "scan_coverage"
+                $carriedScannedAt = Get-CfgObjectProperty $carriedScan "scanned_at"
+                $coverageCopy = [ordered]@{
+                    status = "carried_forward"
+                    population_count = [int](Get-CfgObjectProperty $carriedCoverage "population_count")
+                    sampled_count = [int](Get-CfgObjectProperty $carriedCoverage "sampled_count")
+                    sample_limit = [int](Get-CfgObjectProperty $carriedCoverage "sample_limit")
+                    truncated = [bool](Get-CfgObjectProperty $carriedCoverage "truncated")
+                    large_file_count = [int](Get-CfgObjectProperty $carriedCoverage "large_file_count")
+                    text_truncated_count = [int](Get-CfgObjectProperty $carriedCoverage "text_truncated_count")
+                    self_referential_count = [int](Get-CfgObjectProperty $carriedCoverage "self_referential_count")
+                    read_failure_count = [int](Get-CfgObjectProperty $carriedCoverage "read_failure_count")
+                    sampled_by_kind = Get-CfgObjectProperty $carriedCoverage "sampled_by_kind"
+                    confidence_ceiling = "skipped_dirty"
+                }
+                [pscustomobject]([ordered]@{
+                    schema_version = 1
+                    scanned_at = (Get-Date).ToString("o")
+                    target = [ordered]@{
+                        name = [string]$_.name
+                        path = [string]$_.path
+                        resolved_path = $resolved
+                        exists = $true
+                    }
+                    git = $gitInfo
+                    dirty_skip = [pscustomobject]([ordered]@{
+                        declared_at = (Get-Date).ToString("o")
+                        scope = "whole_repository"
+                        reason = "worktree_dirty"
+                        carried_from_run_id = [string]$carried.run_id
+                        # ConvertFrom-Json 会把 ISO 日期串自动解析为 DateTime；
+                        # 回写必须 ToString('o') 保住可比较的 ISO 形态。
+                        carried_from_scanned_at = $(if ($carriedScannedAt -is [datetime]) { $carriedScannedAt.ToString('o') } else { [string]$carriedScannedAt })
+                    })
+                    detected = $detectedCopy
+                    scan_coverage = $coverageCopy
+                    risks = @("scan_skipped_dirty")
+                })
+                Write-Host ("Skipped {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
+                return
+            }
             Write-Host ("Skipped {0}: dirty worktree (在途修改，未采集画像)" -f $_.name)
             [pscustomobject]([ordered]@{
                 schema_version = 1
