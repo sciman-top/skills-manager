@@ -34,7 +34,7 @@
 .\skills.ps1 迁移 --mode private-all --version <version>
 ```
 
-私用快照内含完整 `agent/`、物化来源、仓库内 `rules/global/` 规则源和 MCP `env`/`headers` 明文 companion file `MIGRATION-MCP-CREDENTIALS.json`，不询问口令。它不打包、更不自动覆盖各宿主已经生效的 `~/.codex`、`~/.claude`、`~/.zcode` 全局规则；恢复后仍需走规则计划、确认与回滚投影。它只限你的本机或可信私有介质，不能上传公共 GitHub、公共 Release 或公共网盘；它不含 Git 历史，也不替代公共源码开发真值。
+私用快照内含完整 `agent/`、物化来源、仓库内 `rules/global/` 规则源和 MCP `env`/`headers` 明文 companion file `MIGRATION-MCP-CREDENTIALS.json`，不询问口令。它不打包、更不自动覆盖各宿主已经生效的全局规则（`~/.codex`、`~/.claude`、`~/.zcode`、`~/.gemini`、`~/.workbuddy-ai`、`~/.dsh` 等）；恢复后仍需走规则计划、确认与回滚投影。它只限你的本机或可信私有介质，不能上传公共 GitHub、公共 Release 或公共网盘；它不含 Git 历史，也不替代公共源码开发真值。
 
 新电脑在解压后的快照目录运行：
 

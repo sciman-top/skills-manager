@@ -42,7 +42,7 @@
 
 ## 3. 全局规则同步步骤
 1. 按第 2 节先确认控制仓工作区干净，`fetch` 并审查远端改动，再整合 `origin/main`；不以 `git pull` 跳过 review。
-2. `pwsh -NoProfile -File build.ps1`：物化未跟踪的 `agent/` 运行目录并核对全部生成物（含五份宿主全局规则）无漂移。
+2. `pwsh -NoProfile -File build.ps1`：物化未跟踪的 `agent/` 运行目录并核对全部生成物（含六份宿主全局规则；9.93 起新增 dsh）无漂移。
 3. `.\skills.ps1 global-rules-check`：应 `pass=True, findings=0`；budget 摘要显示受管源文件的保守预算压力（Antigravity 保留 12000 字符旧版兼容预算，其余按 16 KiB/130 行；不是当前宿主完整加载预算，详见 `rules/global/README.md`）。
 4. `global-rules-plan --out reports/global-rule-projection/plan.json`，再用 plan 输出的 `apply.required_token` 执行 `global-rules-apply`；中断后仅可用同一 plan、receipt、roots 加 `--resume` 续跑。
 5. 重跑一次 `global-rules-check` 留证；文件相等只证明 `filesystem_projected`，`host_loaded` 需各宿主新会话探针（方法见第 4 节），不得自动外推。
@@ -59,6 +59,7 @@
 - ZCode：当前入口 `node "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" --help` 在 2026-10-25 成功（本机 App 3.16.3），列有 `-p`、工具禁用和 `--mode`，未验证无需模型请求的加载诊断。确需模型补证时在临时目录用当前 help 支持的参数禁用工具，并显式选择只读任务所需权限模式。历史的 `Model creation failed`、`无法定位 CLI ZCode Built-in Provider Config` 只作排障线索，不认定为当前故障；登录或 provider 修复属于独立授权范围。
 - WorkBuddy：无扩展名入口是 Node 脚本，使用 `node "$env:LOCALAPPDATA\Programs\WorkBuddyAI\resources\app.asar.unpacked\cli\bin\codebuddy" --help` 核对入口。2026-10-25 国际版 App 5.8.4 实测退出码 1、`Cannot find module '../dist/codebuddy'`，按 `platform_na` 记录，替代验证为 `global-rules-check` 字节一致；可用 CLI 恢复或现有 GUI 提供来源证据后复测，不以 `--version`、空输出或其他版本的 CLI 代替当前执行面验收。需要显式 root 时使用 PowerShell 进程环境变量并在 `finally` 恢复，不使用 POSIX `NAME=value command` 写法。
 - Antigravity：本轮仅确认本机 App 2.26.0 安装版本，未验证可用的非交互加载诊断；优先用 GUI 新会话的规则来源面板核验。当前官方文档已区分 App、CLI 与 IDE/extension 执行面，不将某个执行面缺少入口推广为整个产品无 CLI；不得为核验自动启动或重启 GUI。
+- dsh：本机 shell 无凭据，CLI 探针按 `platform_na` 留痕；判据是 dsh 桌面端新会话 baseline 出现 `Instructions from: ~/.dsh/AGENTS.md` 来源段（`rules/global/platforms/dsh.md`）。2026-11-05 投影 receipt 真值边界为 `filesystem_applied_not_host_loaded`；技能共享槽 `~/.agents/skills` 的加载同样待桌面侧核验。契约依据为安装包内置插件文档（`@deepseek-ai/dsh-agent-instructions` 等，见 `rules/global/README.md`），暂无公开官方 URL。
 - 依据：[Codex instructions](https://developers.openai.com/codex/guides/agents-md) 与本机 `codex-cli 0.159.2` help（2026-10-25）；其余宿主入口按当前安装包与 help 核对，不把历史已知故障视为当前探针结果。
 
 ## 5. 证据与回滚
