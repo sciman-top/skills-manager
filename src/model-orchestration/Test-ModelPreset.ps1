@@ -30,7 +30,7 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw | ConvertFrom-Json -AsHashtable
 $slots = @($policy.slots)
 $expected = @{
-    deepseek41_flash_only  = @{ menu = @(,@('deepseek-v4.1-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
+    deepseek41_flash_only  = @{ menu = @(,@('deepseek-v4.1-flash','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     glm53_flash_only    = @{ menu = @(,@('glm-5.3-flash','xhigh')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     gemini38_flash_only = @{ menu = @(,@('gemini-3.8-flash-high','high')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
     gpt6_luna_only      = @{ menu = @(,@('gpt-6-luna','max')); map = @{quick_triage=0;routine_maintenance=0;standard_review=0;bounded_implementation=0;deep_investigation=0;deep_implementation=0;test_execution=0;documentation_review=0;architecture_review=0} }
@@ -66,8 +66,8 @@ foreach ($id in $expected.Keys) {
 $defaultResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve | ConvertFrom-Json
 Assert ($defaultResolved.preset -ceq $policy.default_preset -and $defaultResolved.preset -ceq 'gpt6_luna_only') 'Default comes from policy'
 Assert ($defaultResolved.active_presets.Count -eq 4 -and $defaultResolved.enabled_routes.Count -eq 4) 'Four presets expose four enabled Codex tuples'
-$expectedCodexTuples = @('gpt-6-luna/max','deepseek-v4.1-flash/xhigh','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high') | Sort-Object
-$expectedNativeTuples = @('gpt-6-luna/max','deepseek-v4.1-flash/xhigh','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high')
+$expectedCodexTuples = @('gpt-6-luna/max','deepseek-v4.1-flash/max','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high') | Sort-Object
+$expectedNativeTuples = @('gpt-6-luna/max','deepseek-v4.1-flash/max','glm-5.3-flash/xhigh','gemini-3.8-flash-high/high')
 Assert (((@($defaultResolved.enabled_routes | ForEach-Object { "$($_.model)/$($_.effort)" } | Sort-Object) -join ',') -ceq ($expectedCodexTuples -join ','))) 'Codex exposes exactly the four approved tuples'
 Assert (@($policy.auto_routes.Values | Select-Object -Unique).Count -eq 4) 'Automatic routes use all four pool model families'
 Assert ((@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'claude-haiku-5-5' })).Count -eq 0) 'Retired Haiku tuple is absent from enabled routes'
@@ -83,7 +83,7 @@ $autoRoutes = @{
     architecture_review = 'gpt6_luna_only'
 }
 foreach ($slot in $slots) { Assert ($defaultResolved.auto_routing -and $defaultResolved.routes.$slot.preset -ceq $autoRoutes[$slot]) "Automatic task-shape route: $slot" }
-Assert ($defaultResolved.routes.deep_implementation.model -ceq 'deepseek-v4.1-flash' -and $defaultResolved.routes.deep_implementation.effort -ceq 'xhigh') 'Deep implementation uses the code-focused DeepSeek tuple'
+Assert ($defaultResolved.routes.deep_implementation.model -ceq 'deepseek-v4.1-flash' -and $defaultResolved.routes.deep_implementation.effort -ceq 'max') 'Deep implementation uses the code-focused DeepSeek tuple'
 Assert ($defaultResolved.routes.documentation_review.model -ceq 'gemini-3.8-flash-high' -and $defaultResolved.routes.documentation_review.effort -ceq 'high') 'Documentation review uses Gemini high'
 Assert ($defaultResolved.routing_receipt.schema_version -eq 1 -and @($defaultResolved.routing_receipt.requested_fields).Count -eq 6 -and @($defaultResolved.routing_receipt.observed_fields).Count -eq 3) 'Resolve exposes the v1 routing receipt contract'
 Assert ($defaultResolved.routing_receipt.unknown_policy -like '*actual_model_observed=false*' -and @($defaultResolved.routing_receipt.selection_precedence).Count -eq 4) 'Routing receipt distinguishes requested and host-observed tuples'
@@ -116,13 +116,13 @@ Assert ($reselection.prohibition.Contains('429') -and $reselection.prohibition.C
 Assert ($defaultResolved.dispatch_policy.max_controlled_launcher_invocations_per_bounded_task -eq 1 -and $defaultResolved.dispatch_policy.PSObject.Properties.Name -notcontains 'max_upstream_attempts_per_bounded_task' -and $defaultResolved.dispatch_policy.max_explicit_reselections -eq 1 -and -not $defaultResolved.dispatch_policy.duplicate_prompt_replay -and $defaultResolved.dispatch_policy.rate_limit_action -ceq 'stop_and_wait_for_fresh_parent_selection' -and $defaultResolved.dispatch_policy.auth_or_risk_action -ceq 'stop_and_operator_review' -and $defaultResolved.dispatch_policy.overload_action -ceq 'one_explicit_reselection_only') 'Controlled launcher safety policy'
 Assert (@($defaultResolved.enabled_routes.model | Select-Object -Unique).Count -eq 4) 'Pool includes four distinct model families'
 Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'gpt-6-luna' })[0].effort -ceq 'max') 'Luna tuple is pinned to max'
-Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'deepseek-v4.1-flash' })[0].effort -ceq 'xhigh') 'DeepSeek tuple is pinned to xhigh'
+Assert (@($defaultResolved.enabled_routes | Where-Object { $_.model -ceq 'deepseek-v4.1-flash' })[0].effort -ceq 'max') 'DeepSeek tuple is pinned to max'
 Assert ('gpt-5.6-terra' -cnotin @($defaultResolved.enabled_routes.model)) 'Terra removed from active pool'
 $selected = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -AvailablePreset glm53_flash_only,gemini38_flash_only | ConvertFrom-Json
 Assert ($selected.preset -eq 'glm53_flash_only') 'Ordered selection'
 Assert ($selected.active_presets.Count -eq 2 -and $selected.enabled_routes.Count -eq 2) 'AvailablePreset retains the whole selected pool'
 Assert ([int]$policy.schema_version -eq 7 -and @($policy.fallbacks.Keys).Count -eq $slots.Count) 'Schema v7 declares fallbacks and controlled-launch policy for every slot'
-Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'glm-5.3-flash/xhigh,gemini-3.8-flash-high/high,deepseek-v4.1-flash/xhigh') 'Resolve exposes the declared alternates of each route'
+Assert ((@($defaultResolved.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'glm-5.3-flash/xhigh,gemini-3.8-flash-high/high,deepseek-v4.1-flash/max') 'Resolve exposes the declared alternates of each route'
 Assert (@($zcodeResolved.routes.quick_triage.declared_fallback).Count -eq 0) 'ZCode pool exposes no alternate outside its reviewed facet'
 Assert ((@($selected.routes.architecture_review.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high') 'Alternates stay inside the active pool and exclude the substituted route'
 $cliSelection = & $acceptanceLauncher -Slot deep_investigation -AvailablePreset 'glm53_flash_only,gemini38_flash_only' -Plan | ConvertFrom-Json
@@ -153,7 +153,7 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='gpt-5.6-terra';Effort='max'},
     @{Slot='standard_review';Model='gpt-5.6-terra';Effort='high'},
     @{Slot='standard_review';Model='deepseek-flash';Effort='high'},
-    @{Slot='standard_review';Model='deepseek-v4.1-flash';Effort='max'},
+    @{Slot='standard_review';Model='deepseek-v4.1-flash';Effort='xhigh'},
     @{Slot='standard_review';Model='gemini-3.8-flash';Effort='high'},
     @{Slot='standard_review';Model='glm-5.3-flash';Effort='high'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='max'},
@@ -191,7 +191,7 @@ $providerEvidence = [ordered]@{
     source = 'test-current-parent-receipt'
     tuples = @(
         @{ model = 'gpt-6-luna'; effort = 'max'; status = 'verified' },
-        @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; status = 'verified' },
+        @{ model = 'deepseek-v4.1-flash'; effort = 'max'; status = 'verified' },
         @{ model = 'glm-5.3-flash'; effort = 'xhigh'; status = 'verified' },
         @{ model = 'gemini-3.8-flash-high'; effort = 'high'; status = 'verified' }
     )
@@ -256,10 +256,10 @@ try {
     Assert ($providerMismatchFailure -like '*provider_mismatch*' -and $providerMismatchFailure -like '*upstream_contacted*false*') 'Provider evidence must match the effective Codex provider'
     Assert ($global:ModelSlotAcceptanceCalls.Count -eq 0) 'Provider mismatch blocks before CLI launch'
     foreach ($failedRoute in @(
-            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','gemini-3.8-flash-high/high','deepseek-v4.1-flash/xhigh'); lower = @() },
-            @{ model = 'deepseek-v4.1-flash'; effort = 'xhigh'; fallback = @('glm-5.3-flash/xhigh','gemini-3.8-flash-high/high'); lower = @() },
-            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('gemini-3.8-flash-high/high','deepseek-v4.1-flash/xhigh'); lower = @() },
-            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('glm-5.3-flash/xhigh','deepseek-v4.1-flash/xhigh'); lower = @() }
+            @{ model = 'gpt-6-luna'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','gemini-3.8-flash-high/high','deepseek-v4.1-flash/max'); lower = @() },
+            @{ model = 'deepseek-v4.1-flash'; effort = 'max'; fallback = @('glm-5.3-flash/xhigh','gemini-3.8-flash-high/high'); lower = @() },
+            @{ model = 'glm-5.3-flash'; effort = 'xhigh'; fallback = @('gemini-3.8-flash-high/high','deepseek-v4.1-flash/max'); lower = @() },
+            @{ model = 'gemini-3.8-flash-high'; effort = 'high'; fallback = @('glm-5.3-flash/xhigh','deepseek-v4.1-flash/max'); lower = @() }
     )) {
         $failureMessage = ''
         try { & $acceptanceLauncher -Slot architecture_review -Model $failedRoute.model -Effort $failedRoute.effort -ReadOnly -CapabilityMode provider_override -CapabilityProbePath $providerEvidencePath -Prompt 'Simulated unavailable request' | Out-Null }
@@ -408,7 +408,7 @@ try {
     $projectionCatalog = $catalogBinding.Clone()
     $projectionCatalog.models = @(
         @{ slug = 'gpt-6-luna'; supported_reasoning_levels = @(@{ effort = 'max' }) },
-        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
+        @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) },
         @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
         @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
     )
@@ -435,7 +435,7 @@ try {
     Assert ($profileText.Contains('On Codex, use the named native slot or exact-tuple role') -and $profileText.Contains('not a substitute for native subagent dispatch')) 'Profile instructions make exact-tuple native roles primary and keep the CLI launcher explicit'
     Assert ($profileText.Contains('default_subagent_model = "glm-5.3-flash"') -and $profileText.Contains('default_subagent_reasoning_effort = "xhigh"')) 'GLM profile pins the approved native default tuple'
     $deepseekProfileText = Get-Content -LiteralPath (Join-Path $target 'deepseek41-flash-only.config.toml') -Raw
-    Assert ($deepseekProfileText.Contains('default_subagent_model = "deepseek-v4.1-flash"') -and $deepseekProfileText.Contains('default_subagent_reasoning_effort = "xhigh"')) 'DeepSeek profile pins the approved native default tuple'
+    Assert ($deepseekProfileText.Contains('default_subagent_model = "deepseek-v4.1-flash"') -and $deepseekProfileText.Contains('default_subagent_reasoning_effort = "max"')) 'DeepSeek profile pins the approved native default tuple'
     $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
     Assert (-not $projectedConfig.Contains('[agents.')) 'Shared Codex config carries no managed role tables'
@@ -445,7 +445,7 @@ try {
         $agentText = Get-Content -LiteralPath $agentPath -Raw
         Assert ($agentText.Contains("name = `"$slot`"") -and $agentText.Contains('managed-by: skills-manager/model-orchestration')) "Codex agents directory contains managed task slot $slot"
     }
-    foreach ($tuple in @('luna_max','deepseek_xhigh','glm_xhigh','gemini_high')) {
+    foreach ($tuple in @('luna_max','deepseek_max','glm_xhigh','gemini_high')) {
         $agentPath = Join-Path $codexAgents "$tuple.toml"
         $agentText = Get-Content -LiteralPath $agentPath -Raw
         Assert ($agentText.Contains("name = `"$tuple`"") -and $agentText.Contains('managed-by: skills-manager/model-orchestration')) "Codex agents directory contains managed tuple role $tuple"
@@ -461,6 +461,11 @@ try {
     Assert (-not $nonLunaConfig.Contains('[agents.')) 'Pool with GLM/Gemini keeps managed role tables out of shared config'
     $expectedNonLunaAgentNames = @($slots + @('glm_xhigh','gemini_high'))
     Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq $expectedNonLunaAgentNames.Count) 'Pool with GLM/Gemini projects task slots and exact tuple roles'
+    $staleMarker = '# managed-by: skills-manager/model-orchestration'
+    $staleManagedPath = Join-Path $codexAgents 'haiku_medium.toml'
+    [IO.File]::WriteAllText($staleManagedPath, "name = `"haiku_medium`"`nmodel = `"claude-haiku-5-5`"`nmodel_reasoning_effort = `"medium`"`n`n$staleMarker`n")
+    $stalePlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    Assert (@($stalePlan.files | Where-Object { $_.path -ceq [IO.Path]::GetFullPath($staleManagedPath) }).Count -eq 1) 'Plan reports a stale managed role for retirement'
     foreach ($profileId in @('glm53_flash_only','gemini38_flash_only')) {
         $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
         Assert ($profileConfigText.Contains('default_subagent_model =') -and $profileConfigText.Contains('[agents.')) "GLM/Gemini profile projects native task slots: $profileId"
@@ -469,12 +474,14 @@ try {
         }
     }
     $restoredReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
+    Assert ($restoredReceipt.swept_managed_agents -ccontains 'haiku_medium' -and -not (Test-Path -LiteralPath $staleManagedPath)) 'Apply retires stale managed tuple roles and records the sweep'
     $restoredConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($restoredConfig.Contains('enabled = true') -and $restoredConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $restoredConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and -not $restoredConfig.Contains('model-orchestration-native-agents-enabled-prior=')) 'Full active pool defaults native subagents to the automatic routine-maintenance route'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $restoredReceipt.receipt | Out-Null
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $nonLunaReceipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Non-Luna native projection and restore sequence rolls back to the exact original config'
-    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 0) 'Pool restore sequence rolls back managed Codex agent files'
+    Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 1 -and (Test-Path -LiteralPath $staleManagedPath)) 'Pool restore sequence rolls back managed Codex agent files and restores swept files for exact undo'
+    Remove-Item -LiteralPath $staleManagedPath -Force
     $zcodeTarget = Join-Path $fixture 'zcode'
     $zcodeAgents = Join-Path $zcodeTarget 'agents'
     [IO.Directory]::CreateDirectory($zcodeAgents) | Out-Null
@@ -635,7 +642,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $verifyRoot 'config.toml'), $verifyBad)
     $verifyBadResult = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Verify -CodexRoot $verifyRoot | ConvertFrom-Json
     Assert ($verifyBadResult.status -ceq 'fail' -and @($verifyBadResult.issues).Count -ge 2) 'Verify flags an unapproved model/effort default and role'
-    $verifyGood = "model = `"glm-5.3-flash`"`n[agents]`nenabled = true`ndefault_subagent_model = `"deepseek-v4.1-flash`"`ndefault_subagent_reasoning_effort = `"xhigh`"`n"
+    $verifyGood = "model = `"glm-5.3-flash`"`n[agents]`nenabled = true`ndefault_subagent_model = `"deepseek-v4.1-flash`"`ndefault_subagent_reasoning_effort = `"max`"`n"
     [IO.File]::WriteAllText((Join-Path $verifyRoot 'config.toml'), $verifyGood)
     $verifyGoodResult = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Verify -CodexRoot $verifyRoot | ConvertFrom-Json
     Assert ($verifyGoodResult.status -ceq 'pass' -and @($verifyGoodResult.issues).Count -eq 0 -and $verifyGoodResult.default_subagent_model -ceq 'deepseek-v4.1-flash' -and $verifyGoodResult.evidence_kind -ceq 'static_host_config_preflight' -and $verifyGoodResult.live_acceptance -ceq 'not_evaluated') 'Verify accepts the DeepSeek native tuple without claiming live acceptance'
@@ -724,7 +731,7 @@ try {
         Assert ($hostMenuFailure -like '*no replay or preset substitution performed*') "Host-menu failure returns control without replay: $hostMenuFailure"
         $hostMenuDoc = (([regex]::Match($hostMenuFailure, '\{.*\}')).Value | ConvertFrom-Json).slot_failure
         Assert (@($hostMenuDoc.reselection.within_preset_lower).Count -eq 0) 'Single-rung host menu leaves no within-preset downgrade'
-        Assert ((@($hostMenuDoc.reselection.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high,deepseek-v4.1-flash/xhigh') 'Failure reselection menus follow the Codex host menu and retain the DeepSeek alternate'
+        Assert ((@($hostMenuDoc.reselection.declared_fallback | ForEach-Object { "$($_.model)/$($_.effort)" }) -join ',') -ceq 'gemini-3.8-flash-high/high,deepseek-v4.1-flash/max') 'Failure reselection menus follow the Codex host menu and retain the DeepSeek alternate'
         Assert ($global:HostMenuFailureCalls.Count -eq 1) 'Host-menu failure still makes exactly one launch call'
     }
     finally {
@@ -756,7 +763,7 @@ try {
     $allowlistCases = @(
         @{ name = 'unlisted model'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].model = 'gpt-5.6-terra' } },
         @{ name = 'wrong Luna effort'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].effort = 'high' } },
-        @{ name = 'DeepSeek wrong native effort'; mutate = { param($p) $p.presets.deepseek41_flash_only.menu[0].effort = 'max' } },
+        @{ name = 'DeepSeek wrong native effort'; mutate = { param($p) $p.presets.deepseek41_flash_only.menu[0].effort = 'xhigh' } },
         @{ name = 'Codex GLM max'; mutate = { param($p) $p.presets.glm53_flash_only.menu[0].effort = 'max' } },
         @{ name = 'ZCode GLM xhigh'; mutate = { param($p) $p.presets.glm53_flash_only.host_menus.zcode[0].effort = 'xhigh' } },
         @{ name = 'retired Haiku model'; mutate = { param($p) $p.presets.gpt6_luna_only.menu[0].model = 'claude-haiku-5-5' } },

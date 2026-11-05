@@ -4,16 +4,16 @@ Independent PowerShell 7 tooling for explicit subagent model presets. `presets.j
 
 ## Model pool and host boundaries
 
-The 2026-10-25 user request restores four model families. Every model has one selected effort per host; the names are host catalog values, not a shared intelligence scale.
+The 2026-10-25 user request restores four model families; the 2026-11-05 user request pins DeepSeek to `max`, which the Codex catalog now declares (levels low/high/max; `xhigh` was removed). Every model has one selected effort per host; the names are host catalog values, not a shared intelligence scale.
 
 | Preset | Codex model ID | Codex effort | Other host policy |
 | --- | --- | --- | --- |
 | `gpt6_luna_only` | `gpt-6-luna` | `max` | Not projected to other hosts |
-| `deepseek41_flash_only` | `deepseek-v4.1-flash` | `xhigh` | Requested `max` where the host exposes DeepSeek; no verified writer |
+| `deepseek41_flash_only` | `deepseek-v4.1-flash` | `max` | Requested `max` where the host exposes DeepSeek; no verified writer |
 | `glm53_flash_only` | `glm-5.3-flash` | `xhigh` | ZCode `max`; WorkBuddy requested `max`, no verified writer |
 | `gemini38_flash_only` | `gemini-3.8-flash-high` | `high` | Antigravity stays within its own model choices; no exact-effort writer |
 
-Codex's Gemini slug includes `-high`; the bare family name is not an alias. DeepSeek/GLM `max` is rejected on Codex. ZCode accepts only its existing GLM/max facet. A requested host policy does not prove that host exposes the model, effort or a child-agent API. Do not project cross-vendor models into hosts restricted to their own family.
+Codex's Gemini slug includes `-high`; the bare family name is not an alias. GLM `max` stays rejected on Codex (its catalog still tops out at `xhigh`); DeepSeek `max` is catalog-declared as of 2026-11-05. ZCode accepts only its existing GLM/max facet. A requested host policy does not prove that host exposes the model, effort or a child-agent API. Do not project cross-vendor models into hosts restricted to their own family.
 
 The executable enforces the closed per-host tuple allowlist. Adding arbitrary JSON entries cannot expand it. `-Preset` pins a preset; `-AvailablePreset` restricts the pool. `default_preset` selects a default parent preset; it does not require every child to use that model. `-SubagentsOnly` preserves parent and review selections.
 
@@ -26,9 +26,9 @@ Slots describe responsibility, not a fixed agent count, concurrency quota or mea
 | `quick_triage` | Concrete lookup, known error classification | Read only | `gemini-3.8-flash-high/high` |
 | `routine_maintenance` | Small fix with an understood cause | Bounded writes | `glm-5.3-flash/xhigh` |
 | `standard_review` | Review an existing bounded change | Read only | `gemini-3.8-flash-high/high` |
-| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes | `deepseek-v4.1-flash/xhigh` |
+| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes | `deepseek-v4.1-flash/max` |
 | `deep_investigation` | Unresolved root cause across modules | Read only; return proposed write set | `gpt-6-luna/max` |
-| `deep_implementation` | Complex implementation after scope is established | Bounded writes | `deepseek-v4.1-flash/xhigh` |
+| `deep_implementation` | Complex implementation after scope is established | Bounded writes | `deepseek-v4.1-flash/max` |
 | `test_execution` | Scoped test command and concrete failure diagnosis | Bounded writes when assigned | `glm-5.3-flash/xhigh` |
 | `documentation_review` | Documentation and contract consistency | Read only | `gemini-3.8-flash-high/high` |
 | `architecture_review` | Interacting constraints and security boundaries | Read only | `gpt-6-luna/max` |
@@ -78,7 +78,7 @@ pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <recei
 pwsh -NoProfile -File ./Test-ModelPreset.ps1
 ```
 
-Plan before Apply. Generated role files live in ignored `.generated/`; active Codex task slots and tuple roles are additionally projected as marked standalone files under `<CODEX_HOME>\agents\`. The shared `config.toml` therefore carries only the global subagent defaults, availability rules and a managed-agent manifest, while profile files retain their frozen role registrations. Ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
+Plan before Apply. Generated role files live in ignored `.generated/`; active Codex task slots and tuple roles are additionally projected as marked standalone files under `<CODEX_HOME>\agents\`, and Apply retires stale managed files left by renamed pool tuples (unmarked files are never touched). The shared `config.toml` therefore carries only the global subagent defaults, availability rules and a managed-agent manifest, while profile files retain their frozen role registrations. Ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
 
 ZCode supports Plan/Apply with `-SubagentsOnly -ExecutionHost zcode`, using the exact selector in its existing `~/.zcode/agents/glm-max.md`. It creates only marked namespaced slot definitions at max and leaves the source definition intact. Antigravity/WorkBuddy have no verified exact-tuple writer. Claude has no active facet after the prior user retirement decision and fails closed.
 
@@ -87,7 +87,7 @@ Resolve is offline policy evidence. Plan/Apply use `codex debug models` for the 
 ## Controlled launcher
 
 ```powershell
-pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -Model deepseek-v4.1-flash -Effort xhigh -Plan
+pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -Model deepseek-v4.1-flash -Effort max -Plan
 pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot standard_review -Model gemini-3.8-flash-high -Effort high -Plan
 ```
 
