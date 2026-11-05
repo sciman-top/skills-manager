@@ -10,14 +10,16 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
     $workbuddyEnvName = if(-not[string]::IsNullOrWhiteSpace($env:WORKBUDDY_CONFIG_DIR)){'WORKBUDDY_CONFIG_DIR'}elseif(-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)){'CODEBUDDY_CONFIG_DIR'}else{''}
     $workbuddyFromEnv = $workbuddyEnvName -ne ''
     $workbuddyDefaultRoot = if($workbuddyFromEnv){if($workbuddyEnvName -eq 'WORKBUDDY_CONFIG_DIR'){$env:WORKBUDDY_CONFIG_DIR}else{$env:CODEBUDDY_CONFIG_DIR}}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy-ai') -PathType Container){Join-Path $userProfile '.workbuddy-ai'}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy') -PathType Container){Join-Path $userProfile '.workbuddy'}else{Join-Path $userProfile '.codebuddy'}
-    # DeepSeek Harness keeps a single user home; enable by directory existence
-    # like Antigravity, so hosts without the harness degrade to no entry.
-    $dshDefaultRoot=Join-Path $userProfile '.dsh'
+    # DeepSeek Harness keeps a single user home. An explicit DSH_HOME wins like
+    # CODEX_HOME; otherwise enable by directory existence like Antigravity, so
+    # hosts without the harness degrade to no entry.  Do not create a root here.
+    $dshFromEnv=-not[string]::IsNullOrWhiteSpace($env:DSH_HOME)
+    $dshDefaultRoot=if($dshFromEnv){$env:DSH_HOME}else{Join-Path $userProfile '.dsh'}
     # 默认启用只看宿主根目录是否存在，不依赖已投影文件（宿主重置删除规则文件后可自动重建投影）；
     # CODEBUDDY_CONFIG_DIR 指向不存在目录时由 Resolve-OptionalWorkBuddyGlobalRuleRoot 抛错。
     $antigravityDefaultEnabled=Test-Path -LiteralPath $antigravityDefaultRoot -PathType Container
     $workbuddyDefaultEnabled=$workbuddyFromEnv -or (Test-Path -LiteralPath $workbuddyDefaultRoot -PathType Container)
-    $dshDefaultEnabled=Test-Path -LiteralPath $dshDefaultRoot -PathType Container
+    $dshDefaultEnabled=$dshFromEnv -or (Test-Path -LiteralPath $dshDefaultRoot -PathType Container)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
@@ -31,7 +33,7 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         workbuddy_user_root=$(if($workbuddyDefaultEnabled){$workbuddyDefaultRoot}else{''})
         workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){$workbuddyEnvName}else{'default'})
         dsh_user_root=$(if($dshDefaultEnabled){$dshDefaultRoot}else{''})
-        dsh_user_root_source=$(if($dshDefaultEnabled){'default'}else{'disabled_until_explicit_root'})
+        dsh_user_root_source=$(if(-not$dshDefaultEnabled){'disabled_until_explicit_root'}elseif($dshFromEnv){'DSH_HOME'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
@@ -107,7 +109,7 @@ function Resolve-OptionalDshGlobalRuleRoot($Options) {
     if (Test-Path -LiteralPath $candidate -PathType Container) {
         return [IO.Path]::GetFullPath($candidate)
     }
-    if ($Options.dsh_user_root_source -eq 'cli') {
+    if ($Options.dsh_user_root_source -in @('cli','DSH_HOME')) {
         throw ('DSH user root does not exist or is not a directory: {0}' -f $candidate)
     }
     return ''
