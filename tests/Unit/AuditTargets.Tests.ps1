@@ -985,7 +985,9 @@ $scan.detected.artifact_capabilities | Out-Null
                 # 新鲜度契约：结转画像仍按 skipped_dirty 处理，组合汇总不视为新鲜扫描。
                 $dirtyScan.scan_coverage.confidence_ceiling | Should -Be "skipped_dirty"
                 $dirtyScan.dirty_skip.carried_from_run_id | Should -Be $priorRunId
-                $dirtyScan.dirty_skip.carried_from_scanned_at | Should -Be "2026-11-04T00:00:00.0000000+08:00"
+                # ToString('o') 输出 runner 本地时区的等价时刻（CI 为 UTC），按时刻而非字面形态断言。
+                [datetimeoffset]::Parse([string]$dirtyScan.dirty_skip.carried_from_scanned_at).UtcDateTime |
+                    Should -Be ([datetimeoffset]::Parse('2026-11-04T00:00:00.0000000+08:00').UtcDateTime)
                 @($dirtyScan.detected.package_managers) | Should -Contain "npm"
                 @($dirtyScan.detected.frameworks) | Should -Contain "vite"
                 @($dirtyScan.risks) | Should -Contain "scan_skipped_dirty"
