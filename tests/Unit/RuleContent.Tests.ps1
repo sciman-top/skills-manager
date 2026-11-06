@@ -51,15 +51,28 @@ Describe 'Checked-in rule content' {
     }
 
     It 'retains the cold-routing execution and observation boundaries' {
-        foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md')) {
+        # The three-branch contract and the no-bypass rule live once in the
+        # shared A section; each host file only declares its own carrier
+        # surface, so the wording is asserted on the source of truth.
+        $common = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/common.md'))
+        foreach ($contract in @('one_shot', 'multi_turn_user_decision', 'parent_user_input', 'host_admission_required', '禁止通过搜索 vendor/import/agent', 'transport_ok', 'router_not_run')) {
+            $common | Should -Match ([regex]::Escape($contract))
+        }
+        foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md', 'rules/global/dsh/AGENTS.md')) {
             $text = [IO.File]::ReadAllText((Join-Path $repoRoot $path))
-            foreach ($contract in @('one_shot', 'multi_turn_user_decision', 'parent-mediated', 'host_admission_required', '禁止通过搜索 vendor/import/agent')) {
-                $text | Should -Match ([regex]::Escape($contract))
-            }
+            # Each host file must point at the shared contract instead of
+            # restating it, and must not drift back into a private restatement.
+            $text | Should -Match 'A\.3'
+            $text | Should -Match '承载面'
             # User-global 规则不得写死仓库私有的技能实现名；它只描述宿主中立的语义。
             foreach ($privateName in @('capability-router', 'cold-capability-runner', 'design-griller')) {
                 $text | Should -Not -Match ([regex]::Escape($privateName))
             }
+        }
+        # The native carrier names belong to the host files that actually own
+        # them, never to the shared section.
+        foreach ($privateName in @('capability-router', 'cold-capability-runner', 'design-griller')) {
+            $common | Should -Not -Match ([regex]::Escape($privateName))
         }
         $antigravity = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md'))
         $antigravity | Should -Match 'Antigravity 平台差异'

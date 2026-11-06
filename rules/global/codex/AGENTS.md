@@ -13,6 +13,10 @@
 ### A.2 执行与输出
 - 默认中文沟通；代码标识符、命令、日志与报错保留英文原文。先给结论，再给改动、验证与风险边界。
 - 完成 = 当前目标的最小闭环并到 stop。执行合同为 `Goal / Exact write set / Minimum proof / Stop`；证据先于断言，未验证的必须明说。
+### A.3 冷技能路由合同
+- 宿主先用可见技能与原生能力；仅当用户点名不可见技能，或判定可见覆盖不足且确需专门工作流时，才以完整请求与至多两个 domain hint 调用仓内登记的路由器**一次**。路由器只做发现与确定性校验，语义选择属于宿主；禁止通过搜索 vendor/import/agent 绕过校验，禁止作每请求 middleware。提及或不确定都不是调用。
+- `candidate_load_validated` 只授权读取闭包，不等于获准执行。父代理按当前授权发 admission，再按**选中根**的 `execution_contract` 分三支：`one_shot` 才可交子代理；`parent_user_input` 停在用户输入；`multi_turn_user_decision` 一题一轮、转发并等待同一 child 的答案，禁用摘要降格。缺失、冲突或 `host_admission_required` 按当前授权执行或停，禁伪造 admission。依赖项只是只读输入，不参与 root 合同合并；独立执行须另立 root。
+- receipt 的 `transport_ok=false` 或 `status=router_not_run` 表示路由器未运行，不是空目录或未命中；绑定或编码失败应校正重试一次，不报“冷发现不可用”。宿主承载面只在 platforms/<host>.md 声明。
 - 委派子代理与并行已获常驻授权；每次委派须限定独立切片、互斥写集、最低证明与停止条件。
 - 在需求边界内最小化交付。互斥方案标 `AI 推荐` 及理由，证据不足标 `无推荐`。
 - 当前授权跨轮有效；“继续”恢复工作但不扩范围。可逆且有失败依据的范围外小修可自主处置，并在汇报中列明；只读探查、dry-run、一次性副本内的计划与预演同理，直接执行并汇报。
@@ -47,9 +51,8 @@
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version`、`codex --help`；当前 help 支持时，用新 run 的 `codex debug prompt-input` 核对注入来源与内容，否则用官方建议的指令摘要探针补证。版本号答复仅证明版本标识可见，不证明全文、项目链或条件规则均已加载；不可观察项按 `platform_na` 留痕。
-- 宿主先按可见元数据选技能；仅当用户点名不可见本地技能，或判定可见技能不足且确需专门工作流时，才一次调用仓内登记的技能路由器（完整请求、至多两个 domain hint），由宿主在候选中语义选择并精确校验候选与依赖闭包。显式与隐式命中都必须保留路由器给出的 `execution_contract`：`one_shot` 才可按 admission 交给子代理；`parent_user_input` 停在用户输入；`multi_turn_user_decision` 一题一轮、父任务转发并等待同一 child 的用户答案，禁用“结论/停止”降格为单轮摘要；缺失/冲突契约禁止自动执行。提及/讨论技能或语义不确定时不是调用；不得作每请求 middleware。
-- 已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
-- 禁止通过搜索 vendor/import/agent 绕过冷技能校验。`host_admission_required`：读已验证闭包，父代理核对操作/授权后 parent-mediated 执行；仍未知、冲突或未授权才停，禁伪造子代理 admission。
+- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 Codex 的承载面：`one_shot` 走 native subagent，`multi_turn_user_decision` 走交互式 specialist，`parent_user_input` 停在父任务；桥接 agent 定义由 `~/.codex/agents` 投影，具体 agent 名以投影 receipt 为准。已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
+- `host_admission_required` 的父代理代替执行边界见 A.3；不得据投影或 receipt 断定子代理已启动。
 - 子代理参数与继承方式以当前工具 schema 为准，不固定 `fork_turns` 类型或生命周期字段名；委派须有可归属的代理身份、启动与完成证据，并核对切片产物后才报告成功。spawn 失败可串行接管，记 `fallback=serial`；不可观察项明确留痕，不伪造终态。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
