@@ -16,11 +16,33 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 function Read-GuardStdinText {
-    # 有界读取：宿主若不关闭 stdin，ReadToEnd 会无限等待。Stop 守卫放行的后果
-    # 只是本轮不裁决，因此宁可 fail-open 也不挂住回合。
-    $stdin = [Console]::In
-    if ($null -eq $stdin -or $stdin.EndOfStream) { return '' }
-    return $stdin.ReadToEnd()
+    # 有界读取：宿主若不关闭 stdin，同步 ReadToEnd 会无限等待。Stop 守卫放行的
+    # 后果只是本轮不裁决，因此超时即 fail-open，绝不挂住回合。实测未关闭
+    # stdin 时旧实现会一直不返回。在基础流上异步读并给每次读一个上限，
+    # 不派生子进程（守卫每回合都跑，额外进程会拖慢并造成并行抖动）。
+    $stream = [Console]::OpenStandardInput()
+    if ($null -eq $stream) { return '' }
+    $buffer = [byte[]]::new(65536)
+    $memory = [IO.MemoryStream]::new()
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    try {
+        while ($true) {
+            $remaining = [int](($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remaining -le 0) { return '' }
+            $readTask = $stream.ReadAsync($buffer, 0, $buffer.Length)
+            if (-not $readTask.Wait($remaining)) { return '' }
+            $count = $readTask.Result
+            if ($count -le 0) { break }
+            $memory.Write($buffer, 0, $count)
+        }
+        return [Text.Encoding]::UTF8.GetString($memory.ToArray())
+    }
+    catch {
+        return ''
+    }
+    finally {
+        $memory.Dispose()
+    }
 }
 $raw = Read-GuardStdinText
 try { $event = $raw | ConvertFrom-Json -ErrorAction Stop } catch { exit 0 }
