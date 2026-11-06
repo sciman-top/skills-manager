@@ -250,4 +250,31 @@ Describe 'Panel guard registration is shared by both hosts' {
                 Where-Object { $_.FullName -notmatch '\\(?:vendor|imports|agent|\.claude\\worktrees|\.txn|node_modules)\\' })
         @($copies).Count | Should -Be 1
     }
+
+    It 'returns without waiting for stdin EOF when the host keeps the pipe open' {
+        # 宿主写完事件后可以不关 stdin。同步 ReadToEnd 会一直阻塞，把工具调用
+        # 挂死；本仓两个守卫都声称"有界读取"却实际依赖 EOF。这里用真正保持
+        # stdin 打开的子进程复现，断言守卫仍在有限时间内返回并 fail-open。
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = (Get-Process -Id $PID).Path
+        $psi.ArgumentList.Add('-NoProfile')
+        $psi.ArgumentList.Add('-File')
+        $psi.ArgumentList.Add($script:Hook)
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $process = [System.Diagnostics.Process]::Start($psi)
+        try {
+            $process.StandardInput.Write((New-EditEvent 'scripts/README.md'))
+            $process.StandardInput.Flush()
+            # 故意不关闭 StandardInput：模拟宿主保活管道。
+            ($process.WaitForExit(30000)) | Should -BeTrue -Because 'the guard must not block on an open stdin pipe'
+            $process.ExitCode | Should -Be 0
+        }
+        finally {
+            if (-not $process.HasExited) { $process.Kill($true) }
+            $process.Dispose()
+        }
+    }
 }
