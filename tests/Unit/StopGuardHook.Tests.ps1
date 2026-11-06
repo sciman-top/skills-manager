@@ -19,9 +19,11 @@ Describe 'Stop guard is registered for Codex' {
     }
 
     It 'requires a bounded timeout so the stop path cannot hang the turn' {
+        # 用 `\r?$` 而不是 `$`：仓库按 .gitattributes 在 Windows 检出为 CRLF，
+        # 只写 `$` 时行尾的 \r 会让断言在 CI 上失败而本地通过。
         $config = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.codex\config.toml') -Raw
         $stopBlock = [regex]::Match($config, '(?s)\[\[hooks\.Stop\]\].*$').Value
-        $timeout = [regex]::Match($stopBlock, '(?m)^timeout = (?<t>\d+)$')
+        $timeout = [regex]::Match($stopBlock, '(?m)^timeout = (?<t>\d+)\r?$')
         $timeout.Success | Should -BeTrue
         [int]$timeout.Groups['t'].Value | Should -BeLessOrEqual 600
     }
