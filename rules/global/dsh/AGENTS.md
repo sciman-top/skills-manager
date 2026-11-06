@@ -13,6 +13,10 @@
 ### A.2 执行与输出
 - 默认中文沟通；代码标识符、命令、日志与报错保留英文原文。先给结论，再给改动、验证与风险边界。
 - 完成 = 当前目标的最小闭环并到 stop。执行合同为 `Goal / Exact write set / Minimum proof / Stop`；证据先于断言，未验证的必须明说。
+### A.3 冷技能路由合同
+- 宿主先用可见技能与原生能力；仅当用户点名不可见技能，或判定可见覆盖不足且确需专门工作流时，才以完整请求与至多两个 domain hint 调用仓内登记的路由器**一次**。路由器只做发现与确定性校验，语义选择属于宿主；禁止通过搜索 vendor/import/agent 绕过校验，禁止作每请求 middleware。提及或不确定都不是调用。
+- `candidate_load_validated` 只授权读取闭包，不等于获准执行。父代理按当前授权发 admission，再按**选中根**的 `execution_contract` 分三支：`one_shot` 才可交子代理；`parent_user_input` 停在用户输入；`multi_turn_user_decision` 一题一轮、转发并等待同一 child 的答案，禁用摘要降格。缺失、冲突或 `host_admission_required` 按当前授权执行或停，禁伪造 admission。依赖项只是只读输入，不参与 root 合同合并；独立执行须另立 root。
+- receipt 的 `transport_ok=false` 或 `status=router_not_run` 表示路由器未运行，不是空目录或未命中；绑定或编码失败应校正重试一次，不报“冷发现不可用”。宿主承载面只在 platforms/<host>.md 声明。
 - 委派子代理与并行已获常驻授权；每次委派须限定独立切片、互斥写集、最低证明与停止条件。
 - 在需求边界内最小化交付。互斥方案标 `AI 推荐` 及理由，证据不足标 `无推荐`。
 - 当前授权跨轮有效；“继续”恢复工作但不扩范围。可逆且有失败依据的范围外小修可自主处置，并在汇报中列明；只读探查、dry-run、一次性副本内的计划与预演同理，直接执行并汇报。
@@ -45,7 +49,7 @@
 - 项目链自 `.git` 项目根向会话工作目录逐层加载 `AGENTS.md`、`CLAUDE.md` 并叠加 `AGENTS.local.md`、`CLAUDE.local.md`，广度到具体排序；权限或 I/O 失败即中止上溯，不回退祖先根。
 - 同组候选 trim 后内容相同的文件只渲染一次；更具体文件优先，预算不足先省略广度文件（user-global 链 harness-home 先于 shared-root 被省略）。
 - 用户级技能走 `~/.agents/skills`（既有投影目标，五宿主技能天然流入；不另建 `~/.dsh/skills` 投影以免双载）。技能 frontmatter 支持 `disable-model-invocation` 与 `user-invocable`，非法布尔值整技能丢弃并告警。
-- 宿主先按可见技能元数据选择；仅点名不可见技能或可见覆盖不足且确需专门工作流时，才以完整原始请求和至多两个 domain hint 调用仓内登记的技能路由器一次，由宿主在候选中语义选择并保留其 `execution_contract`；禁止通过搜索 vendor/import/agent 绕过冷技能校验。
+- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 DSH 的承载面：用户级技能走 `~/.agents/skills` 共享根，且当前无 verifier 证明 DSH 具备 native custom-agent spawn 面，故 `one_shot`/`multi_turn_user_decision` 默认 parent-mediated 并在汇报中注明实际承载，不冒充 native runner。`disable-model-invocation` 的技能不会进入可见目录，正是需要本条冷路径的对象。
 ### B.2 预算与诊断
 - 指令预算默认 64 KiB/链（user-global 与 project 独立计，单消息至多两倍）；本仓 130 行/16 KiB 保守预算继续生效，不因宿主余量放宽。
 - 指令为 durable sourced user/message，可从 `~/.dsh/sessions` 会话日志取证；第一方 read/write/edit 触达更深层目录后注入新适用文件，变更替换、消失出移除通知。

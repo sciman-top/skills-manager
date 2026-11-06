@@ -7,9 +7,8 @@
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version`、`codex --help`；当前 help 支持时，用新 run 的 `codex debug prompt-input` 核对注入来源与内容，否则用官方建议的指令摘要探针补证。版本号答复仅证明版本标识可见，不证明全文、项目链或条件规则均已加载；不可观察项按 `platform_na` 留痕。
-- 宿主先按可见元数据选技能；仅当用户点名不可见本地技能，或判定可见技能不足且确需专门工作流时，才一次调用仓内登记的技能路由器（完整请求、至多两个 domain hint），由宿主在候选中语义选择并精确校验候选与依赖闭包。显式与隐式命中都必须保留路由器给出的 `execution_contract`：`one_shot` 才可按 admission 交给子代理；`parent_user_input` 停在用户输入；`multi_turn_user_decision` 一题一轮、父任务转发并等待同一 child 的用户答案，禁用“结论/停止”降格为单轮摘要；缺失/冲突契约禁止自动执行。提及/讨论技能或语义不确定时不是调用；不得作每请求 middleware。
-- 已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
-- 禁止通过搜索 vendor/import/agent 绕过冷技能校验。`host_admission_required`：读已验证闭包，父代理核对操作/授权后 parent-mediated 执行；仍未知、冲突或未授权才停，禁伪造子代理 admission。
+- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 Codex 的承载面：`one_shot` 走 native subagent，`multi_turn_user_decision` 走交互式 specialist，`parent_user_input` 停在父任务；桥接 agent 定义由 `~/.codex/agents` 投影，具体 agent 名以投影 receipt 为准。已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
+- `host_admission_required` 的父代理代替执行边界见 A.3；不得据投影或 receipt 断定子代理已启动。
 - 子代理参数与继承方式以当前工具 schema 为准，不固定 `fork_turns` 类型或生命周期字段名；委派须有可归属的代理身份、启动与完成证据，并核对切片产物后才报告成功。spawn 失败可串行接管，记 `fallback=serial`；不可观察项明确留痕，不伪造终态。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
