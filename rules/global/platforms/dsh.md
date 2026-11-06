@@ -5,7 +5,7 @@
 - 项目链自 `.git` 项目根向会话工作目录逐层加载 `AGENTS.md`、`CLAUDE.md` 并叠加 `AGENTS.local.md`、`CLAUDE.local.md`，广度到具体排序；权限或 I/O 失败即中止上溯，不回退祖先根。
 - 同组候选 trim 后内容相同的文件只渲染一次；更具体文件优先，预算不足先省略广度文件（user-global 链 harness-home 先于 shared-root 被省略）。
 - 用户级技能走 `~/.agents/skills`（既有投影目标，五宿主技能天然流入；不另建 `~/.dsh/skills` 投影以免双载）。技能 frontmatter 支持 `disable-model-invocation` 与 `user-invocable`，非法布尔值整技能丢弃并告警。
-- 宿主先按可见技能元数据选择；仅点名不可见技能或可见覆盖不足且确需专门工作流时，才以完整原始请求和至多两个 domain hint 调用仓内登记的技能路由器一次，由宿主在候选中语义选择并保留其 `execution_contract`；禁止通过搜索 vendor/import/agent 绕过冷技能校验。
+- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 DSH 的承载面：用户级技能走 `~/.agents/skills` 共享根，且当前无 verifier 证明 DSH 具备 native custom-agent spawn 面，故 `one_shot`/`multi_turn_user_decision` 默认 parent-mediated 并在汇报中注明实际承载，不冒充 native runner。`disable-model-invocation` 的技能不会进入可见目录，正是需要本条冷路径的对象。
 ### B.2 预算与诊断
 - 指令预算默认 64 KiB/链（user-global 与 project 独立计，单消息至多两倍）；本仓 130 行/16 KiB 保守预算继续生效，不因宿主余量放宽。
 - 指令为 durable sourced user/message，可从 `~/.dsh/sessions` 会话日志取证；第一方 read/write/edit 触达更深层目录后注入新适用文件，变更替换、消失出移除通知。

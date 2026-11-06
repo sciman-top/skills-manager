@@ -7,7 +7,11 @@ param(
     [Alias('SelectedCapability')][string[]]$Candidate = @(),
     [string[]]$ExcludeCapability = @(),
     [ValidateRange(1,256)][int]$MaxCandidates = 12,
-    [switch]$AutoDiscover
+    [switch]$AutoDiscover,
+    # Which trigger the host used.  The router never infers this: an explicit
+    # name and an "insufficient visible skills" judgement fail differently, and
+    # an unattributed receipt let a host read a binding failure as a miss.
+    [ValidateSet('explicit_named', 'implicit_insufficient', 'unspecified')][string]$InvocationSource = 'unspecified'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,6 +64,58 @@ function Get-SkillPackageSha256([string]$SkillDirectory) {
         $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
     }
     return Get-TextSha256 ($parts.ToArray() -join "`n")
+}
+
+function New-RouterNotRunDocument([string]$Reason, [string]$Detail) {
+    # The historical failure was a host that treated "no parseable document" as
+    # "the catalog has no candidate": unexpanded args, a cmd.exe code page, or a
+    # ConvertFrom-Json throw all collapsed into "cold discovery unavailable".
+    # Emit the attribution instead of returning nothing, so a caller can bind the
+    # decision to transport_ok=false rather than to an empty result set.
+    $document = [ordered]@{
+        schema_version = 1
+        decision_owner = 'host_ai'
+        semantic_routing_performed = $false
+        query_received = (-not [string]::IsNullOrWhiteSpace($Query))
+        catalog_path = ''
+        catalog_resolution = [ordered]@{ mode = 'not_run'; auto_discover_requested = [bool]$AutoDiscover }
+        catalog = [ordered]@{ status = 'not_evaluated'; skill_count = 0; findings = @(); diagnostics = @() }
+        discovery_domains = @()
+        retrieval = [ordered]@{ strategy = 'not_run'; candidates = @(); candidate_count = 0; max_candidates = $MaxCandidates; truncated = $false; scope_required = $false }
+        selected = @()
+        validated_closure = @()
+        execution_contract = $null
+        excluded = @()
+        load_validation = [ordered]@{ requested = @(); pass = $false; scope = 'not_run'; checks = @() }
+        validation = [ordered]@{ requested = @(); pass = $false; scope = 'not_run'; checks = @() }
+        routing_receipt = [ordered]@{
+            schema_version = 2
+            receipt_id = ''
+            decision_owner = 'host_ai'
+            semantic_routing_performed = $false
+            query_sha256 = Get-TextSha256 $Query
+            catalog_fingerprint = ''
+            transport_ok = $false
+            invocation_source = $InvocationSource
+            selection_required = $false
+            requested_candidates = @()
+            validated_candidates = @()
+            validated_closure = @()
+            execution_contract = $null
+            status = 'router_not_run'
+            truth_boundary = 'router_not_run'
+            not_run_reason = $Reason
+            not_run_detail = $Detail
+            writes_performed = $false
+            provider_calls = 0
+            native_mutations = 0
+        }
+        execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $true; reason = 'router_not_run'; execution_contract = $null }
+        writes_performed = $false
+        provider_calls = 0
+        native_mutations = 0
+    }
+    ConvertTo-AsciiJson ($document | ConvertTo-Json -Depth 20 -Compress)
 }
 
 function Test-Within([string]$Path, [string]$Root) {
@@ -304,6 +360,7 @@ $catalogProjectionIncomplete = $false
 $requestValid = $true
 $stale = $false
 
+try {
 $resolution = Resolve-Catalog $CatalogPath ([bool]$AutoDiscover)
 if ($null -ne $resolution.finding) { $catalogFindings.Add($resolution.finding) | Out-Null }
 else {
@@ -720,14 +777,22 @@ $routingReceiptInput = [ordered]@{
     requested_candidates = $requestedNames
     excluded_capabilities = $excludedNames
     catalog_fingerprint = if ($null -ne $catalog) { [string]$catalog.catalog_fingerprint } else { '' }
+    invocation_source = $InvocationSource
 }
 $routingReceipt = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     receipt_id = ('crr-{0}' -f (Get-TextSha256 (($routingReceiptInput | ConvertTo-Json -Depth 10 -Compress))).Substring(0, 16))
     decision_owner = 'host_ai'
     semantic_routing_performed = $false
     query_sha256 = [string]$routingReceiptInput.query_sha256
     catalog_fingerprint = [string]$routingReceiptInput.catalog_fingerprint
+    # transport_ok answers "did the router itself run and emit this document",
+    # which is what a host needs to separate an empty catalog from a failed
+    # invocation.  Reaching this line at all means the parameter binding and the
+    # stdout contract held, so it is always true in an emitted receipt; the
+    # failure mode it guards is a host that never got a parseable document.
+    transport_ok = $true
+    invocation_source = $InvocationSource
     selection_required = $requestedNames.Count -eq 0
     requested_candidates = $requestedNames
     validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
@@ -762,4 +827,9 @@ $document = [pscustomobject][ordered]@{
     provider_calls = 0
     native_mutations = 0
 }
-ConvertTo-AsciiJson ($document | ConvertTo-Json -Depth 20 -Compress)
+    ConvertTo-AsciiJson ($document | ConvertTo-Json -Depth 20 -Compress)
+}
+catch {
+    New-RouterNotRunDocument -Reason 'router_error' -Detail ([string]$_.Exception.Message)
+    exit 3
+}

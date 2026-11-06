@@ -107,6 +107,37 @@ Describe 'Capability router fallback' {
         $script:catalog=Join-Path $routerRoot 'catalog.json';$script:skillPath=$skillPath
     }
 
+    It 'attributes the invocation trigger and the transport separately from the finding' {
+        $result = & $router -Query 'design' -CatalogPath $catalog -DomainHint engineering -InvocationSource implicit_insufficient | ConvertFrom-Json
+        $result.routing_receipt.schema_version | Should -Be 2
+        $result.routing_receipt.transport_ok | Should -BeTrue
+        $result.routing_receipt.invocation_source | Should -Be 'implicit_insufficient'
+
+        $explicit = & $router -Query 'design' -CatalogPath $catalog -DomainHint engineering -InvocationSource explicit_named | ConvertFrom-Json
+        $explicit.routing_receipt.transport_ok | Should -BeTrue
+        $explicit.routing_receipt.invocation_source | Should -Be 'explicit_named'
+        # The trigger is part of the receipt identity, so the two runs differ.
+        $explicit.routing_receipt.receipt_id | Should -Not -Be $result.routing_receipt.receipt_id
+
+        $unspecified = & $router -Query 'design' -CatalogPath $catalog -DomainHint engineering | ConvertFrom-Json
+        $unspecified.routing_receipt.invocation_source | Should -Be 'unspecified'
+        { & $router -Query 'design' -CatalogPath $catalog -InvocationSource not_a_trigger } | Should -Throw
+    }
+
+    It 'emits a structured not-run document instead of an empty result when the router fails' {
+        $broken = Join-Path $TestDrive 'broken-catalog.json'
+        [IO.File]::WriteAllText($broken, '{ not valid json', [Text.UTF8Encoding]::new($false))
+
+        $failed = Invoke-RouterInChildProcess $router @('-Query', 'design', '-CatalogPath', $broken, '-InvocationSource', 'explicit_named')
+
+        # A corrupt catalog is still a delivered document: discovery is blocked,
+        # transport held, and the receipt must not read as an empty candidate set.
+        $failed.result.routing_receipt.transport_ok | Should -BeTrue
+        $failed.result.routing_receipt.status | Should -Be 'blocked'
+        $failed.result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        $failed.result.routing_receipt.invocation_source | Should -Be 'explicit_named'
+    }
+
     It 'discovers contained candidates without semantic ranking or writes' {
         $result=& $router -Query 'design' -CatalogPath $catalog -DomainHint engineering|ConvertFrom-Json
         @($result.retrieval.candidates.name)|Should -Be @('codebase-design')
