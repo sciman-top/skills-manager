@@ -31,6 +31,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Nested-run marker. A gate test can start tests/run.ps1 from inside a Pester
+# container; that child process cannot see the parent's TestDrive (PSDrives are
+# per-process), but the parent's drive looks abandoned to the reclaim script once
+# it has been idle past MinAgeSeconds, and parking it breaks the container still
+# using it. Exporting the marker makes the enclosing run visible to the child,
+# and the child inherits it automatically - the same mechanism the runner
+# already relies on for CODEX_HOME-style environment facts.
+$script:NestedRunMarker = 'DSH_TEST_RUNNER_NESTED'
+$script:InNestedRun = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($script:NestedRunMarker))
+if (-not $script:InNestedRun) {
+    # Mark before doing anything else so any runner this run starts inherits it.
+    [Environment]::SetEnvironmentVariable($script:NestedRunMarker, [string]$PID)
+}
 $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1'
 $manifest = & $bootstrap
 
@@ -44,7 +57,13 @@ $manifest = & $bootstrap
 if ([string]::IsNullOrWhiteSpace($ShardJobPath) -and [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
     try {
         $reclaimPath = Join-Path $PSScriptRoot '..\scripts\quality\reclaim-test-temp.ps1'
-        if (Test-Path -LiteralPath $reclaimPath -PathType Leaf) {
+        # A nested runner (a gate test starting tests/run.ps1 inside a Pester
+        # container) must not reclaim: the enclosing run's TestDrive looks
+        # abandoned once it has been idle past MinAgeSeconds, and parking it
+        # breaks the container that still owns it - the stale-mapping crash this
+        # runner otherwise has to recover from. The marker is inherited by child
+        # processes, which cannot see the parent's per-process PSDrive.
+        if ((Test-Path -LiteralPath $reclaimPath -PathType Leaf) -and -not $script:InNestedRun) {
             # Capture the best-effort summary so it cannot add a third line to
             # the runner's stable start/summary output contract.
             $null = & $reclaimPath
@@ -100,6 +119,58 @@ function Get-TestEnvironmentRecord {
     }
 }
 
+function Remove-StaleTestDriveMapping {
+    # Pester's Start step clears a previous TestDrive only when `Test-Path
+    # TestDrive:\` succeeds, then unconditionally calls New-PSDrive by name. A
+    # container that deletes its drive root (a reclaim test, a fixture cleanup)
+    # but leaves the mapping makes that probe false: the stale mapping survives
+    # and the next container in the same worker throws "drive already exists".
+    # Removing the mapping whenever the probe is false is what breaks that cycle;
+    # a healthy drive is left alone so a legitimate nesting still works.
+    $drive = Get-PSDrive -Name TestDrive -ErrorAction SilentlyContinue
+    if ($null -eq $drive) { return }
+    if (Test-Path -LiteralPath 'TestDrive:\' -ErrorAction SilentlyContinue) { return }
+    try {
+        Remove-PSDrive -Name TestDrive -Force -ErrorAction SilentlyContinue
+        Remove-Variable -Name TestDrive -Scope Global -ErrorAction SilentlyContinue
+    }
+    catch {
+        # Recovery is best effort; a drive we still cannot remove surfaces as the
+        # original container failure rather than a silent skip.
+    }
+}
+
+function Merge-PesterRunResult {
+    # Per-file runs are an implementation detail of the leak fix; the runner's
+    # receipt contract still describes one batch, so the counters and failure
+    # collections are merged back into a single result object.
+    param([object[]]$Results)
+    $merged = [pscustomobject]@{
+        TotalCount           = 0
+        PassedCount          = 0
+        FailedCount          = 0
+        SkippedCount         = 0
+        FailedContainers     = @()
+        FailedContainersCount = 0
+        Failed               = @()
+    }
+    $containers = [Collections.Generic.List[object]]::new()
+    $failed = [Collections.Generic.List[object]]::new()
+    foreach ($item in @($Results)) {
+        if ($null -eq $item) { continue }
+        $merged.TotalCount += [int]$item.TotalCount
+        $merged.PassedCount += [int]$item.PassedCount
+        $merged.FailedCount += [int]$item.FailedCount
+        $merged.SkippedCount += [int]$item.SkippedCount
+        foreach ($container in @($item.FailedContainers)) { $containers.Add($container) | Out-Null }
+        foreach ($test in @($item.Failed)) { $failed.Add($test) | Out-Null }
+    }
+    $merged.FailedContainers = @($containers.ToArray())
+    $merged.FailedContainersCount = $containers.Count
+    $merged.Failed = @($failed.ToArray())
+    return $merged
+}
+
 function Invoke-RepositoryPester {
     param(
         [string[]]$Paths,
@@ -108,14 +179,47 @@ function Invoke-RepositoryPester {
         [string[]]$ExcludeTags
     )
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    # A directory expands to one run per test file, so a reclaim point sits
+    # between every pair of containers. Pester clears a previous TestDrive only
+    # when `Test-Path TestDrive:\` succeeds, then unconditionally calls
+    # New-PSDrive by name; a container that deletes its drive root but leaves the
+    # mapping makes that probe false, so the next container in the same
+    # Invoke-Pester call throws "名为 'TestDrive' 的驱动器已存在" and the whole
+    # container crashes. Splitting per file is the only place that leak can be
+    # broken from outside Pester.
+    $singleRun = $false
+    $perFilePaths = [Collections.Generic.List[string]]::new()
+    foreach ($candidate in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate)) { continue }
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $candidate -Recurse -Filter '*.Tests.ps1' -File | Sort-Object FullName)) {
+                $perFilePaths.Add($file.FullName) | Out-Null
+            }
+        }
+        else {
+            $perFilePaths.Add([string]$candidate) | Out-Null
+        }
+    }
+    if ($perFilePaths.Count -eq 0) { $singleRun = $true }
     $configuration = New-PesterConfiguration
-    $configuration.Run.Path = $Paths
     $configuration.Run.PassThru = $true
     $configuration.Output.Verbosity = 'None'
     if ($Names.Count -gt 0) { $configuration.Filter.FullName = $Names }
     if ($Tags.Count -gt 0) { $configuration.Filter.Tag = $Tags }
     if ($ExcludeTags.Count -gt 0) { $configuration.Filter.ExcludeTag = $ExcludeTags }
-    $result = Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
+    $results = if ($singleRun) {
+        Remove-StaleTestDriveMapping
+        $configuration.Run.Path = @($Paths)
+        Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
+    }
+    else {
+        foreach ($path in $perFilePaths.ToArray()) {
+            Remove-StaleTestDriveMapping
+            $configuration.Run.Path = @($path)
+            Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
+        }
+    }
+    $result = if (@($results).Count -eq 1) { @($results)[0] } else { Merge-PesterRunResult @($results) }
     $stopwatch.Stop()
     return [pscustomobject]@{ result = $result; seconds = $stopwatch.Elapsed.TotalSeconds }
 }
