@@ -36,21 +36,29 @@ BeforeAll {
 }
 
 Describe 'Skill projection profiles' {
-    It 'keeps the checked-in default core-lean profile small for every host' {
+    It 'keeps the checked-in default core-lean profile small and backs every cold-reachable skill' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
+        $coldMembers = @(Get-SkillProjectionColdMembershipNames $config)
 
         foreach ($hostName in @('codex', 'claude', 'zcode')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.profile | Should -Be 'core-lean'
             $selection.include_all | Should -BeFalse
-            @($selection.included_names).Count | Should -Be 7
+            # The profile literal stays small; the effective include set also
+            # carries cold discovery members, otherwise the router can validate
+            # a candidate the host cannot load.
+            @($selection.cold_membership_includes).Count | Should -BeGreaterThan 0
+            @($selection.cold_membership_includes) | Should -Contain 'grill-me'
             @($selection.included_names) | Should -Contain 'ai-coding-workflow'
             @($selection.included_names) | Should -Contain 'capability-router'
-            @($selection.included_names) | Should -Not -Contain 'codebase-design'
-            @($selection.included_names) | Should -Not -Contain 'custom-powerpoint-accessibility'
-            @($selection.included_names) | Should -Not -Contain 'grill-me'
+            @($selection.included_names) | Should -Contain 'grill-me'
         }
+        # A host exclusion still subtracts from the cold backing list.
+        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex).included_names | Should -Not -Contain 'xlsx'
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex
+        @($coldMembers) | Where-Object { $codexSelection.excluded_names -notcontains $_ } |
+            ForEach-Object { @($codexSelection.included_names) | Should -Contain $_ }
     }
 
     It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
@@ -91,6 +99,7 @@ Describe 'Skill projection profiles' {
         $selection.profile | Should -Be 'full-compatible'
         $selection.include_all | Should -BeTrue
         @($selection.included_names).Count | Should -Be 0
+        @($selection.cold_membership_includes).Count | Should -Be 0
         @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
@@ -157,6 +166,7 @@ Describe 'Skill projection profiles' {
         $selected = @(Get-SkillProjectionTargetsInScope -Targets $targets -ProjectionHosts @('codex,claude,zcode,antigravity'))
         @($selected | ForEach-Object host) | Should -Be @('codex', 'claude', 'zcode', 'antigravity')
         @(Get-SkillProjectionTargetsInScope -Targets $targets).Count | Should -Be 5
+        @((Resolve-SkillProjectionHosts @('dsh')))[0] | Should -Be 'dsh'
         { Resolve-SkillProjectionHosts @('codex,unsupported') } | Should -Throw '*projection_hosts_invalid*'
     }
 
@@ -169,12 +179,12 @@ Describe 'Skill projection profiles' {
         { Get-SkillProjectionTargetsInScope -Targets $targets -ProjectionHosts @('claude') } | Should -Throw '*无法由 path 推导宿主*'
     }
 
-    It 'resolves profile selections for the antigravity and workbuddy hosts' {
+    It 'resolves profile selections for the antigravity, workbuddy and dsh hosts' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
-        foreach ($hostName in @('antigravity', 'workbuddy')) {
+        foreach ($hostName in @('antigravity', 'workbuddy', 'dsh')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.host | Should -Be $hostName
-            $selection.profile | Should -Be 'core-ops'
+            $selection.profile | Should -Be $(if ($hostName -eq 'dsh') { 'core-lean' } else { 'core-ops' })
             @($selection.included_names).Count | Should -BeGreaterThan 0
         }
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName notepad } | Should -Throw '*'

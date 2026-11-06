@@ -435,4 +435,70 @@ Describe 'Read-only skill surface inventory' {
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
+
+    It 'fails the view when a cold discovery domain member is not projected to any host root' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $hostRoot = Join-Path $fixture 'host-skills'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            foreach ($name in @('projected-skill', 'cold-only-skill')) {
+                $source = Join-Path $agentRoot $name
+                New-Item -ItemType Directory -Force -Path $source | Out-Null
+                [IO.File]::WriteAllText((Join-Path $source 'SKILL.md'), "---`nname: $name`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            }
+            New-Item -ItemType Directory -Force -Path $userRoot, $hostRoot | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $userRoot 'projected-skill') -Target (Join-Path $agentRoot 'projected-skill') | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $hostRoot 'projected-skill') -Target (Join-Path $agentRoot 'projected-skill') | Out-Null
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{
+                    manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = $userRoot
+                    managed_link_includes = @('projected-skill')
+                    discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{ engineering = @('projected-skill', 'cold-only-skill') } }
+                }
+                targets = @([pscustomobject]@{ path = $hostRoot; host = 'claude'; managed_link_only = $true })
+                mcp_servers = @()
+            }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $finding = @($view.findings | Where-Object code -eq 'cold_membership_not_projected')
+
+            $finding.Count | Should -Be 1
+            $finding[0].severity | Should -Be 'error'
+            $finding[0].surface | Should -Be 'host_skill_roots'
+            $finding[0].path | Should -BeLike '*cold-only-skill*'
+            $view.pass | Should -BeFalse
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'reports no cold membership gap when every domain member is projected' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $hostRoot = Join-Path $fixture 'host-skills'; $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $source = Join-Path $agentRoot 'only-skill'; New-Item -ItemType Directory -Force -Path $source, $userRoot, $hostRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $source 'SKILL.md'), "---`nname: only-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Junction -Path (Join-Path $userRoot 'only-skill') -Target $source | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $hostRoot 'only-skill') -Target $source | Out-Null
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{
+                    manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = $userRoot
+                    managed_link_includes = @('only-skill')
+                    discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{ engineering = @('only-skill') } }
+                }
+                targets = @([pscustomobject]@{ path = $hostRoot; host = 'claude'; managed_link_only = $true })
+                mcp_servers = @()
+            }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+
+            @($view.findings.code) | Should -Not -Contain 'cold_membership_not_projected'
+            $view.pass | Should -BeTrue
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
 }
