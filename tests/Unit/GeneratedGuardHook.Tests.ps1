@@ -166,6 +166,53 @@ Describe 'Panel guard handles the Codex apply_patch payload' {
     It 'ignores patches that touch no guarded path' {
         Invoke-Guard (New-PatchEvent @('*** Update File: docs/product/README.md')) | Should -Be 0
     }
+
+    It 'blocks the same patch when Codex carries it in tool_input.command' {
+        # A live `codex exec` apply_patch delivered the payload in
+        # tool_input.command and edited skills.ps1; the guard only read
+        # tool_input.patch, so the write went through. Both shapes must block.
+        $patch = (@('*** Begin Patch', '*** Update File: skills.ps1', '@@', '+# probe', '*** End Patch')) -join "`n"
+        Invoke-Guard (@{ tool_name = 'apply_patch'; tool_input = @{ command = $patch } } | ConvertTo-Json -Compress) | Should -Be 2
+        Invoke-Guard (@{ tool_name = 'apply_patch'; tool_input = @{ patch = $patch } } | ConvertTo-Json -Compress) | Should -Be 2
+    }
+}
+
+Describe 'Panel guard speaks each host deny protocol' {
+    It 'emits the Codex JSON deny decision instead of a bare exit code under -DenyJson' {
+        # A live `codex exec` run treated `exit 2` as "PreToolUse Failed" and let
+        # the apply_patch through; only the JSON decision actually blocks Codex.
+        $eventPath = Join-Path ([IO.Path]::GetTempPath()) ('guarde-' + [guid]::NewGuid().ToString('N') + '.json')
+        try {
+            Set-Content -LiteralPath $eventPath -Value (New-EditEvent 'skills.ps1') -Encoding utf8 -NoNewline
+            $process = Start-Process -FilePath (Get-Process -Id $PID).Path `
+                -ArgumentList @('-NoProfile', '-File', $script:Hook, '-DenyJson') `
+                -RedirectStandardInput $eventPath -RedirectStandardOutput ($eventPath + '.out') `
+                -RedirectStandardError ($eventPath + '.err') -NoNewWindow -PassThru -Wait
+            $process.ExitCode | Should -Be 0
+            $decision = [IO.File]::ReadAllText($eventPath + '.out') | ConvertFrom-Json
+            $decision.hookSpecificOutput.hookEventName | Should -Be 'PreToolUse'
+            $decision.hookSpecificOutput.permissionDecision | Should -Be 'deny'
+            $decision.hookSpecificOutput.permissionDecisionReason | Should -Match 'skills\.ps1'
+        }
+        finally {
+            Remove-Item -LiteralPath $eventPath, ($eventPath + '.out'), ($eventPath + '.err') -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'keeps the Claude exit-2 contract when -DenyJson is absent' {
+        Invoke-Guard (New-EditEvent 'skills.ps1') | Should -Be 2
+    }
+
+    It 'registers -DenyJson for both Codex PreToolUse matchers' {
+        $config = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.codex\config.toml') -Raw
+        @([regex]::Matches($config, 'guard-generated\.ps1 -DenyJson')).Count | Should -BeGreaterOrEqual 4
+        # `$(git rev-parse ...)` is bash syntax; Codex runs hooks through cmd.exe,
+        # where it never expands and the hook fails open. Only command values
+        # matter, so the explanatory comment above them is not scanned.
+        foreach ($commandLine in @([regex]::Matches($config, "(?m)^(?:command|command_windows) = '(?<c>[^']*)'") | ForEach-Object { $_.Groups['c'].Value })) {
+            $commandLine | Should -Not -Match '\$\(git rev-parse'
+        }
+    }
 }
 
 Describe 'Panel guard registration is shared by both hosts' {

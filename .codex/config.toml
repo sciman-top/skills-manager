@@ -1,17 +1,21 @@
 approval_policy = "on-request"
 
-# 生成物守卫与 Stop 验证守卫。命令一律从 git 根解析，因为 Codex 可能从子目录启动
-# （learn.chatgpt.com/docs/hooks）。两个脚本与 Claude Code 共用，脚本本身只有一个副本。
+# 生成物守卫与 Stop 验证守卫。两个脚本与 Claude Code 共用，脚本本身只有一个副本。
 # Codex 把 Bash 统一记为 tool_name=Bash，apply_patch 的编辑记为 apply_patch，
 # 因此 PreToolUse 同时匹配两者。项目级 hook 首次使用需在 `/hooks` 审查并信任。
+#
+# 命令必须是 argv 形式，不能用 `$(git rev-parse --show-toplevel)`：hook 在 Windows
+# 上由 cmd.exe 执行，`$(...)` 不会展开（实测 `pwsh -File "$(git ...)/x.ps1"` 以
+# 退出码 64 失败），而 Codex 对 hook 执行失败的处理是"记录失败并继续"，于是守卫
+# 静默失效。脚本自身用 $PSScriptRoot 定位仓库，因此不依赖调用方的工作目录。
 
 [[hooks.PreToolUse]]
 matcher = "^Bash$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-generated.ps1"'
-command_windows = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-generated.ps1"'
+command = 'pwsh -NoProfile -File scripts/guard-generated.ps1 -DenyJson'
+command_windows = 'pwsh -NoProfile -File scripts/guard-generated.ps1 -DenyJson'
 timeout = 30
 statusMessage = "Checking generated-file write boundary"
 
@@ -20,8 +24,8 @@ matcher = "^apply_patch$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-generated.ps1"'
-command_windows = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-generated.ps1"'
+command = 'pwsh -NoProfile -File scripts/guard-generated.ps1 -DenyJson'
+command_windows = 'pwsh -NoProfile -File scripts/guard-generated.ps1 -DenyJson'
 timeout = 30
 statusMessage = "Checking generated-file write boundary"
 
@@ -29,7 +33,7 @@ statusMessage = "Checking generated-file write boundary"
 
 [[hooks.Stop.hooks]]
 type = "command"
-command = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-stop-verification.ps1"'
-command_windows = 'pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/scripts/guard-stop-verification.ps1"'
+command = 'pwsh -NoProfile -File scripts/guard-stop-verification.ps1'
+command_windows = 'pwsh -NoProfile -File scripts/guard-stop-verification.ps1'
 timeout = 180
 statusMessage = "Checking generated-bundle drift and verification evidence"

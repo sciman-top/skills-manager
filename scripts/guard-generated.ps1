@@ -1,4 +1,10 @@
 #requires -Version 7.0
+param(
+    # Codex 的 hook 只认 JSON 决策：实测 `exit 2` 会被记为 "PreToolUse Failed" 并
+    # 继续执行工具（真实 apply_patch 因此写穿了生成物），而 Claude Code 的约定是
+    # `exit 2` + stderr。用显式开关区分，不靠猜宿主。
+    [switch]$DenyJson
+)
 # 生成物守卫（宿主中立）：阻断对生成物与物化目录的直接写入。
 #
 # 两个宿主共用本脚本，不各自复制一份守卫：
@@ -15,6 +21,7 @@
 # 最终裁决是 CI 的 `build.ps1 -Check`（-CheckGenerated）。见 docs/runbooks/agent-hook-enforcement.md。
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+$script:DenyJsonMode = [bool]$DenyJson
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 function Read-GuardStdinText {
     # 有界读取：宿主若不关闭 stdin，ReadToEnd 会无限等待。判据是守卫对不可读输入
@@ -51,7 +58,22 @@ function Get-GuardedRel([string]$Token) {
 }
 
 function Block([string]$Rel, [string]$Via) {
-    [Console]::Error.WriteLine("blocked: $Rel 是生成物或物化目录（$Via）。请修改 src/、overrides/ 或 rules/global 源，再运行 build.ps1 重建。")
+    $reason = "blocked: $Rel 是生成物或物化目录（$Via）。请修改 src/、overrides/ 或 rules/global 源，再运行 build.ps1 重建。"
+    if ($script:DenyJsonMode) {
+        # Codex 的阻断形态：stdout 上的 hookSpecificOutput.permissionDecision。
+        # 退出码仍用 0，避免 Codex 把它归为 hook 失败。
+        $decision = [pscustomobject][ordered]@{
+            hookSpecificOutput = [pscustomobject][ordered]@{
+                hookEventName            = 'PreToolUse'
+                permissionDecision       = 'deny'
+                permissionDecisionReason = $reason
+            }
+        }
+        [Console]::Out.WriteLine(($decision | ConvertTo-Json -Compress -Depth 5))
+        [Console]::Out.Flush()
+        exit 0
+    }
+    [Console]::Error.WriteLine($reason)
     exit 2
 }
 
@@ -73,7 +95,16 @@ if (-not [string]::IsNullOrWhiteSpace($filePath)) {
     exit 0
 }
 
+# Codex sends the apply_patch payload in `tool_input.command` (the patch text is
+# the "command"), not in a `patch` field: a real `apply_patch` edit slipped past
+# an earlier version of this guard that only read `tool_input.patch`. Accept both
+# shapes, and also treat any command that starts with the patch header as a patch
+# so the Bash path-write heuristics cannot silently pass it.
 $patch = [string]$event.tool_input.patch
+if ([string]::IsNullOrWhiteSpace($patch)) {
+    $candidateCommand = [string]$event.tool_input.command
+    if ($candidateCommand -match '(?im)^\s*\*\*\* Begin Patch') { $patch = $candidateCommand }
+}
 if (-not [string]::IsNullOrWhiteSpace($patch)) {
     $targets = @([regex]::Matches($patch, '(?im)^\*\*\* (?:Add|Update|Delete) File:\s*(?<p>\S+)\s*$') | ForEach-Object { $_.Groups['p'].Value })
     if (@($targets).Count -eq 0) { exit 0 }
