@@ -840,18 +840,21 @@ function Split-AuditLines([string]$Content) {
     # 按 '\n' 切再剥行尾 '\r' 得到同样的行数组，单独 '\r' 在两种实现下都不
     # 断行，空行也一并保留，因此行号与证据位置不变。
     if ([string]::IsNullOrEmpty($Content)) { return @('') }
-    $lines = $Content.Split([char[]]@([char]10), [System.StringSplitOptions]::None)
+    $split = $Content.Split([char[]]@([char]10), [System.StringSplitOptions]::None)
     # 只有被 '\n' 终止的段才可能带 CRLF 的 '\r'；末段没有 '\n' 收尾，
     # 它自身末尾的 '\r' 是普通字符（'\r?\n' 不把孤立的 '\r' 当分隔符）。
     # 因此只在非末段剥 '\r'——对末段剥会把 "a\r" 错切成 "a"。
-    $lastIndex = $lines.Length - 1
+    $lastIndex = $split.Length - 1
     for ($index = 0; $index -lt $lastIndex; $index++) {
-        $line = $lines[$index]
+        $line = $split[$index]
         if ($line.Length -gt 0 -and $line[$line.Length - 1] -eq [char]13) {
-            $lines[$index] = $line.Substring(0, $line.Length - 1)
+            $split[$index] = $line.Substring(0, $line.Length - 1)
         }
     }
-    return $lines
+    # 直接返回数组：单元素时会被管道解包成裸字符串，调用方的 $lines[0]
+    # 就退化成「字符串的第 0 个字符」——单行文件因此丢失全部证据。调用方
+    # 一律用 @() 重新收集，与 [regex]::Split 的数组形态保持一致。
+    return $split
 }
 
 function Get-AuditRequirementSignalTable {
@@ -910,7 +913,7 @@ function Add-AuditRequirementFactsFromText {
     # 命中行才逐候选展开。空行/规则定义行的排除与旧行集准入一致，行号
     # = 索引+1，证据顺序（行升序×候选表序）不变。
     $combined = Get-AuditLineProbeRegex @($candidateSignals | ForEach-Object { $_.regex })
-    $lines = Split-AuditLines $Content
+    $lines = @(Split-AuditLines $Content)
     if ($null -eq $script:AuditRuleDefinitionRegex) {
         $script:AuditRuleDefinitionRegex = New-AuditProbeRegex "(?i)\b(?:artifact|domain|subject|pattern|actions)\s*="
     }
@@ -1049,7 +1052,7 @@ function Add-AuditArtifactFactsFromText {
     # |artifact|x|action|x2 次 IsMatch。纯短路，不改变任何证据或顺序。
     $artifactProbe = Get-AuditLineProbeRegex @($candidateArtifacts | ForEach-Object { $_.regex })
     $actions = @($table.actions)
-    $lines = Split-AuditLines $Content
+    $lines = @(Split-AuditLines $Content)
     if ($null -eq $script:AuditRuleDefinitionRegex) {
         $script:AuditRuleDefinitionRegex = New-AuditProbeRegex "(?i)\b(?:artifact|domain|subject|pattern|actions)\s*="
     }

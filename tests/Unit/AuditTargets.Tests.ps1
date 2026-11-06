@@ -1360,6 +1360,31 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $targeted.priority_band | Should -Be "primary_candidate"
         }
 
+        It "Never derives a matched action from the signal prefix" {
+            # 需求侧 signal 前缀是 domain、工件侧是工件名；从前缀回退会把
+            # "workflow"/"pdf" 伪装成动作。没有 action 字段的证据就是没有配对。
+            $noActionField = New-AuditPrioritizedNeed ([pscustomobject]@{
+                    domain = "workflow"; subject = "document_processing"; actions = @("process")
+                    confidence = "high"; evidence_status = "implemented"; targets = @("one")
+                    evidence = @([pscustomobject]@{ kind = "source_code"; path = "src\\process.py"; signal = "workflow:document_processing@L1"; target = "one" })
+                }) "requirement" 1
+            @($noActionField.matched_actions).Count | Should -Be 0
+
+            $scanned = New-AuditRepoScan "prefix-probe" (Join-Path $TestDrive "prefix-probe") "..\prefix-probe"
+            foreach ($signal in @($scanned.detected.requirement_signals)) {
+                foreach ($evidence in @($signal.evidence)) {
+                    [string]$evidence.action | Should -Not -BeNullOrEmpty
+                    [string]$evidence.action | Should -Not -Be ([string]$signal.domain)
+                }
+            }
+            foreach ($artifact in @($scanned.detected.artifact_capabilities)) {
+                foreach ($evidence in @($artifact.evidence)) {
+                    [string]$evidence.action | Should -Not -BeNullOrEmpty
+                    [string]$evidence.action | Should -Not -Be ([string]$artifact.artifact)
+                }
+            }
+        }
+
         It "Carries auditable scores and paired actions for every portfolio need" {
             $synthetic = [pscustomobject]@{ domain = "workflow"; subject = "document_processing" }
             $scan = [pscustomobject]@{
@@ -1379,8 +1404,12 @@ $signals = @([pscustomobject]@{ domain = "workflow"; subject = "document_process
             $all.Count | Should -Be (@($all | Select-Object -ExpandProperty key -Unique).Count)
             $pdf = @($all | Where-Object key -eq "pdf")
             $pdf.Count | Should -Be 1
-            $pdf[0].matched_actions[0].action | Should -Be "pdf"
-            $pdf[0].matched_actions[0].target | Should -Be "harbor-studio"
+            # matched_actions 必须给出真实动作。此前断言写的是 "pdf"——那是工件名，
+            # 由 signal 前缀 "pdf:read@L1" 反推出来的伪动作：需求侧前缀是 domain，
+            # 工件侧前缀是工件名，两者都不是动作。这里钉住声明动作本身。
+            $pdf[0].matched_actions | ForEach-Object { $_.target | Should -Be "harbor-studio" }
+            ($pdf[0].matched_actions | ForEach-Object { $_.action }) | Should -Be @("read")
+            $pdf[0].matched_actions[0].action | Should -Not -Be "pdf"
             $pdf[0].priority_score | Should -Be 29
             $pdf[0].score_components.psobject.Properties.Name | Should -Contain "implementation_spread"
             $summary.primary_needs[0].evidence_coverage | Should -Not -BeNullOrEmpty
