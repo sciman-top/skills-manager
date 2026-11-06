@@ -26,6 +26,13 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match 'pull_request:'
     }
 
+    It 're-runs the PR check when a human adds the new-surface label' {
+        # The gate reads the PR's current labels, so a `labeled` event must
+        # trigger the workflow; otherwise adding the label never clears the
+        # check and the PR stays blocked until an unrelated push.
+        $script:workflow | Should -Match '(?ms)^  pull_request:\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s+types:\s*\[[^\]]*\blabeled\b'
+    }
+
     It 'shares proportional classification for PRs and reserves unconditional full for tags' {
         $script:workflow | Should -Match 'github\.ref.*refs/tags/'
         $script:workflow | Should -Not -Match "github\.event_name.*-eq 'push'"

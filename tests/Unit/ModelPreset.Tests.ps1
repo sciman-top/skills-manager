@@ -47,6 +47,19 @@ Describe 'Independent model preset behavior' {
         }
     }
 
+    It 'reports an explicit capability boundary for DSH, Antigravity and WorkBuddy' {
+        $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+        $scriptPath = Join-Path $repoRoot 'src/model-orchestration/Set-ModelPreset.ps1'
+        foreach ($hostName in @('dsh','antigravity','workbuddy')) {
+            $errorText = ''
+            try { & $scriptPath -ExecutionHost $hostName -Action Resolve 2>&1 | Out-Null }
+            catch { $errorText = [string]$_.Exception.Message }
+            $errorText | Should -Match 'Model preset projection is unavailable for host'
+            $errorText | Should -Match $hostName
+            $errorText | Should -Match 'native model and child-agent contract is not verified'
+        }
+    }
+
     It 'rejects stale, unbound and future native catalog snapshots in both entrypoints' {
         $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
         $snapshotPath = Join-Path $TestDrive 'catalog.json'

@@ -83,6 +83,16 @@
         "workbuddy": {
           "default_profile": "core-ops",
           "exclude": []
+        },
+        "dsh": {
+          "default_profile": "core-lean",
+          "exclude": [
+            "docx",
+            "pptx",
+            "skill-creator",
+            "web-artifacts-builder",
+            "xlsx"
+          ]
         }
       }
     },

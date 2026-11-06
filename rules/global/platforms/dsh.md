@@ -5,10 +5,12 @@
 - 项目链自 `.git` 项目根向会话工作目录逐层加载 `AGENTS.md`、`CLAUDE.md` 并叠加 `AGENTS.local.md`、`CLAUDE.local.md`，广度到具体排序；权限或 I/O 失败即中止上溯，不回退祖先根。
 - 同组候选 trim 后内容相同的文件只渲染一次；更具体文件优先，预算不足先省略广度文件（user-global 链 harness-home 先于 shared-root 被省略）。
 - 用户级技能走 `~/.agents/skills`（既有投影目标，五宿主技能天然流入；不另建 `~/.dsh/skills` 投影以免双载）。技能 frontmatter 支持 `disable-model-invocation` 与 `user-invocable`，非法布尔值整技能丢弃并告警。
+- 宿主先按可见技能元数据选择；仅点名不可见技能或可见覆盖不足且确需专门工作流时，才以完整原始请求和至多两个 domain hint 调用仓内登记的技能路由器一次，由宿主在候选中语义选择并保留其 `execution_contract`；禁止通过搜索 vendor/import/agent 绕过冷技能校验。
 ### B.2 预算与诊断
 - 指令预算默认 64 KiB/链（user-global 与 project 独立计，单消息至多两倍）；本仓 130 行/16 KiB 保守预算继续生效，不因宿主余量放宽。
 - 指令为 durable sourced user/message，可从 `~/.dsh/sessions` 会话日志取证；第一方 read/write/edit 触达更深层目录后注入新适用文件，变更替换、消失出移除通知。
 - 文件一致只证明 `filesystem_projected`；dsh 新会话 baseline 出现 `Instructions from: ~/.dsh/AGENTS.md` 来源段才可称 `host_loaded`，真实任务验收另列。
+- 最小诊断：`/permission` 核对沙箱与审批预设、`/plan` 核对计划模式；文件级投影、dry-run 与 receipt 属于 `platform_na` 替代证据，不冒充 `host_loaded`。
 - `~/.dsh/profiles/desktop/cordis.patch.yml` 是受控配置面（id 定向覆盖/禁用/插入，支持 `!!js` 表达式）；调整指令链行为须走 patch 行并留备份回滚入口。
 ### B.3 强制面与回退
 - dsh 无 hooks 机制；确定性强制面是沙箱模式（`read-only` / `workspace-write` / `danger-full-access`，部署默认 fail-closed `read-only`）与审批策略（`ask` / `never`；`ask` 缺应答器以拒绝方式关闭，仅一次性授权、无 `allow-always`）。`/permission` 预设捆绑两旋钮，`permission` 设置命名空间固定新会话默认。

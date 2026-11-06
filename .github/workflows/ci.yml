@@ -8,6 +8,11 @@ on:
     tags:
       - '*'
   pull_request:
+    # `labeled` is required, not optional: verify-new-surface.ps1 gates new
+    # files on a label a human adds after the PR exists. With only the default
+    # event types, adding that label never re-ran the check and the PR stayed
+    # red until an unrelated push.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 jobs:
   test:

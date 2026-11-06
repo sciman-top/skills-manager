@@ -138,7 +138,7 @@ function Get-RuleDiscovery {
     }
     $projectDirs = if ($HostName -eq 'zcode') { @($repo) } else { @($dirs) }
     foreach ($dir in $projectDirs) {
-        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') {
+        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -in @('zcode', 'dsh')) { @('AGENTS.md') } elseif ($HostName -eq 'antigravity') {
             $ruleDir = Join-Path $dir '.agents\rules'
             @('AGENTS.md', 'GEMINI.md', '.agents/AGENTS.md', '.agents/GEMINI.md') + $(if ([System.IO.Directory]::Exists($ruleDir)) { @(Get-ChildItem -LiteralPath $ruleDir -Filter '*.md' -File | Sort-Object Name | ForEach-Object { Join-Path '.agents\rules' $_.Name }) } else { @() })
         } else { @('CLAUDE.md', 'AGENTS.md') }

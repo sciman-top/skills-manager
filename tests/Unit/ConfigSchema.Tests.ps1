@@ -185,4 +185,29 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $cfg = Get-Content -LiteralPath (Join-Path $fixtureRoot 'v3-unknown-top-level.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         { Assert-Cfg $cfg } | Should -Throw '*顶层字段未被 schema v3 允许*'
     }
+
+    It 'looks up config fields case-insensitively on both object shapes' {
+        # PSObject.Properties.Match honours wildcards and only ignores case by
+        # default, so a wildcard name matched every property and a differently
+        # cased known field could read as missing. The shared lookup compares
+        # names ordinally, exactly like the dictionary branch of the same three
+        # helpers. Assertions stay implementation-independent: both shapes must
+        # answer the same case-insensitive, non-wildcard way.
+        . ([scriptblock]::Create((Get-Content -LiteralPath (Join-Path $repoRoot 'src\Domain\ConfigContract.ps1') -Raw -Encoding UTF8)))
+        $psObject = [pscustomobject]@{ Schema_Version = 3; Targets = @('a') }
+        $dictionary = [ordered]@{ Schema_Version = 3; Targets = @('a') }
+
+        foreach ($cfg in @($psObject, $dictionary)) {
+            Test-CfgObjectProperty $cfg '*' | Should -BeFalse
+            Get-CfgObjectProperty $cfg 'Schema_*' | Should -BeNullOrEmpty
+            Test-CfgObjectProperty $cfg 'schema_version' | Should -BeTrue
+            Test-CfgArrayProperty $cfg 'targets' | Should -BeTrue
+            @(Get-CfgObjectProperty $cfg 'targets') | Should -Be @('a')
+            Get-CfgObjectProperty $cfg 'SCHEMA_VERSION' | Should -Be 3
+        }
+
+        Test-CfgObjectProperty $psObject 'absent_field' | Should -BeFalse
+        Test-CfgArrayProperty $psObject 'schema_version' | Should -BeFalse
+        Get-CfgObjectProperty $psObject 'absent_field' | Should -BeNullOrEmpty
+    }
 }

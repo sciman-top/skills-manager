@@ -11,7 +11,10 @@ function Test-CfgObjectProperty($obj, [string]$name) {
         }
         return $false
     }
-    return ($obj.PSObject.Properties.Match($name).Count -gt 0)
+    # PSObject 路径必须与 dictionary 分支同一口径：OrdinalIgnoreCase 精确名比对。
+    # PSObject.Properties.Match 是通配符形式，会把 "*" 或 "Schema_*" 当模式匹配所有
+    # 属性，与 dictionary 分支结果不一致。
+    return ($null -ne (Get-CfgNativeProperty $obj $name))
 }
 function Test-CfgArrayProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $false }
@@ -25,9 +28,9 @@ function Test-CfgArrayProperty($obj, [string]$name) {
         }
         return $false
     }
-    $property = @($obj.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
-    if ($property.Count -ne 1) { return $false }
-    return (Assert-IsArray $property[0].Value)
+    $property = Get-CfgNativeProperty $obj $name
+    if ($null -eq $property) { return $false }
+    return (Assert-IsArray $property.Value)
 }
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }
@@ -48,9 +51,18 @@ function Get-CfgObjectProperty($obj, [string]$name) {
         }
         return $null
     }
-    if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
-    $value = $obj.$name
+    $property = Get-CfgNativeProperty $obj $name
+    if ($null -eq $property) { return $null }
+    $value = $property.Value
     if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
+}
+# PSObject 路径的大小写不敏感精确名查找。PSObject.Properties.Match 是通配符
+# 形式（默认忽略大小写），不能用作已知字段存在性判断；三条读取 helper 共用此函数。
+function Get-CfgNativeProperty($obj, [string]$name) {
+    foreach ($property in $obj.PSObject.Properties) {
+        if ([string]::Equals($property.Name, $name, [System.StringComparison]::OrdinalIgnoreCase)) { return $property }
+    }
+    return $null
 }
 function New-CfgVendorNameSet($vendors = @()) {
     $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)

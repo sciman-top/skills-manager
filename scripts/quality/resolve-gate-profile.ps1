@@ -12,7 +12,7 @@ param(
 # only. Classification failure is expressed as profile=full plus a reason and
 # exit code 0; only parameter usage errors exit 1.
 
-$riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
+$riskPath = '^(tests/E2E/|overrides/(README\.md|resources/|(?:custom|patches)/[^/]+/scripts/)|overrides/patches/provenance\.json$|vendor/|imports/|\.github/workflows/|\.codex/|\.claude/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|build\.ps1$|install\.ps1$|skills\.lock\.json$|audit-targets\.json$)'
 $rulePath = '^(?:rules/global/(?:common\.md|platforms/(?:codex|claude|zcode|antigravity|workbuddy|dsh)\.md|(?:codex/AGENTS|claude/CLAUDE|zcode/AGENTS|antigravity/GEMINI|workbuddy/CODEBUDDY|dsh/AGENTS)\.md)|(?:AGENTS|CLAUDE|GEMINI)\.md)$'
 $sourcePath = '^(src/|tests/Unit/)'
 $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$|rules/global/README\.md$|src/model-orchestration/(?:README|AGENTS)\.md$|overrides/(?:custom|patches)/[^/]+/references/.*\.md$)'
@@ -64,6 +64,8 @@ $sourceTests = @{
     'src/Infrastructure/CodexCli.ps1' = @('CodexCli')
     'src/Main.ps1' = @('MainDispatch', 'MenuStructure')
     'src/Version.ps1' = @('MainDispatch', 'PowerShellCompatibility')
+    'scripts/guard-generated.ps1' = @('GeneratedGuardHook')
+    'scripts/guard-stop-verification.ps1' = @('StopGuardHook')
     'scripts/quality/resolve-gate-profile.ps1' = @('ResolveGateProfile', 'QualityGateAuto', 'CiWorkflow')
     'tests/run.ps1' = @('TestRunner')
 }
@@ -76,7 +78,7 @@ $skillFocusedTests = @(
 $assetFreeTests = @('ModelPreset', 'AuditTargets', 'AuditTargetsHardening', 'CapabilityInventory',
     'ReadOnlyCli', 'RuleContent', 'RuleDiagnostics', 'GlobalRuleProjection',
     'SkillContent', 'SkillMetadata', 'SkillProjectionProfiles',
-    'AiCodingCommand',
+    'AiCodingCommand', 'GeneratedGuardHook', 'StopGuardHook',
     'QualityGateAuto', 'ResolveGateProfile', 'CiWorkflow', 'TestRunner') |
     ForEach-Object { 'tests/Unit/{0}.Tests.ps1' -f $_ }
 

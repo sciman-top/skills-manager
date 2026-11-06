@@ -10,9 +10,11 @@
     $globalMaxLines = [int](Get-OperationObjectProperty $Profile 'global_max_lines')
     $projectMaxBytes = [int](Get-OperationObjectProperty $Profile 'project_max_bytes')
     $projectMaxLines = [int](Get-OperationObjectProperty $Profile 'project_max_lines')
+    $globalRuleVersion = [string](Get-OperationObjectProperty $Profile 'global_rule_version')
     $results = New-Object System.Collections.Generic.List[object]
     $allFindings = New-Object System.Collections.Generic.List[object]
     $hashIndex = @{}
+    $projectContractChecks = @{}
     foreach ($document in @((Get-OperationObjectProperty $Discovery 'documents'))) {
         $path = [string]$document.path
         $documentScope = [string]$document.scope
@@ -27,11 +29,35 @@
             $text = [System.IO.File]::ReadAllText($path)
             $lines = @($text -split "`r?`n")
             if ($bytes.Length -gt $documentMaxBytes) { $findings.Add((New-RuleFinding -Kind deterministic -Code byte_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} bytes; profile budget is {1}.' -f $bytes.Length, $documentMaxBytes) -Disposition adapt -Blocking:($blockingCodes -contains 'byte_budget_exceeded'))) | Out-Null }
+            elseif ($bytes.Length -ge [math]::Ceiling($documentMaxBytes * 0.85)) { $findings.Add((New-RuleFinding -Kind deterministic -Code byte_budget_near_limit -Severity info -Path $path -Message ('Rule file uses {0} bytes ({1:P0} of the {2}-byte budget); past the 85% warning line.' -f $bytes.Length, ($bytes.Length / $documentMaxBytes), $documentMaxBytes) -Disposition defer -Blocking:($blockingCodes -contains 'byte_budget_near_limit'))) | Out-Null }
             if ($lines.Count -gt $documentMaxLines) { $findings.Add((New-RuleFinding -Kind deterministic -Code line_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} lines; profile budget is {1}.' -f $lines.Count, $documentMaxLines) -Disposition adapt -Blocking:($blockingCodes -contains 'line_budget_exceeded'))) | Out-Null }
+            elseif ($lines.Count -ge [math]::Ceiling($documentMaxLines * 0.85)) { $findings.Add((New-RuleFinding -Kind deterministic -Code line_budget_near_limit -Severity info -Path $path -Message ('Rule file uses {0} lines ({1:P0} of the {2}-line budget); past the 85% warning line.' -f $lines.Count, ($lines.Count / $documentMaxLines), $documentMaxLines) -Disposition defer -Blocking:($blockingCodes -contains 'line_budget_near_limit'))) | Out-Null }
             if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { $findings.Add((New-RuleFinding -Kind deterministic -Code utf8_bom_present -Severity info -Path $path -Message 'UTF-8 BOM is present.' -Disposition defer -Blocking:($blockingCodes -contains 'utf8_bom_present'))) | Out-Null }
             if (-not [string]::IsNullOrWhiteSpace($wrapperFirstLine) -and $lines.Count -gt 0 -and $lines[0] -ne $wrapperFirstLine) { $findings.Add((New-RuleFinding -Kind deterministic -Code wrapper_first_line_mismatch -Severity error -Path $path -Line 1 -Message ('First physical line must be: {0}' -f $wrapperFirstLine) -Disposition adapt -Blocking:($blockingCodes -contains 'wrapper_first_line_mismatch'))) | Out-Null }
             if ([string]$document.scope -eq 'global' -and $text -match '(?i)[A-Z]:\\(?:CODE|src|repo)\\') { $findings.Add((New-RuleFinding -Kind deterministic -Code global_repo_private_path -Severity warning -Path $path -Message 'Global rule contains a repository-private absolute path.' -Disposition adapt -Blocking:($blockingCodes -contains 'global_repo_private_path'))) | Out-Null }
             if ([string]$document.scope -in @('repo', 'subtree') -and $text -match '(?i)\bCODEX_HOME\b.*(?:loads?|加载)') { $findings.Add((New-RuleFinding -Kind deterministic -Code project_host_loading_tutorial -Severity warning -Path $path -Message 'Project rule contains host-loading tutorial text.' -Disposition adapt -Blocking:($blockingCodes -contains 'project_host_loading_tutorial'))) | Out-Null }
+            if ([string]$document.scope -eq 'repo' -and [IO.Path]::GetFileName($path) -ieq 'AGENTS.md') {
+                $contractFields = [ordered]@{
+                    source_of_truth = '(?im)^\s*(?:[-*]\s*)?(?:source of truth|仓库事实|定位与真值|产品边界与入口)\s*[:：]'
+                    entrypoint = '(?im)^\s*(?:[-*]\s*)?(?:entrypoint|入口)\s*[:：]'
+                    domain_invariants = '(?im)^\s*(?:#{1,4}\s*(?:领域不变量|不变量|真值|仓库事实与模块边界)|[-*]\s*domain[_\s]+invariants\s*[:：])'
+                    minimum_gates = '(?im)^\s*(?:#{1,4}\s*(?:门禁|最低充分门禁|最低门禁|验证)|[-*]\s*minimum[_\s]+gates\s*[:：])'
+                    rollback = '(?im)^\s*(?:#{1,4}\s*(?:Git 与回滚|回滚|收口)|[-*]\s*rollback\s*[:：])'
+                }
+                $missingContractFields = @($contractFields.Keys | Where-Object { $text -notmatch $contractFields[$_] })
+                $reviewedField = if ($globalRuleVersion -and $text -match '(?im)^\s*(?:[-*]\s*)?\*\*全局规则复核\*\*\s*[:：]\s*(?<version>\d+\.\d+)\s*$') { [string]$Matches['version'] } else { '' }
+                $projectContractChecks[$path] = [pscustomobject][ordered]@{
+                    present               = ($missingContractFields.Count -eq 0)
+                    missing               = @($missingContractFields)
+                    global_rule_reviewed  = $reviewedField
+                }
+                if ($missingContractFields.Count -gt 0) {
+                    $findings.Add((New-RuleFinding -Kind deterministic -Code project_contract_incomplete -Severity warning -Path $path -Message ('Project rule contract is missing: {0}.' -f ($missingContractFields -join ', ')) -Disposition adapt -Blocking:($blockingCodes -contains 'project_contract_incomplete'))) | Out-Null
+                }
+                if (-not [string]::IsNullOrWhiteSpace($reviewedField) -and $reviewedField -ne $globalRuleVersion) {
+                    $findings.Add((New-RuleFinding -Kind deterministic -Code global_rule_review_stale -Severity info -Path $path -Message ('Project rule records global review {0}; current global rules are {1}.' -f $reviewedField, $globalRuleVersion) -Disposition adapt -Blocking:($blockingCodes -contains 'global_rule_review_stale'))) | Out-Null
+                }
+            }
             if ($text -match '(?im)^\s*\[deterministic-enforcement\]' -and $text -notmatch '(?i)(\.github/workflows|hooks?|scripts?/|\.rules\b|config\.)') { $findings.Add((New-RuleFinding -Kind deterministic -Code prose_only_enforcement -Severity error -Path $path -Message 'Deterministic enforcement claim has no hook/config/script/CI reference.' -Disposition adapt -Blocking:($blockingCodes -contains 'prose_only_enforcement'))) | Out-Null }
             $hash = [string]$document.content_hash
             if (-not [string]::IsNullOrWhiteSpace($hash)) {
@@ -48,5 +74,5 @@
             foreach ($path in $paths) { $finding = New-RuleFinding -Kind deterministic -Code exact_duplicate_document -Severity warning -Path $path -Message ('Exact content is duplicated across: {0}' -f ($paths -join ', ')) -Disposition adapt -Blocking:($blockingCodes -contains 'exact_duplicate_document'); $allFindings.Add($finding) | Out-Null; $target = @($results | Where-Object path -eq $path)[0]; $target.findings = @($target.findings) + @($finding) }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; documents = @($results.ToArray()); findings = @($allFindings.ToArray() | Sort-Object finding_id); blocking_count = @($allFindings | Where-Object blocking).Count; commands_executed = 0; writes = 0; provider_calls = 0; native_mutations = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; documents = @($results.ToArray()); findings = @($allFindings.ToArray() | Sort-Object finding_id); blocking_count = @($allFindings | Where-Object blocking).Count; project_contracts = [pscustomobject]$projectContractChecks; commands_executed = 0; writes = 0; provider_calls = 0; native_mutations = 0 }
 }

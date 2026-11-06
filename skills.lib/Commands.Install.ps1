@@ -1835,7 +1835,10 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
         }
-        $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        # DSH consumes the same ~/.agents/skills native root as Codex. Treat a
+        # DSH-only scope as selecting that shared projection, without inventing
+        # a second ~/.dsh/skills target or MCP adapter.
+        $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals([string]$_, 'dsh', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
         if (-not $projectCodex) {
             Log "已按 ProjectionHosts 跳过 Codex native skill projection。"
         }
@@ -2002,7 +2005,7 @@ function 构建生效(
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
-            $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals([string]$_, 'dsh', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
             if (-not $SkipHostProjection -and $projectCodex -and @($failures).Count -eq 0) {
                 try {
                     $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock

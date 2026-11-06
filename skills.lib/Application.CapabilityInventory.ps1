@@ -75,6 +75,54 @@ function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
     }
 }
 
+# Cold discovery reads the discovery catalog, not the host skill roots, so a
+# domain member that no root projects stays discoverable and hash-valid while
+# the host can never load it.  Report that gap instead of letting the two
+# surfaces both look complete.
+function Get-CapabilityColdMembershipFindings {
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [AllowEmptyCollection()][object[]]$HostRootItems = @()
+    )
+
+    $findings = [Collections.Generic.List[object]]::new()
+    $catalog = Get-OperationObjectProperty $ProjectionConfig 'discovery_catalog'
+    if ($null -eq $catalog) { return @() }
+    $memberships = Get-OperationObjectProperty $catalog 'domain_memberships'
+    if ($null -eq $memberships) { return @() }
+
+    $projectedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($HostRootItems)) {
+        if ($null -eq $item -or [string]::IsNullOrWhiteSpace([string]$item.name)) { continue }
+        [void]$projectedNames.Add(([string]$item.name).Trim())
+    }
+
+    $members = [Collections.Generic.List[string]]::new()
+    $seenMembers = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $propertyNames = if ($memberships -is [System.Collections.IDictionary]) { @($memberships.Keys) } else { @($memberships.PSObject.Properties | ForEach-Object { $_.Name }) }
+    foreach ($domainName in @($propertyNames)) {
+        $values = if ($memberships -is [System.Collections.IDictionary]) { $memberships[$domainName] } else { Get-OperationObjectProperty $memberships ([string]$domainName) }
+        foreach ($value in @($values)) {
+            $name = ([string]$value).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($name) -and $seenMembers.Add($name)) { $members.Add($name) | Out-Null }
+        }
+    }
+
+    foreach ($name in @($members.ToArray() | Sort-Object)) {
+        if ($projectedNames.Contains($name)) { continue }
+        $source = Join-Path (Join-Path (Resolve-CapabilitySurfacePath ([string](Get-OperationObjectProperty $ProjectionConfig 'managed_source_path')) $RepoRoot) $name) 'SKILL.md'
+        $findings.Add([pscustomobject]@{
+                code = 'cold_membership_not_projected'
+                severity = 'error'
+                surface = 'host_skill_roots'
+                path = [IO.Path]::GetFullPath($source)
+                message = ('Cold discovery can return {0}, which no configured host skill root projects; the host cannot load it.' -f $name)
+            }) | Out-Null
+    }
+    return @($findings.ToArray())
+}
+
 function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
     $ordered = @($Items | Sort-Object name, path)
     $canonical = @($ordered | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.name, $_.entrypoint_hash, $_.description_hash, $_.owner, $_.projection_state }) -join "`n"
@@ -219,6 +267,10 @@ function New-SkillSurfaceView {
         $hostRoot = Resolve-CapabilitySurfacePath $hostRootName $root
         $deduplicationKey = if ([string]::IsNullOrWhiteSpace($hostRoot)) { $label } else { $hostRoot }
         if (-not $seenHostRoots.Add($deduplicationKey)) { continue }
+        # 声明可能是共享根（例如 DSH 复用 ~/.agents/skills）。该根已在 user_skill_root
+        # 面按受管/外部所有权裁决过；这里再报一次只会在 pass/fail 上产生第二条
+        # managed_link_dangling，把同一个链接算成两个缺陷。
+        if ($hostRoot -and $userRoot -and [string]::Equals($hostRoot, $userRoot, [StringComparison]::OrdinalIgnoreCase)) { continue }
         $hostRootExists = $hostRoot -and (Test-Path -LiteralPath $hostRoot -PathType Container)
         if (-not $hostRootExists) {
             $findings.Add([pscustomobject]@{ code = 'declared_host_root_missing'; severity = 'warning'; surface = 'host_skill_roots'; path = $hostRoot; message = ('Declared {0} host skill root is missing on this machine: {1}' -f $hostName, $hostRootName) }) | Out-Null
@@ -257,6 +309,8 @@ function New-SkillSurfaceView {
         }
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'host_skill_roots' 'filesystem_observation' $(if ($hostRootLabels.Count) { $hostRootLabels -join ', ' } else { 'managed_link targets / skill_projection.host_skill_roots (not configured)' }) $(if ($hostRootLabels.Count) { 'fresh' } else { 'not_declared' }) $(if ($hostRootItems.Count) { 'complete' } elseif ($hostRootLabels.Count) { 'not_materialized' } else { 'not_observed' }) $hostRootItems.ToArray())) | Out-Null
+    foreach ($membershipFinding in @(Get-CapabilityColdMembershipFindings -ProjectionConfig $projection -RepoRoot $root -HostRootItems $hostRootItems.ToArray())) { $findings.Add($membershipFinding) | Out-Null }
+
 
     $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
     $systemRoot = Join-Path $codexHome 'skills\.system'

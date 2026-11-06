@@ -10,9 +10,17 @@ param(
     [string]$ReceiptPath = '',
     [switch]$SubagentsOnly,
     [string]$CapabilityProbePath = '',
-    [ValidateSet('codex','claude','zcode')][string]$ExecutionHost = 'codex'
+    # Model orchestration is only implemented for the host facets below.  The
+    # remaining first-party hosts are accepted here so they fail with a
+    # capability explanation rather than a parameter-binding error; their
+    # native model/child contracts are intentionally not guessed from Codex.
+    [ValidateSet('codex','claude','zcode','antigravity','workbuddy','dsh')][string]$ExecutionHost = 'codex'
 )
 $ErrorActionPreference = 'Stop'
+$unsupportedModelHosts = @('antigravity','workbuddy','dsh')
+if ($ExecutionHost -cin $unsupportedModelHosts) {
+    throw ("Model preset projection is unavailable for host {0}: its native model and child-agent contract is not verified. Rules and shared skill projection are separate surfaces; use the host's native model controls and record host_loaded/live_accepted independently." -f $ExecutionHost)
+}
 $allowedModelEffortByHost = [ordered]@{
     codex = @(
         'gpt-6-luna|max'

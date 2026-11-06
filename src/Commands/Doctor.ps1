@@ -790,6 +790,26 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         if (-not $opts.json) { Write-Host ("⚠️ Host compatibility: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
     }
 
+    # Repository capability declaration. This describes projection surfaces;
+    # it does not claim a fresh host load or a successful user task.
+    try {
+        $report.checks.host_support = [ordered]@{
+            surfaces = @(Get-AgentHostSupportSurface)
+            read_only = $true
+            evidence_level = 'repo_verified'
+            truth_boundary = 'projection_capability_only'
+        }
+        if (-not $opts.json) {
+            foreach ($surface in @($report.checks.host_support.surfaces)) {
+                Write-Host ("   {0}: rules={1}; skills={2}; mcp={3}; live={4}" -f $surface.host, $surface.rules_projection, $surface.skill_projection, $surface.mcp_projection, $surface.live_acceptance)
+            }
+        }
+    }
+    catch {
+        $report.checks.host_support = [ordered]@{ read_only = $true; evidence_level = 'unknown'; error = [string]$_.Exception.Message }
+        if (-not $opts.json) { Write-Host ("⚠️ Host support surface: {0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+    }
+
     # 2.5 Skill Projection Consistency
     try {
         $projectionCheck = Get-DoctorSkillProjectionConsistency

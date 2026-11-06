@@ -1,4 +1,14 @@
-﻿function Parse-RuleAuditOptions([object[]]$Tokens) {
+﻿# Reads the current global rule version from the audited repo's common source.
+# Absent source (e.g. a repo that only consumes rules) yields '' and no version finding.
+function Get-RepoGlobalRuleVersion([string]$RepoRoot) {
+    $source = Join-Path $RepoRoot 'rules/global/common.md'
+    if (-not [System.IO.File]::Exists($source)) { return '' }
+    $text = [System.IO.File]::ReadAllText($source)
+    if ($text -match '(?im)^\s*\*\*版本\*\*\s*[:：]\s*(?<version>\d+\.\d+)\s*$') { return $Matches['version'] }
+    return ''
+}
+
+function Parse-RuleAuditOptions([object[]]$Tokens) {
     $result = [ordered]@{ repo = $null; current_directory = $null; user_root = $null; host = 'codex'; json = $false; out_path = $null }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
@@ -13,7 +23,7 @@
         }
     }
     if ([string]::IsNullOrWhiteSpace([string]$result.repo)) { throw '--repo is required.' }
-    if ([string]$result.host -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw '--host supports codex, claude, zcode, antigravity, or workbuddy.' }
+    if ([string]$result.host -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { throw '--host supports codex, claude, zcode, antigravity, workbuddy, or dsh.' }
     if ([string]::IsNullOrWhiteSpace([string]$result.current_directory)) { $result.current_directory = $result.repo }
     return [pscustomobject]$result
 }
@@ -21,7 +31,7 @@
 function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     $options = Parse-RuleAuditOptions $Tokens
     $discovery = Get-RuleDiscovery -RepoRoot $options.repo -CurrentDirectory $options.current_directory -HostName $options.host -UserRuleRoot $options.user_root
-    $profile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
+    $profile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing'); global_rule_version = $(Get-RepoGlobalRuleVersion $options.repo) }
     $diagnostics = Invoke-RuleDiagnostics $discovery $profile
     $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents $diagnostics.documents)
     $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents -Constraints $constraints

@@ -83,9 +83,10 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 - 项目契约：根 `AGENTS.md`（5 节，约 45 行），只写仓库事实、不变量与门禁入口。
 - 冻结面：PRD §3.1 为唯一清单，AGENTS.md 只指向它。
 - 生成物：`build.ps1 -Check` 与 CI `-CheckGenerated`；hook 只是辅助，Bash 写入不受 hook 覆盖，最终裁决是 CI。
+- 守卫脚本：`scripts/guard-generated.ps1`（两个宿主共用同一副本）与 `scripts/guard-stop-verification.ps1`，覆盖范围与限制见 [宿主 Hook 强制面](../runbooks/agent-hook-enforcement.md)。
 - 门禁：`scripts/quality/run-local-quality-gates.ps1`，选档以 `resolve-gate-profile.ps1` 为准。
 - 全局规则宿主：六份（9.93 起新增 dsh）。dsh 只投影 `~/.dsh/AGENTS.md`，共享槽 `~/.agents/AGENTS.md` 保持空缺；技能面仍五宿主共享 `~/.agents/skills`，dsh 天然流入。真源见 `rules/global/README.md` 与 `rules/global/platforms/dsh.md`。
-- 已知缺口：Bash 写入生成物未被 hook 拦截；PR 章程仍为表单式校验（只查占位符，不查语义）。
+- 已知缺口：dsh 没有 hooks 机制，守卫只能覆盖 Codex 与 Claude Code；PR 章程仍为表单式校验（只查占位符，不查语义）。
 
 ## 7. 依据
 

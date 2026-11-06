@@ -53,8 +53,12 @@ Describe 'Checked-in rule content' {
     It 'retains the cold-routing execution and observation boundaries' {
         foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md')) {
             $text = [IO.File]::ReadAllText((Join-Path $repoRoot $path))
-            foreach ($contract in @('capability-router', 'one_shot', 'multi_turn_user_decision', 'parent-mediated', 'host_admission_required', '禁止通过搜索 vendor/import/agent')) {
+            foreach ($contract in @('one_shot', 'multi_turn_user_decision', 'parent-mediated', 'host_admission_required', '禁止通过搜索 vendor/import/agent')) {
                 $text | Should -Match ([regex]::Escape($contract))
+            }
+            # User-global 规则不得写死仓库私有的技能实现名；它只描述宿主中立的语义。
+            foreach ($privateName in @('capability-router', 'cold-capability-runner', 'design-griller')) {
+                $text | Should -Not -Match ([regex]::Escape($privateName))
             }
         }
         $antigravity = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/antigravity/GEMINI.md'))

@@ -74,3 +74,24 @@ function Get-AgentHostFact([string]$HostName) {
     if (@($fact).Count -eq 0) { throw ("unknown_agent_host: {0}" -f $HostName) }
     return $fact[0]
 }
+
+function Get-AgentHostSupportSurface {
+    # This is a repository capability declaration, not a host-load or live-task
+    # probe. Keep the dsh shared-skill boundary explicit so callers do not infer
+    # a dedicated dsh skill root or MCP adapter from the six-host rule registry.
+    $dsh = @{
+        rules_projection = 'supported'
+        skill_projection = 'shared_agents_root'
+        mcp_projection = 'not_verified'
+    }
+    foreach ($fact in @(Get-AgentHostFacts)) {
+        $isDsh = [string]::Equals([string]$fact.id, 'dsh', [StringComparison]::OrdinalIgnoreCase)
+        [pscustomobject][ordered]@{
+            host = [string]$fact.id
+            rules_projection = 'supported'
+            skill_projection = if ($isDsh) { $dsh.skill_projection } else { 'profiled' }
+            mcp_projection = if ($isDsh) { $dsh.mcp_projection } else { 'adapter_available' }
+            live_acceptance = 'separate_probe'
+        }
+    }
+}
