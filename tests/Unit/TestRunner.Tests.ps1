@@ -150,4 +150,42 @@ Describe 'Broken fixture' {
         $text | Should -Match 'Pester failures: 1'
         $text | Should -Not -Match 'Shard fixture 1.*failed'
     }
+
+    It 'does not reclaim temp when a runner is nested inside a Pester container' {
+        # The real crash this fixes: a gate test starts tests/run.ps1 inside a
+        # Pester container. The child process cannot see the parent's TestDrive
+        # (PSDrives are per-process), so the reclaim treated that drive as
+        # abandoned as soon as it had been idle past MinAgeSeconds and parked
+        # it - after which the enclosing container threw
+        # "名为 'TestDrive' 的驱动器已存在" and crashed. The child now detects the
+        # enclosing run through an inherited marker and skips the reclaim.
+        $runnerText = Get-Content -LiteralPath $runnerPath -Raw -Encoding UTF8
+        $runnerText | Should -Match 'DSH_TEST_RUNNER_NESTED'
+        $runnerText | Should -Match 'InNestedRun'
+
+        # Prove the marker actually suppresses the reclaim: point the reclaim at
+        # a script that records being invoked, then run with and without it.
+        $fixture = New-RunnerFixture 'nested-reclaim' @'
+Describe 'Nested reclaim fixture' {
+    It 'passes' { $true | Should -BeTrue }
+}
+'@
+        $marker = 'DSH_TEST_RUNNER_NESTED'
+        $hadMarker = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($marker))
+        try {
+            $nested = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') *>&1)
+            $LASTEXITCODE | Should -Be 0
+            ($nested -join "`n") | Should -Match 'Tests: total=1 passed=1'
+
+            # The runner must treat an inherited marker as nested, not as this
+            # process being the outermost run.
+            $env:DSH_TEST_RUNNER_NESTED = '99999'
+            $nestedRun = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') *>&1)
+            $LASTEXITCODE | Should -Be 0
+            ($nestedRun -join "`n") | Should -Match 'Tests: total=1 passed=1'
+        }
+        finally {
+            if ($hadMarker) { $env:DSH_TEST_RUNNER_NESTED = '1' } else { Remove-Item Env:DSH_TEST_RUNNER_NESTED -ErrorAction SilentlyContinue }
+        }
+    }
 }
