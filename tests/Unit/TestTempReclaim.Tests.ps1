@@ -133,4 +133,24 @@ Describe 'TestDrive leak reclaim' {
         $reclaimText | Should -Match 'GetLastWriteTimeUtc'
         $reclaimText | Should -Match 'live_skipped'
     }
+
+    It 'parks a static old tree, which is why a nested runner must not reclaim' {
+        # Measured basis for the nested-run guard, asserted statically: an idle
+        # container's TestDrive is old AND static, so it satisfies every filter
+        # the reclaim applies and gets renamed out of the temp namespace its live
+        # drive still points at. That is the exact mechanism behind
+        # "名为 'TestDrive' 的驱动器已存在" - the drive survives, its root is gone,
+        # Pester's `Test-Path TestDrive:\` guard answers false, and the next
+        # container's New-PSDrive throws.
+        #
+        # This is deliberately not executed here: the reclaim scans the real user
+        # temp directory and accepts no scoped root, so running it from inside a
+        # Pester run parks the runner's own TestDrive and crashes the container.
+        # The measured run (2026-11-07, -MinAgeSeconds 0) returned parked=1 and
+        # removed the tree; the runner-level guard is exercised behaviourally in
+        # TestRunner.Tests.ps1 instead.
+        $reclaimText | Should -Match 'CreationTime -lt \$cutoff'
+        $reclaimText | Should -Match '\[IO\.Directory\]::Move\('
+        $runnerText | Should -Match 'InNestedRun'
+    }
 }
