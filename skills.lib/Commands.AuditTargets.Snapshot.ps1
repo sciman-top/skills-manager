@@ -188,8 +188,14 @@ function Get-AuditCurrentProfileSkillState($cfg, $configuredSupplySkills = $null
             })
     }
     catch {
+        # 取证失败必须留下原因。这里曾静默吞掉异常，只回一个 status=unavailable：
+        # 调用方无法区分「配置确实没有当前档案」与「物化根缺失/配置损坏」，
+        # 于是一份缺少已安装能力面的画像看起来和正常画像一样完整。
+        $reason = [string]$_.Exception.Message
+        Write-Verbose ("当前 Profile 选择取证失败：{0}" -f $reason)
         return [pscustomobject]([ordered]@{
                 status = 'unavailable'
+                status_reason = $reason
                 selection = $null
                 selected_skills = @()
                 selected_skill_count = 0
@@ -502,6 +508,9 @@ function Get-AuditLiveInstalledState($cfg = $null) {
         configured_supply_fingerprint = (Get-AuditFingerprintFromSkillFacts $configuredSupplySkills)
         profile_selection = $profileState.selection
         profile_selection_status = [string]$profileState.status
+        # status 只说明可用性；原因必须一并进快照，否则「已安装能力面缺失」
+        # 与「当前没有选中项」在画像上不可区分。
+        profile_selection_status_reason = if ($profileState.PSObject.Properties.Match('status_reason').Count -gt 0) { [string]$profileState.status_reason } else { '' }
         profile_selection_unresolved_names = @($profileState.unresolved_selected_names)
         configured_supply_skills = @($configuredSupplySkills)
         profile_selected_skills = @($facts)

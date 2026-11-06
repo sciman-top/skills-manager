@@ -1941,6 +1941,45 @@ $scan.detected.artifact_capabilities | Out-Null
             }
         }
 
+        It "Keeps the profile-selection failure reason instead of a bare unavailable" {
+            # 静默吞异常会让「已安装能力面取证失败」与「当前没有选中项」在画像上
+            # 无法区分，两者都会退化成 status=unavailable 且无原因。
+            $brokenCfg = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{
+                    managed_source_path = Join-Path $TestDrive "managed-root-that-does-not-exist"
+                    projection_profiles = [pscustomobject]@{
+                        schema_version  = 1
+                        default_profile = 'core'
+                        profiles        = [pscustomobject]@{ core = [pscustomobject]@{ include = @('alpha'); exclude = @() } }
+                        hosts           = [pscustomobject]@{ codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() } }
+                    }
+                }
+            }
+
+            $state = Get-AuditCurrentProfileSkillState $brokenCfg @()
+            $state.status | Should -Be 'unavailable'
+            [string]$state.status_reason | Should -Not -BeNullOrEmpty
+            [string]$state.status_reason | Should -Match 'managed-root-that-does-not-exist'
+        }
+
+        It "Surfaces an invalid projection profile as a reasoned unavailable" {
+            $invalidCfg = [pscustomobject]@{
+                skill_projection = [pscustomobject]@{
+                    managed_source_path = Join-Path $TestDrive "any-root"
+                    projection_profiles = [pscustomobject]@{
+                        schema_version  = 99
+                        default_profile = 'core'
+                        profiles        = [pscustomobject]@{ core = [pscustomobject]@{ include = @('alpha'); exclude = @() } }
+                        hosts           = [pscustomobject]@{ codex = [pscustomobject]@{ default_profile = 'core'; exclude = @() } }
+                    }
+                }
+            }
+
+            $state = Get-AuditCurrentProfileSkillState $invalidCfg @()
+            $state.status | Should -Be 'unavailable'
+            [string]$state.status_reason | Should -Match 'schema_version'
+        }
+
         It "Captures MCP activation fields in the installed audit snapshot" {
             $cfg = [pscustomobject]@{
                 mcp_servers = @([pscustomobject]@{
