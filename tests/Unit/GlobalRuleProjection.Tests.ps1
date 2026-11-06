@@ -562,6 +562,44 @@ Describe 'Global rule CLI boundaries' {
         }
     }
 
+    It 'discovers the second WorkBuddy edition as a peer instead of silently leaving it stale' {
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
+        $profileRoot=[Environment]::GetFolderPath('UserProfile')
+        $legacy=Join-Path $profileRoot '.workbuddy-ai';$cn=Join-Path $profileRoot '.workbuddy'
+        $hadLegacy=Test-Path -LiteralPath $legacy;$hadCn=Test-Path -LiteralPath $cn
+        try{
+            # Both editions present and no explicit root: the default still picks
+            # .workbuddy-ai, and the other edition must surface as a peer so it is
+            # projected too. Before this, only the default root was ever written
+            # and a stale .workbuddy kept passing every check.
+            $env:CODEBUDDY_CONFIG_DIR=$null;$env:WORKBUDDY_CONFIG_DIR=$null
+            if(-not $hadLegacy){New-Item -ItemType Directory -Path $legacy -Force|Out-Null}
+            if(-not $hadCn){New-Item -ItemType Directory -Path $cn -Force|Out-Null}
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $legacy
+            $parsed.workbuddy_peer_user_root|Should -Be ([IO.Path]::GetFullPath($cn))
+            $parsed.workbuddy_peer_user_root_source|Should -Be 'discovered_peer_of_default'
+        }finally{
+            $env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork
+            if(-not $hadLegacy -and (Test-Path -LiteralPath $legacy)){Remove-Item -LiteralPath $legacy -Recurse -Force}
+            if(-not $hadCn -and (Test-Path -LiteralPath $cn)){Remove-Item -LiteralPath $cn -Recurse -Force}
+        }
+    }
+
+    It 'does not invent a peer when the operator names one root explicitly' {
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
+        try{
+            # An explicit selection addresses that root. Expanding it into a
+            # second write would be an unrequested host mutation.
+            $env:WORKBUDDY_CONFIG_DIR=Join-Path $TestDrive 'workbuddy-explicit'
+            New-Item -ItemType Directory -Path $env:WORKBUDDY_CONFIG_DIR -Force|Out-Null
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_user_root|Should -Be $env:WORKBUDDY_CONFIG_DIR
+            $parsed.workbuddy_peer_user_root|Should -Be ''
+            $parsed.workbuddy_peer_user_root_source|Should -Be 'not_present'
+        }finally{$env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork}
+    }
+
     It 'falls back to an existing .workbuddy root when .workbuddy-ai is absent' {
         $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
         $profileRoot=[Environment]::GetFolderPath('UserProfile')

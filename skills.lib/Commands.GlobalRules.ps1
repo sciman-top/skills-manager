@@ -3,13 +3,27 @@
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
     $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $antigravityDefaultRoot=Join-Path $userProfile '.gemini'
-    # WorkBuddy/CodeBuddy has shipped both names for its user config root.
-    # Match the host resolver: explicit WORKBUDDY_CONFIG_DIR wins, then the
-    # legacy CODEBUDDY_CONFIG_DIR, then an existing .workbuddy-ai/.workbuddy root, and
-    # finally the documented .codebuddy default.  Do not create a root here.
+    # WorkBuddy/CodeBuddy has shipped both names for its user config root, and a
+    # machine can carry the international (~/.workbuddy-ai) and Chinese
+    # (~/.workbuddy) editions side by side. The host resolver picks one, but the
+    # rule projection must not: a single-root default left the other edition on
+    # stale rules with `global-rules-check` still reporting pass, because it only
+    # ever inspected the one root it knew about.
     $workbuddyEnvName = if(-not[string]::IsNullOrWhiteSpace($env:WORKBUDDY_CONFIG_DIR)){'WORKBUDDY_CONFIG_DIR'}elseif(-not[string]::IsNullOrWhiteSpace($env:CODEBUDDY_CONFIG_DIR)){'CODEBUDDY_CONFIG_DIR'}else{''}
     $workbuddyFromEnv = $workbuddyEnvName -ne ''
     $workbuddyDefaultRoot = if($workbuddyFromEnv){if($workbuddyEnvName -eq 'WORKBUDDY_CONFIG_DIR'){$env:WORKBUDDY_CONFIG_DIR}else{$env:CODEBUDDY_CONFIG_DIR}}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy-ai') -PathType Container){Join-Path $userProfile '.workbuddy-ai'}elseif(Test-Path -LiteralPath (Join-Path $userProfile '.workbuddy') -PathType Container){Join-Path $userProfile '.workbuddy'}else{Join-Path $userProfile '.codebuddy'}
+    # The additional root is discovered, never created, and never overrides an
+    # explicit environment or CLI selection: an operator who names one root is
+    # addressing that root, and the fix for the silent-gap case must not turn
+    # into an unrequested second write.
+    $workbuddyPeerRoot = ''
+    if(-not$workbuddyFromEnv){
+        $peerCandidates = @((Join-Path $userProfile '.workbuddy-ai'), (Join-Path $userProfile '.workbuddy'), (Join-Path $userProfile '.codebuddy')) |
+            Where-Object { -not (Test-GlobalRulePathEqual ([IO.Path]::GetFullPath($_)) ([IO.Path]::GetFullPath([string]$workbuddyDefaultRoot))) }
+        foreach($peer in $peerCandidates){
+            if(Test-Path -LiteralPath $peer -PathType Container){ $workbuddyPeerRoot = [IO.Path]::GetFullPath($peer); break }
+        }
+    }
     # DeepSeek Harness keeps a single user home. An explicit DSH_HOME wins like
     # CODEX_HOME; otherwise enable by directory existence like Antigravity, so
     # hosts without the harness degrade to no entry.  Do not create a root here.
@@ -32,6 +46,8 @@
         antigravity_user_root_source=$(if($antigravityDefaultEnabled){'default'}else{'disabled_until_explicit_root'})
         workbuddy_user_root=$(if($workbuddyDefaultEnabled){$workbuddyDefaultRoot}else{''})
         workbuddy_user_root_source=$(if(-not$workbuddyDefaultEnabled){'disabled_until_explicit_root'}elseif($workbuddyFromEnv){$workbuddyEnvName}else{'default'})
+        workbuddy_peer_user_root=$workbuddyPeerRoot
+        workbuddy_peer_user_root_source=$(if([string]::IsNullOrWhiteSpace($workbuddyPeerRoot)){'not_present'}else{'discovered_peer_of_default'})
         dsh_user_root=$(if($dshDefaultEnabled){$dshDefaultRoot}else{''})
         dsh_user_root_source=$(if(-not$dshDefaultEnabled){'disabled_until_explicit_root'}elseif($dshFromEnv){'DSH_HOME'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
@@ -128,6 +144,11 @@ function Get-GlobalRuleRootEnvelope($Options) {
         antigravity_user_root_source=$Options.antigravity_user_root_source
         workbuddy_user_root=(Resolve-OptionalWorkBuddyGlobalRuleRoot $Options)
         workbuddy_user_root_source=$Options.workbuddy_user_root_source
+        # A second WorkBuddy edition needs its own projection pass: the engine
+        # keys every action, backup and token on the host id, so two targets for
+        # one id cannot ride the same plan.
+        workbuddy_peer_user_root=$(if([string]::IsNullOrWhiteSpace([string]$Options.workbuddy_peer_user_root)){''}else{[IO.Path]::GetFullPath([string]$Options.workbuddy_peer_user_root)})
+        workbuddy_peer_user_root_source=$Options.workbuddy_peer_user_root_source
         dsh_user_root=(Resolve-OptionalDshGlobalRuleRoot $Options)
         dsh_user_root_source=$Options.dsh_user_root_source
     }
@@ -138,25 +159,55 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
     $zcodeRoot = [string]$roots.zcode_user_root
     $antigravityRoot = [string]$roots.antigravity_user_root
     $workbuddyRoot = [string]$roots.workbuddy_user_root
+    $workbuddyPeerRoot = [string]$roots.workbuddy_peer_user_root
     $dshRoot = [string]$roots.dsh_user_root
     switch($Mode){
         'check'{
-            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot -DshUserRoot $dshRoot;$exit=if($result.pass){0}else{2}
+            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot -DshUserRoot $dshRoot
+            # Verify the peer edition with the same source family, so a stale
+            # second edition reports drift instead of hiding behind a pass on the
+            # root that happened to be first in the default order.
+            if(-not[string]::IsNullOrWhiteSpace($workbuddyPeerRoot)){
+                $peerResult=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyPeerRoot -DshUserRoot $dshRoot
+                $mergedFindings=@(@($result.findings) + @($peerResult.findings) | Sort-Object code, path -Unique)
+                $result=[pscustomobject][ordered]@{
+                    pass=[bool]($peerResult.pass -and $result.pass)
+                    findings=@($mergedFindings)
+                    observations=@($result.observations)
+                    budget=@($result.budget)
+                    truth_boundary=$(if($peerResult.pass -and $result.pass){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})
+                    workbuddy_peer_user_root=$workbuddyPeerRoot
+                }
+            }
+            $exit=if($result.pass){0}else{2}
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-check';pass=$result.pass;exit_code=$exit;roots=$roots;result=$result;writes=0;provider_calls=0;native_mutations=0}
         }
         'plan'{
             $out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
             $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot -DshUserRoot $dshRoot
-            $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
+            $peerPlan=$null
+            if(-not[string]::IsNullOrWhiteSpace($workbuddyPeerRoot)){
+                $peerPlan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyPeerRoot -DshUserRoot $dshRoot
+            }
+            $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;peer_plan=$peerPlan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
             Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 30 -Compress);$exit=0
         }
         'apply'{
             $planPath=Resolve-GlobalRuleControlPath $options.plan $options.repo_root -MustExist;$out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
             if(Test-GlobalRulePathEqual $planPath $out){throw 'Global rule apply receipt path must differ from the plan path.'}
             $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command-eq'global-rules-plan'){$document.plan}else{$document}
+            $peerPlan=if($document.command-eq'global-rules-plan'){$document.peer_plan}else{$null}
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
             $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyRoot -DshUserRoot $dshRoot
-            $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0
+            # The peer landing is a separate, explicitly named artifact: it needs
+            # its own receipt, so a failure there cannot mark the first receipt
+            # applied for a root it never wrote.
+            $peerReceipt=$null
+            if($null-ne$peerPlan -and -not[string]::IsNullOrWhiteSpace($workbuddyPeerRoot)){
+                $peerReceiptPath=[IO.Path]::Combine([IO.Path]::GetDirectoryName($out),([IO.Path]::GetFileNameWithoutExtension($out)+'-workbuddy-peer.json'))
+                $peerReceipt=Invoke-GlobalRuleProjectionApply -Plan $peerPlan -Token $peerPlan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $peerReceiptPath -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $zcodeRoot -AntigravityUserRoot $antigravityRoot -WorkBuddyUserRoot $workbuddyPeerRoot -DshUserRoot $dshRoot
+            }
+            $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;peer_receipt=$peerReceipt;provider_calls=0;native_mutations=0};$exit=0
         }
         'rollback'{
             $receiptPath=Resolve-GlobalRuleControlPath $options.receipt $options.repo_root -MustExist
