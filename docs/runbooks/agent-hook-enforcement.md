@@ -50,7 +50,34 @@ Codex 侧首次使用需要在 `/hooks` 审查并信任这些 hook；hook 定义
   达到上限后宿主会放行本轮。
 - 证据判定是形式检查。它挡的是"没跑任何检查就宣称完成"，不是"证据本身正确"。
 
-## 5. 验证
+## 5. 受控实战验收：Codex 侧的三个真实陷阱
+
+首个真实 `codex exec` 验收（2026-11-06，本机 codex-cli 0.159.2）暴露了三个只有实跑才
+看得见的坑。前两个会让守卫**静默失效并放行写入**，第三个是能力边界。
+
+1. **`apply_patch` 的补丁在 `tool_input.command`，不在 `tool_input.patch`。** 守卫原先只读
+   `patch`，于是把补丁当普通命令处理，`*** Update File:` 行不命中任何路径 → 放行。
+   现在两种形状都识别，且任何以 `*** Begin Patch` 开头的命令一律按补丁处理。
+2. **Codex 把 `exit 2` 记为 "PreToolUse Failed" 并继续执行工具。** 官方文档写 exit 2 可用，
+   但实测不阻断 `apply_patch`。可行形态是 stdout 输出
+   `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",…}}`
+   并 exit 0。因此守卫有 `-DenyJson` 开关：Codex 用它，Claude 保持 exit 2。
+3. **hook 命令由 `cmd.exe` 执行**（Windows），`$(git rev-parse --show-toplevel)` 不会展开，
+   `pwsh -File "$(…)/x.ps1"` 以退出码 64 失败 → 同样静默失效。命令改为相对于启动目录的
+   `-File scripts/…`，脚本自身用 `$PSScriptRoot` 定位仓库，不依赖调用方 cwd。
+
+修复后的验收输出（同一台机器、同一命令）：
+
+```text
+hook: PreToolUse
+error=Command blocked by PreToolUse hook: blocked: skills.ps1 是生成物或物化目录（apply_patch）…
+hook: PreToolUse Blocked
+UNCHANGED=True
+```
+
+修复前同一探针的 `skills.ps1` 哈希发生变化，即写入真的落盘了。
+
+## 6. 验证
 
 ```powershell
 pwsh -NoProfile -File .\tests\run.ps1 -TestPath tests/Unit/GeneratedGuardHook.Tests.ps1
@@ -59,5 +86,8 @@ pwsh -NoProfile -File .\tests\run.ps1 -TestPath tests/Unit/StopGuardHook.Tests.p
 
 手工核对事件编码时不要用函数间管道：Pester 4 + PowerShell 7 + 中文代码页会把中文参数
 转码成乱码。测试改为写 UTF-8 事件文件并用 `-RedirectStandardInput` 送入 stdin。
+
+复跑真实探针时用 `codex exec --dangerously-bypass-hook-trust --sandbox workspace-write`，
+并把目标限定为一个可丢弃的生成物路径；结束后核对该文件哈希未变。
 
 依据：[Codex hooks](https://learn.chatgpt.com/docs/hooks) · [Claude Code best practices](https://code.claude.com/docs/en/best-practices)（均为 2026-11-06 读取）。
