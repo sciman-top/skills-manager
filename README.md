@@ -58,7 +58,8 @@
 
 | AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 | 兼容性证据 |
 | :--- | :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | 原生 Codex MCP 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (7 个精选) | `skills.json` `mcp_targets` 指向 `~/.codex` | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **DeepSeek Harness** | 复用 `~/.agents/skills`；规则投影到 `~/.dsh/AGENTS.md` | `core-lean` (7 个精选) | 未验证独立 MCP 适配器，保持不投影 | 仓库适配；fresh host probe 与真实任务另行验收 |
 | **Claude Code** | 用户级 `~/.claude/skills` 链接；Agent Bridge 另写 `~/.claude/agents` 子代理定义 | `core-lean` (7 个精选) | `~/.claude.json` / Desktop 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
 | **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (7 个精选) | `~/.zcode/cli/config.json` | 仓库适配；宿主能力限制单独记录 |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-ops` (8 个运维增强) | `mcp_config.json` | 配置适配；不由投影推断宿主已加载 |

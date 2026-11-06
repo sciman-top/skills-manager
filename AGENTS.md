@@ -34,7 +34,7 @@
 - 证明覆盖当前独立失败后即停止；不为"更全面"重复同层门禁。
 - 收口内门禁与验收的先后由会话自定（默认"输入冻结→门禁→验收"），不逐次请示；解除操作者明示的暂缓或审阅冻结仍须先问。
 - CI 以 `-CheckGenerated` 只读核对已提交的生成物。
-- 生成物 hook（[guard-generated.ps1](.claude/hooks/guard-generated.ps1)、[pre-commit](.githooks/pre-commit)）只是辅助；Bash 写入不受 hook 覆盖，最终裁决是 CI。
+- 生成物 hook（[guard-generated.ps1](scripts/guard-generated.ps1)、[pre-commit](.githooks/pre-commit)）只是辅助，两个宿主共用同一副本，见 [宿主 Hook 强制面](docs/runbooks/agent-hook-enforcement.md)；Bash 写入不受 hook 覆盖，最终裁决是 CI。
 - 全局规则文件相等只证明 `filesystem_projected`；`host_loaded` 需要 fresh host probe。
 
 ## 5. 收口

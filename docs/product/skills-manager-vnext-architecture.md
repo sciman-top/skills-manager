@@ -35,6 +35,13 @@
 
 随后 `build.ps1` 重新生成，连同 `skills.ps1`/`skills.lib/` 一起提交。
 
+宿主 hook 与守卫脚本同属扩展触点，但只有一个真源：`.claude/settings.json` 与
+`.codex/config.toml` 都调用 `scripts/guard-generated.ps1`，Stop 守卫为
+`scripts/guard-stop-verification.ps1`。新增或修改守卫须同步在
+`resolve-gate-profile.ps1` 登记行为测试映射，并在
+[宿主 Hook 强制面](../runbooks/agent-hook-enforcement.md) 更新覆盖与限制说明；
+不要把守卫脚本复制到宿主私有目录。
+
 拆分现有职责时，`Domain/` 放字段契约与校验，`Application/` 放可复用操作及其资源生命周期，`Commands/` 放参数、交互与编排；保持现有函数接口，由 `$Files` 与静态调用闭包决定加载，不增设模块注册器。搬移前搜索直接读取或 dot-source 源文件的调用方（包括 verifier 与测试），同步调整其加载路径；顶层赋值也必须随所属职责移动。仅新位置更清晰而行为不变时，优先复用原行为测试。
 
 退役一个功能时，先搜索入口函数、命令名及兼容别名的所有调用方；随后移除上述参数、分发、帮助/菜单与功能专属实现，确认共享 helper 仍有调用方后保留。源文件删除后同步移除 `$Files` 登记，执行 build 让 `skills.lib/` 清理对应生成文件。只删除失去保护对象的测试与文档，并核对门禁映射；涉及配置字段或持久化数据时，按配置兼容与迁移合同单独验证，不能直接删除旧数据。
