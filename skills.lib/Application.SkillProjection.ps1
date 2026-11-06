@@ -492,7 +492,7 @@ function Get-SkillProjectionProfileNames($Values, [string]$FieldName) {
 function Get-SkillProjectionTargetHost($TargetConfig) {
     $configuredHost = ([string](Get-OperationObjectProperty $TargetConfig 'host')).Trim().ToLowerInvariant()
     if (-not [string]::IsNullOrWhiteSpace($configuredHost)) {
-        if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
+        if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
         return $configuredHost
     }
 
@@ -508,7 +508,7 @@ function Resolve-SkillProjectionHosts {
     param([string[]]$ProjectionHosts = @())
 
     $allowedHosts = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($hostName in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { [void]$allowedHosts.Add($hostName) }
+    foreach ($hostName in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { [void]$allowedHosts.Add($hostName) }
     $selectedHosts = [Collections.Generic.List[string]]::new()
     foreach ($inputValue in $ProjectionHosts) {
         foreach ($part in ([string]$inputValue -split '[,;\s]+')) {
@@ -575,20 +575,48 @@ function Get-SkillProjectionHostRootDeclarations($Config) {
         }
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'codex' }
-        if ($hostName -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
+        if ($hostName -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { throw ("host_skill_roots 包含不受支持宿主：{0}" -f $hostName) }
         $declarations.Add([pscustomobject][ordered]@{
                 host = $hostName
                 path = $path
                 source = 'compatibility_host_skill_roots'
             }) | Out-Null
     }
+    # DeepSeek Harness reads the shared ~/.agents/skills root. Record that
+    # alias explicitly so doctor and capability inventory inspect the same
+    # filesystem surface without creating a second DSH skill directory.
+    $sharedRoot = ([string](Get-OperationObjectProperty $projection 'user_skill_root')).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($sharedRoot) -and @($declarations | Where-Object { $_.host -eq 'dsh' -and [string]::Equals([string]$_.path, $sharedRoot, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) {
+        $declarations.Add([pscustomobject][ordered]@{ host = 'dsh'; path = $sharedRoot; source = 'shared_user_skill_root' }) | Out-Null
+    }
     return @($declarations.ToArray())
+}
+
+function Get-SkillProjectionColdMembershipNames($ProjectionConfig) {
+    # Cold discovery can surface any discovery-catalog domain member.  A host
+    # profile that omits one produces a candidate the router validates from the
+    # repository but the host cannot load, so membership is an additive include.
+    $catalog = Get-OperationObjectProperty $ProjectionConfig 'discovery_catalog'
+    if ($null -eq $catalog) { return @() }
+    $memberships = Get-OperationObjectProperty $catalog 'domain_memberships'
+    if ($null -eq $memberships) { return @() }
+    $names = [Collections.Generic.List[string]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $propertyNames = if ($memberships -is [System.Collections.IDictionary]) { @($memberships.Keys) } else { @($memberships.PSObject.Properties | ForEach-Object { $_.Name }) }
+    foreach ($domainName in @($propertyNames)) {
+        $values = if ($memberships -is [System.Collections.IDictionary]) { $memberships[$domainName] } else { Get-OperationObjectProperty $memberships ([string]$domainName) }
+        foreach ($value in @($values)) {
+            $name = ([string]$value).Trim().ToLowerInvariant()
+            if (-not [string]::IsNullOrWhiteSpace($name) -and $seen.Add($name)) { $names.Add($name) | Out-Null }
+        }
+    }
+    return @($names.ToArray() | Sort-Object)
 }
 
 function Resolve-SkillProjectionSelection {
     param(
         [Parameter(Mandatory = $true)]$ProjectionConfig,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')][string]$HostName,
         [string]$RequestedProfile = ''
     )
 
@@ -618,7 +646,7 @@ function Resolve-SkillProjectionSelection {
     $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'
     if ($null -ne $hosts) {
         foreach ($configuredHost in @(Get-SkillProjectionProfileObjectNames $hosts 'skill_projection.projection_profiles.hosts')) {
-            if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
+            if ($configuredHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
         }
     }
     $hostConfig = if ($null -eq $hosts) { $null } else { Get-OperationObjectProperty $hosts $HostName }
@@ -647,23 +675,28 @@ function Resolve-SkillProjectionSelection {
     if ($profileConflicts.Count -gt 0) { throw ("skill_projection.projection_profiles.profiles.{0} include/exclude 冲突：{1}" -f $defaultProfile, ($profileConflicts -join ', ')) }
 
     $hostExcludes = if ($null -eq $hostConfig) { @() } else { @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $hostConfig 'exclude') ("skill_projection.projection_profiles.hosts.{0}.exclude" -f $HostName)) }
+    # Profile membership is not a security boundary: the host excludes above
+    # still subtract, and only cold-reachable names are added.  An include-all
+    # profile needs no backing list, so its included_names stays empty.
+    $coldIncludes = if ($includeAll) { @() } else { @((Get-SkillProjectionColdMembershipNames $ProjectionConfig) | Where-Object { $excluded -notcontains $_ -and $hostExcludes -notcontains $_ }) }
     return [pscustomobject][ordered]@{
         host = $HostName
         profile = $defaultProfile
         include_all = $includeAll
-        included_names = @($included)
+        included_names = @(@($included) + @($coldIncludes) | Sort-Object -Unique)
         excluded_names = @($excluded + $hostExcludes | Sort-Object -Unique)
+        cold_membership_includes = @($coldIncludes)
         uses_profiles = $true
     }
 }
 
 function Get-SkillProjectionEffectiveSelection {
-    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')][string]$DefaultHost = 'codex')
+    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')][string]$DefaultHost = 'codex')
 
     $selection = Get-OperationObjectProperty $ProjectionConfig 'resolved_projection_selection'
     if ($null -ne $selection) {
         $selectionHost = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
-        if ($selectionHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) { throw 'resolved_projection_selection.host 不受支持' }
+        if ($selectionHost -notin @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) { throw 'resolved_projection_selection.host 不受支持' }
         return $selection
     }
     return Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $DefaultHost
@@ -696,7 +729,7 @@ function Get-SkillProjectionProfileContractErrors($ProjectionConfig, $Targets = 
     try {
         $profiles = Get-OperationObjectProperty $profilesConfig 'profiles'
         $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
-        foreach ($projectionHost in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')) {
+        foreach ($projectionHost in @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')) {
             Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost | Out-Null
             foreach ($profileName in $profileNames) { Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost -RequestedProfile $profileName | Out-Null }
         }

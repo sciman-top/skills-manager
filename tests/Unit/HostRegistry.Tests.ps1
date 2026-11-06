@@ -24,6 +24,15 @@ Describe 'Agent host registry' {
         { Get-AgentHostFact 'unknown-host' } | Should -Throw
     }
 
+    It 'declares the dsh shared skill and unverified MCP boundary' {
+        $surface = @(Get-AgentHostSupportSurface)
+        $surface.Count | Should -Be 6
+        (@($surface | Where-Object host -eq 'dsh')[0]).skill_projection | Should -Be 'shared_agents_root'
+        (@($surface | Where-Object host -eq 'dsh')[0]).mcp_projection | Should -Be 'not_verified'
+        @($surface | Where-Object { $_.host -ne 'dsh' -and $_.skill_projection -ne 'profiled' }).Count | Should -Be 0
+        @($surface | Where-Object live_acceptance -ne 'separate_probe').Count | Should -Be 0
+    }
+
     It 'reports compatibility freshness without claiming host loading or live acceptance' {
         $current = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-11-09') -MaxAgeDays 30)
         $current.Count | Should -Be 6
@@ -46,13 +55,21 @@ Describe 'Agent host registry' {
         @($future | Where-Object status -eq 'future').Count | Should -Be 6
     }
 
+    It 'declares DSH skill sharing without implying a model adapter' {
+        $surfaces = @(Get-AgentHostSupportSurface)
+        @($surfaces.host) | Should -Be @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')
+        @($surfaces | Where-Object host -eq 'dsh').skill_projection | Should -Be 'shared_agents_root'
+        @($surfaces | Where-Object host -eq 'dsh').mcp_projection | Should -Be 'not_verified'
+        @($surfaces | Where-Object host -eq 'dsh').live_acceptance | Should -Be 'separate_probe'
+    }
+
     It 'keeps every host ValidateSet in product source in sync with its surface' {
         # AST 校验已知函数参数的 ValidateSet；再扫描 src 源文本，任何以
         # codex 起头的宿主 ValidateSet 字面量都必须与其表面的宿主清单全等，
-        # 防止出现新的平行枚举。规则面=注册表全量；技能面=五个技能 target
-        # 宿主（dsh 经 ~/.agents/skills 共享根覆盖，刻意无独立技能 target）。
+        # 防止出现新的平行枚举。规则面=注册表全量；技能面包含共享技能根
+        # 覆盖的 dsh，但不要求为它制造独立技能 target。
         $ruleSurface = @(Get-AgentHostIds)
-        $skillSurface = @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy')
+        $skillSurface = @('codex', 'claude', 'zcode', 'antigravity', 'workbuddy', 'dsh')
         $reflectionTargets = @(
             @{ Command = 'Get-RuleDiscovery'; Parameter = 'HostName'; File = 'src\Application\RuleDiscovery.ps1'; Expected = $ruleSurface }
             @{ Command = 'Resolve-SkillProjectionSelection'; Parameter = 'HostName'; File = 'src\Application\SkillProjection.ps1'; Expected = $skillSurface }

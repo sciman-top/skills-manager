@@ -13,6 +13,14 @@ The 2026-10-25 user request restores four model families; the 2026-11-05 user re
 | `glm53_flash_only` | `glm-5.3-flash` | `xhigh` | ZCode `max`; WorkBuddy requested `max`, no verified writer |
 | `gemini38_flash_only` | `gemini-3.8-flash-high` | `high` | Antigravity stays within its own model choices; no exact-effort writer |
 
+The preset tool now accepts `antigravity`, `workbuddy`, and `dsh` as explicit
+host names so unsupported model projection fails with a capability message.
+It does not write their host configuration or copy Codex tuples into them:
+Antigravity and WorkBuddy require their own current model/child contracts, and
+DeepSeek Harness currently has verified rules plus shared `~/.agents/skills`
+coverage but no verified model-preset writer or child-agent adapter. A DSH
+rules receipt therefore cannot be upgraded to model or subagent acceptance.
+
 Codex's Gemini slug includes `-high`; the bare family name is not an alias. GLM `max` stays rejected on Codex (its catalog still tops out at `xhigh`); DeepSeek `max` is catalog-declared as of 2026-11-05. ZCode accepts only its existing GLM/max facet. A requested host policy does not prove that host exposes the model, effort or a child-agent API. Do not project cross-vendor models into hosts restricted to their own family.
 
 The executable enforces the closed per-host tuple allowlist. Adding arbitrary JSON entries cannot expand it. `-Preset` pins a preset; `-AvailablePreset` restricts the pool. `default_preset` selects a default parent preset; it does not require every child to use that model. `-SubagentsOnly` preserves parent and review selections.
