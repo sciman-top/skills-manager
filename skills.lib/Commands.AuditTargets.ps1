@@ -700,17 +700,14 @@ function Get-AuditNeedEvidenceCoverage($entry) {
 function Get-AuditNeedMatchedActions($entry) {
     $pairs = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($evidence in @(Convert-AuditObjectArray (Get-CfgObjectProperty $entry "evidence"))) {
-        # 证据显式携带 action 时优先使用；signal 前缀只是回退——需求类 signal 的
-        # 前缀是 domain，工件类是能力名，都不能伪造成具体动作。
+        # 动作只认证据自带的 action 字段。不能从 signal 前缀回退：需求侧 signal
+        # 是 "{domain}:{subject}@{loc}"、工件侧是 "{artifact}:{action}@{loc}"，
+        # 前缀分别是 domain 与工件名，回退会把 "workflow"/"pdf" 伪造成动作
+        # （实测 16/16 画像的 matched_actions 全部因此错配）。缺失即无配对。
         $action = ([string](Get-CfgObjectProperty $evidence "action")).Trim().ToLowerInvariant()
-        $signal = [string](Get-CfgObjectProperty $evidence "signal")
-        if ([string]::IsNullOrWhiteSpace($action)) {
-            $sep = $signal.IndexOf(":")
-            if ($sep -le 0) { continue }
-            $action = $signal.Substring(0, $sep).Trim().ToLowerInvariant()
-        }
+        if ([string]::IsNullOrWhiteSpace($action)) { continue }
         $target = ([string](Get-CfgObjectProperty $evidence "target")).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($action) -and -not [string]::IsNullOrWhiteSpace($target)) {
+        if (-not [string]::IsNullOrWhiteSpace($target)) {
             $pairs.Add(("{0}|{1}" -f $action, $target)) | Out-Null
         }
     }
