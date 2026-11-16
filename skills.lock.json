@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-15T12:48:21.9479018Z",
+  "generated_at": "2026-11-16T10:26:17.7557792Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -137,7 +137,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "07f732cdc2705aa6d89f19de6020663d026f80b4"
+      "commit": "82b4a32260e0b0ad5def912299378c881b8ca447"
     },
     {
       "name": "error-handling-patterns",
@@ -155,7 +155,7 @@
       "ref": "main",
       "skill": "skills\\find-skills",
       "sparse": true,
-      "commit": "b716f9dc2ba36b6aa8f0080615e5a3a6caeac63b"
+      "commit": "af860243b8c68053b3b5151e3732b9322933674d"
     },
     {
       "name": "grill-me",
@@ -227,7 +227,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "8ecd5b17f02fe5fbebf35eccd1867265eded811f"
+      "commit": "dc0083dbe22133bfa7ce3500dee85e187e0cd47a"
     },
     {
       "name": "microsoft-code-reference",
@@ -272,7 +272,7 @@
       "ref": "master",
       "skill": "powerpoint-automation",
       "sparse": false,
-      "commit": "07f732cdc2705aa6d89f19de6020663d026f80b4"
+      "commit": "82b4a32260e0b0ad5def912299378c881b8ca447"
     },
     {
       "name": "prompt-engineering-patterns",
@@ -353,7 +353,7 @@
       "ref": "main",
       "skill": "skills\\vite",
       "sparse": false,
-      "commit": "d524ed287eef22757297827ce42e3cad88abd20c"
+      "commit": "4a6bb39e7b45e26402eb215393c51ccf5df1ca4c"
     },
     {
       "name": "windows-desktop-e2e",
