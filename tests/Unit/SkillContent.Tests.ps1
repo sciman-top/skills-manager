@@ -38,8 +38,20 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?is)vertical slice.*UI/API/service/data'
         $skill | Should -Match '(?is)Tests must not only mirror mocks'
         $skill | Should -Match '(?is)API, schema, or data changes.*every known consumer.*migration rollback'
+        $skill | Should -Match '(?is)pre-existing baseline or sandbox/environment failures'
+        $skill | Should -Match '(?is)On auth, quota, rate-limit or provider errors, stop and preserve the raw\s+error'
+        $skill | Should -Match '(?is)Stop background servers/watchers.*remove temporary verification\s+files'
         $skill | Should -Match '(?is)Redact secrets from logs.*screenshots.*receipts'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
+    }
+
+    It 'keeps checked-in skill instructions free of retired test files and local-only scratch paths' {
+        $files = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'overrides/custom'), (Join-Path $repoRoot 'overrides/patches') -Recurse -File -Filter SKILL.md)
+        foreach ($file in $files) {
+            $content = Get-Content -LiteralPath $file.FullName -Raw
+            $content | Should -Not -Match 'RuleEstate\.Tests\.ps1' -Because $file.FullName
+            $content | Should -Not -Match 'artifacts/work/ai-session-verify' -Because $file.FullName
+        }
     }
 
     It 'retains the explicit-use constraint for strict TDD' {

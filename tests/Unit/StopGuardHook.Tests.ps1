@@ -11,11 +11,17 @@ BeforeAll {
 }
 
 Describe 'Stop guard is registered for Codex' {
-    It 'declares a Stop hook that runs the shared verification guard from the git root' {
+    It 'declares a Stop hook with a cmd-safe argv path to the shared verification guard' {
         $config = Get-Content -LiteralPath (Join-Path $script:RepoRoot '.codex\config.toml') -Raw
         $config | Should -Match '(?m)^\[\[hooks\.Stop\]\]'
-        $config | Should -Match 'guard-stop-verification\.ps1'
-        $config | Should -Match 'git rev-parse --show-toplevel'
+        $stopBlock = [regex]::Match($config, '(?s)\[\[hooks\.Stop\]\].*$').Value
+        $commands = @([regex]::Matches($stopBlock, "(?m)^(?:command|command_windows) = '(?<c>[^']*)'") | ForEach-Object { $_.Groups['c'].Value })
+        $commands.Count | Should -Be 2
+        foreach ($commandLine in $commands) {
+            $commandLine | Should -Match 'scripts/guard-stop-verification\.ps1$'
+            $commandLine | Should -Not -Match '\$\(git rev-parse'
+        }
+        Test-Path -LiteralPath $script:Hook | Should -BeTrue
     }
 
     It 'requires a bounded timeout so the stop path cannot hang the turn' {

@@ -157,6 +157,12 @@ Describe 'Panel guard handles the Codex apply_patch payload' {
 
     It 'allows a generated edit batched with its source rebuild' {
         Invoke-Guard (New-PatchEvent @('*** Update File: src/Core.ps1', '*** Update File: skills.lib/Core.ps1')) | Should -Be 0
+        Invoke-Guard (New-PatchEvent @('*** Update File: rules/global/common.md', '*** Update File: rules/global/dsh/AGENTS.md')) | Should -Be 0
+    }
+
+    It 'still blocks materialized directories even when a source file is in the same patch' {
+        Invoke-Guard (New-PatchEvent @('*** Update File: src/Core.ps1', '*** Update File: vendor/demo/README.md')) | Should -Be 2
+        Invoke-Guard (New-PatchEvent @('*** Update File: src/Core.ps1', '*** Update File: agent/demo/SKILL.md')) | Should -Be 2
     }
 
     It 'allows removing a generated file, which needs no source change' {
@@ -242,7 +248,7 @@ Describe 'Panel guard registration is shared by both hosts' {
         $config | Should -Match 'matcher = "\^apply_patch\$"'
         @([regex]::Matches($config, 'guard-generated\.ps1')).Count | Should -BeGreaterOrEqual 2
         $config | Should -Not -Match "pwsh -NoProfile -File '?\./"
-        $config | Should -Match 'git rev-parse --show-toplevel'
+        Test-Path -LiteralPath (Join-Path $script:RepoRoot 'scripts/guard-generated.ps1') | Should -BeTrue
     }
 
     It 'keeps a single guard script copy in the repository' {

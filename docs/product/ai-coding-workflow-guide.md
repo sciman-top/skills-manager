@@ -1,7 +1,7 @@
 # AI 编码工作流与约束（参考件）
 
 **定位**：本文件是参考件，不是规则、不是门禁，不进入任何宿主上下文。高频稳定闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`。本文合并原《AI 编码效能手册》与《通用指南》，取代二者。
-**核实日期**：2026-11-05。外部依据见第 7 节。
+**核实日期**：2026-11-18。外部依据见第 7 节。
 
 ## 1. 顶层宗旨
 
@@ -36,7 +36,7 @@ Anthropic 的原则是"找到最简单的方案，只在必要时增加复杂度
 
 CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模板；另有 `review`、`failure`、`handoff`、`checklist`，支持 `--json`。该入口只输出模板，不扫描目标仓、不执行任务或调用模型。
 
-验收预期应来自需求、示例或外部契约，关键回归在可行时确认旧行为会失败。UI 观察实际交互与空态/错误态；API 检查调用方兼容和错误响应；数据处理核对代表性输入与不变量；性能优化比较相同条件的前后结果。只选择本次适用的证明，不为低风险改动增加完整测试流程。
+验收预期应来自需求、示例或外部契约，关键回归在可行时确认旧行为会失败。测试或构建失败时先隔离提交前既有基线/沙箱环境故障与本次 diff 引入的回归；UI 在目标视口或参考图下观察实际交互、提交/键盘可达性与加载/空态/错误态；API 检查调用方兼容和错误响应；数据处理核对代表性输入与不变量；性能优化比较相同条件的前后结果。收口前停止验证期间拉起的后台服务/监听进程并清理临时文件。只选择本次适用的证明，不为低风险改动增加完整测试流程。
 
 全栈变更还要沿边界追踪生产者与已知消费者：API、共享 schema、序列化格式和数据库迁移必须一起核对，保留兼容的回滚入口。提交日志、截图、receipt、命令或复制的 payload 前，先去除 token、cookie、API key、个人数据和访问凭据。
 
@@ -51,10 +51,12 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 | 全栈接缝断裂 | 前端字段与 API 不一致；共享 schema 改了旧消费者坏掉；迁移无法回滚 | 同时追踪生产者与所有已知消费者；做契约兼容检查；迁移保留回退与数据不变量 |
 | 安全与隐私失守 | 只在客户端做授权、越权访问、秘密进日志、未审查依赖或外部指令 | 在 trust/data 边界校验；服务端执行授权；分享前脱敏；检查依赖来源和新增能力 |
 | 过度工程与注意力挤占 | 为假想需求加抽象、门禁和文档；规则越来越长；每次任务加载无关信息 | 用“当前调用方 / 替换了什么 / 最小证明”准入；同一错误第二次才升级为自动防线 |
-| 失败后盲目循环 | 重复同一修复、自动重试认证错误、把环境失败当代码失败 | 分类输入/环境/认证限流/代码失败；同一问题两次后退回事实与未决问题 |
-| 把“看起来完成”当完成 | 只说“应该可以”；编译或 mock 通过就宣称端到端交付 | 运行能返回 pass/fail 的最短检查；直接观察受影响的 UI、请求、文件或外部效果 |
+| 失败后盲目循环 | 重复同一修复、自动重试认证/额度/provider 故障、把既有基线或沙箱环境失败当本次代码错误 | 先区分基线/环境与本次 diff；认证/额度/限流/provider 故障立即停止并保留原错；同一问题两次后向用户澄清 |
+| 把“看起来完成”当完成 | 只说“应该可以”；编译或 mock 通过就宣称端到端交付；遗留后台服务或临时文件污染工作区 | 运行能返回 pass/fail 的最短检查；直接观察受影响的 UI、请求、文件或外部效果；收口前关停验证拉起的后台进程并清理临时文件 |
 
 最省时间的日常闭环通常是：**让仓库可读 → 写清验收 → 做一个垂直切片 → 运行快速检查并修正 → 高风险处用新鲜上下文审查 → 只报告已证实的边界**。不要让 AI 一次吞下整个大型仓，也不要为每个小改动启动多代理、全量测试或新的治理层。
+
+当前主流模型下可以**停止做的旧习惯**：不在 `AGENTS.md`/`CLAUDE.md` 里罗列模型读仓即可发现的目录树与常规语法；不用全大写 `IMPORTANT` 代替 hook/deny 规则；不为“得到更好答案”把同一单线任务转包给子代理（子代理只用于互斥并行切片、隔离高噪输出或独立上下文审查）；不用提示词口号代替宿主 effort 档位与可执行的 pass/fail 检查。
 
 ## 4. 防过度工程：提交前五问
 
@@ -91,12 +93,13 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 ## 7. 依据
 
 - OpenAI Codex Prompting：Codex 任务应说明想要的行为、相关代码或复现、约束和验证方式；复杂任务可先用 `/plan`，修 bug 后运行最小相关检查并报告命令与结果。 <https://developers.openai.com/codex/prompting>
+- OpenAI Prompting GPT-6.2 in Codex：按调查深度匹配 reasoning effort；多代理仅用于可独立推进的并行部分；UI/视觉产物按真实呈现尺寸核对交互；收口时停止自己启动的后台任务并清理不再需要的临时文件。 <https://learn.chatgpt.com/guides/prompting-gpt-6-2-astra>
 - OpenAI Codex `AGENTS.md`：Codex 每次运行会按全局到项目目录逐层组合指令，默认上限 32 KiB；项目事实应按目录就近放置，格式化与 lint 留给 CI。 <https://developers.openai.com/codex/guides/agents-md>
 - OpenAI Codex Build skills：技能采用渐进披露，初始只加载名称、描述和路径；应保持单一职责、描述清晰、使用命令式步骤并测试触发范围。 <https://developers.openai.com/codex/build-skills>
 - Claude Code hooks：33 个事件；`PreToolUse` 可用退出码 2 或 `permissionDecision: deny` 阻断；`Stop` 可阻止结束，需防循环。 <https://code.claude.com/docs/en/hooks>
-- Claude Code 最佳实践：区分模型判断与宿主确定性约束；只写仓库里找不到的上下文；给 AI 一个可运行的 pass/fail 检查；要求命令、输出或截图作为证据；用未参与实现的 fresh context 审查 spec。 <https://code.claude.com/docs/en/best-practices>
+- Claude Code 最佳实践：区分模型判断与宿主确定性约束；只写仓库里找不到的上下文；给 AI 一个可运行的 pass/fail 检查；要求命令、输出或截图作为证据；用未参与实现的 fresh context 审查 spec；淘汰全大写强调、目录树复述和无效子代理转包等旧习惯。 <https://code.claude.com/docs/en/best-practices>
 - Anthropic，Building effective agents：找到最简单的方案，只在能明显改善结果时增加复杂度；抽象层可能遮蔽提示词。 <https://www.anthropic.com/engineering/building-effective-agents>
 - GitHub Spec Kit：把 spec 贯穿 plan、tasks、implement 与 converge；bug 修复走 assess、fix、test，并通过独立验证结论区分 `verified`、`partial`、`failed`。 <https://github.com/github/spec-kit>
 - AGENTS.md：作为跨宿主的“给 AI 的 README”，稳定记录构建、测试、风格、安全与 PR 约定；大型单体仓可在子项目放就近文件。 <https://agents.md/>
 - Codex hooks：可通过 `permissionDecision: deny` 或退出码 2 阻断，项目 hook 需受信任后才加载；官方称其为"护栏而非完整强制边界"。 <https://learn.chatgpt.com/docs/hooks>
-- Agent Skills 规范：`name` 与 `description` 必填；元数据常驻，正文按需加载；`SKILL.md` 建议不超过 500 行。 <https://agentskills.io/specification>
+- Agent Skills 规范与作者实践：`name` 与 `description` 必填，元数据常驻、正文按需加载；只补充模型原本不知道的领域/项目事实，按脆弱度校准控制粒度，给默认方案而非并列菜单。 <https://agentskills.io/specification> · <https://agentskills.io/skill-creation/best-practices>
