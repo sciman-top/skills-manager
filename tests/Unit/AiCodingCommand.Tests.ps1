@@ -43,10 +43,14 @@ Describe 'ai-coding read-only templates' {
 
         $implementation.output | Should -Match '禁止凭记忆编造 API、配置键、依赖、版本'
         $implementation.output | Should -Match '生产者与所有已知消费者'
+        $implementation.output | Should -Match '基线/沙箱环境问题与本次 diff 引入的回归'
+        $implementation.output | Should -Match '认证/额度/限流/风控/provider 故障时立即停止'
+        $implementation.output | Should -Match '停止验证期间启动的后台服务/监听进程'
         $review.output | Should -Match '虚构的 API、配置键、依赖或版本'
         $review.output | Should -Match '只验证 mock 调用'
         $checklist.output | Should -Match '贯通窄垂直切片'
         $checklist.output | Should -Match '秘密未进入日志或工件'
+        $checklist.output | Should -Match '停止验证拉起的后台进程'
     }
 
     It 'supports help and fails closed for unknown options or templates' {

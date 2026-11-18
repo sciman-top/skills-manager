@@ -64,9 +64,10 @@ $guardedDirs = @(
     'rules/global/claude/', 'rules/global/codex/', 'rules/global/zcode/',
     'rules/global/antigravity/', 'rules/global/workbuddy/', 'rules/global/dsh/'
 )
-# 代码宿主（生成 skills.ps1 / skills.lib 的输入）。只用于 Codex apply_patch 的
-# "生成物必须与其源同批提交" 判定，普通编辑不阻断。
-$sourceMarkers = @('src/', 'build.ps1')
+# 生成物与对应源的映射：只允许 build.ps1 的生成物与其对应源同批 apply_patch，
+# 物化目录（agent/、vendor/、imports/）不能靠附带 src/ 修改放行。
+$bundleSourceMarkers = @('src/', 'build.ps1')
+$ruleSourceMarkers = @('rules/global/common.md', 'rules/global/platforms/', 'build.ps1')
 
 # Returns the repo-relative guarded path for a token, or '' when the token is not guarded.
 function Get-GuardedRel([string]$Token) {
@@ -107,13 +108,6 @@ function Test-Guarded([string]$Token, [string]$Via) {
     if ($hit) { Block $hit $Via }
 }
 
-# Codex apply_patch payload: count occurrences of the patch marker for one path so
-# Add/Update need a source file in the same patch while Delete stands alone.
-function Get-PatchPathCount([string]$Patch, [string]$Rel) {
-    $escaped = [regex]::Escape($Rel)
-    return [regex]::Matches($Patch, "(?im)^\*\*\* (?:Add|Update) File:\s*(?:\S*[\\/])?$escaped\s*$").Count
-}
-
 $filePath = [string]$event.tool_input.file_path
 if (-not [string]::IsNullOrWhiteSpace($filePath)) {
     Test-Guarded $filePath 'Edit/Write'
@@ -135,12 +129,22 @@ if (-not [string]::IsNullOrWhiteSpace($patch)) {
     if (@($targets).Count -eq 0) { exit 0 }
     $guardedTargets = @($targets | Where-Object { Get-GuardedRel $_ })
     if (@($guardedTargets).Count -eq 0) { exit 0 }
-    $codeTargets = @($targets | Where-Object { $rel = $_.Replace('\', '/'); [bool](@($sourceMarkers | Where-Object { $rel.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) })) })
-    if (@($codeTargets).Count -gt 0) { exit 0 }
+    $normalizedTargets = @($targets | ForEach-Object { $_.Replace('\', '/') })
+    $hasBundleSource = [bool](@($normalizedTargets | Where-Object {
+                $candidate = $_
+                [bool](@($bundleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
+            }).Count -gt 0)
+    $hasRuleSource = [bool](@($normalizedTargets | Where-Object {
+                $candidate = $_
+                [bool](@($ruleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
+            }).Count -gt 0)
     foreach ($target in $guardedTargets) {
         # 删除生成文件不需要同批源改动；新增/修改必须带上源，否则就是一键手工改生成物。
         if ($patch -match ('(?im)^\*\*\* Delete File:\s*' + [regex]::Escape($target) + '\s*$')) { continue }
-        Block (Get-GuardedRel $target) 'apply_patch'
+        $guardedRel = Get-GuardedRel $target
+        if (($guardedRel -eq 'skills.ps1' -or $guardedRel.StartsWith('skills.lib/', [StringComparison]::OrdinalIgnoreCase)) -and $hasBundleSource) { continue }
+        if ($guardedRel.StartsWith('rules/global/', [StringComparison]::OrdinalIgnoreCase) -and $hasRuleSource) { continue }
+        Block $guardedRel 'apply_patch'
     }
     exit 0
 }

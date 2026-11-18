@@ -36,9 +36,8 @@ Deletion is **per directory entry**, not per call and not swappable:
 | Create dir/file | ≈3–4 ms/item | creation is cheap |
 | Process spawn (`git`, `pwsh`, CLI) | 0.4–1.2 s hot; **can stall 60–228 s cold** | per spawn, unpredictable |
 
-Reproduce with: build N dirs, time `Remove-Item -Recurse`; build N flat files,
-time delete; compare `Remove-Item` vs `[IO.Directory]::Delete`. Scripts live
-under `artifacts/work/ai-session-verify/probe-*.ps1` in skills-manager.
+Reproduce in a disposable temp folder: time `Remove-Item -LiteralPath <root> -Recurse -Force`
+on N nested directories vs N flat files, and compare against `[IO.Directory]::Delete($p, $true)`.
 
 - 🔴 **`Get-ChildItem … | Remove-Item -Force` silently does nothing** in the
   sandbox: the wrapper rejects pipeline input (`Remove-Item: missing path
@@ -90,9 +89,12 @@ deletion.
   `show-ref` / `remote`, the pointer must resolve to a **real** gitdir.
 - ✅ Best pattern: `git init --bare --initial-branch=main <shared>` once, then
   write `gitdir: <shared>` into each fixture's `.git` file. Real queries succeed,
-  zero nested directories. (Used in skills-manager `RuleEstate.Tests.ps1`.)
-- `git init --template=` yields a **7-directory** functional repo (vs 9) — use it
-  when you must copy a real `.git`.
+  zero nested directories per fixture (see `src/Git.ps1` and `tests/Unit/Core.Tests.ps1`
+  in skills-manager).
+- `git init --template=` shrinks `.git` from ~26 items (9 directories including
+  `.git`) to ~8 items (7 directories) by omitting sample hooks and `info/`. It is
+  ineffective when invoked per test, so pair it with **prepare once, copy per fixture**
+  when a real `.git` directory is required.
 
 ## 5. Verify without the slow full run
 
