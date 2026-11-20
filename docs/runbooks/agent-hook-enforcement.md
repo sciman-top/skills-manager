@@ -7,7 +7,7 @@
 | 约束 | 确定性裁决位置 | 覆盖不了的情况 |
 | --- | --- | --- |
 | 不手改生成物（`skills.ps1`、`skills.lib/`、`rules/global/<host>/`） | `scripts/guard-generated.ps1`，由 `.claude/settings.json` 与 `.codex/config.toml` 的 `PreToolUse` 调用 | 任意程序内部写文件；未建模的写入动词 |
-| 生成物必须与其源同批提交 | 同一守卫的 `apply_patch` 分支 | Bash 分支不跨语句聚合（`sed -i skills.lib/x && touch src/y` 会放行） |
+| 生成物必须与其源同批提交 | 同一守卫的 `apply_patch` 分支（覆盖 `Add/Update/Delete File` 与 `Move to`） | Bash 分支不做同批源放行（命中受管路径的写入动词一律阻断），但无法覆盖未建模的脚本内部写入 |
 | 生成物与源不得漂移 | `.codex/config.toml` 的 `Stop` 钩子跑 `build.ps1 -Check`；CI 的 `-CheckGenerated` | 没有 hooks 的宿主 |
 | 完成任务必须给证据 | 同一 `Stop` 钩子检查最后一条回复是否含命令块或验证段落 | 回复里写了"验证"字样但没真跑命令；模型可以用文字满足形式 |
 | 新增面须有人标签 | CI `verify-new-surface.ps1` | 唯一权威，无本地等价物 |
@@ -19,10 +19,10 @@
 - `scripts/guard-generated.ps1`：两个宿主共用同一个副本（`GeneratedGuardHook.Tests.ps1` 断言仓库里只有一份）。
   `Edit/Write` 事件看 `tool_input.file_path`；`Bash` 事件看重定向目标、写入动词的路径参数、
   `git rm/mv/restore/checkout/reset/clean/stash/apply/switch` 的路径参数；`apply_patch`
-  事件看 patch 里的 `*** Add/Update/Delete File:` 行。
+  事件逐条检查 patch 里的 `*** Add/Update/Delete File:` 与 `*** Move to:` 行。
 - `scripts/guard-stop-verification.ps1`：`stop_hook_active` 为真时立即放行（否则会自我循环），
   否则先跑 `build.ps1 -Check`，失败即以退出码 2 把输出回传给模型；工作区有改动而最后一条
-  回复没有命令块/验证段落时同样阻断。
+  回复没有命令块、英文 `verify/verified/verification` 词或中文 `验证/证据` 标记时同样阻断。
 
 ## 3. 接线
 

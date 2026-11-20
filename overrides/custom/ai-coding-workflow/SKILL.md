@@ -59,47 +59,49 @@ receipts and rollback/compensation when supported.
 
 ## Implement and verify
 
-Reuse entrypoints and checks; preserve unrelated work. Before looping on a
-failing check, isolate pre-existing baseline or sandbox/environment failures
-from regressions introduced by your diff. For bugs, reproduce, fix the cause,
-rerun the symptom and one relevant boundary case. Never weaken assertions, hide
-errors or delete protection to pass. Strict TDD, coverage, full suites and independent
-review require a request, contract or affected risk. Never let a skill invent a new gate.
-Prefer one narrow vertical slice that crosses the necessary UI/API/service/data
-boundaries over a broad speculative rewrite. Add dependencies only for a current
-need, using the repository's package manager, lockfile and existing patterns.
-Derive expected results from requirements, examples or an external contract,
-not just the implementation. Tests must not only mirror mocks or implementation
-details. For a meaningful regression, confirm the check detects the old failure
-when practical; do not manufacture tests for trivial edits.
-Choose evidence by the changed behavior: UI needs rendered interaction at the
-target viewport/reference plus loading/empty/error and submit/keyboard states;
-APIs need caller compatibility and error responses;
-data changes need representative values and invariants; performance needs
-comparable before/after measurements. Use only the applicable checks.
-For API, schema, or data changes, trace the producer and every known consumer;
-check the contract at that boundary and keep migration rollback compatible.
-Reuse valid evidence; rerun only proof invalidated by input/environment changes.
-Defend real trust/data boundaries: validate untrusted input once at the edge,
-enforce authorization on the trusted side, and review dependency provenance.
-Fallbacks or retries need explicit triggers, budgets and observable receipts.
-
-Classify failures: missing input, tool/environment, auth/quota/rate-limit/provider,
-or code. On auth, quota, rate-limit or provider errors, stop and preserve the raw
-error instead of looping retries, switching models/providers or mutating auth.
-After two failed corrections to the same problem, or conflicting acceptance
-criteria, summarize facts, attempts and the open question, then ask the user
-for clarification. Context compaction or handoff does not replace clarification;
-preserve evidence, authorization and stop.
-
-Never edit generated outputs directly; rebuild from source and check drift.
-Stop background servers/watchers you started and remove temporary verification
-files before finishing. Show the command, exit code and relevant result. Keep
-`repo_verified`, `filesystem_projected`, `host_loaded`, and `live_accepted`
-separate; lower evidence never proves a higher boundary. Observe affected
-UI/runtime/external behavior directly; if a check cannot observe the claimed
-boundary, report it as unverified. Redact secrets from logs, screenshots,
-receipts, commands, and copied payloads before sharing them.
+- **Build narrow and safe**: reuse entrypoints and checks; preserve unrelated
+  dirty worktree changes. Prefer one narrow vertical slice across the needed
+  UI/API/service/data boundaries over a speculative rewrite. Add dependencies
+  only for a current need via the repo's package manager and lockfile.
+  For API, schema, or data changes, trace the producer and every known consumer, check
+  the contract, and keep migration rollback compatible. Defend real trust/data
+  boundaries: validate untrusted input once at the edge, enforce authorization
+  on the trusted side, and review dependency provenance. Fallbacks or retries
+  need explicit triggers, budgets and observable receipts.
+- **Verify real behavior**: derive expected results from requirements, examples
+  or an external contract, not just the implementation.
+  Tests must not only mirror mocks, implementation details, or brittle
+  change-detector constants and copy — name the concrete break a test catches,
+  and confirm it detects the old failure when practical; do not manufacture
+  tests for trivial edits.
+  Match checks to changed behavior: UI needs rendered interaction at the target
+  viewport/reference plus loading/empty/error and submit/keyboard states; APIs
+  need caller compatibility and error responses; data needs representative
+  values and invariants; performance needs comparable before/after numbers.
+  Never weaken assertions, hide errors or delete protection to pass. Reuse
+  valid evidence; strict TDD, coverage, full suites and independent review
+  require a request, contract or affected risk.
+  Never let a skill invent a new gate.
+- **Triage failures cleanly**: before looping on a failing check, isolate
+  pre-existing baseline or sandbox/environment failures from regressions
+  introduced by your diff. For bugs, reproduce, fix the cause, rerun the
+  symptom and one boundary case. Classify failures: missing input,
+  tool/environment, auth/quota/rate-limit/provider, or code.
+  On auth, quota, rate-limit or provider errors, stop and preserve the raw error
+  instead of looping retries, switching models/providers or mutating auth.
+  After two failed corrections to the same problem, or conflicting acceptance criteria,
+  summarize facts, attempts and the open question, then ask the user
+  for clarification. Context compaction or handoff does not replace clarification;
+  preserve evidence, authorization and stop.
+- **Close cleanly**: never edit generated outputs directly; rebuild from source
+  and check drift. Stop background servers/watchers you started and
+  remove temporary verification files before finishing. Show the command, exit code
+  and relevant result. Keep `repo_verified`, `filesystem_projected`,
+  `host_loaded`, and `live_accepted` separate; lower evidence never proves a
+  higher boundary. Observe affected UI/runtime/external behavior directly; if a
+  check cannot observe the claimed boundary, report it as unverified.
+  Redact secrets from logs, screenshots, receipts, commands, and copied
+  payloads before sharing them.
 
 ## Executor, tools and review
 
@@ -114,6 +116,8 @@ Review with fresh context when risk/uncertainty warrants it: correctness,
 regression, security, compatibility and stated requirements only.
 Look specifically for invented APIs or dependencies, mock-only tests, omitted
 producer/consumer contracts, broken migrations, and secrets crossing a boundary.
+Verify candidate findings against callers, guards and tests before reporting,
+and separate pre-existing defects from new regressions.
 `Report gaps, not style preferences`; allow zero findings.
 Compare new-surface declarations with the actual diff, callers and evidence.
 Rules guide judgment; enforce detectable limits at existing permission/write/CI

@@ -10,13 +10,19 @@ smallest change that removes that cause.
 
 1. Record expected behavior, observed behavior, and the cheapest command or
    inspection that reproduces the difference.
-2. Read the failing path and its immediate inputs before proposing a fix.
-3. Form one falsifiable cause at a time and use the cheapest discriminating
+2. Check recent changes (`git diff`) and isolate pre-existing baseline or
+   sandbox/environment failures from regressions introduced by your diff.
+   Classify failures (`missing input`, `tool/environment`,
+   `auth/quota/rate-limit/provider`, `code`): on auth, quota, rate-limit, or
+   provider errors, stop and preserve the raw error instead of editing code,
+   looping retries, or mutating auth.
+3. Read the failing path and its immediate inputs before proposing a fix.
+4. Form one falsifiable cause at a time and use the cheapest discriminating
    evidence. Do not launch broad audits, full suites, or external research
    unless the current evidence cannot distinguish the cause.
-4. Fix the causal seam. Add a focused regression only when it protects the
+5. Fix the causal seam. Add a focused regression only when it protects the
    observed failure mode and is not already covered.
-5. Re-run the reproducer or affected test. Escalate to a wider gate only when
+6. Re-run the reproducer or affected test. Escalate to a wider gate only when
    the change crosses a shared, security, data, migration, or public-contract
    boundary required by the repository.
 

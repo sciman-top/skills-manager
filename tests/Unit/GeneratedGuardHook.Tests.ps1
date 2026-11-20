@@ -165,6 +165,15 @@ Describe 'Panel guard handles the Codex apply_patch payload' {
         Invoke-Guard (New-PatchEvent @('*** Update File: src/Core.ps1', '*** Update File: agent/demo/SKILL.md')) | Should -Be 2
     }
 
+    It 'blocks apply_patch Move to targets that land in generated or materialized paths' {
+        Invoke-Guard (New-PatchEvent @('*** Update File: docs/note.md', '*** Move to: skills.ps1')) | Should -Be 2
+        Invoke-Guard (New-PatchEvent @('*** Update File: src/Core.ps1', '*** Move to: agent/demo/SKILL.md')) | Should -Be 2
+    }
+
+    It 'blocks mixed Delete and Add operations targeting the same generated path without a source edit' {
+        Invoke-Guard (New-PatchEvent @('*** Delete File: skills.ps1', '*** Add File: skills.ps1', '+tampered')) | Should -Be 2
+    }
+
     It 'allows removing a generated file, which needs no source change' {
         Invoke-Guard (New-PatchEvent @('*** Delete File: agent/demo/SKILL.md')) | Should -Be 0
     }
