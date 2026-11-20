@@ -41,7 +41,7 @@ Slots describe responsibility, not a fixed agent count, concurrency quota or mea
 | `documentation_review` | Documentation and contract consistency | Read only | `gemini-3.8-flash-high/high` |
 | `architecture_review` | Interacting constraints and security boundaries | Read only | `gpt-6-luna/max` |
 
-Keep the nine slots; there is no demonstrated need for more. Classify the task first, then select a supported tuple. `deep_implementation` uses DeepSeek because it is the code-focused route; `documentation_review` uses Gemini high because document and visual consistency do not justify a Luna/max child. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
+Keep the nine slots; there is no demonstrated need for more. Classify the task first, then select a supported tuple. `deep_implementation` uses DeepSeek because it is the code-focused route; `documentation_review` uses Gemini high because document and visual consistency do not justify a Luna/max child. For a known test command, the parent can run it directly. Use `test_execution` when a scoped verification task can run independently. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
 
 ## Routing receipt
 
@@ -59,6 +59,12 @@ All four exact tuples remain available to the controlled launcher after target c
 
 Compatibility remains a separate boundary. BWG runs CPA v8.0.42 and the deployed admission code has strict-doctor and pin evidence for the exact-envelope conversion. This is deployment evidence, not a model generation request. The host catalog and user Desktop availability evidence support the requested pool; neither proves that every provider accepts a native delegation or completes it successfully. If `encrypted_agent_payload_unsupported` occurs, stop for compatibility diagnosis. Do not replay the task, remove the guard or silently substitute models. One-shot CLI execution sends a different request shape and is not native subagent acceptance.
 
+### Codex native compatibility (2026-11-20)
+
+The local Desktop-bundled Codex CLI (`0.171.0-alpha.13`) completed a native `standard_review` delegation through a `gpt-5.6-luna` parent using V1. A separate `gpt-6.2-sol` V2 session could not deliver readable task content to the same role. Use a fresh V1 parent for a new cross-provider delegation when the active Desktop catalog lists `gpt-5.6-luna` with `multi_agent_version: v1`. Check the requested child role and its output. A parent summary alone does not establish the upstream model or effort. V2 ephemeral sessions also failed to initialize the child in this build with `no rollout found for thread id`.
+
+For one controlled CLI session using the same host catalog, invoke the Desktop-bundled executable with `exec --model gpt-5.6-luna --disable multi_agent_v2 --sandbox read-only --ephemeral` and a bounded native delegation prompt. Use `Start-ModelSlot.ps1` for a direct single-model task, which does not exercise delegation. Keep work from a failed V2 task intact and inspect it before dispatching any remaining work.
+
 Fresh host loading is required after projection. An existing chat may retain its old role definitions. Do not restart or stop the app to force loading. Local Codex files do not configure hosted ChatGPT Work.
 
 ## Failure handling
@@ -73,7 +79,7 @@ Preset fallbacks are candidate data, not an automatic failover engine. The launc
 | Auth/permission/account risk | Stop for operator review |
 | Timeout or unknown error | Inspect existing process result and partial writes before new dispatch |
 
-There is no proven cross-vendor automatic failover contract for ordinary Desktop, ZCode, Antigravity or WorkBuddy in this tool. Native hosts own their retry behavior. A pinned child does not automatically consult JSON fallbacks. A different model may share the same quota or gateway.
+There is no proven cross-vendor automatic failover contract for ordinary Desktop, ZCode, Antigravity or WorkBuddy in this tool. Native hosts own their retry behavior. A pinned child does not automatically consult JSON fallbacks. During planning, `-AvailablePreset` can explicitly exclude an unavailable model before dispatch. Restricted-pool resolution selects the first eligible preset in the active pool if a slot default is excluded. To select a specific alternate for the remaining work, choose its exact tuple role. A different model may share the same quota or gateway.
 
 ## Projection, proof and rollback
 
@@ -86,7 +92,7 @@ pwsh -NoProfile -File ./Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <recei
 pwsh -NoProfile -File ./Test-ModelPreset.ps1
 ```
 
-Plan before Apply. Generated role files live in ignored `.generated/`; active Codex task slots and tuple roles are additionally projected as marked standalone files under `<CODEX_HOME>\agents\`, and Apply retires stale managed files left by renamed pool tuples (unmarked files are never touched). The shared `config.toml` therefore carries only the global subagent defaults, availability rules and a managed-agent manifest, while profile files retain their frozen role registrations. Ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
+Plan before Apply. Generated role files live in ignored `.generated/`; active Codex task slots and tuple roles are additionally projected as marked standalone files under `<CODEX_HOME>\agents\`, and Apply retires stale managed files left by renamed pool tuples (unmarked files are never touched). The shared `config.toml` therefore carries only the global subagent defaults, availability rules and a managed-agent manifest, while profile files pin their default tuple and inherit the shared named slots and exact-tuple roles. A named slot uses its shared route even when a profile is selected. To pin a child to the profile tuple, select its exact-tuple role. This keeps each role registered once. Ignored `.state/` stores backups and receipts. Preserve unrelated configuration, concurrency, hooks, auth and provider fields. Ownership markers prevent adopting user-owned files. Rollback checks current hashes; restore later dependent mutations first. Backups may contain sensitive pre-existing host data and must not be published.
 
 ZCode supports Plan/Apply with `-SubagentsOnly -ExecutionHost zcode`, using the exact selector in its existing `~/.zcode/agents/glm-max.md`. It creates only marked namespaced slot definitions at max and leaves the source definition intact. Antigravity/WorkBuddy have no verified exact-tuple writer. Claude has no active facet after the prior user retirement decision and fails closed.
 

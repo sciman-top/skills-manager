@@ -530,7 +530,6 @@ $slotGuidance = @{
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
 $parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch. Record a routing receipt for each child: slot, requested preset, model, effort, read-only status, declared fallback, and the host-reported actual model/effort when available. Set actual_model_observed=false instead of inferring the child model from the parent picker. A custom agent file pins model/effort and overrides spawn values; its provider remains the parent provider.'
-$tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
     if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
     if (-not (Test-NativePreset $entry.preset)) { continue }
@@ -540,7 +539,6 @@ foreach ($entry in $enabledRoutes) {
     $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
     AddFile $rolePath $roleText
     AddCodexAgentFile $entry.role $roleText
-    $tupleBlocks.Add("[agents.$($entry.role)]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
 }
 $capability = [ordered]@{
     status = 'not_applicable'
@@ -665,7 +663,6 @@ foreach ($id in $policy.presets.Keys) { if ($activePresets -ccontains $id -and $
 foreach ($id in $codexIds) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
-    $roleBlocks = [Collections.Generic.List[string]]::new()
         $codexMenu = @(Get-PresetMenu $p 'codex')
         $standard = $codexMenu[$p.slot_map['routine_maintenance']]
     $profileNativeAgentAvailable = Test-NativePreset $id
@@ -681,18 +678,16 @@ foreach ($id in $codexIds) {
         $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
         AddFile $rolePath $roleText
         $generatedCodexRoleText[[IO.Path]::GetFullPath($rolePath)] = $roleText
-        $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
     $profileAgentSection = if ($profileNativeAgentAvailable) {
         "[agents]`ndefault_subagent_model = `"$($standard.model)`"`ndefault_subagent_reasoning_effort = `"$($standard.effort)`""
     }
     else { "[agents]`nenabled = false" }
     $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', $profileAgentSection) -join "`n"
-    $profileText = $header + "`n`n" + ($roleBlocks -join "`n") + "`n" + ($tupleBlocks -join "`n")
-    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
-    if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
+    # Named slots and exact-tuple roles are discovered from CodexRoot/agents.
+    # Repeating the registrations in a profile makes Codex ignore duplicates.
+    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") ($header + "`n")
 }
-$activeRoleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($slot in $slotNames) {
     if ($nativePresetIds.Count -eq 0) { break }
     $routePreset = $nativeRoutePresetIds[$slot]
@@ -701,9 +696,7 @@ foreach ($slot in $slotNames) {
     $routeRoleText = $generatedCodexRoleText[[IO.Path]::GetFullPath($routePath)]
     if (-not $routeRoleText) { throw "Active Codex role was not generated: $routePath" }
     AddCodexAgentFile $slot $routeRoleText
-    $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Native route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
-$activeBlocks = $activeRoleBlocks -join "`n"
 # Retire managed agent files that no longer belong to the projected set: a renamed
 # tuple role (e.g. deepseek_xhigh -> deepseek_max) must not leave its stale managed
 # file behind, or Verify flags it forever. Unmarked files stay untouched (fail closed).

@@ -40,7 +40,7 @@ Assert (('codex' -in $policy.presets['glm53_flash_only'].hosts) -and ('zcode' -i
 Assert (-not $policy.presets.Contains('claude_haiku55_only')) 'Retired Claude Haiku preset is absent from the pool'
 Assert (@($policy.presets['gemini38_flash_only'].hosts).Count -eq 1 -and 'codex' -in $policy.presets['gemini38_flash_only'].hosts) 'Gemini stays codex-only'
 Assert (@($policy.presets['deepseek41_flash_only'].hosts).Count -eq 1 -and 'codex' -in $policy.presets['deepseek41_flash_only'].hosts -and $policy.presets['deepseek41_flash_only'].native_subagent) 'DeepSeek exact tuple is Codex native'
-Assert ($policy.presets['glm53_flash_only'].native_subagent -and $policy.presets['gemini38_flash_only'].native_subagent) 'All four approved Codex tuples are native after the guarded envelope conversion deployment'
+Assert ($policy.presets['glm53_flash_only'].native_subagent -and $policy.presets['gemini38_flash_only'].native_subagent) 'All four approved Codex tuples are eligible for native projection'
 $zcodeResolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -ExecutionHost zcode -Preset glm53_flash_only | ConvertFrom-Json -AsHashtable
 Assert ($zcodeResolved.host -ceq 'zcode' -and $zcodeResolved.routes.quick_triage.model -ceq 'glm-5.3-flash' -and $zcodeResolved.routes.quick_triage.effort -ceq 'max') 'ZCode keeps the native GLM max facet'
 Assert (@($zcodeResolved.enabled_routes | Where-Object { $_.model -ceq 'glm-5.3-flash' -and $_.effort -ceq 'max' }).Count -eq 1) 'ZCode exposes only the reviewed GLM max tuple'
@@ -155,11 +155,13 @@ foreach ($invalidSelection in @(
     @{Slot='standard_review';Model='deepseek-flash';Effort='high'},
     @{Slot='standard_review';Model='deepseek-v4.1-flash';Effort='xhigh'},
     @{Slot='standard_review';Model='gemini-3.8-flash';Effort='high'},
+    @{Slot='standard_review';Model='gemini-4-hydrogen-xhigh';Effort='medium'},
     @{Slot='standard_review';Model='glm-5.3-flash';Effort='high'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='max'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='low'},
     @{Slot='standard_review';Model='gpt-6.1-sol';Effort='medium'},
     @{Slot='standard_review';Preset='gpt61_sol_only'},
+    @{Slot='standard_review';Preset='gemini4_hydrogen_only'},
     @{Slot='standard_review';Model='gpt-6-luna'},
     @{Slot='standard_review';Model='claude-haiku-5-5';Effort='low'},
     @{Slot='standard_review';Model='gpt-6-luna';Effort='xhigh'},
@@ -468,7 +470,7 @@ try {
     Assert (@($stalePlan.files | Where-Object { $_.path -ceq [IO.Path]::GetFullPath($staleManagedPath) }).Count -eq 1) 'Plan reports a stale managed role for retirement'
     foreach ($profileId in @('glm53_flash_only','gemini38_flash_only')) {
         $profileConfigText = Get-Content -LiteralPath (Join-Path $target "$($profileId.Replace('_','-')).config.toml") -Raw
-        Assert ($profileConfigText.Contains('default_subagent_model =') -and $profileConfigText.Contains('[agents.')) "GLM/Gemini profile projects native task slots: $profileId"
+        Assert ($profileConfigText.Contains('default_subagent_model =') -and -not $profileConfigText.Contains('[agents.')) "GLM/Gemini profile inherits standalone role registrations: $profileId"
         foreach ($slot in $slots) {
             Assert (Test-Path -LiteralPath (Join-Path $fixture ".generated/codex/$profileId/$slot.toml")) "Native profile emits a task slot file: $profileId/$slot"
         }
@@ -665,7 +667,7 @@ try {
     $customGlmRole = Get-Content -LiteralPath (Join-Path $fixture '.generated/codex/glm53_flash_only/custom_task.toml') -Raw
     $customAgentPath = Join-Path $codexAgents 'custom_task.toml'
     $customAgentText = Get-Content -LiteralPath $customAgentPath -Raw
-    Assert (-not $customRootConfig.Contains('[agents.custom_task]') -and $customAgentText.Contains('name = "custom_task"') -and $customAgentText.Contains('model = "glm-5.3-flash"') -and $customAgentText.Contains('model_reasoning_effort = "xhigh"') -and $customNativeRole.Contains('model = "gpt-6-luna"') -and $customNativeRole.Contains('model_reasoning_effort = "max"') -and $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaProfile.Contains('default_subagent_model = "gpt-6-luna"') -and $customGlmProfile.Contains('default_subagent_model = "glm-5.3-flash"') -and $customGlmProfile.Contains('[agents.custom_task]') -and $customGlmRole.Contains('model = "glm-5.3-flash"') -and $customResolved.routes.custom_task.model -ceq 'glm-5.3-flash') 'Additional slots follow the automatic native GLM route'
+    Assert (-not $customRootConfig.Contains('[agents.custom_task]') -and $customAgentText.Contains('name = "custom_task"') -and $customAgentText.Contains('model = "glm-5.3-flash"') -and $customAgentText.Contains('model_reasoning_effort = "xhigh"') -and $customNativeRole.Contains('model = "gpt-6-luna"') -and $customNativeRole.Contains('model_reasoning_effort = "max"') -and -not $customLunaProfile.Contains('[agents.custom_task]') -and $customLunaProfile.Contains('default_subagent_model = "gpt-6-luna"') -and $customGlmProfile.Contains('default_subagent_model = "glm-5.3-flash"') -and -not $customGlmProfile.Contains('[agents.custom_task]') -and $customGlmRole.Contains('model = "glm-5.3-flash"') -and $customResolved.routes.custom_task.model -ceq 'glm-5.3-flash') 'Additional slots follow the automatic native GLM route'
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -ReceiptPath $customReceipt.receipt | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Destination $fixturePolicyPath -Force
     $descendingPolicy = Get-Content -LiteralPath $fixturePolicyPath -Raw | ConvertFrom-Json -AsHashtable
