@@ -568,10 +568,31 @@ function Get-CodexCatalog([string]$Path) {
         return $snapshot
     }
     # Probe the target root in a child process; never change this session's CODEX_HOME.
-    $command = Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+    # Prefer a native .exe/.cmd shim over the npm .ps1 wrapper: a PowerShell child
+    # re-decodes its grandchild stdout with the console ANSI codepage, and on a GBK
+    # console a served template ellipsis consumes the backslash of an escaped quote,
+    # yielding invalid JSON. Native shims pass node's UTF-8 bytes through unchanged and
+    # capture is byte-level, decoded as UTF-8 explicitly.
+    $candidates = @(Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop -All)
+    $command = $null
+    foreach ($candidate in $candidates) {
+        $ext = [IO.Path]::GetExtension($candidate.Source)
+        if ($ext -ieq '.exe' -or $ext -ieq '.cmd') { $command = $candidate; break }
+    }
+    if (-not $command) {
+        foreach ($candidate in $candidates) {
+            if ([IO.Path]::GetExtension($candidate.Source) -ieq '.ps1') { $command = $candidate; break }
+        }
+    }
+    if (-not $command) { $command = $candidates | Select-Object -First 1 }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $command.Source
-    if ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
+    if ([IO.Path]::GetExtension($command.Source) -ieq '.cmd') {
+        # CreateProcess cannot launch a batch file directly.
+        $info.FileName = (Get-Command cmd.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        foreach ($arg in @('/c', $command.Source)) { $info.ArgumentList.Add($arg) }
+    }
+    elseif ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
         $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         foreach ($arg in @('-NoProfile','-File',$command.Source)) { $info.ArgumentList.Add($arg) }
     }
@@ -587,12 +608,14 @@ function Get-CodexCatalog([string]$Path) {
     try {
         $null = $process.Start()
         $started = $true
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
+        $outMem = [IO.MemoryStream]::new()
+        $errMem = [IO.MemoryStream]::new()
+        $outTask = $process.StandardOutput.BaseStream.CopyToAsync($outMem)
+        $errTask = $process.StandardError.BaseStream.CopyToAsync($errMem)
         if (-not $process.WaitForExit(30000)) { throw 'codex debug models timed out after 30 seconds.' }
-        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr), 2000)) { throw 'codex debug models output read timed out.' }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($outTask,$errTask), 2000)) { throw 'codex debug models output read timed out.' }
         if ($process.ExitCode -ne 0) { throw "codex debug models failed (exit=$($process.ExitCode))." }
-        $output = $stdout.GetAwaiter().GetResult()
+        $output = [Text.Encoding]::UTF8.GetString($outMem.ToArray())
     }
     finally {
         if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
@@ -686,7 +709,7 @@ foreach ($id in $codexIds) {
     $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', $profileAgentSection) -join "`n"
     # Named slots and exact-tuple roles are discovered from CodexRoot/agents.
     # Repeating the registrations in a profile makes Codex ignore duplicates.
-    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") ($header + "`n")
+    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") ($header + "`n" + $codexManagedMarker + "`n")
 }
 foreach ($slot in $slotNames) {
     if ($nativePresetIds.Count -eq 0) { break }
@@ -710,6 +733,19 @@ if ($ExecutionHost -ceq 'codex' -and $managedCodexAgentNames.Count -gt 0) {
             AddFileDelete $stale.FullName
             $sweptAgentNames.Add($staleName)
         }
+    }
+}
+# Retire managed profile configs for presets that no longer belong to the projected
+# pool: a removed preset (e.g. a retired Gemini variant) must not leave its launcher
+# profile behind, or a stale default tuple keeps loading on the host. Unmarked files
+# stay untouched (fail closed).
+if ($ExecutionHost -ceq 'codex' -and $profileNames.Count -gt 0) {
+    foreach ($staleProfile in @(Get-ChildItem -LiteralPath $CodexRoot -Filter '*.config.toml' -File)) {
+        if ($staleProfile.Name -cnotmatch '\.config\.toml$') { continue }
+        $staleProfileId = $staleProfile.Name.Substring(0, $staleProfile.Name.Length - '.config.toml'.Length)
+        if ($staleProfileId -cin @($profileNames.Values)) { continue }
+        if (([IO.File]::ReadAllText($staleProfile.FullName)) -cnotmatch [regex]::Escape($codexManagedMarker)) { continue }
+        AddFileDelete $staleProfile.FullName
     }
 }
 $configPath = Join-Path $CodexRoot 'config.toml'

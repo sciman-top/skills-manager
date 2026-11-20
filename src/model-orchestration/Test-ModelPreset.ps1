@@ -423,6 +423,32 @@ try {
     catch { $collisionRejected = $_.Exception.Message -like '*Refusing to overwrite user-owned Codex agent*' }
     Assert ($collisionRejected -and (Get-FileHash -LiteralPath $collisionPath).Hash -ceq $collisionHash) 'Codex projection refuses an unowned agent collision'
     Remove-Item -LiteralPath $collisionPath -Force
+    # Live catalog probe: a native .cmd sibling must be preferred over the npm .ps1
+    # wrapper, and byte-level UTF-8 capture must keep an escaped quote next to a served
+    # ellipsis intact on a GBK console. The fake .ps1 shim would poison the parse if it
+    # were selected, and any text-level re-decode would break the catalog JSON.
+    $probeDir = Join-Path $fixture 'probe-shim'
+    [IO.Directory]::CreateDirectory($probeDir) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $probeDir 'codex.ps1'), "Write-Output 'NOT JSON FROM PS1 SHIM'`nexit 0`n")
+    $fakeCatalog = @{
+        models = @(
+            @{ slug = 'gpt-6-luna'; description = '(e.g. "Yes…"), proposing plans'; supported_reasoning_levels = @(@{ effort = 'max' }) },
+            @{ slug = 'deepseek-v4.1-flash'; supported_reasoning_levels = @(@{ effort = 'max' }) },
+            @{ slug = 'glm-5.3-flash'; supported_reasoning_levels = @(@{ effort = 'xhigh' }) },
+            @{ slug = 'gemini-3.8-flash-high'; supported_reasoning_levels = @(@{ effort = 'high' }) }
+        )
+    }
+    $fakeCatalogPath = Join-Path $probeDir 'fake-catalog.json'
+    [IO.File]::WriteAllText($fakeCatalogPath, ($fakeCatalog | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $probeDir 'codex.cmd'), "@echo off`r`nnode -e `"process.stdout.write(require('fs').readFileSync(process.argv[1]))`" `"%~dp0fake-catalog.json`"`r`n")
+    $savedProbePath = $env:PATH
+    try {
+        $env:PATH = "$probeDir;$savedProbePath"
+        $probePlan = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Plan -CodexRoot $target | ConvertFrom-Json
+        Assert ($probePlan.capability.status -ceq 'catalog_supported') 'Live catalog probe prefers the native shim and decodes bytes as UTF-8'
+        Assert (@($probePlan.capability.tuples | Where-Object { $_.model -ceq 'gemini-3.8-flash-high' -and $_.effort -ceq 'high' }).Count -eq 1) 'Live probe parses the escaped-ellipsis catalog without corruption'
+    }
+    finally { $env:PATH = $savedProbePath }
     $before = (Get-FileHash -LiteralPath $cfg).Hash
     $receipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     Assert ($receipt.capability.status -ceq 'catalog_supported' -and $receipt.capability.tuple_check -ceq 'codex_model_catalog' -and $receipt.capability.live_dispatch_compatibility -ceq 'not_evaluated' -and @($receipt.capability.tuples).Count -eq 4) 'Apply records all four catalog-verified tuples without claiming live dispatch compatibility'
@@ -440,6 +466,7 @@ try {
     Assert ($deepseekProfileText.Contains('default_subagent_model = "deepseek-v4.1-flash"') -and $deepseekProfileText.Contains('default_subagent_reasoning_effort = "max"')) 'DeepSeek profile pins the approved native default tuple'
     $lunaProfileText = Get-Content -LiteralPath (Join-Path $target 'gpt6-luna-only.config.toml') -Raw
     Assert ($lunaProfileText.Contains('default_subagent_model = "gpt-6-luna"') -and $lunaProfileText.Contains('default_subagent_reasoning_effort = "max"') -and -not $lunaProfileText.Contains('enabled = false')) 'Luna profile pins its allowed native default tuple'
+    Assert ($lunaProfileText.Contains('# managed-by: skills-manager/model-orchestration')) 'Profile configs carry the managed marker'
     Assert (-not $projectedConfig.Contains('[agents.')) 'Shared Codex config carries no managed role tables'
     Assert ($projectedConfig.Contains('# managed-agents-directory: agents') -and $projectedConfig.Contains('# managed-agent-names: ')) 'Shared Codex config records the managed agents manifest'
     foreach ($slot in $slots) {
@@ -457,12 +484,21 @@ try {
     & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Rollback -CodexRoot $target -ReceiptPath $receipt.receipt | Out-Null
     Assert ((Get-FileHash -LiteralPath $cfg).Hash -ceq $before) 'Rollback must restore exact bytes including BOM'
     Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq 0) 'Rollback removes only managed Codex agent files'
+    $staleProfilePath = Join-Path $target 'deepseek41-flash-only.config.toml'
+    [IO.File]::WriteAllText($staleProfilePath, "model = `"deepseek-v4.1-flash`"`nmodel_reasoning_effort = `"max`"`n`n# managed-by: skills-manager/model-orchestration`n")
+    $legacyProfilePath = Join-Path $target 'deepseek-flash-only.config.toml'
+    [IO.File]::WriteAllText($legacyProfilePath, "model = `"legacy`"`n")
     $nonLunaReceipt = & (Join-Path $fixture 'Set-ModelPreset.ps1') -Action Apply -AvailablePreset @('glm53_flash_only','gemini38_flash_only') -CodexRoot $target -CapabilityProbePath $projectionCapabilityPath | ConvertFrom-Json
     $nonLunaConfig = Get-Content -LiteralPath $cfg -Raw
     Assert ($nonLunaConfig.Contains('default_subagent_model = "glm-5.3-flash"') -and $nonLunaConfig.Contains('default_subagent_reasoning_effort = "xhigh"') -and $nonLunaConfig.Contains('max_concurrent_threads_per_session = 2')) 'A GLM/Gemini pool keeps native delegation enabled with its selected tuple'
     Assert (-not $nonLunaConfig.Contains('[agents.')) 'Pool with GLM/Gemini keeps managed role tables out of shared config'
     $expectedNonLunaAgentNames = @($slots + @('glm_xhigh','gemini_high'))
     Assert (@(Get-ChildItem -LiteralPath $codexAgents -Filter '*.toml' -File | Where-Object Name -ne 'user-owned.toml').Count -eq $expectedNonLunaAgentNames.Count) 'Pool with GLM/Gemini projects task slots and exact tuple roles'
+    Assert (-not (Test-Path -LiteralPath $staleProfilePath)) 'Managed profile config of a preset outside the pool is swept'
+    Assert (Test-Path -LiteralPath $legacyProfilePath) 'Unmarked legacy profile config is never touched'
+    foreach ($keptProfile in @('glm53-flash-only.config.toml','gemini38-flash-only.config.toml')) {
+        Assert ((Test-Path -LiteralPath (Join-Path $target $keptProfile)) -and ((Get-Content -LiteralPath (Join-Path $target $keptProfile) -Raw).Contains('# managed-by: skills-manager/model-orchestration'))) "Projected profile config keeps the managed marker: $keptProfile"
+    }
     $staleMarker = '# managed-by: skills-manager/model-orchestration'
     $staleManagedPath = Join-Path $codexAgents 'haiku_medium.toml'
     [IO.File]::WriteAllText($staleManagedPath, "name = `"haiku_medium`"`nmodel = `"claude-haiku-5-5`"`nmodel_reasoning_effort = `"medium`"`n`n$staleMarker`n")
