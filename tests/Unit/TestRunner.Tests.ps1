@@ -1,6 +1,7 @@
 BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     $runnerPath = Join-Path $repoRoot 'tests\run.ps1'
+    $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
 
     function New-RunnerFixture([string]$Name, [string]$TestBody) {
         $root = Join-Path $TestDrive $Name
@@ -38,6 +39,17 @@ Describe 'Shard fixture $index' {
 
 }
 Describe 'Repository test runner output contract' {
+    It 'preserves a test discovery error instead of reporting an opaque Pester failure' {
+        $missing = Join-Path ([IO.Path]::GetTempPath()) ('missing-test-path-' + [guid]::NewGuid().ToString('N'))
+        $text = & $pwshPath -NoProfile -File $runnerPath -TestPath $missing -InProcess 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Not -Be 0
+        $text | Should -Match 'Test discovery failed:'
+        $text | Should -Match ([regex]::Escape($missing))
+        $text | Should -Match 'Cannot find'
+        $text | Should -Not -Match 'Pester failures:'
+    }
+
     It 'rejects a name filter that executes no tests' {
         $fixture = New-RunnerFixture 'no-match' @'
 Describe 'Filter fixture' {
@@ -46,7 +58,7 @@ Describe 'Filter fixture' {
 '@
         $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' *>&1)
         $LASTEXITCODE | Should -Not -Be 0
-        ($output -join "`n") | Should -Match 'No tests executed'
+        ($output -join "`n") | Should -Match 'No tests selected'
     }
 
     It 'prints a start line and one stable summary line for a passing run' {
@@ -136,6 +148,93 @@ Describe 'Broken fixture' {
         foreach ($receiptPath in $receipts) {
             (Get-Content -LiteralPath $receiptPath.FullName -Raw | ConvertFrom-Json).status | Should -Be 'passed'
         }
+    }
+
+    It 'keeps an explicit companion path in the same targeted batch' {
+        $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('dsh-split-path-' + [guid]::NewGuid().ToString('N'))
+        $reportRoot = Join-Path ([IO.Path]::GetTempPath()) ('dsh-split-reports-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $fixtureRoot, $reportRoot -Force | Out-Null
+        $first = Join-Path $fixtureRoot 'First.Tests.ps1'
+        $second = Join-Path $fixtureRoot 'Second.Tests.ps1'
+        foreach ($path in @($first, $second)) {
+            Set-Content -LiteralPath $path -Encoding utf8 -Value "Describe 'Selected test' { It 'passes' { `$true | Should -BeTrue } }"
+        }
+        try {
+            # Avoid binding this assertion to Pester's nested function scope
+            # or its $LASTEXITCODE handling.
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $pwshPath
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in @('-NoProfile', '-File', $runnerPath, '-TestPath', $first, '-SplitTestPath', $second, '-InProcess', '-ShardReportRoot', $reportRoot)) {
+                $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [Diagnostics.Process]::Start($startInfo)
+            try {
+                $stdout = $process.StandardOutput.ReadToEndAsync()
+                $stderr = $process.StandardError.ReadToEndAsync()
+                $process.WaitForExit()
+                $exitCode = $process.ExitCode
+                $text = @($stdout.Result, $stderr.Result) -join "`n"
+            }
+            finally { $process.Dispose() }
+            $exitCode | Should -Be 0
+            @($text.Trim() -split "`r?`n").Count | Should -Be 2
+            $text | Should -Match 'Tests: total=2 passed=2 failed=0 skipped=0'
+        }
+        finally {
+            if (Test-Path -LiteralPath $fixtureRoot) {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+            }
+            if (Test-Path -LiteralPath $reportRoot) {
+                Remove-Item -LiteralPath $reportRoot -Recurse -Force
+            }
+        }
+    }
+
+    It 'reports the selected-worker context when a sharded run discovers zero tests' {
+        $fixture = New-RunnerFixture 'shard-empty' @'
+Describe 'Empty shard fixture' {
+    It 'passes' {
+        $true | Should -BeTrue
+    }
+}
+'@
+        $reportRoot = Join-Path $TestDrive 'empty-shard-reports'
+        $output = @(& $pwshPath -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' -ShardReportRoot $reportRoot *>&1)
+        $text = $output -join "`n"
+
+        $LASTEXITCODE | Should -Not -Be 0
+        $text | Should -Match 'No tests selected'
+        $text | Should -Match 'starting_paths=.*Fixture'
+        $text | Should -Match 'worker_paths='
+        $text | Should -Match 'collected_files=.*Fixture'
+        $text | Should -Not -Match 'collected_paths'
+    }
+
+    It 'does not report an empty selection as a successful in-process run' {
+        $root = Join-Path $TestDrive 'explicit-files'
+        $first = Join-Path $root 'First-special-selected.Tests.ps1'
+        $second = Join-Path $root 'Second-special-selected.Tests.ps1'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        foreach ($path in @($first, $second)) {
+            Set-Content -LiteralPath $path -Encoding utf8 -Value "Describe 'Required selected test' { It 'passes' { `$true | Should -BeTrue } }"
+        }
+
+        $reportRoot = Join-Path $TestDrive 'targeted-empty'
+        $script:explicitArguments = @('-NoProfile', '-File', $runnerPath, '-TestPath', $first, $second, '-TestName', '*no matching test', '-InProcess', '-ShardReportRoot', $reportRoot)
+        $output = @(& pwsh @explicitArguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $text = $output -join "`n"
+
+        $exitCode | Should -Not -Be 0
+        $reports = @(Get-ChildItem -LiteralPath $reportRoot -Recurse -Filter 'targeted.receipt.json' -File | ForEach-Object FullName)
+        @($reports).Count | Should -Be 1
+        $receipt = Get-Content -LiteralPath $reports[0] -Raw | ConvertFrom-Json
+        $receipt.passed_count | Should -Be 0
+        $receipt.failed_count | Should -Be 0
+        $text | Should -Match 'No tests executed successfully'
     }
 
     It 'aggregates a failed shard and preserves its failure diagnostic' {

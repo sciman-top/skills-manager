@@ -1,9 +1,20 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([string]$SourcePath = (Join-Path $PSScriptRoot 'Labels.ps1'))
+param(
+    [string]$SourcePath = (Join-Path $PSScriptRoot 'Labels.ps1'),
+    [string]$ProbeDirectory
+)
 
 $ErrorActionPreference = 'Stop'
 . $SourcePath
+$createdProbeDirectory = [string]::IsNullOrWhiteSpace($ProbeDirectory)
+if ($createdProbeDirectory) {
+    $ProbeDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ai-coding-probe-' + [guid]::NewGuid().ToString('N'))
+}
+$sharedProbeDirectory = -not $createdProbeDirectory -and (Test-Path -LiteralPath $ProbeDirectory -PathType Container)
+$probePath = Join-Path $ProbeDirectory 'labels.txt'
+$generatedOk = 0
+$cleanupOk = 0
 $cases = @(
     @{ Name = 'empty'; Input = @(); Expected = @() }
     @{ Name = 'null'; Input = $null; Expected = @() }
@@ -40,5 +51,30 @@ try {
     }
 }
 finally { [Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture }
+try {
+    if (-not $sharedProbeDirectory) {
+        $null = New-Item -ItemType Directory -Path $ProbeDirectory -Force
+    }
+    New-LabelFile -Path $probePath -Labels @('One', 'two')
+    $generatedLines = @(Get-Content -LiteralPath $probePath)
+    if ($generatedLines.Count -ne 2) { throw "Expected 2 generated lines, got $($generatedLines.Count)." }
+    $generatedOk = 1
+    Remove-LabelFile -Path $probePath
+    if (Test-Path -LiteralPath $probePath) { throw 'Generated file was not removed.' }
+    $cleanupOk = 1
+}
+catch {
+    $failed++
+    Write-Output "FAIL generated behavior: $($_.Exception.Message)"
+}
+finally {
+    if (Test-Path -LiteralPath $probePath) {
+        try { Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop } catch { $generatedOk = 0 }
+    }
+    if ($createdProbeDirectory -and (Test-Path -LiteralPath $ProbeDirectory)) {
+        try { Remove-Item -LiteralPath $ProbeDirectory -Force -ErrorAction Stop } catch { $cleanupOk = 0 }
+    }
+}
+Write-Output "generated_ok=$generatedOk cleanup_ok=$cleanupOk shared_dir=$([int]$sharedProbeDirectory)"
 Write-Output "cases=$($cases.Count) failed=$failed"
 if ($failed -gt 0) { exit 1 }
