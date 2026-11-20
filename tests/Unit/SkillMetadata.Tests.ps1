@@ -132,4 +132,34 @@ future-field: value
         @($metadata.findings | Where-Object code -eq 'field_host_extension').Count | Should -Be 2
         @($metadata.findings | Where-Object code -eq 'field_unknown').Count | Should -Be 1
     }
+
+    It 'recognizes current Claude Code host frontmatter extensions and reports unknown underscore keys' {
+        $path = Join-Path $TestDrive 'claude-extensions.md'
+        @'
+---
+name: claude-extensions
+description: fixture
+when_to_use: When testing host frontmatter
+arguments: target
+disallowed-tools: Bash
+effort: medium
+background: false
+paths: src/**/*.ps1
+shell: powershell
+custom_unknown: value
+---
+'@ | Set-Content -LiteralPath $path
+
+        $owned = Read-SkillMetadata $path
+        $owned.valid | Should -BeFalse
+        @($owned.field_classes.host_extension) | Should -Contain 'when_to_use'
+        @($owned.field_classes.host_extension) | Should -Contain 'effort'
+        @($owned.field_classes.host_extension) | Should -Contain 'paths'
+        @($owned.field_classes.host_extension) | Should -Contain 'shell'
+        @($owned.field_classes.host_extension) | Should -Contain 'disallowed-tools'
+        @($owned.field_classes.host_extension) | Should -Contain 'arguments'
+        @($owned.field_classes.host_extension) | Should -Contain 'background'
+        @($owned.findings | Where-Object { $_.code -eq 'field_host_extension' }).Count | Should -Be 7
+        @($owned.findings | Where-Object { $_.code -eq 'field_unknown' -and $_.field -eq 'custom_unknown' -and $_.severity -eq 'error' }).Count | Should -Be 1
+    }
 }

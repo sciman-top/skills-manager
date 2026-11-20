@@ -1,4 +1,7 @@
 #requires -Version 7.0
+param(
+    [string]$RepoRoot = ''
+)
 # Codex Stop 守卫：把"验证证据"和"生成物漂移"变成确定性裁决。
 #
 # 依据 learn.chatgpt.com/docs/hooks（2026-11-06 读取）：Stop 的决策不拒绝本轮，
@@ -14,7 +17,12 @@
 # 合并裁决仍是 CI。
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
+$root = if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
+}
+else {
+    (Resolve-Path -LiteralPath $RepoRoot).ProviderPath
+}
 function Read-GuardStdinText {
     # 有界读取：宿主若不关闭 stdin，同步 ReadToEnd 会无限等待。Stop 守卫放行的
     # 后果只是本轮不裁决，因此超时即 fail-open，绝不挂住回合。实测未关闭
@@ -45,7 +53,9 @@ function Read-GuardStdinText {
     }
 }
 $raw = Read-GuardStdinText
+if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
 try { $event = $raw | ConvertFrom-Json -ErrorAction Stop } catch { exit 0 }
+if ($null -eq $event) { exit 0 }
 
 # A turn already continued by this hook must be allowed to finish.
 if ($event.stop_hook_active -eq $true) { exit 0 }
@@ -76,7 +86,11 @@ try {
 
     $message = [string]$event.last_assistant_message
     if ([string]::IsNullOrWhiteSpace($message)) { exit 0 }
-    $hasEvidence = ($message -match '(?m)^\s*```') -or ($message -match '(?i)\b(?:verification|verif(?:y|ied|ication)|验证|证据)\b')
+    # .NET 正则里 `\w` 包含中文汉字，`\b验证\b` 在“已完成验证并确认通过”等常见中文句中
+    # 会误判为未命中；仅对英文词使用 `\b`，中文关键字按子串匹配。
+    $hasEvidence = ($message -match '(?m)^\s*```') -or
+        ($message -match '(?i)\bverif(?:y|ied|ication)\b') -or
+        ($message -match '(?:验证|证据)')
     if ($hasEvidence) { exit 0 }
 
     Write-GuardReason 'Stop guard: 本轮改动了工作区，但最后一条回复没有给出命令/退出码或验证段落。请补上实际运行的检查与结果（未验证项也要明说），再结束本轮。'

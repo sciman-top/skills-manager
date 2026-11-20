@@ -1,7 +1,7 @@
 # AI 编码工作流与约束（参考件）
 
 **定位**：本文件是参考件，不是规则、不是门禁，不进入任何宿主上下文。高频稳定闭环已提炼到默认投影的 `overrides/custom/ai-coding-workflow/SKILL.md`。本文合并原《AI 编码效能手册》与《通用指南》，取代二者。
-**核实日期**：2026-11-18。外部依据见第 7 节。
+**核实日期**：2026-11-21。外部依据见第 7 节。
 
 ## 1. 顶层宗旨
 
@@ -24,7 +24,7 @@ Anthropic 的原则是"找到最简单的方案，只在必要时增加复杂度
 2. **写契约**：目标、上下文、约束、写集、最低证明、完成条件和停止条件。需求未定型时，让 AI 一次一问收敛成可审查 spec，再在干净上下文实现。
 3. **小切片实现**：循环内跑相关测试；给 AI 一个它能自己运行的检查。
 4. **按风险选最低充分证明**：文档运行 `git diff --check`，并按项目契约运行适用 verifier；行为变更跑 focused 测试；运行时、安全、数据、迁移类改动才跑一次 full。
-5. **按风险审查**：风险、不确定性或项目契约需要时，用 fresh 上下文独立审查；只报影响正确性或已声明需求的问题，允许零发现。
+5. **按风险审查**：风险、不确定性或项目契约需要时，用 fresh 上下文独立审查；报告候选发现前先对照调用方、守卫与既有测试核实，将基线既有缺陷与本次 diff 新回归分开标注，只报影响正确性或已声明需求的问题，允许零发现。
 6. **提交小 PR**：写清改动、证明与删除量，按当前项目的审阅和合入授权收口。
 7. **复盘**：同一错误第二次出现，才把它转成 hook、权限或测试；否则不加规则。
 
@@ -47,7 +47,7 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 | 目标或范围漂移 | 修 bug 顺手大重构；只做出演示路径；测试通过但不是用户要的结果 | 先冻结 Goal / Done when / Stop；优先一个窄垂直切片；按真实用户操作验收 |
 | 仓库事实误读 | 看错分支、漏掉调用方、直接修改生成物、猜错包管理器或版本 | 开工先看 `git status`、规则、锁文件、入口和生成链；沿调用方检索；先跑现有检查 |
 | 虚构 API 或依赖 | 方法、配置键、框架行为、包版本来自记忆；为小改动引入新库 | 以源码、类型、本地 help 和当前官方文档为准；新依赖必须有当前需求并核对来源 |
-| 测试假阳性 | 只断言 mock 调用、复制实现逻辑、只测演示样例、为通过而放宽断言 | 从需求和边界条件推导断言；重要回归确认旧实现会失败；覆盖错误路径和真实契约 |
+| 测试假阳性 | 只断言 mock 调用、复制实现逻辑、只测演示样例、写只盯常量/文案的变更检测器、为通过而放宽断言 | 从需求和边界条件推导断言；说明每条测试捕获的具体故障；重要回归确认旧实现会失败；覆盖错误路径和真实契约 |
 | 全栈接缝断裂 | 前端字段与 API 不一致；共享 schema 改了旧消费者坏掉；迁移无法回滚 | 同时追踪生产者与所有已知消费者；做契约兼容检查；迁移保留回退与数据不变量 |
 | 安全与隐私失守 | 只在客户端做授权、越权访问、秘密进日志、未审查依赖或外部指令 | 在 trust/data 边界校验；服务端执行授权；分享前脱敏；检查依赖来源和新增能力 |
 | 过度工程与注意力挤占 | 为假想需求加抽象、门禁和文档；规则越来越长；每次任务加载无关信息 | 用“当前调用方 / 替换了什么 / 最小证明”准入；同一错误第二次才升级为自动防线 |
@@ -102,4 +102,5 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 - GitHub Spec Kit：把 spec 贯穿 plan、tasks、implement 与 converge；bug 修复走 assess、fix、test，并通过独立验证结论区分 `verified`、`partial`、`failed`。 <https://github.com/github/spec-kit>
 - AGENTS.md：作为跨宿主的“给 AI 的 README”，稳定记录构建、测试、风格、安全与 PR 约定；大型单体仓可在子项目放就近文件。 <https://agents.md/>
 - Codex hooks：可通过 `permissionDecision: deny` 或退出码 2 阻断，项目 hook 需受信任后才加载；官方称其为"护栏而非完整强制边界"。 <https://learn.chatgpt.com/docs/hooks>
-- Agent Skills 规范与作者实践：`name` 与 `description` 必填，元数据常驻、正文按需加载；只补充模型原本不知道的领域/项目事实，按脆弱度校准控制粒度，给默认方案而非并列菜单。 <https://agentskills.io/specification> · <https://agentskills.io/skill-creation/best-practices>
+- Agent Skills 规范与作者实践：`name` 与 `description` 必填，元数据常驻、正文按需加载；description 将核心意图与触发边界前置，并用正反用例评测触发精度；只补充模型原本不知道的领域/项目事实，按脆弱度校准控制粒度，给默认方案而非并列菜单。 <https://agentskills.io/specification> · <https://agentskills.io/skill-creation/best-practices> · <https://agentskills.io/skill-creation/optimizing-descriptions>
+- Claude Code skills frontmatter 与列表预算：标准六字段之外提供 `when_to_use`、`arguments`、`disallowed-tools`、`effort`、`background`、`paths`、`shell` 等宿主扩展；技能列表按上下文比例裁剪，且单条 `description` + `when_to_use` 上限 1,536 字符，核心场景须前置。 <https://code.claude.com/docs/en/skills>

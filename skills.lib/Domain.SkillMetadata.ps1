@@ -48,7 +48,7 @@ function Read-SkillMetadata {
     $findings = [Collections.Generic.List[object]]::new()
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $line = [string]$lines[$index]
-        if ($line -notmatch '^(?<key>[A-Za-z][A-Za-z0-9-]*):(?:[ \t]*(?<value>.*))?$') { continue }
+        if ($line -notmatch '^(?<key>[A-Za-z][A-Za-z0-9_-]*):(?:[ \t]*(?<value>.*))?$') { continue }
         $key = [string]$Matches.key
         $raw = [string]$Matches.value
         if ($fields.Contains($key)) {
@@ -143,7 +143,7 @@ function Read-SkillMetadata {
     }
 
     $standardFields = @('name','description','license','allowed-tools','metadata','compatibility')
-    $hostExtensionFields = @('agent','argument-hint','context','disable-model-invocation','hidden','hooks','model','user-invocable')
+    $hostExtensionFields = @('agent','argument-hint','arguments','background','context','disable-model-invocation','disallowed-tools','effort','hidden','hooks','model','paths','shell','user-invocable','when_to_use')
     $vendorExtensionFields = @('version')
     $fieldClasses = [ordered]@{ standard = @(); host_extension = @(); vendor_extension = @(); unknown = @() }
     foreach ($key in $fields.Keys) {

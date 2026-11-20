@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sandbox Slow-Test Diagnosis"
+  short_description: "Diagnose and reduce sandbox test teardown and spawn stalls"
+  default_prompt: "Use $sandbox-slow-test-diagnosis to confirm sandbox shim fingerprints, measure per-directory teardown and process spawn costs, and apply safe fixture optimizations."
+policy:
+  allow_implicit_invocation: true

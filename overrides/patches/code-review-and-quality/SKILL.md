@@ -1,6 +1,6 @@
 ---
 name: code-review-and-quality
-description: Review existing code for correctness, maintainability, security, performance, and missing tests. Use for code-review or quality-audit requests; do not modify code unless the user also asks for fixes.
+description: Review code, diffs, or pull requests for correctness, regressions, security, maintainability, performance, and missing tests — even when a diff is pasted inline or looks quick to eyeball. Report severity-labeled findings and a clear verdict; do not modify code unless the user also asks for fixes.
 ---
 
 # Code review and quality
@@ -10,11 +10,11 @@ Review the smallest relevant change set and report evidence-backed findings befo
 ## Workflow
 
 1. Establish the intended behavior, changed files, compatibility boundary, and available verification evidence.
-2. Trace affected control flow and data flow. Prioritize defects that can change behavior, lose data, weaken authorization, leak secrets, or break compatibility.
+2. Trace affected control flow, data flow, callers, and guards. Prioritize defects that can change behavior, lose data, weaken authorization, leak secrets, or break compatibility.
 3. Check error handling, lifecycle/resource cleanup, concurrency, input validation, and boundary conditions only where the changed path makes them relevant.
-4. Check tests for the highest-risk behavior and failure modes. Do not request duplicate test layers when one sufficient layer proves the risk.
-5. Report findings by severity with a tight file/line location, concrete failure scenario, and the smallest defensible correction.
-6. If no actionable finding remains, say so and list material residual risks or verification gaps.
+4. Check tests for the highest-risk behavior and failure modes: confirm they would fail if a changed branch or condition were inverted, rather than mirroring mocks or brittle constants. Do not request duplicate test layers when one sufficient layer proves the risk.
+5. Before reporting a candidate finding, verify it against reaching callers, guards, and existing tests — drop it if they rule it out. Separate pre-existing base defects from regressions introduced by the change, and report findings by severity with a tight file/line location, concrete failure scenario, and minimal fix direction.
+6. Zero actionable findings is a valid result — do not invent one; state the verdict clearly and list material residual risks or verification gaps.
 
 ## Boundaries
 

@@ -10,6 +10,8 @@ Describe 'Checked-in skill content' {
         foreach ($file in $files) {
             $metadata = Read-SkillMetadata $file.FullName
             $metadata.valid | Should -BeTrue -Because ($file.FullName + ': ' + ($metadata.findings.code -join ', '))
+            Test-Path -LiteralPath (Join-Path $file.DirectoryName 'agents\openai.yaml') -PathType Leaf |
+                Should -BeTrue -Because ($file.DirectoryName + ' must keep agents/openai.yaml aligned')
         }
     }
 
@@ -37,12 +39,28 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?is)never reconstruct APIs.*from memory'
         $skill | Should -Match '(?is)vertical slice.*UI/API/service/data'
         $skill | Should -Match '(?is)Tests must not only mirror mocks'
+        $skill | Should -Match '(?is)change-detector'
         $skill | Should -Match '(?is)API, schema, or data changes.*every known consumer.*migration rollback'
         $skill | Should -Match '(?is)pre-existing baseline or sandbox/environment failures'
         $skill | Should -Match '(?is)On auth, quota, rate-limit or provider errors, stop and preserve the raw\s+error'
         $skill | Should -Match '(?is)Stop background servers/watchers.*remove temporary verification\s+files'
         $skill | Should -Match '(?is)Redact secrets from logs.*screenshots.*receipts'
+        $skill | Should -Match '(?is)Verify candidate findings against callers, guards and tests'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
+    }
+
+    It 'keeps patched core review and verification skills grounded in callers, baseline separation, and pipeline-safe evidence' {
+        $review = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/code-review-and-quality/SKILL.md') -Raw
+        $review | Should -Match '(?i)inline'
+        $review | Should -Match '(?is)verify it against reaching callers, guards, and existing tests'
+        $review | Should -Match '(?is)Separate pre-existing base defects from regressions'
+
+        $debug = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/systematic-debugging/SKILL.md') -Raw
+        $debug | Should -Match '(?is)isolate pre-existing baseline or\s+sandbox/environment failures'
+        $debug | Should -Match '(?is)auth, quota, rate-limit, or\s+provider errors, stop and preserve the raw error'
+
+        $verify = Get-Content -LiteralPath (Join-Path $repoRoot 'overrides/patches/verification-before-completion/SKILL.md') -Raw
+        $verify | Should -Match '(?is)verify actual VCS diffs and command output'
     }
 
     It 'keeps checked-in skill instructions free of retired test files and local-only scratch paths' {

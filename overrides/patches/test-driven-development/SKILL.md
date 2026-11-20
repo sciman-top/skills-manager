@@ -8,7 +8,9 @@ description: Use only when the user explicitly requests strict TDD or Red-Green-
 Apply a test-first loop only to the behavior seam named by the request or task
 contract:
 
-1. Write the smallest test that would fail for the missing behavior.
+1. Write the smallest test that would fail for the missing behavior. Name the
+   concrete break it catches against real behavior; avoid brittle
+   change-detector assertions on constants, private structure, or exact copy.
 2. Run that focused test and confirm the expected failure.
 3. Implement the minimum change that makes it pass.
 4. Re-run the focused test, then refactor only if the passing behavior is

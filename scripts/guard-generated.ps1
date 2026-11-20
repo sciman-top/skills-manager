@@ -56,7 +56,9 @@ function Read-GuardStdinText {
     }
 }
 $raw = Read-GuardStdinText
+if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
 try { $event = $raw | ConvertFrom-Json -ErrorAction Stop } catch { exit 0 }
+if ($null -eq $event) { exit 0 }
 
 $guardedFiles = @('skills.ps1')
 $guardedDirs = @(
@@ -125,11 +127,16 @@ if ([string]::IsNullOrWhiteSpace($patch)) {
     if ($candidateCommand -match '(?im)^\s*\*\*\* Begin Patch') { $patch = $candidateCommand }
 }
 if (-not [string]::IsNullOrWhiteSpace($patch)) {
-    $targets = @([regex]::Matches($patch, '(?im)^\*\*\* (?:Add|Update|Delete) File:\s*(?<p>\S+)\s*$') | ForEach-Object { $_.Groups['p'].Value })
-    if (@($targets).Count -eq 0) { exit 0 }
-    $guardedTargets = @($targets | Where-Object { Get-GuardedRel $_ })
-    if (@($guardedTargets).Count -eq 0) { exit 0 }
-    $normalizedTargets = @($targets | ForEach-Object { $_.Replace('\', '/') })
+    $ops = @([regex]::Matches($patch, '(?im)^\*\*\* (?<op>Add File|Update File|Delete File|Move to):\s*(?<p>.+?)\s*$') | ForEach-Object {
+            [pscustomobject]@{
+                op   = $_.Groups['op'].Value.Trim()
+                path = $_.Groups['p'].Value.Trim()
+            }
+        })
+    if (@($ops).Count -eq 0) { exit 0 }
+    $guardedOps = @($ops | Where-Object { Get-GuardedRel $_.path })
+    if (@($guardedOps).Count -eq 0) { exit 0 }
+    $normalizedTargets = @($ops | ForEach-Object { $_.path.Replace('\', '/') })
     $hasBundleSource = [bool](@($normalizedTargets | Where-Object {
                 $candidate = $_
                 [bool](@($bundleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
@@ -138,10 +145,10 @@ if (-not [string]::IsNullOrWhiteSpace($patch)) {
                 $candidate = $_
                 [bool](@($ruleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
             }).Count -gt 0)
-    foreach ($target in $guardedTargets) {
-        # 删除生成文件不需要同批源改动；新增/修改必须带上源，否则就是一键手工改生成物。
-        if ($patch -match ('(?im)^\*\*\* Delete File:\s*' + [regex]::Escape($target) + '\s*$')) { continue }
-        $guardedRel = Get-GuardedRel $target
+    foreach ($op in $guardedOps) {
+        # 删除生成文件不需要同批源改动；新增/修改/移入必须带上对应源，否则就是手工改生成物。
+        if ($op.op -ieq 'Delete File') { continue }
+        $guardedRel = Get-GuardedRel $op.path
         if (($guardedRel -eq 'skills.ps1' -or $guardedRel.StartsWith('skills.lib/', [StringComparison]::OrdinalIgnoreCase)) -and $hasBundleSource) { continue }
         if ($guardedRel.StartsWith('rules/global/', [StringComparison]::OrdinalIgnoreCase) -and $hasRuleSource) { continue }
         Block $guardedRel 'apply_patch'

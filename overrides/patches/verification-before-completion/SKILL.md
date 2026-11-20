@@ -15,9 +15,14 @@ Evidence must match the claim. Before reporting completion:
    the structured summary line (e.g. `Tests: ... failed=N`); a shell
    pipeline tail is not evidence — after `| tail`, `$?` reports the tail
    and reads false-zero past a real failure. Capture codes pipeline-safe:
-   `pwsh -File <runner>; echo "exit=$LASTEXITCODE"`.
+   `pwsh -File <runner>; echo "exit=$LASTEXITCODE"` (or `set -o pipefail` in
+   bash), and do not trust `$LASTEXITCODE` after an in-process PowerShell
+   `& script.ps1` call that invokes no native executable — inspect returned
+   results or thrown errors directly.
 4. Report the proven boundary. Distinguish repository verification, host load,
-   real invocation, external effect, and live acceptance.
+   real invocation, external effect, and live acceptance. For delegated or
+   subagent work, verify actual VCS diffs and command output rather than
+   prose summaries.
 
 This skill does not itself authorize a full suite, CI run, repeated audit,
 new evidence file, wider write set, network probe, deployment, or host
