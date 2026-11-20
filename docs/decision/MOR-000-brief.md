@@ -5,6 +5,12 @@
 **回滚**：文档决定通过 Git 回退；已投影的 preset 配置使用 `src/model-orchestration/Set-ModelPreset.ps1 -Action Rollback -ReceiptPath <receipt>`，删除文档不会回滚宿主状态。
 **Truth boundary**：human design decision（decided_deferred）；不证明任何 host/模型事实
 
+## 2026-11-21 Gemini 腿回退与投影机制加固（池回到 2026-11-05 形态）
+
+操作者裁决撤销 2026-11-20 晚的未提交换模（`gemini-4-hydrogen-xhigh`/medium），Gemini 腿恢复为 `gemini-3.8-flash-high`/high；四元组池与 2026-11-05 节完全一致（luna/max、deepseek/max、glm Codex=xhigh/ZCode=max、gemini38/high）。Hydrogen 从未进入提交历史；当日 live catalog 仍声明 `gemini-3.8-flash-high`（low..xhigh，default effort 已漂为 xhigh，slug 名滞后不影响钉制）。同日 catalog 新事实：gemini-4 家族三变体（hydrogen/argon/neon）均 low..xhigh；全部 GPT 系模型 `multi_agent_version` 标为 v2，而 2026-11-20 实测 V2 委派在该 build 损坏（`no rollout found for thread id`），跨供应商委派兼容性需在启用前复测。
+
+本轮机制修复两条（均由真实故障驱动）：①`codex debug models` 目录探针经 npm `.ps1` shim 的 PowerShell 文本中继时，GBK 控制台解码会把模板内 `…`（U+2026）的 UTF-8 字节并吞 `\"` 的转义反斜杠，产生非法 JSON，使 capability preflight 随内容随机失败；改为优先解析原生 `.exe`/`.cmd` shim（字节透传）并以字节级 UTF-8 解码捕获，`.ps1` 仅作回退。②`Apply` 清扫 agents 目录受管文件但不清扫已移除 preset 的 launcher profile config，改名/移除 preset 会在宿主残留旧默认元组；profile 现写入 managed marker，Apply 末尾对不在当前池且带 marker 的 `<preset>.config.toml` 按同一 fail-closed 规则清扫（未标记的历史 profile 永不触碰）。Test-ModelPreset 516 断言（新增探针 UTF-8 回归、profile marker 与清扫用例）；Codex 面.Apply 后 Plan 幂等 0、四 profile+根 `--strict-config` 全过；ZCode 面幂等 0 零变化。回滚沿 receipt 机制不变。
+
 ## 2026-11-05 池修订：DeepSeek/max（通道目录漂移对齐）
 
 操作者钉定四元组池为 gpt-6-luna/max、deepseek-v4.1-flash/max、glm-5.3-flash（Codex=xhigh、ZCode=max 分面不变）与 gemini-3.8-flash-high/high。同日通道目录一手实测（`codex debug models`）证明 deepseek-v4.1-flash 声明 low/high/max 且 **xhigh 已被目录移除**——2026-10-13 起钉定的 deepseek/xhigh 属潜伏失效元组（launcher 预检与 Apply 目录预检都会 tuple_unsupported），本次修订同时消除该漂移。GLM 的 max 仍不在目录声明内，Codex 面白名单维持拒绝。deepseek/max 经 `Start-ModelSlot` 严格入口最小请求 1 次 turn.completed 返回 agent_message=OK（read-only ephemeral，input≈17.4k tok，C13）。池沿革：2026-10-20 haiku 退役、2026-10-25 四族恢复（当时 DeepSeek 钉 xhigh），presets.json 为唯一真源。本节取代下文各节的启用池描述，其余原则（一请求/一显式重选/停等、ZCode 手工 glm-max 投影、Antigravity/WorkBuddy 适配器结论）不变。

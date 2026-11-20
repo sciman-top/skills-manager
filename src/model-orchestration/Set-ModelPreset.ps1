@@ -530,7 +530,6 @@ $slotGuidance = @{
     architecture_review = 'Select for read-only architecture, interacting constraints or security boundary review.'
 }
 $parentGuidance = 'Split work by dependencies and choose the named native execution slot by task shape before dispatch. Use the deterministic auto route for the slot unless the parent records an explicit supported tuple override; different tasks may use different models simultaneously. Delegate only when explicitly authorized. Parallelize only independently verifiable slices with disjoint write sets and positive benefit within native concurrency limits. Do not replay an identical prompt, start duplicate parallel requests, or automatically launch another task after 429/quota/rate-limit/auth/risk responses. Stop, record the failed tuple and remaining scope, and wait for a fresh parent selection. A confirmed overload may receive one explicit reselection only when the alternate tuple is currently supported and the parent tracks the task-level budget. Do not hot-swap a running task, select a gateway, or silently substitute an effort across host menus. On Codex, use the named native slot or exact-tuple role; each generated agent config pins one of the approved model/effort tuples. Start-ModelSlot.ps1 remains an explicitly invoked one-shot CLI path; its retry cap does not govern native agent requests and it is not a substitute for native subagent dispatch. Record a routing receipt for each child: slot, requested preset, model, effort, read-only status, declared fallback, and the host-reported actual model/effort when available. Set actual_model_observed=false instead of inferring the child model from the parent picker. A custom agent file pins model/effort and overrides spawn values; its provider remains the parent provider.'
-$tupleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($entry in $enabledRoutes) {
     if ($ExecutionHost -cne 'codex' -or 'codex' -notin $entry.hosts) { continue }
     if (-not (Test-NativePreset $entry.preset)) { continue }
@@ -540,7 +539,6 @@ foreach ($entry in $enabledRoutes) {
     $roleText = @("name = `"$($entry.role)`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
     AddFile $rolePath $roleText
     AddCodexAgentFile $entry.role $roleText
-    $tupleBlocks.Add("[agents.$($entry.role)]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
 }
 $capability = [ordered]@{
     status = 'not_applicable'
@@ -570,10 +568,31 @@ function Get-CodexCatalog([string]$Path) {
         return $snapshot
     }
     # Probe the target root in a child process; never change this session's CODEX_HOME.
-    $command = Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+    # Prefer a native .exe/.cmd shim over the npm .ps1 wrapper: a PowerShell child
+    # re-decodes its grandchild stdout with the console ANSI codepage, and on a GBK
+    # console a served template ellipsis consumes the backslash of an escaped quote,
+    # yielding invalid JSON. Native shims pass node's UTF-8 bytes through unchanged and
+    # capture is byte-level, decoded as UTF-8 explicitly.
+    $candidates = @(Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop -All)
+    $command = $null
+    foreach ($candidate in $candidates) {
+        $ext = [IO.Path]::GetExtension($candidate.Source)
+        if ($ext -ieq '.exe' -or $ext -ieq '.cmd') { $command = $candidate; break }
+    }
+    if (-not $command) {
+        foreach ($candidate in $candidates) {
+            if ([IO.Path]::GetExtension($candidate.Source) -ieq '.ps1') { $command = $candidate; break }
+        }
+    }
+    if (-not $command) { $command = $candidates | Select-Object -First 1 }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $command.Source
-    if ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
+    if ([IO.Path]::GetExtension($command.Source) -ieq '.cmd') {
+        # CreateProcess cannot launch a batch file directly.
+        $info.FileName = (Get-Command cmd.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        foreach ($arg in @('/c', $command.Source)) { $info.ArgumentList.Add($arg) }
+    }
+    elseif ([IO.Path]::GetExtension($command.Source) -ieq '.ps1') {
         $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         foreach ($arg in @('-NoProfile','-File',$command.Source)) { $info.ArgumentList.Add($arg) }
     }
@@ -589,12 +608,14 @@ function Get-CodexCatalog([string]$Path) {
     try {
         $null = $process.Start()
         $started = $true
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
+        $outMem = [IO.MemoryStream]::new()
+        $errMem = [IO.MemoryStream]::new()
+        $outTask = $process.StandardOutput.BaseStream.CopyToAsync($outMem)
+        $errTask = $process.StandardError.BaseStream.CopyToAsync($errMem)
         if (-not $process.WaitForExit(30000)) { throw 'codex debug models timed out after 30 seconds.' }
-        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr), 2000)) { throw 'codex debug models output read timed out.' }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($outTask,$errTask), 2000)) { throw 'codex debug models output read timed out.' }
         if ($process.ExitCode -ne 0) { throw "codex debug models failed (exit=$($process.ExitCode))." }
-        $output = $stdout.GetAwaiter().GetResult()
+        $output = [Text.Encoding]::UTF8.GetString($outMem.ToArray())
     }
     finally {
         if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
@@ -665,7 +686,6 @@ foreach ($id in $policy.presets.Keys) { if ($activePresets -ccontains $id -and $
 foreach ($id in $codexIds) {
     $p = $policy.presets[$id]
     $profileNames[$id] = $id.Replace('_','-')
-    $roleBlocks = [Collections.Generic.List[string]]::new()
         $codexMenu = @(Get-PresetMenu $p 'codex')
         $standard = $codexMenu[$p.slot_map['routine_maintenance']]
     $profileNativeAgentAvailable = Test-NativePreset $id
@@ -681,18 +701,16 @@ foreach ($id in $codexIds) {
         $roleText = @("name = `"$slot`"", "description = `"$description`"", "model = `"$($entry.model)`"", "model_reasoning_effort = `"$($entry.effort)`"", "developer_instructions = `"$instructions`"", '') -join "`n"
         AddFile $rolePath $roleText
         $generatedCodexRoleText[[IO.Path]::GetFullPath($rolePath)] = $roleText
-        $roleBlocks.Add("[agents.$slot]`ndescription = `"$description`"`nconfig_file = '$($rolePath.Replace('\','/'))'`n")
     }
     $profileAgentSection = if ($profileNativeAgentAvailable) {
         "[agents]`ndefault_subagent_model = `"$($standard.model)`"`ndefault_subagent_reasoning_effort = `"$($standard.effort)`""
     }
     else { "[agents]`nenabled = false" }
     $header = @("model = `"$($standard.model)`"", "review_model = `"$($standard.model)`"", "model_reasoning_effort = `"$($standard.effort)`"", "developer_instructions = `"$parentGuidance`"", '', $profileAgentSection) -join "`n"
-    $profileText = $header + "`n`n" + ($roleBlocks -join "`n") + "`n" + ($tupleBlocks -join "`n")
-    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") $profileText
-    if ($id -ceq $Preset) { $activeBlocks = $roleBlocks -join "`n" }
+    # Named slots and exact-tuple roles are discovered from CodexRoot/agents.
+    # Repeating the registrations in a profile makes Codex ignore duplicates.
+    AddFile (Join-Path $CodexRoot "$($profileNames[$id]).config.toml") ($header + "`n" + $codexManagedMarker + "`n")
 }
-$activeRoleBlocks = [Collections.Generic.List[string]]::new()
 foreach ($slot in $slotNames) {
     if ($nativePresetIds.Count -eq 0) { break }
     $routePreset = $nativeRoutePresetIds[$slot]
@@ -701,9 +719,7 @@ foreach ($slot in $slotNames) {
     $routeRoleText = $generatedCodexRoleText[[IO.Path]::GetFullPath($routePath)]
     if (-not $routeRoleText) { throw "Active Codex role was not generated: $routePath" }
     AddCodexAgentFile $slot $routeRoleText
-    $activeRoleBlocks.Add("[agents.$slot]`ndescription = `"Native route $slot, $($route.model)/$($route.effort) via $routePreset. Parent supplies scope, proof and stop.`"`nconfig_file = '$($routePath.Replace('\','/'))'`n")
 }
-$activeBlocks = $activeRoleBlocks -join "`n"
 # Retire managed agent files that no longer belong to the projected set: a renamed
 # tuple role (e.g. deepseek_xhigh -> deepseek_max) must not leave its stale managed
 # file behind, or Verify flags it forever. Unmarked files stay untouched (fail closed).
@@ -717,6 +733,19 @@ if ($ExecutionHost -ceq 'codex' -and $managedCodexAgentNames.Count -gt 0) {
             AddFileDelete $stale.FullName
             $sweptAgentNames.Add($staleName)
         }
+    }
+}
+# Retire managed profile configs for presets that no longer belong to the projected
+# pool: a removed preset (e.g. a retired Gemini variant) must not leave its launcher
+# profile behind, or a stale default tuple keeps loading on the host. Unmarked files
+# stay untouched (fail closed).
+if ($ExecutionHost -ceq 'codex' -and $profileNames.Count -gt 0) {
+    foreach ($staleProfile in @(Get-ChildItem -LiteralPath $CodexRoot -Filter '*.config.toml' -File)) {
+        if ($staleProfile.Name -cnotmatch '\.config\.toml$') { continue }
+        $staleProfileId = $staleProfile.Name.Substring(0, $staleProfile.Name.Length - '.config.toml'.Length)
+        if ($staleProfileId -cin @($profileNames.Values)) { continue }
+        if (([IO.File]::ReadAllText($staleProfile.FullName)) -cnotmatch [regex]::Escape($codexManagedMarker)) { continue }
+        AddFileDelete $staleProfile.FullName
     }
 }
 $configPath = Join-Path $CodexRoot 'config.toml'
