@@ -72,6 +72,20 @@ Describe "Build script" {
 
         & pwsh -NoProfile -File (Join-Path $workspace "build.ps1") -Check | Out-Null
         $LASTEXITCODE | Should -Be 0
+
+        # -Check must be read-only. A cached hash cannot reveal a transient rewrite
+        # that restores the same bytes before returning.
+        $generated = @((Join-Path $workspace 'skills.ps1')) +
+            @(Get-ChildItem -LiteralPath $libDir -File -Filter '*.ps1' | ForEach-Object FullName) +
+            @(Get-ChildItem -LiteralPath (Join-Path $workspace 'rules/global') -Recurse -File | ForEach-Object FullName)
+        $timestamps = @{}
+        foreach ($path in $generated) { $timestamps[$path] = (Get-Item -LiteralPath $path).LastWriteTimeUtc }
+        Start-Sleep -Milliseconds 20
+        & pwsh -NoProfile -File (Join-Path $workspace "build.ps1") -Check | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        foreach ($path in $generated) {
+            (Get-Item -LiteralPath $path).LastWriteTimeUtc | Should -Be $timestamps[$path] -Because "build -Check rewrote $path"
+        }
     }
 
     It "Keeps the generated pack plan a total function over the CLI ValidateSet" {

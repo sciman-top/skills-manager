@@ -254,6 +254,15 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r.result.reason | Should -Be 'risk_path'
     }
 
+    It 'keeps a root build-script change on the full risk path' {
+        $repo = New-ResolveGateFixture
+        $base = (& git -C $repo rev-parse HEAD).Trim()
+        Set-Content -LiteralPath (Join-Path $repo 'build.ps1') -Value '# new root build script'
+        $r = Invoke-Resolver $repo @{ BaseSha = $base }
+        $r.result.profile | Should -Be 'full'
+        $r.result.reason | Should -Be 'risk_path'
+    }
+
     It 'classifies governance and integrity contract changes as full' {
         foreach ($relativePath in @(
             'config/skills.schema.json',

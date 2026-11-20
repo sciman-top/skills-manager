@@ -27,7 +27,10 @@ param(
     # Internal: set only by the parent process when spawning a shard worker.
     [string]$ShardJobPath = '',
     # Internal: set only by the parent process when spawning a targeted worker.
-    [string]$TargetedJobPath = ''
+    [string]$TargetedJobPath = '',
+    # Explicit extra test paths. Some native File launchers discard repeated
+    # -TestPath values while still reporting success.
+    [string[]]$SplitTestPath = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -187,20 +190,33 @@ function Invoke-RepositoryPester {
     # Invoke-Pester call throws "名为 'TestDrive' 的驱动器已存在" and the whole
     # container crashes. Splitting per file is the only place that leak can be
     # broken from outside Pester.
-    $singleRun = $false
-    $perFilePaths = [Collections.Generic.List[string]]::new()
+    $selectedFilePaths = [Collections.Generic.List[string]]::new()
+    $directoryPaths = [Collections.Generic.List[string]]::new()
     foreach ($candidate in @($Paths)) {
         if ([string]::IsNullOrWhiteSpace([string]$candidate)) { continue }
         if (Test-Path -LiteralPath $candidate -PathType Container) {
+            $directoryPaths.Add([IO.Path]::GetFullPath([string]$candidate)) | Out-Null
             foreach ($file in @(Get-ChildItem -LiteralPath $candidate -Recurse -Filter '*.Tests.ps1' -File | Sort-Object FullName)) {
-                $perFilePaths.Add($file.FullName) | Out-Null
+                $selectedFilePaths.Add([IO.Path]::GetFullPath($file.FullName)) | Out-Null
             }
         }
         else {
-            $perFilePaths.Add([string]$candidate) | Out-Null
+            $selectedFilePaths.Add([IO.Path]::GetFullPath([string]$candidate)) | Out-Null
         }
     }
-    if ($perFilePaths.Count -eq 0) { $singleRun = $true }
+    # A file selected explicitly by the caller remains a file even if its
+    # directory contains other tests. Expanding it would silently broaden the
+    # requested proof. Directory arguments and the default suite discover all
+    # their test files here.
+    $perFilePaths = if ($directoryPaths.Count -gt 0) {
+        @($directoryPaths | ForEach-Object {
+                Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.Tests.ps1' -File | ForEach-Object { [IO.Path]::GetFullPath($_.FullName) }
+            } | Sort-Object -Unique)
+    }
+    else {
+        @($selectedFilePaths | Sort-Object -Unique)
+    }
+    $singleRun = $perFilePaths.Count -eq 0
     $configuration = New-PesterConfiguration
     $configuration.Run.PassThru = $true
     $configuration.Output.Verbosity = 'None'
@@ -213,7 +229,7 @@ function Invoke-RepositoryPester {
         Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
     }
     else {
-        foreach ($path in $perFilePaths.ToArray()) {
+        foreach ($path in @($perFilePaths)) {
             Remove-StaleTestDriveMapping
             $configuration.Run.Path = @($path)
             Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
@@ -250,6 +266,7 @@ if (-not [string]::IsNullOrWhiteSpace($ShardJobPath)) {
     $receipt = [ordered]@{
         schema_version     = 1
         status             = 'error'
+        zero_selection     = $false
         total_count        = 0
         passed_count       = 0
         failed_count       = 0
@@ -276,7 +293,12 @@ if (-not [string]::IsNullOrWhiteSpace($ShardJobPath)) {
                     error     = if ($_.ErrorRecord) { [string]$_.ErrorRecord } else { '' }
                 }
             })
-        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
+        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) {
+            'failed'
+        }
+        elseif ([int]$result.PassedCount -gt 0) { 'passed' }
+        else { 'error' }
+        if ($receipt.status -eq 'error') { $receipt.zero_selection = $true; $receipt.error = 'Selected tests discovered but none executed successfully.' }
     }
     catch {
         $receipt.status = 'error'
@@ -321,7 +343,12 @@ if (-not [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
                     error     = if ($_.ErrorRecord) { [string]$_.ErrorRecord } else { '' }
                 }
             })
-        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
+        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) {
+            'failed'
+        }
+        elseif ([int]$result.PassedCount -gt 0) { 'passed' }
+        else { 'error' }
+        if ($receipt.status -eq 'error') { $receipt.zero_selection = $true; $receipt.error = 'Selected tests discovered but none executed successfully.' }
     }
     catch {
         $receipt.status = 'error'
@@ -330,10 +357,41 @@ if (-not [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
     [IO.File]::WriteAllText([string]$job.receipt, ($receipt | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
     exit $(if ([string]$receipt.status -eq 'passed') { 0 } else { 1 })
 }
+$TestPath = @(@($TestPath) + @($SplitTestPath) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+$TestName = @($TestName | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$Tag = @($Tag | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$ExcludeTag = @($ExcludeTag | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+# Under `-Command`, a native argument array can leave extra paths at the tail of
+# -TestPath. PowerShell then binds them to the next string[] parameters
+# (-TestName/-Tag), so Pester discovers the files but reports zero tests. Treat
+# an existing tests/*.Tests.ps1 path in a text filter as a path, not a filter.
+$misplacedPaths = @(@($TestName) + @($Tag) + @($ExcludeTag) | Where-Object {
+        [string]$_ -match '(?i)\.Tests\.ps1$' -and (Test-Path -LiteralPath ([string]$_) -PathType Leaf)
+    })
+if ($misplacedPaths.Count -gt 0) {
+    $TestPath = @($TestPath + $misplacedPaths)
+    $TestName = @($TestName | Where-Object { $misplacedPaths -notcontains [string]$_ })
+    $Tag = @($Tag | Where-Object { $misplacedPaths -notcontains [string]$_ })
+    $ExcludeTag = @($ExcludeTag | Where-Object { $misplacedPaths -notcontains [string]$_ })
+}
 
 $paths = if ($TestPath.Count -eq 0) { @($UnitTestPath, $E2ETestPath) } else { @($TestPath) }
 foreach ($path in $paths) {
-    $testFiles = if (Test-Path -LiteralPath $path -PathType Leaf) { @(Get-Item -LiteralPath $path | Where-Object Name -Like '*.Tests.ps1') } else { @(Get-ChildItem -LiteralPath $path -Recurse -Filter '*.Tests.ps1' -File) }
+    try {
+        $testFiles = if (Test-Path -LiteralPath $path -PathType Leaf) { @(Get-Item -LiteralPath $path | Where-Object Name -Like '*.Tests.ps1') } else { @(Get-ChildItem -LiteralPath $path -Recurse -Filter '*.Tests.ps1' -File -ErrorAction Stop) }
+    }
+    catch {
+        $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        $hiddenByLiteralPath = $null -eq $item -and -not [string]::IsNullOrWhiteSpace([string]$_) -and
+            [string]$_ -match "Could not find(?: a part of the path)?"
+        # LiteralPath cannot expand wildcards. Say so instead of claiming that a
+        # wrong spelling does not exist when it merely needs Path semantics.
+        if ($hiddenByLiteralPath) {
+            throw ("Test discovery failed: {0}: LiteralPath does not expand wildcard characters in the requested path;" -f $path)
+        }
+        throw ("Test discovery failed: {0}: {1}" -f $path, $_.Exception.Message)
+    }
     if ($testFiles.Count -eq 0) {
         throw ("Test discovery returned zero files: {0}" -f $path)
     }
@@ -349,6 +407,17 @@ $instrumentedHost = [bool]($env:CODEBUDDY_SAFE_DELETE_ENABLED -or
     (([string]$env:NODE_OPTIONS) -match 'shim') -or
     (([string]$env:PYTHONPATH) -match 'shim'))
 $targetedSelection = $TestPath.Count -gt 0 -or $TestName.Count -gt 0 -or $Tag.Count -gt 0 -or $ExcludeTag.Count -gt 0
+$targetedJobSpec = [ordered]@{
+    paths       = @($paths)
+    names       = @($TestName)
+    tags        = @($Tag)
+    excludeTags = @($ExcludeTag)
+    test_files  = @($paths | ForEach-Object {
+            if (Test-Path -LiteralPath $_ -PathType Leaf) { [IO.Path]::GetFullPath($_); return }
+            Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.Tests.ps1' -File | ForEach-Object FullName
+        })
+    receipt     = ''
+}
 
 if ($targetedSelection -and ($InProcess -or $instrumentedHost)) {
     $runId = '{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -360,15 +429,23 @@ if ($targetedSelection -and ($InProcess -or $instrumentedHost)) {
     [IO.File]::WriteAllText((Join-Path $runRoot 'environment.json'), ($environment.Record | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
     Write-Host ("Targeted run started: batch=[{0}] timeout={1}s receipt={2} mode=in-process" -f (@($paths) -join '; '), $TargetedTimeoutSeconds, $receiptPath)
     $receipt = [ordered]@{
-        schema_version = 1; status = 'error'; total_count = 0; passed_count = 0
+        schema_version = 1; status = 'error'; zero_selection = $false; total_count = 0; passed_count = 0
         failed_count = 0; skipped_count = 0; duration_seconds = 0.0
         failures = @(); container_failures = @(); container_failure_details = @(); error = ''
     }
     try {
         $run = Invoke-RepositoryPester -Paths @($paths) -Names @($TestName) -Tags @($Tag) -ExcludeTags @($ExcludeTag)
         $result = $run.result
-        if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
-        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } else { 'passed' }
+        if (-not $result -or [int]$result.TotalCount -le 0) { $receipt.zero_selection = $true; throw 'Test discovery returned zero tests.' }
+        $receipt.status = if ([int]$result.FailedContainersCount -gt 0 -or [int]$result.FailedCount -gt 0) { 'failed' } elseif ([int]$result.PassedCount -gt 0) { 'passed' } else { 'error' }
+        if ($receipt.status -eq 'error' -and -not [bool]$receipt.zero_selection -and -not [string]::IsNullOrWhiteSpace([string]$receipt.error)) {
+            throw [string]$receipt.error
+        }
+        if ($receipt.status -eq 'error') {
+            # A filter can match a test that is skipped (zero passed, zero
+            # failed). That is a valid selected test but not a successful run.
+            $receipt.zero_selection = [bool]([int]$result.TotalCount -eq 0)
+        }
         $receipt.duration_seconds = [Math]::Round([double]$run.seconds, 3)
         $receipt.total_count = [int]$result.TotalCount
         $receipt.passed_count = [int]$result.PassedCount
@@ -382,9 +459,18 @@ if ($targetedSelection -and ($InProcess -or $instrumentedHost)) {
     }
     catch { $receipt.error = $_.Exception.Message }
     [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
-    if ($receipt.status -eq 'error') { throw [string]$receipt.error }
+    if ($receipt.status -eq 'error' -and -not [bool]$receipt.zero_selection -and -not [string]::IsNullOrWhiteSpace([string]$receipt.error)) {
+        throw [string]$receipt.error
+    }
+    if ($receipt.status -eq 'error') {
+        if ([bool]$receipt.zero_selection) {
+            throw ("No tests selected; check filters and selected paths. starting_paths=[{0}], collected_files=[{1}]." -f (@($targetedJobSpec.paths) -join '; '), (@($targetedJobSpec.test_files | Sort-Object) -join '; '))
+        }
+        throw 'No tests executed successfully; check filters and skipped tests.'
+    }
     Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f $receipt.total_count, $receipt.passed_count, $receipt.failed_count, $receipt.skipped_count, $receipt.duration_seconds)
     foreach ($test in @($receipt.failures)) { Write-Host ("FAILED: {0}" -f [string]$test.name); if ($test.message) { Write-Host ([string]$test.message) } }
+    if ([bool]$receipt.zero_selection) { throw 'No tests selected; check filters and selected paths.' }
     if ($receipt.container_failures.Count -gt 0) { throw ("Pester container failures: {0}" -f $receipt.container_failures.Count) }
     if ($receipt.failed_count -gt 0) { throw ("Pester failures: {0}" -f $receipt.failed_count) }
     if ($receipt.passed_count -eq 0) { throw 'No tests executed successfully; check filters and skipped tests.' }
@@ -540,7 +626,7 @@ $targetedRunRoot = Join-Path $ShardReportRoot ('targeted-{0}' -f $targetedRunId)
 $null = New-Item -ItemType Directory -Path $targetedRunRoot -Force
 $targetedJobPath = Join-Path $targetedRunRoot 'targeted.job.json'
 $targetedReceiptPath = Join-Path $targetedRunRoot 'targeted.receipt.json'
-$targetedJobSpec = [ordered]@{ paths = @($paths); names = @($TestName); tags = @($Tag); excludeTags = @($ExcludeTag); receipt = $targetedReceiptPath }
+$targetedJobSpec.receipt = $targetedReceiptPath
 [IO.File]::WriteAllText($targetedJobPath, ($targetedJobSpec | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
 # Same attribution record as sharded runs: a slow targeted run must be
@@ -580,10 +666,29 @@ $targetedTimer.Stop()
 if (-not (Test-Path -LiteralPath $targetedReceiptPath -PathType Leaf)) {
     throw ("Targeted test worker exited without a receipt (batch: {0})." -f (@($paths) -join '; '))
 }
+$expectedTestFiles = @($targetedJobSpec.test_files | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
+$selectedTestFiles = @($targetedJobSpec.paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
+if (@($selectedTestFiles).Count -eq 0) {
+    $selectedTestFiles = @($targetedJobSpec.paths | ForEach-Object {
+            Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.Tests.ps1' -File | ForEach-Object FullName
+        } | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
+}
+if (@($expectedTestFiles).Count -ne @($selectedTestFiles).Count -or
+    @($expectedTestFiles | Where-Object { $selectedTestFiles -notcontains $_ }).Count -gt 0) {
+    throw ("Test selection changed while collecting the isolated job; starting_paths=[{0}], expected_files=[{1}], current_files=[{2}]." -f
+        (@($targetedJobSpec.paths) -join '; '), (@($expectedTestFiles | Sort-Object) -join '; '), (@($selectedTestFiles | Sort-Object) -join '; '))
+}
 $receipt = Get-Content -LiteralPath $targetedReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([string]$receipt.status -eq 'error') { throw [string]$receipt.error }
+if ([string]$receipt.status -eq 'error' -and -not [bool]$receipt.zero_selection -and -not [string]::IsNullOrWhiteSpace([string]$receipt.error)) {
+    throw [string]$receipt.error
+}
 
 Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f [int]$receipt.total_count, [int]$receipt.passed_count, [int]$receipt.failed_count, [int]$receipt.skipped_count, [double]$receipt.duration_seconds)
+if ([bool]$receipt.zero_selection) {
+    throw ("No tests selected; check filters and selected paths. starting_paths=[{0}], worker_paths=[{1}], collected_files=[{2}]." -f
+        (@($targetedJobSpec.paths) -join '; '), (@($paths) -join '; '), (@($expectedTestFiles | Sort-Object) -join '; '))
+}
 if (@($receipt.container_failures).Count -gt 0) {
     foreach ($container in @($receipt.container_failures)) { Write-Host ("CONTAINER FAILED: {0}" -f [string]$container) }
     foreach ($detail in @($receipt.container_failure_details)) {

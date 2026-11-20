@@ -357,10 +357,17 @@ if ($Check) {
     Write-Host "Build check passed: $Dist + skills.lib ($(@($libOutputs.Keys).Count) files)" -ForegroundColor Green
 }
 else {
-    New-Item -ItemType Directory -Path $LibDir -Force | Out-Null
-    [System.IO.File]::WriteAllBytes($Dist, $thinBytes)
+    $updates = [ordered]@{ $Dist = $thinBytes }
     foreach ($name in @($libOutputs.Keys)) {
-        [System.IO.File]::WriteAllBytes((Join-Path $LibDir $name), (Convert-ToBomBytes $libOutputs[$name]))
+        $updates[(Join-Path $LibDir $name)] = Convert-ToBomBytes $libOutputs[$name]
+    }
+    New-Item -ItemType Directory -Path $LibDir -Force | Out-Null
+    foreach ($path in @($updates.Keys)) {
+        $unchanged = [IO.File]::Exists($path) -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -ceq [Convert]::ToBase64String($updates[$path])
+        if (-not $unchanged) {
+            Write-BytesAtomic -Path $path -Bytes $updates[$path]
+        }
     }
     foreach ($stale in $staleLibs) {
         Remove-Item -LiteralPath (Join-Path $LibDir $stale) -Force

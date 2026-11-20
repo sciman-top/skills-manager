@@ -22,7 +22,7 @@ Anthropic 的原则是"找到最简单的方案，只在必要时增加复杂度
 
 1. **分流**：一句话能描述 diff 的小改动直接做；否则先核对分支、HEAD、项目规则、锁文件和生成物，再只读探索（plan mode，或范围明确的 subagent）。
 2. **写契约**：目标、上下文、约束、写集、最低证明、完成条件和停止条件。需求未定型时，让 AI 一次一问收敛成可审查 spec，再在干净上下文实现。
-3. **小切片实现**：循环内跑相关测试；给 AI 一个它能自己运行的检查。
+3. **小切片实现**：优先从一条窄垂直切片开始；既有契约或跨层改动按生产者、消费者和边界列覆盖切片，分别在相关循环内验证。给 AI 一个它能自己运行的检查。
 4. **按风险选最低充分证明**：文档运行 `git diff --check`，并按项目契约运行适用 verifier；行为变更跑 focused 测试；运行时、安全、数据、迁移类改动才跑一次 full。
 5. **按风险审查**：风险、不确定性或项目契约需要时，用 fresh 上下文独立审查；报告候选发现前先对照调用方、守卫与既有测试核实，将基线既有缺陷与本次 diff 新回归分开标注，只报影响正确性或已声明需求的问题，允许零发现。
 6. **提交小 PR**：写清改动、证明与删除量，按当前项目的审阅和合入授权收口。
@@ -36,7 +36,7 @@ Anthropic 的原则是"找到最简单的方案，只在必要时增加复杂度
 
 CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模板；另有 `review`、`failure`、`handoff`、`checklist`，支持 `--json`。该入口只输出模板，不扫描目标仓、不执行任务或调用模型。
 
-验收预期应来自需求、示例或外部契约，关键回归在可行时确认旧行为会失败。测试或构建失败时先隔离提交前既有基线/沙箱环境故障与本次 diff 引入的回归；UI 在目标视口或参考图下观察实际交互、提交/键盘可达性与加载/空态/错误态；API 检查调用方兼容和错误响应；数据处理核对代表性输入与不变量；性能优化比较相同条件的前后结果。收口前停止验证期间拉起的后台服务/监听进程并清理临时文件。只选择本次适用的证明，不为低风险改动增加完整测试流程。
+验收预期应来自需求、示例或外部契约；报告过的缺陷在可行时先复现旧失败，再改变行为，避免只证明演示样例。测试或构建失败时先隔离提交前既有基线/沙箱环境故障与本次 diff 引入的回归；UI 在目标视口或参考图下观察实际交互、提交/键盘可达性与加载/空态/错误态；API 检查调用方兼容和错误响应；数据处理核对代表性输入与不变量；性能优化比较相同条件的前后结果。生成物从真源或生成器修改，并重建核对漂移；确无真源的生成物才直接修补，同时绑定可复现的再生成步骤，并在可支持时做清理或一致性检查。收口前停止验证期间拉起的后台服务/监听进程并清理临时文件。只选择本次适用的证明，不为低风险改动增加完整测试流程。
 
 全栈变更还要沿边界追踪生产者与已知消费者：API、共享 schema、序列化格式和数据库迁移必须一起核对，保留兼容的回滚入口。提交日志、截图、receipt、命令或复制的 payload 前，先去除 token、cookie、API key、个人数据和访问凭据。
 
@@ -44,7 +44,7 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 
 | 常见问题 | 典型表现 | 有效防线 |
 | --- | --- | --- |
-| 目标或范围漂移 | 修 bug 顺手大重构；只做出演示路径；测试通过但不是用户要的结果 | 先冻结 Goal / Done when / Stop；优先一个窄垂直切片；按真实用户操作验收 |
+| 目标或范围漂移 | 修 bug 顺手大重构；只做出演示路径；测试通过但不是用户要的结果 | 先冻结 Goal / Done when / Stop；从窄垂直切片开始，契约扩散时列消费者覆盖；按真实用户操作验收 |
 | 仓库事实误读 | 看错分支、漏掉调用方、直接修改生成物、猜错包管理器或版本 | 开工先看 `git status`、规则、锁文件、入口和生成链；沿调用方检索；先跑现有检查 |
 | 虚构 API 或依赖 | 方法、配置键、框架行为、包版本来自记忆；为小改动引入新库 | 以源码、类型、本地 help 和当前官方文档为准；新依赖必须有当前需求并核对来源 |
 | 测试假阳性 | 只断言 mock 调用、复制实现逻辑、只测演示样例、写只盯常量/文案的变更检测器、为通过而放宽断言 | 从需求和边界条件推导断言；说明每条测试捕获的具体故障；重要回归确认旧实现会失败；覆盖错误路径和真实契约 |
@@ -95,7 +95,7 @@ CLI 可通过 `skills.ps1 ai-coding --template implementation` 输出任务模�
 - OpenAI Codex Prompting：Codex 任务应说明想要的行为、相关代码或复现、约束和验证方式；复杂任务可先用 `/plan`，修 bug 后运行最小相关检查并报告命令与结果。 <https://developers.openai.com/codex/prompting>
 - OpenAI Prompting GPT-6.2 in Codex：按调查深度匹配 reasoning effort；多代理仅用于可独立推进的并行部分；UI/视觉产物按真实呈现尺寸核对交互；收口时停止自己启动的后台任务并清理不再需要的临时文件。 <https://learn.chatgpt.com/guides/prompting-gpt-6-2-astra>
 - OpenAI Codex `AGENTS.md`：Codex 每次运行会按全局到项目目录逐层组合指令，默认上限 32 KiB；项目事实应按目录就近放置，格式化与 lint 留给 CI。 <https://developers.openai.com/codex/guides/agents-md>
-- OpenAI Codex Build skills：技能采用渐进披露，初始只加载名称、描述和路径；应保持单一职责、描述清晰、使用命令式步骤并测试触发范围。 <https://developers.openai.com/codex/build-skills>
+- OpenAI Codex Build skills：技能采用渐进披露，初始只加载名称、描述和路径；应保持单一职责、描述聚焦触发意图、使用显式输入输出的命令式步骤并测试触发范围；触发匹配依赖 description。 <https://developers.openai.com/codex/skills>
 - Claude Code hooks：33 个事件；`PreToolUse` 可用退出码 2 或 `permissionDecision: deny` 阻断；`Stop` 可阻止结束，需防循环。 <https://code.claude.com/docs/en/hooks>
 - Claude Code 最佳实践：区分模型判断与宿主确定性约束；只写仓库里找不到的上下文；给 AI 一个可运行的 pass/fail 检查；要求命令、输出或截图作为证据；用未参与实现的 fresh context 审查 spec；淘汰全大写强调、目录树复述和无效子代理转包等旧习惯。 <https://code.claude.com/docs/en/best-practices>
 - Anthropic，Building effective agents：找到最简单的方案，只在能明显改善结果时增加复杂度；抽象层可能遮蔽提示词。 <https://www.anthropic.com/engineering/building-effective-agents>
