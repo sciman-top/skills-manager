@@ -24,8 +24,6 @@ if ($ExecutionHost -cin $unsupportedModelHosts) {
 $allowedModelEffortByHost = [ordered]@{
     codex = @(
         'gpt-6-luna|max'
-        # The 2026-11-05 Codex catalog declares DeepSeek reasoning levels low/high/max (xhigh is gone).
-        'deepseek-v4.1-flash|max'
         'glm-5.3-flash|xhigh'
         # The current Codex native catalog exposes this Gemini Flash model ID with the high tier in its slug.
         'gemini-3.8-flash-high|high'
@@ -34,7 +32,6 @@ $allowedModelEffortByHost = [ordered]@{
 }
 $allowedNativeCodexModelEffortTuples = @(
     'gpt-6-luna|max'
-    'deepseek-v4.1-flash|max'
     'glm-5.3-flash|xhigh'
     'gemini-3.8-flash-high|high'
 )
@@ -720,9 +717,9 @@ foreach ($slot in $slotNames) {
     if (-not $routeRoleText) { throw "Active Codex role was not generated: $routePath" }
     AddCodexAgentFile $slot $routeRoleText
 }
-# Retire managed agent files that no longer belong to the projected set: a renamed
-# tuple role (e.g. deepseek_xhigh -> deepseek_max) must not leave its stale managed
-# file behind, or Verify flags it forever. Unmarked files stay untouched (fail closed).
+# Retire managed agent files that no longer belong to the projected set: removed or
+# renamed tuple roles must not leave stale managed files behind, or Verify flags
+# them forever. Unmarked files stay untouched (fail closed).
 if ($ExecutionHost -ceq 'codex' -and $managedCodexAgentNames.Count -gt 0) {
     $agentRoot = Join-Path $CodexRoot 'agents'
     if (Test-Path -LiteralPath $agentRoot -PathType Container) {
