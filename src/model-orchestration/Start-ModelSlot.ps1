@@ -82,7 +82,8 @@ $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'presets.json') -Raw
 $resolved = & (Join-Path $PSScriptRoot 'Set-ModelPreset.ps1') -Action Resolve -Preset $Preset -AvailablePreset $AvailablePreset | ConvertFrom-Json -AsHashtable
 $Preset = $resolved.preset
 if ($Slot -cnotin @($resolved.slots)) { throw "Unknown configured slot: $Slot" }
-$route = $resolved.routes[$Slot]
+$slotRoute = $resolved.routes[$Slot]
+$route = $slotRoute
 if ([string]::IsNullOrWhiteSpace($Model) -xor [string]::IsNullOrWhiteSpace($Effort)) { throw 'Model and Effort must be supplied together.' }
 if (-not [string]::IsNullOrWhiteSpace($Model)) {
     $matchingRoutes = @($resolved.enabled_routes | Where-Object { $_.model -ceq $Model -and $_.effort -ceq $Effort })
@@ -91,9 +92,13 @@ if (-not [string]::IsNullOrWhiteSpace($Model)) {
     $Preset = $route.preset
 }
 $routePreset = [string]$route.preset
-# The slot's declared overload alternates (presets.json fallbacks), restricted to the resolved host pool.
-# The tuple being launched is removed; on a confirmed overload the parent takes the first alternate it can currently support.
-$declaredFallback = @($resolved.routes[$Slot].declared_fallback | Where-Object { -not ($_.model -ceq [string]$route.model -and $_.effort -ceq [string]$route.effort) })
+# Start with the slot default and its ordered alternates, already restricted to
+# the resolved host pool. The selected tuple is removed so an explicit tuple
+# override still has the default route available as a parent reselection choice.
+$fallbackCandidates = @(
+    @{ preset = [string]$slotRoute.preset; model = [string]$slotRoute.model; effort = [string]$slotRoute.effort }
+) + @($slotRoute.declared_fallback)
+$declaredFallback = @($fallbackCandidates | Where-Object { -not ($_.model -ceq [string]$route.model -and $_.effort -ceq [string]$route.effort) })
 $readOnlyTask = $ReadOnly -or $Slot -cin @($resolved.read_only_slots)
 $presetHosts = @($policy.presets[$routePreset].hosts)
 # Launch on the first declared facet with a verified native interface, so the

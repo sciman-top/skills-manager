@@ -4,24 +4,43 @@ Independent PowerShell 7 tooling for explicit subagent model presets. `presets.j
 
 ## Model pool and host boundaries
 
-The 2026-10-25 user request restores four model families; the 2026-11-05 user request pins DeepSeek to `max`, which the Codex catalog now declares (levels low/high/max; `xhigh` was removed). Every model has one selected effort per host; the names are host catalog values, not a shared intelligence scale.
+The Codex pool contains the three tuples selected for this orchestration policy. Effort names belong to each host/model catalog; they are not a shared intelligence scale. `max` is a setting within one model, not a claim that it is stronger than another model or effort.
 
-| Preset | Codex model ID | Codex effort | Other host policy |
+| Preset | Codex model ID | Codex effort | Other verified facet in this repository |
 | --- | --- | --- | --- |
-| `gpt6_luna_only` | `gpt-6-luna` | `max` | Not projected to other hosts |
-| `deepseek41_flash_only` | `deepseek-v4.1-flash` | `max` | Requested `max` where the host exposes DeepSeek; no verified writer |
-| `glm53_flash_only` | `glm-5.3-flash` | `xhigh` | ZCode `max`; WorkBuddy requested `max`, no verified writer |
-| `gemini38_flash_only` | `gemini-3.8-flash-high` | `high` | Antigravity stays within its own model choices; no exact-effort writer |
+| `gpt6_luna_only` | `gpt-6-luna` | `max` | None |
+| `glm53_flash_only` | `glm-5.3-flash` | `xhigh` | ZCode `max` |
+| `gemini38_flash_only` | `gemini-3.8-flash-high` | `high` | None |
 
-The preset tool now accepts `antigravity`, `workbuddy`, and `dsh` as explicit
-host names so unsupported model projection fails with a capability message.
-It does not write their host configuration or copy Codex tuples into them:
-Antigravity and WorkBuddy require their own current model/child contracts, and
-DeepSeek Harness currently has verified rules plus shared `~/.agents/skills`
-coverage but no verified model-preset writer or child-agent adapter. A DSH
-rules receipt therefore cannot be upgraded to model or subagent acceptance.
+These are capability boundaries of this repository's writers, not a complete
+list of models that each product can call. As of 2026-11-21, official
+documentation describes third-party or custom model connections in ZCode,
+WorkBuddy CN/Enterprise, WorkBuddy AI international, and DeepSeek Harness.
+Antigravity also lists selected partner-provider models, such as Claude and
+GPT-OSS, with availability depending on plan and client; that is not an
+arbitrary custom-provider API. DeepSeek also lists WorkBuddy (including
+CodeBuddy) as an official V4.1-Flash partner. Therefore, “this host only uses
+its maker's models” is not a reliable general rule. Availability still depends
+on the specific product surface, version, account, plan, region, provider
+configuration, and child-agent API.
 
-Codex's Gemini slug includes `-high`; the bare family name is not an alias. GLM `max` stays rejected on Codex (its catalog still tops out at `xhigh`); DeepSeek `max` is catalog-declared as of 2026-11-05. ZCode accepts only its existing GLM/max facet. A requested host policy does not prove that host exposes the model, effort or a child-agent API. Do not project cross-vendor models into hosts restricted to their own family.
+This repository's executable allowlist is narrower: Codex supports the three
+selected tuples after target-catalog preflight; the ZCode writer supports only
+its reviewed GLM/max facet. DeepSeek V4.1-Flash is intentionally excluded from
+this preset pool and its routes, even if a host separately offers it. There is no verified model-preset writer or
+subagent adapter here for WorkBuddy CN/INTL, DeepSeek Harness, or Antigravity.
+The tool accepts those host names to fail closed with a capability message; it
+does not write their host configuration or treat another host's model list as
+a proven local adapter. A DSH rules receipt is not model or subagent acceptance.
+
+The Codex slug `gemini-3.8-flash-high` is the exact local catalog name; the bare
+family name is not an alias. Codex GLM remains `xhigh`, while ZCode's GLM facet
+is `max`. These are host-specific settings. OpenAI positions Luna for frequent,
+bounded tasks and gives low effort as an example for small edits; this policy
+keeps the selected `max` tuple, so it does not optimize effort cost or latency.
+Google positions Gemini 3.8 Flash for long-horizon software engineering and
+agent workflows. Those descriptions motivate task-fit hypotheses, not a
+cross-vendor strength ranking or proof of local acceptance quality.
 
 The executable enforces the closed per-host tuple allowlist. Adding arbitrary JSON entries cannot expand it. `-Preset` pins a preset; `-AvailablePreset` restricts the pool. `default_preset` selects a default parent preset; it does not require every child to use that model. `-SubagentsOnly` preserves parent and review selections.
 
@@ -31,17 +50,19 @@ Slots describe responsibility, not a fixed agent count, concurrency quota or mea
 
 | Slot | Task boundary | Access intent | Codex route |
 | --- | --- | --- | --- |
-| `quick_triage` | Concrete lookup, known error classification | Read only | `gemini-3.8-flash-high/high` |
+| `quick_triage` | Concrete lookup, known error classification | Read only | `gpt-6-luna/max` |
 | `routine_maintenance` | Small fix with an understood cause | Bounded writes | `glm-5.3-flash/xhigh` |
 | `standard_review` | Review an existing bounded change | Read only | `gemini-3.8-flash-high/high` |
-| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes | `deepseek-v4.1-flash/max` |
-| `deep_investigation` | Unresolved root cause across modules | Read only; return proposed write set | `gpt-6-luna/max` |
-| `deep_implementation` | Complex implementation after scope is established | Bounded writes | `deepseek-v4.1-flash/max` |
+| `bounded_implementation` | Specified change with explicit files and proof | Bounded writes | `glm-5.3-flash/xhigh` |
+| `deep_investigation` | Unresolved root cause across modules | Read only; return proposed write set | `gemini-3.8-flash-high/high` |
+| `deep_implementation` | Complex implementation after scope is established | Bounded writes | `gemini-3.8-flash-high/high` |
 | `test_execution` | Scoped test command and concrete failure diagnosis | Bounded writes when assigned | `glm-5.3-flash/xhigh` |
-| `documentation_review` | Documentation and contract consistency | Read only | `gemini-3.8-flash-high/high` |
-| `architecture_review` | Interacting constraints and security boundaries | Read only | `gpt-6-luna/max` |
+| `documentation_review` | Documentation and contract consistency | Read only | `gpt-6-luna/max` |
+| `architecture_review` | Interacting constraints and security boundaries | Read only | `gemini-3.8-flash-high/high` |
 
-Keep the nine slots; there is no demonstrated need for more. Classify the task first, then select a supported tuple. `deep_implementation` uses DeepSeek because it is the code-focused route; `documentation_review` uses Gemini high because document and visual consistency do not justify a Luna/max child. For a known test command, the parent can run it directly. Use `test_execution` when a scoped verification task can run independently. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
+Keep the nine slots; there is no demonstrated need for more. The defaults are task-fit hypotheses, not a universal ranking. Luna is routed to short, bounded read-only work; GLM to routine fixes, bounded implementation and test diagnosis; Gemini to broad review, cross-module investigation and complex implementation. Vendor benchmarks and model descriptions do not prove these routes win on this repository.
+
+`bounded_implementation` and `deep_implementation` use different default models because their scope differs: GLM handles a specified change with known boundaries; Gemini handles complex implementation after investigation has established the scope. A supported alternative can be selected explicitly when the task's actual needs differ. For a known test command, the parent can run it directly. Use `test_execution` when a scoped verification task can run independently. Shared writes stay serial. Every delegation supplies scope, exact write set, minimum proof and stop. Read-only wording does not create a sandbox; child permissions follow the parent.
 
 ## Routing receipt
 
@@ -49,37 +70,49 @@ Keep the nine slots; there is no demonstrated need for more. Classify the task f
 
 The effective child selection follows this order: a custom agent file's model/effort, then an explicit spawn value, then the `[agents]` default, then parent inheritance. A custom agent file also inherits the parent provider; it cannot switch to another provider. `Start-ModelSlot.ps1 -Plan` emits the requested portion of this receipt and leaves the observed fields unset.
 
-The route defaults are editable policy hypotheses. The earlier [108-call evaluation](https://github.com/sciman-top/skills-manager/pull/143) used three short questions per slot, one run per candidate, and grading adjusted after inspection; most candidates tied. It did not evaluate the restored DeepSeek tuple or long-horizon native child tasks. It cannot establish a universal ordering among these four models. Vendor descriptions also do not establish endpoint latency, tool reliability or project acceptance quality. Luna is positioned by OpenAI for focused, efficient subagent work; selecting max does not make it universally strongest. DeepSeek/GLM/Gemini task fit should be refined from ordinary accepted project outcomes, with identical scope and acceptance, rather than a new broad synthetic sweep. Higher effort may increase time and token use; `xhigh` and `max` are not proven equivalent across hosts.
+The route defaults are editable policy hypotheses. The earlier [108-call evaluation](https://github.com/sciman-top/skills-manager/pull/143) used three short questions per slot, one run per candidate, and grading adjusted after inspection; most candidates tied. It did not establish which of the three current tuples performs best on long-horizon native child tasks. Vendor descriptions also do not establish endpoint latency, tool reliability or project acceptance quality. OpenAI's small-edit example uses low effort; this repository keeps Luna at `max`, so that route does not optimize effort cost. Refine routes only from ordinary accepted project outcomes with comparable scope and acceptance, not a broad synthetic sweep. Higher effort may increase time and token use; `xhigh` and `max` are not proven equivalent across hosts.
 
 ## Native subagents and the Luna-only incident
 
-Before this revision, all nine native slots and the shared default were projected to Luna; GLM/Gemini were launcher-only and DeepSeek was removed. Selecting a fixed semantic role therefore kept using Luna regardless of the launcher `auto_routes`. A model in the Desktop picker did not alter these files.
+Before this revision, all nine native slots and the shared default were projected to Luna; GLM/Gemini were launcher-only. Selecting a fixed semantic role therefore kept using Luna regardless of the launcher `auto_routes`. A model in the Desktop picker did not alter these files.
 
-All four exact tuples remain available to the controlled launcher after target catalog preflight and to native roles after the 2026-10-25 BWG admission deployment. That deployment maps only the exact known Codex task envelope to standard Responses user text before forwarding; unknown envelope shapes remain rejected. Native slot selection now follows the eligible pool rather than forcing every slot to Luna. Both model and effort must be pinned. An exact custom agent file can override spawn parameters; inspect the effective role rather than assuming an explicit model argument wins. Unpinned bridges may inherit the selected defaults.
+All three exact tuples remain available to the controlled launcher after target catalog preflight and to native roles after the 2026-10-25 BWG admission deployment. That deployment maps only the exact known Codex task envelope to standard Responses user text before forwarding; unknown envelope shapes remain rejected. Native slot selection now follows the eligible pool rather than forcing every slot to Luna. Both model and effort must be pinned. An exact custom agent file can override spawn parameters; inspect the effective role rather than assuming an explicit model argument wins. Unpinned bridges may inherit the selected defaults.
 
 Compatibility remains a separate boundary. BWG runs CPA v8.0.42 and the deployed admission code has strict-doctor and pin evidence for the exact-envelope conversion. This is deployment evidence, not a model generation request. The host catalog and user Desktop availability evidence support the requested pool; neither proves that every provider accepts a native delegation or completes it successfully. If `encrypted_agent_payload_unsupported` occurs, stop for compatibility diagnosis. Do not replay the task, remove the guard or silently substitute models. One-shot CLI execution sends a different request shape and is not native subagent acceptance.
 
-### Codex native compatibility (2026-11-20)
+### Codex native compatibility observation (2026-11-20)
 
-The local Desktop-bundled Codex CLI (`0.171.0-alpha.13`) completed a native `standard_review` delegation through a `gpt-5.6-luna` parent using V1. A separate `gpt-6.2-sol` V2 session could not deliver readable task content to the same role. Use a fresh V1 parent for a new cross-provider delegation when the active Desktop catalog lists `gpt-5.6-luna` with `multi_agent_version: v1`. Check the requested child role and its output. A parent summary alone does not establish the upstream model or effort. V2 ephemeral sessions also failed to initialize the child in this build with `no rollout found for thread id`.
+One local Desktop-bundled Codex CLI build (`0.171.0-alpha.13`) completed one native `standard_review` delegation through a `gpt-5.6-luna` parent using V1. A separate V2 session failed to deliver readable task content and an ephemeral child failed initialization. This is one historical build-specific observation, not a current routing or model-support guarantee; inspect the active model catalog and child output for each new acceptance check.
 
-For one controlled CLI session using the same host catalog, invoke the Desktop-bundled executable with `exec --model gpt-5.6-luna --disable multi_agent_v2 --sandbox read-only --ephemeral` and a bounded native delegation prompt. Use `Start-ModelSlot.ps1` for a direct single-model task, which does not exercise delegation. Keep work from a failed V2 task intact and inspect it before dispatching any remaining work.
+`Start-ModelSlot.ps1` is a direct single-model task and does not exercise native delegation. A parent summary alone does not establish the upstream child model or effort. Keep work from a failed task intact and inspect it before dispatching remaining work.
 
 Fresh host loading is required after projection. An existing chat may retain its old role definitions. Do not restart or stop the app to force loading. Local Codex files do not configure hosted ChatGPT Work.
 
 ## Failure handling
 
-Preset fallbacks are candidate data, not an automatic failover engine. The launcher starts one `codex exec` process and never automatically retries, replays or launches an alternate. `max_explicit_reselections=1` is a parent-managed budget; `-ReselectionCount 1` blocks another controlled launch for that bounded task. The parent records failure, inspected partial work, selected supported tuple and remaining scope.
+The JSON `fallbacks` are ordered candidates for a parent decision; they are not an automatic failover engine. The controlled launcher starts one `codex exec` process and never automatically retries, replays or launches an alternate. In this launcher, only a confirmed upstream unavailable/overload failure can permit one explicit reselection for reviewed remaining scope. A 429/quota/rate-limit stops and waits for a fresh parent selection; authentication, account risk, timeout, unknown, tool and compatibility failures do not trigger model switching. `-ReselectionCount 1` blocks another controlled launch for that bounded task. The parent records failure, inspected partial work, selected supported tuple and remaining scope.
 
 | Failure | Action |
 | --- | --- |
 | Unsupported tuple, encrypted payload or incompatible tools | Stop and diagnose capability; do not treat as overload |
-| Confirmed overload/unavailable | At most one explicit parent reselection for reviewed remaining scope |
+| Confirmed upstream unavailable/overload (structured 502/503/504) | At most one explicit parent reselection for reviewed remaining scope |
 | 429/quota | Honor Retry-After/reset; no model switching to evade limits |
 | Auth/permission/account risk | Stop for operator review |
 | Timeout or unknown error | Inspect existing process result and partial writes before new dispatch |
 
-There is no proven cross-vendor automatic failover contract for ordinary Desktop, ZCode, Antigravity or WorkBuddy in this tool. Native hosts own their retry behavior. A pinned child does not automatically consult JSON fallbacks. During planning, `-AvailablePreset` can explicitly exclude an unavailable model before dispatch. Restricted-pool resolution selects the first eligible preset in the active pool if a slot default is excluded. To select a specific alternate for the remaining work, choose its exact tuple role. A different model may share the same quota or gateway.
+Automatic failure behavior is product- and request-layer-specific. It is important to separate a same-model API retry, an `Auto` task router, a model-retirement migration, and a cross-model child-agent failover:
+
+| Host surface | Product behavior documented by its vendor | What this repository guarantees |
+| --- | --- | --- |
+| Codex Desktop / `Start-ModelSlot.ps1` | This launcher sends one `codex exec` call and does not retry, replay or choose another model. The parent may explicitly reselect once for a structured upstream-unavailable error; 429/quota waits. Native subagent retry behavior is outside this JSON policy. | Three selected Codex tuples after target-catalog preflight; pinned child routes do not read `fallbacks` at runtime. |
+| ZCode | v3.18.2 says sending prompts the user to reselect a model when the selected model is unavailable. It does not document automatic cross-model child-agent failover. | The only writer-verified tuple is GLM-5.3-Flash/max; no automatic fallback implemented here. |
+| DeepSeek Harness | Third-party providers are supported. Its optional `dsh-llm-retry` policy retries eligible failed model requests on the configured provider route; this is request retry, not evidence of cross-model child failover. | No model writer or child-agent adapter. |
+| WorkBuddy CN / WorkBuddy Enterprise | Custom models and task-routed `Auto` are documented. Enterprise/CodeBuddy Code subagent `fallback-main` handles a configured model that is disabled or unknown locally by using the main conversation model; the docs do not describe transient service errors as a cross-model retry. Treat that as model-resolution fallback for the documented client, not proof for every WorkBuddy Desktop surface. | No verified writer or child-agent adapter. |
+| WorkBuddy AI international | Custom model services are supported. `Auto` allocates models by the service routing policy, and custom models do not necessarily participate in `Auto`; troubleshooting asks users to switch models for model-side errors. Public docs do not establish pinned-child failover. | No verified writer or child-agent adapter; CN and INTL are separate product surfaces. |
+| CodeBuddy CLI | v2.134.0 documents retries before generation for selected failures and direct fallback-model switching on quota exhaustion; v2.148.0 narrows which 429 conditions retry versus switch. This versioned CLI behavior does not establish WorkBuddy Desktop or every subagent's behavior. | Not controlled by this repository. |
+| Antigravity | Its Orchestrator can automatically pair planner and executor models and return control to the planner when execution hits friction; this is task orchestration, not model-unavailable failover. The CLI also retries selected transient API errors. A `/swarm` worker that exhausts quota pauses instead of retrying and needs a new board post, model switch or message to resume. | No exact-tuple writer or model failover adapter. |
+
+So a host may retry a request, route a request in `Auto`, or resume a quota-paused worker after an explicit event; these behaviors do not imply a universal cross-model fallback. In this repository, `fallbacks` are parent-readable reselection candidates and never auto-run. During planning, `-AvailablePreset` can exclude an unavailable model before dispatch. Restricted-pool resolution selects the first eligible preset in the active pool if a slot default is excluded. To select a specific alternate for remaining work, choose its exact tuple role. A different model may share the same quota or gateway.
 
 ## Projection, proof and rollback
 
@@ -101,7 +134,7 @@ Resolve is offline policy evidence. Plan/Apply use `codex debug models` for the 
 ## Controlled launcher
 
 ```powershell
-pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -Model deepseek-v4.1-flash -Effort max -Plan
+pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot bounded_implementation -Model glm-5.3-flash -Effort xhigh -Plan
 pwsh -NoProfile -File ./Start-ModelSlot.ps1 -Slot standard_review -Model gemini-3.8-flash-high -Effort high -Plan
 ```
 
@@ -111,4 +144,4 @@ The launcher disables nested delegation and accepts explicit scope through `-Pro
 
 Repository proof uses `Test-ModelPreset.ps1` (also wrapped by `tests/Unit/ModelPreset.Tests.ps1`); this independent tool is outside the main CLI build. `repo_verified -> filesystem_projected -> host_loaded -> live_accepted` remain separate claims. Stop once the requested boundary is proven.
 
-Official OpenAI documentation checked 2026-10-25: [subagents and custom-model precedence](https://learn.chatgpt.com/docs/agent-configuration/subagents). Current [Gemini Flash documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) positions it for long-horizon software engineering; [DeepSeek's release](https://www.deepseek.com/en/news/deepseek-v4-1-flash/) confirms WorkBuddy integration. WorkBuddy's host catalog can therefore include partner models; own-host availability is not the same as vendor-only manufacture. A [community Codex report](https://github.com/openai/codex/issues/37237) documents encrypted-task loss on custom providers, but is historical supporting evidence, not proof for every current client. Other hosts' exact lifecycle and failure behavior require current host evidence.
+Official sources checked 2026-11-21: [OpenAI model selection](https://developers.openai.com/api/docs/guides/model-selection), [Z.ai GLM-5.3-Flash release](https://z.ai/blog/glm-5.3-flash), [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash), [ZCode model configuration](https://zcode.z.ai/en/docs/configuration) and [release notes](https://zcode.z.ai/en/changelog), [WorkBuddy CN custom-model configuration](https://cloud.tencent.com/document/product/1831/134445) and [subagent configuration](https://cloud.tencent.com/document/product/1831/137015), [WorkBuddy AI international model configuration](https://intl.cloud.tencent.com/document/product/1316/84496), [CodeBuddy CLI v2.134.0](https://www.codebuddy.ai/docs/cli/release-notes/v2.134.0) and [v2.148.0 release notes](https://www.codebuddy.ai/docs/cli/release-notes/v2.148.0), [DeepSeek Harness provider guide](https://deepseek-harness.github.io/deepseek-harness/en/guide/providers) and [retry policy source](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm/src/retry-policy.ts), [Antigravity model selection and plan availability](https://antigravity.google/docs/models/), [retry changelog](https://antigravity.google/changelog), and [Swarm quota behavior](https://antigravity.google/docs/swarm/). These links describe product guidance and implementation surfaces; they do not prove this repository has an adapter or live acceptance for those hosts.
