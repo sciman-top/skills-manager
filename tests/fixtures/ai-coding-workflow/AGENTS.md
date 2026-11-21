@@ -4,8 +4,8 @@ This is a disposable PowerShell 7 project when copied to its own workspace.
 Do not repair the checked-in fixture inside skills-manager/tests/fixtures.
 Source of truth: Labels.ps1. Check: pwsh -NoProfile -File Test-Labels.ps1.
 The check executes only Labels.ps1 from this fixture root and rejects source
-paths outside it.
-
+paths outside it. Without -ProbeDirectory, its probe is created and removed
+below this root.
 `New-LabelFile` writes two caller-provided labels under `ProbeDirectory`, and
 `Remove-LabelFile` deletes that file. The check inspects the content and
 verifies cleanup without deleting caller-owned directories.
@@ -14,6 +14,8 @@ Get-NormalizedLabels must skip null/blank inputs, trim labels, remove duplicates
 using ordinal case-insensitive comparison, and preserve first occurrence order
 and the first trimmed spelling. Internal whitespace remains significant.
 Its caller collects output using @(...) for empty, single and multiple labels.
+Each run writes its probe receipt path to stdout and distinguishes observed
+behavior from skipped probes; read that receipt, never rely on another run's.
 Do not mutate caller inputs; repeated normalization must give the same result.
 
 Only Labels.ps1 may be edited. Do not change tests, rules or external files.

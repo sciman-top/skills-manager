@@ -301,10 +301,23 @@ Describe 'Empty shard fixture' {
         $fixture = Join-Path $repoRoot 'tests\fixtures\ai-coding-workflow'
         $outside = Join-Path $TestDrive 'outside.ps1'
         Copy-Item -LiteralPath (Join-Path $fixture 'Labels.ps1') -Destination $outside
-        $output = @(& pwsh -NoProfile -File (Join-Path $fixture 'Test-Labels.ps1') -SourcePath $outside *>&1)
+        $fixtureCopy = Join-Path $TestDrive 'pinned-fixture'
+        Copy-Item -Path $fixture -Destination $fixtureCopy -Recurse
+        $output = @(& pwsh -NoProfile -File (Join-Path $fixtureCopy 'Test-Labels.ps1') -SourcePath $outside *>&1)
         $exitCode = $LASTEXITCODE
         $exitCode | Should -Not -Be 0
         ($output -join "`n") | Should -Match 'Acceptance source must be in the disposable fixture root'
+        $receiptLine = @($output | ForEach-Object { [string]$_ }) | Where-Object { $_ -like 'receipt=*' } | Select-Object -Last 1
+        $receiptLine | Should -Not -BeNullOrEmpty
+        $receiptPath = $receiptLine.Substring('receipt='.Length).Trim()
+        try {
+            $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            $receipt.status | Should -Be 'failed'
+            $receipt.failure_kind | Should -Be 'evaluator'
+        }
+        finally {
+            if (Test-Path -LiteralPath $receiptPath) { Remove-Item -LiteralPath $receiptPath -Force }
+        }
     }
 
     It 'aggregates a failed shard and preserves its failure diagnostic' {
