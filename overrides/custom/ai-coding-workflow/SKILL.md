@@ -6,8 +6,8 @@ description: Complete implementation, bug-fix, refactor, and full-stack coding t
 # AI coding workflow
 
 Minimize delivery, rework and maintenance cost within goal, compatibility and
-asset boundaries. Prefer host-native capabilities and existing functions over new
-layers: every added file, layer, gate or dependency needs a caller, a
+asset boundaries. Prefer host-native capabilities and existing functions over
+new layers: every added file, layer, gate or dependency needs a caller, a
 demonstrated gap and minimum proof; temporary measures need retirement.
 
 ## Spend context
@@ -32,29 +32,28 @@ versions, generated files and callers. Use source, help or official docs;
 never reconstruct APIs, config or versions from memory.
 Read only in-scope source; do not import another task's implementation.
 Isolate acceptance inputs.
+
 ## Shape the task before coding
 
 Turn an underspecified request into a short contract before touching code:
 
 - state the user-visible outcome, affected entrypoints and non-goals;
-- identify the current behavior and one concrete failure, example or acceptance
-  case; if none exists, add a disposable reproduction rather than guessing;
+- identify current behavior and one concrete failure, example or acceptance
+  case; if none, use a disposable reproduction;
 - split one vertical slice at dependency boundaries (producer/consumer, UI/API,
   or service/data). Use explicit coverage slices when validating an existing
-  contract or a cross-cutting change; each needs a known caller, an unchanged
-  write set during parallel work, and independent proof;
+  contract or a cross-cutting change; each needs a known caller, disjoint writes
+  and independent proof;
 - record assumptions and ask only when answers change scope, safety or
-  compatibility; otherwise choose the smallest reversible default and report it.
-  Expected results come from the request or reference contract. Keep checks
-  outside edit scope.
-
+  compatibility; otherwise choose the smallest reversible default.
+  Expected results come from the request or reference contract. Checks stay outside edits.
 
 ## Choose the lightest path
 
 - **tiny/direct**: clear local change; inspect, edit and run focused proof.
-- **normal**: meaningful uncertainty; explore, plan, implement verifiable slices.
+- **normal**: meaningful uncertainty; plan and implement verifiable slices.
 - **high-risk**: security, data, migration, public contract, deployment or
-  external state; add safeguards, backup/rollback and proportionate proof.
+  external state; add safeguards, rollback and proportionate proof.
 
 Skip formal plans for clear, low-risk changes; treat permission, auth and data
 edits as high-risk. Continue authorized goals and explain write-set changes.
@@ -63,8 +62,8 @@ Preview/dry-run external/host writes; retain receipts and rollback/compensation 
 ## Implement and verify
 
 - **Build narrow and safe**: reuse entrypoints and checks; preserve unrelated
-  dirty worktree changes. Start with one narrow slice across the needed
-  UI/API/service/data boundaries; finish every contract-required consumer. Add
+  dirty worktree changes. Start with one narrow slice across UI/API/service/data
+  boundaries; finish every contract-required consumer. Add
   dependencies only for a current need via the repo's package manager and lockfile.
   For API, schema, or data changes, trace every known consumer and keep
   migration rollback. Defend real trust/data
@@ -72,7 +71,9 @@ Preview/dry-run external/host writes; retain receipts and rollback/compensation 
   on the trusted side, and review dependency provenance. Fallbacks or retries
   need explicit triggers, budgets and observable receipts.
 - **Verify real behavior**: derive expected results from requirements, examples
-  or an external contract, not just the implementation.
+  or an external contract. A discovered test, evaluator or callable is not
+  execution evidence: exercise the affected public entrypoint or artifact; a
+  skipped probe cannot close it.
   Tests must not only mirror mocks, implementation details, or brittle
   change-detector constants and copy — name the concrete break a test catches,
   and confirm it detects the old failure when practical. For a reported defect,
@@ -80,7 +81,7 @@ Preview/dry-run external/host writes; retain receipts and rollback/compensation 
   Match checks to changed behavior: UI needs rendered interaction at the target
   viewport/reference plus loading/empty/error and submit/keyboard states; APIs
   need caller compatibility and error responses; data needs representative
-  values and invariants; performance needs comparable before/after numbers.
+  values/invariants; performance needs comparable before/after numbers.
   Never weaken assertions, hide errors or delete protection to pass. Reuse
   valid evidence; strict TDD, coverage, full suites and independent review
   require a request, contract or affected risk.
