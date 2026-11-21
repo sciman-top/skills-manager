@@ -5,6 +5,15 @@ param(
     [string]$ProbeDirectory
 )
 
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+$relativePath = [IO.Path]::GetRelativePath($repoRoot, $PSScriptRoot).Replace('\', '/')
+if ((Test-Path -LiteralPath (Join-Path $repoRoot 'skills.json') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $repoRoot 'skills.ps1') -PathType Leaf) -and
+    $relativePath -eq 'tests/fixtures/ai-coding-workflow') {
+    Write-Error 'Refusing to run the checked-in acceptance fixture. Copy it to a disposable workspace first.'
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
 $probeReceipt = Join-Path $PSScriptRoot '.probe-receipt.json'
 [IO.File]::Delete($probeReceipt)

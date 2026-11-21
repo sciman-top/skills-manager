@@ -2,6 +2,7 @@
 
 This is a disposable PowerShell 7 project when copied to its own workspace.
 Do not repair the checked-in fixture inside skills-manager/tests/fixtures.
+The check refuses the checked-in fixture path before creating a receipt.
 Source of truth: Labels.ps1. Check: pwsh -NoProfile -File Test-Labels.ps1.
 The check executes only Labels.ps1 from this fixture root and rejects source
 paths outside it. Without -ProbeDirectory, its probe is created and removed
