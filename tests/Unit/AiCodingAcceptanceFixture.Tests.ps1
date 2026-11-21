@@ -22,6 +22,28 @@ BeforeAll {
 }
 
 Describe 'Reusable AI coding acceptance fixture' {
+    It 'refuses the checked-in fixture path before writing a receipt' {
+        $source = Join-Path $fixture 'Labels.ps1'
+        $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $sourceLikeRoot = Join-Path $TestDrive 'repo/tests/fixtures/ai-coding-workflow'
+        Copy-Item -Path $fixture -Destination $sourceLikeRoot -Recurse
+        [IO.File]::WriteAllText((Join-Path $TestDrive 'repo/skills.ps1'), '', [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $TestDrive 'repo/skills.json'), '{}', [Text.UTF8Encoding]::new($false))
+        $receipt = Join-Path $sourceLikeRoot '.probe-receipt.json'
+        if (Test-Path -LiteralPath $receipt -PathType Leaf) {
+            Remove-Item -LiteralPath $receipt -Force
+        }
+
+        $output = & $pwshPath -NoProfile -File (Join-Path $sourceLikeRoot 'Test-Labels.ps1') 2>&1
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 1
+        ($output -join "`n") | Should -Match 'Refusing to run the checked-in acceptance fixture'
+        Test-Path -LiteralPath $receipt -PathType Leaf | Should -BeFalse
+        (Get-FileHash -LiteralPath (Join-Path $sourceLikeRoot 'Labels.ps1') -Algorithm SHA256).Hash |
+            Should -Be $sourceHash
+    }
+
     It 'keeps the checked-in baseline defective and detects its case comparison failure' {
         $source = Join-Path $fixture 'Labels.ps1'
         $before = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
