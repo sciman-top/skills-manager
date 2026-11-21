@@ -41,6 +41,8 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?is)Start with one narrow slice'
         $skill | Should -Match '(?is)existing\s+contract or a cross-cutting change.*independent proof'
         $skill | Should -Match '(?is)Tests must not only mirror mocks'
+        $skill | Should -Match '(?is)discovered test, evaluator or callable is not\s+execution evidence'
+        $skill | Should -Match '(?is)skipped probe cannot close it'
         $skill | Should -Match '(?is)change-detector'
         $skill | Should -Match '(?is)old failure.*before changing behavior'
         $skill | Should -Match '(?is)API, schema, or data changes.*every known consumer.*migration rollback'
