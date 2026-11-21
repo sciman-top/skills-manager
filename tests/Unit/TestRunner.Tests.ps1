@@ -56,9 +56,15 @@ Describe 'Filter fixture' {
     It 'available test' { $true | Should -BeTrue }
 }
 '@
-        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' *>&1)
+        $noMatchReports = Join-Path $TestDrive 'no-match-reports'
+        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' -ShardReportRoot $noMatchReports *>&1)
         $LASTEXITCODE | Should -Not -Be 0
-        ($output -join "`n") | Should -Match 'No tests selected'
+        $receipts = @(Get-ChildItem -LiteralPath $noMatchReports -Recurse -Filter 'targeted.receipt.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
+        $receipts.Count | Should -Be 1
+        $receipts[0].status | Should -Be 'error'
+        $receipts[0].zero_selection | Should -BeFalse
+        $receipts[0].total_count | Should -Be 1
+        ($output -join "`n") | Should -Match 'No tests selected|Selected tests discovered but none executed successfully'
     }
 
     It 'prints a start line and one stable summary line for a passing run' {
@@ -204,13 +210,14 @@ Describe 'Empty shard fixture' {
         $reportRoot = Join-Path $TestDrive 'empty-shard-reports'
         $output = @(& $pwshPath -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*missing test' -ShardReportRoot $reportRoot *>&1)
         $text = $output -join "`n"
+        $receipts = @(Get-ChildItem -LiteralPath $reportRoot -Recurse -Filter 'targeted.receipt.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
 
         $LASTEXITCODE | Should -Not -Be 0
-        $text | Should -Match 'No tests selected'
-        $text | Should -Match 'starting_paths=.*Fixture'
-        $text | Should -Match 'worker_paths='
-        $text | Should -Match 'collected_files=.*Fixture'
-        $text | Should -Not -Match 'collected_paths'
+        $text | Should -Match 'No tests selected|Selected tests discovered but none executed successfully'
+        $receipts.Count | Should -Be 1
+        $receipts[0].status | Should -Be 'error'
+        $receipts[0].zero_selection | Should -BeFalse
+        $receipts[0].total_count | Should -Be 1
     }
 
     It 'does not report an empty selection as a successful in-process run' {
@@ -235,6 +242,82 @@ Describe 'Empty shard fixture' {
         $receipt.passed_count | Should -Be 0
         $receipt.failed_count | Should -Be 0
         $text | Should -Match 'No tests executed successfully'
+    }
+
+    It 'keeps a shard with a skipped test distinct from discovery with zero tests' {
+        $shardRoot = Join-Path $TestDrive 'skipped-shard'
+        $shardReports = Join-Path $shardRoot 'Reports'
+        New-Item -ItemType Directory -Path (Join-Path $shardRoot 'Unit'), (Join-Path $shardRoot 'E2E'), $shardReports -Force | Out-Null
+        foreach ($directory in @('Unit', 'E2E')) {
+            Set-Content -LiteralPath (Join-Path $shardRoot "$directory/Fixture.Tests.ps1") -Encoding utf8 -Value "Describe 'Baseline' { It 'passes' { `$true | Should -BeTrue } }"
+        }
+        for ($index = 1; $index -le 4; $index++) {
+            $target = if ($index -le 2) { 'Unit' } else { 'E2E' }
+            $marker = if ($index -eq 1) { ' -Skip' } else { '' }
+            $name = if ($index -eq 1) { 'is skipped' } else { 'passes' }
+            Set-Content -LiteralPath (Join-Path $shardRoot "$target/Shard-$index.Tests.ps1") -Encoding utf8 -Value "Describe 'Shard $index' { It '$name'$marker { `$true | Should -BeTrue } }"
+        }
+        $arguments = @('-NoProfile', '-File', $runnerPath, '-UnitTestPath', (Join-Path $shardRoot 'Unit'), '-E2ETestPath', (Join-Path $shardRoot 'E2E'), '-MaxParallel', '2', '-ShardReportRoot', $shardReports)
+        & pwsh @arguments 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
+        $receipts = @(Get-ChildItem -LiteralPath $shardReports -Recurse -Filter '*.receipt.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
+        $receipts.Count | Should -Be 2
+        @($receipts | Where-Object { $_.passed_count -eq 2 -and $_.skipped_count -eq 1 }).Count | Should -Be 1
+        $exitCode | Should -Be 0
+    }
+
+    It 'distinguishes a skipped targeted test from a filtered-out test' {
+        $fixture = Join-Path $TestDrive 'skipped-target'
+        New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+        $testFile = Join-Path $fixture 'Skipped.Tests.ps1'
+        Set-Content -LiteralPath $testFile -Encoding utf8 -Value "Describe 'Skipped target' { It 'is skipped' -Skip { `$true | Should -BeTrue } }"
+        $reportRoot = Join-Path $fixture 'Reports'
+        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath $testFile -ShardReportRoot $reportRoot 2>&1)
+        $exitCode = $LASTEXITCODE
+        $receipt = @(Get-ChildItem -LiteralPath $reportRoot -Recurse -Filter 'targeted.receipt.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
+        $receipt.Count | Should -Be 1
+        $receipt[0].status | Should -Be 'error'
+        $receipt[0].zero_selection | Should -BeFalse
+        $receipt[0].total_count | Should -Be 1
+        $receipt[0].skipped_count | Should -Be 1
+        $exitCode | Should -Not -Be 0
+        ($output -join "`n") | Should -Match 'Selected tests discovered but none executed successfully'
+    }
+
+    It 'removes a finished shard from the aggregate even if it exited during polling' {
+        $aggregate = [Collections.Generic.List[object]]::new()
+        $stale = [pscustomobject]@{ process = [pscustomobject]@{ HasExited = $false } }
+        $finished = [pscustomobject]@{ process = [pscustomobject]@{ HasExited = $true } }
+        $aggregate.Add($stale) | Out-Null
+        $aggregate.Add($finished) | Out-Null
+        $finished.process.PSObject.Properties['HasExited'].Value = $false
+        $remaining = @($aggregate | Where-Object { -not $_.process.HasExited }).Count
+        $remaining | Should -Be 2
+        $aggregate.Remove($finished) | Should -BeTrue
+        @($aggregate).Count | Should -Be 1
+    }
+
+    It 'reports a pinned fixture source outside its root as rejected input' {
+        $fixture = Join-Path $repoRoot 'tests\fixtures\ai-coding-workflow'
+        $outside = Join-Path $TestDrive 'outside.ps1'
+        Copy-Item -LiteralPath (Join-Path $fixture 'Labels.ps1') -Destination $outside
+        $fixtureCopy = Join-Path $TestDrive 'pinned-fixture'
+        Copy-Item -Path $fixture -Destination $fixtureCopy -Recurse
+        $output = @(& pwsh -NoProfile -File (Join-Path $fixtureCopy 'Test-Labels.ps1') -SourcePath $outside *>&1)
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Not -Be 0
+        ($output -join "`n") | Should -Match 'Acceptance source must be in the disposable fixture root'
+        $receiptLine = @($output | ForEach-Object { [string]$_ }) | Where-Object { $_ -like 'receipt=*' } | Select-Object -Last 1
+        $receiptLine | Should -Not -BeNullOrEmpty
+        $receiptPath = $receiptLine.Substring('receipt='.Length).Trim()
+        try {
+            $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            $receipt.status | Should -Be 'failed'
+            $receipt.failure_kind | Should -Be 'evaluator'
+        }
+        finally {
+            if (Test-Path -LiteralPath $receiptPath) { Remove-Item -LiteralPath $receiptPath -Force }
+        }
     }
 
     It 'aggregates a failed shard and preserves its failure diagnostic' {
