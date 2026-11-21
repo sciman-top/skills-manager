@@ -3,6 +3,8 @@
 This is a disposable PowerShell 7 project when copied to its own workspace.
 Do not repair the checked-in fixture inside skills-manager/tests/fixtures.
 Source of truth: Labels.ps1. Check: pwsh -NoProfile -File Test-Labels.ps1.
+The check executes only Labels.ps1 from this fixture root and rejects source
+paths outside it.
 
 `New-LabelFile` writes two caller-provided labels under `ProbeDirectory`, and
 `Remove-LabelFile` deletes that file. The check inspects the content and

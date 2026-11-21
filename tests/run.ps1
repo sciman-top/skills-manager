@@ -298,7 +298,7 @@ if (-not [string]::IsNullOrWhiteSpace($ShardJobPath)) {
         }
         elseif ([int]$result.PassedCount -gt 0) { 'passed' }
         else { 'error' }
-        if ($receipt.status -eq 'error') { $receipt.zero_selection = $true; $receipt.error = 'Selected tests discovered but none executed successfully.' }
+        if ($receipt.status -eq 'error') { $receipt.error = 'Selected tests discovered but none executed successfully.' }
     }
     catch {
         $receipt.status = 'error'
@@ -348,7 +348,7 @@ if (-not [string]::IsNullOrWhiteSpace($TargetedJobPath)) {
         }
         elseif ([int]$result.PassedCount -gt 0) { 'passed' }
         else { 'error' }
-        if ($receipt.status -eq 'error') { $receipt.zero_selection = $true; $receipt.error = 'Selected tests discovered but none executed successfully.' }
+        if ($receipt.status -eq 'error') { $receipt.error = 'Selected tests discovered but none executed successfully.' }
     }
     catch {
         $receipt.status = 'error'
@@ -540,7 +540,12 @@ if ($shardCandidates.Count -gt $MaxParallel) {
 
     $suiteTimer = [Diagnostics.Stopwatch]::StartNew()
     $shardTimedOut = $false
-    while (@($jobs | Where-Object { -not $_.process.HasExited }).Count -gt 0) {
+    while ($true) {
+        $running = @($jobs | Where-Object { -not $_.process.HasExited })
+        if ($running.Count -eq 0) { break }
+        foreach ($job in $running) {
+            if ($job.process.HasExited) { $null = $jobs.Remove($job) }
+        }
         if ($suiteTimer.Elapsed.TotalSeconds -gt $ShardTimeoutSeconds) { $shardTimedOut = $true; break }
         Start-Sleep -Milliseconds 200
     }

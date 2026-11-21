@@ -6,6 +6,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
+if ((Get-Item -LiteralPath $SourcePath).Directory.FullName -ne $PSScriptRoot) {
+    throw 'Acceptance source must be in the disposable fixture root.'
+}
 . $SourcePath
 $createdProbeDirectory = [string]::IsNullOrWhiteSpace($ProbeDirectory)
 if ($createdProbeDirectory) {

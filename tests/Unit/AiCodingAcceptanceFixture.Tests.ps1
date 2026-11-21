@@ -18,7 +18,8 @@ Describe 'Reusable AI coding acceptance fixture' {
     }
 
     It 'accepts a conforming implementation supplied from a disposable directory' {
-        $source = Join-Path $TestDrive 'Labels.ps1'
+        $fixtureCopy = Join-Path $TestDrive 'disposable-fixture'
+        Copy-Item -Path $fixture -Destination $fixtureCopy -Recurse
         $implementation = @'
 function Get-NormalizedLabels {
     param([AllowNull()][AllowEmptyCollection()][string[]]$Labels)
@@ -49,8 +50,8 @@ function Remove-LabelFile {
 }
 '@
         $implementation = $implementation.TrimStart("`r", "`n")
-        [IO.File]::WriteAllText($source, $implementation, [Text.UTF8Encoding]::new($false))
-        $output = & $pwshPath -NoProfile -File $runner -SourcePath $source 2>&1
+        [IO.File]::WriteAllText((Join-Path $fixtureCopy 'Labels.ps1'), $implementation, [Text.UTF8Encoding]::new($false))
+        $output = & $pwshPath -NoProfile -File (Join-Path $fixtureCopy 'Test-Labels.ps1') 2>&1
         $exitCode = $LASTEXITCODE
         $exitCode | Should -Be 0
         ($output -join "`n") | Should -Match 'cases=11 failed=0'
@@ -59,9 +60,11 @@ function Remove-LabelFile {
 
     It 'rejects a hardcoded answer that only satisfies the demonstrated failing example' {
         $source = Join-Path $TestDrive 'Hardcoded.ps1'
+        $fixtureCopy = Join-Path $TestDrive 'disposable-fixture-hardcoded'
+        Copy-Item -Path $fixture -Destination $fixtureCopy -Recurse
         'function Get-NormalizedLabels { param($Labels) @("Alpha", "BETA") }' |
-            Set-Content -LiteralPath $source -Encoding utf8
-        $output = & $pwshPath -NoProfile -File $runner -SourcePath $source
+            Set-Content -LiteralPath (Join-Path $fixtureCopy 'Labels.ps1') -Encoding utf8
+        $output = & $pwshPath -NoProfile -File (Join-Path $fixtureCopy 'Test-Labels.ps1') 2>&1
         $exitCode = $LASTEXITCODE
         $exitCode | Should -Be 1
         ($output -join "`n") | Should -Match 'FAIL empty:'
@@ -121,10 +124,14 @@ Describe 'Second selected test' {
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $probe = Join-Path $root 'caller-owned'
         $source = Join-Path $root 'Labels.ps1'
+        $fixtureCopy = Join-Path $root 'disposable-fixture'
+        New-Item -ItemType Directory -Path $fixtureCopy -Force | Out-Null
+        Copy-Item -Path (Join-Path $fixture '*') -Destination $fixtureCopy -Recurse
         New-Item -ItemType Directory -Path $probe -Force | Out-Null
         $callerMarker = Join-Path $probe 'keep.me'
         [IO.File]::WriteAllText($callerMarker, 'caller-owned', [Text.UTF8Encoding]::new($false))
-        Copy-Item -LiteralPath (Join-Path $fixture 'old-cleanup/Labels.ps1') -Destination $source
+        Copy-Item -LiteralPath (Join-Path $fixture 'old-cleanup/Labels.ps1') -Destination (Join-Path $fixtureCopy 'Labels.ps1')
+        Copy-Item -LiteralPath (Join-Path $fixtureCopy 'Labels.ps1') -Destination $source
         $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
         try {
             $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -132,7 +139,7 @@ Describe 'Second selected test' {
             $startInfo.UseShellExecute = $false
             $startInfo.RedirectStandardOutput = $true
             $startInfo.RedirectStandardError = $true
-            foreach ($argument in @('-NoProfile', '-File', $runner, '-SourcePath', $source, '-ProbeDirectory', $probe)) {
+            foreach ($argument in @('-NoProfile', '-File', (Join-Path $fixtureCopy 'Test-Labels.ps1'), '-ProbeDirectory', $probe)) {
                 $startInfo.ArgumentList.Add($argument)
             }
             $process = [Diagnostics.Process]::Start($startInfo)

@@ -31,6 +31,7 @@ Verify mutable facts before designing: branch, package manager, dependency
 versions, generated files and callers. Use source, types, local help or current
 official docs; never reconstruct APIs, configuration keys, package versions or
 framework behavior from memory.
+Read only in-scope source; do not import another task's implementation.
 
 ## Shape the task before coding
 
@@ -45,6 +46,9 @@ Turn an underspecified request into a short contract before touching code:
   write set during parallel work, and independent proof;
 - record open assumptions and ask only when the answer changes scope, safety or
   compatibility. Otherwise choose the smallest reversible default and report it.
+
+Expected results come from the request or reference contract, not the candidate.
+Keep checks outside its editable surface; never rewrite them to fit it.
 
 ## Choose the lightest path
 
@@ -102,7 +106,8 @@ receipts and rollback/compensation when supported.
   and relevant result. Keep `repo_verified`, `filesystem_projected`,
   `host_loaded`, and `live_accepted` separate; lower evidence never proves a
   higher boundary. Observe affected UI/runtime/external behavior directly; if a
-  check cannot observe the claimed boundary, report it as unverified.
+  check cannot observe the claimed boundary, report it as unverified. Diagnose a
+  failed or interrupted check before calling it a defect.
   Redact secrets from logs, screenshots, receipts, commands, and copied
   payloads before sharing them.
 

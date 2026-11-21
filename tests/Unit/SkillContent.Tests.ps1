@@ -53,6 +53,7 @@ Describe 'Checked-in skill content' {
         $skill | Should -Match '(?is)Redact secrets from logs.*screenshots.*receipts'
         $skill | Should -Match '(?is)Verify candidate findings against callers, guards and tests'
         $skill | Should -Match '(?i)Report gaps, not style preferences'
+        $skill | Should -Match '(?is)Expected results come from the request or reference contract'
     }
 
     It 'keeps patched core review and verification skills grounded in callers, baseline separation, and pipeline-safe evidence' {
