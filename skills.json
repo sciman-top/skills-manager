@@ -77,8 +77,14 @@
           ]
         },
         "antigravity": {
-          "default_profile": "core-ops",
-          "exclude": []
+          "default_profile": "core-lean",
+          "exclude": [
+            "docx",
+            "pptx",
+            "skill-creator",
+            "web-artifacts-builder",
+            "xlsx"
+          ]
         },
         "workbuddy": {
           "default_profile": "core-ops",
