@@ -184,7 +184,8 @@ Describe 'Skill projection profiles' {
         foreach ($hostName in @('antigravity', 'workbuddy', 'dsh')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.host | Should -Be $hostName
-            $selection.profile | Should -Be $(if ($hostName -eq 'dsh') { 'core-lean' } else { 'core-ops' })
+            $expectedProfile = if ($hostName -in @('antigravity', 'dsh')) { 'core-lean' } else { 'core-ops' }
+            $selection.profile | Should -Be $expectedProfile
             @($selection.included_names).Count | Should -BeGreaterThan 0
         }
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName notepad } | Should -Throw '*'
