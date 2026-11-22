@@ -1,0 +1,19 @@
+# Generated and materialized payloads
+agent/
+vendor/
+reports/
+.worktrees/
+.txn/
+
+# Build & dependency directories
+node_modules/
+dist/
+build/
+
+# Local caches and logs
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+.env
