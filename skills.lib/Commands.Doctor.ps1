@@ -820,6 +820,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
                 foreach ($warning in @($projectionCheck.warnings)) { Write-Host ("   - {0}" -f $warning) -ForegroundColor Yellow }
             }
             $pass = $false
+            $report.summary.errors += "skill_projection_drift"
         }
         elseif (-not $opts.json) {
             Write-Host ("✅ Skill projection: {0}" -f $projectionCheck.detail) -ForegroundColor Green
@@ -829,6 +830,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         $report.checks.skill_projection = [ordered]@{ ok = $false; warnings = @([string]$_.Exception.Message); detail = "" }
         if (-not $opts.json) { Write-Host "❌ Skill projection: 检查失败" -ForegroundColor Red }
         $pass = $false
+        $report.summary.errors += "skill_projection_drift"
     }
 
     # 2.6 Working tree snapshot (report-vs-reality anchor for delegated runs)
