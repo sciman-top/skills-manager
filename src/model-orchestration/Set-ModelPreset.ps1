@@ -737,12 +737,14 @@ if ($ExecutionHost -ceq 'codex' -and $managedCodexAgentNames.Count -gt 0) {
 # profile behind, or a stale default tuple keeps loading on the host. Unmarked files
 # stay untouched (fail closed).
 if ($ExecutionHost -ceq 'codex' -and $profileNames.Count -gt 0) {
-    foreach ($staleProfile in @(Get-ChildItem -LiteralPath $CodexRoot -Filter '*.config.toml' -File)) {
-        if ($staleProfile.Name -cnotmatch '\.config\.toml$') { continue }
-        $staleProfileId = $staleProfile.Name.Substring(0, $staleProfile.Name.Length - '.config.toml'.Length)
-        if ($staleProfileId -cin @($profileNames.Values)) { continue }
-        if (([IO.File]::ReadAllText($staleProfile.FullName)) -cnotmatch [regex]::Escape($codexManagedMarker)) { continue }
-        AddFileDelete $staleProfile.FullName
+    if (Test-Path -LiteralPath $CodexRoot -PathType Container) {
+        foreach ($staleProfile in @(Get-ChildItem -LiteralPath $CodexRoot -Filter '*.config.toml' -File)) {
+            if ($staleProfile.Name -cnotmatch '\.config\.toml$') { continue }
+            $staleProfileId = $staleProfile.Name.Substring(0, $staleProfile.Name.Length - '.config.toml'.Length)
+            if ($staleProfileId -cin @($profileNames.Values)) { continue }
+            if (([IO.File]::ReadAllText($staleProfile.FullName)) -cnotmatch [regex]::Escape($codexManagedMarker)) { continue }
+            AddFileDelete $staleProfile.FullName
+        }
     }
 }
 $configPath = Join-Path $CodexRoot 'config.toml'
