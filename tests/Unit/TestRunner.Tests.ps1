@@ -289,6 +289,27 @@ Describe 'Empty shard fixture' {
         ($output -join "`n") | Should -Match 'Selected tests discovered but none executed successfully'
     }
 
+    It 'keeps a shard that exits during polling in the aggregate' {
+        $shardRoot = Join-Path $TestDrive 'exit-race'
+        $reports = Join-Path $TestDrive 'exit-race-reports'
+        $unit = Join-Path $shardRoot 'Unit'
+        $e2e = Join-Path $shardRoot 'E2E'
+        New-Item -ItemType Directory -Path $unit, $e2e -Force | Out-Null
+        for ($index = 1; $index -le 4; $index++) {
+            $target = if ($index -le 2) { $unit } else { $e2e }
+            Set-Content -LiteralPath (Join-Path $target "Shard-$index.Tests.ps1") -Encoding utf8 -Value "Describe 'Shard $index' { It 'passes' { `$true | Should -BeTrue } }"
+        }
+
+        $arguments = @('-NoProfile', '-File', $runnerPath, '-UnitTestPath', $unit, '-E2ETestPath', $e2e, '-MaxParallel', '2', '-ShardReportRoot', $reports)
+        $output = @(& pwsh @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $text = $output -join "`n"
+
+        $exitCode | Should -Be 0
+        $text | Should -Match 'Tests: total=4 passed=4 failed=0 skipped=0'
+        @(Get-ChildItem -LiteralPath $reports -Recurse -Filter 'shard-*.receipt.json' -File).Count | Should -Be 2
+    }
+
     It 'reports a pinned fixture source outside its root as rejected input' {
         $fixture = Join-Path $repoRoot 'tests\fixtures\ai-coding-workflow'
         $outside = Join-Path $TestDrive 'outside.ps1'

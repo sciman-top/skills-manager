@@ -536,9 +536,9 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     while ($true) {
         $running = @($jobs | Where-Object { -not $_.process.HasExited })
         if ($running.Count -eq 0) { break }
-        # Never remove exited jobs from $jobs: a shard that exits between the
-        # snapshot above and the old re-check was dropped from the list, its
-        # receipt was never aggregated, and a failed shard turned the run green.
+        # Never remove exited jobs from $jobs: a shard that exits after the
+        # snapshot would be dropped before the aggregation loop reads its
+        # receipt, and a failed shard could turn the run green.
         if ($suiteTimer.Elapsed.TotalSeconds -gt $ShardTimeoutSeconds) { $shardTimedOut = $true; break }
         Start-Sleep -Milliseconds 200
     }
