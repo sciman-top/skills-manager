@@ -611,7 +611,16 @@ function Get-CodexCatalog([string]$Path) {
         $errTask = $process.StandardError.BaseStream.CopyToAsync($errMem)
         if (-not $process.WaitForExit(30000)) { throw 'codex debug models timed out after 30 seconds.' }
         if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($outTask,$errTask), 2000)) { throw 'codex debug models output read timed out.' }
-        if ($process.ExitCode -ne 0) { throw "codex debug models failed (exit=$($process.ExitCode))." }
+        if ($process.ExitCode -ne 0) {
+            # The CLI's own stderr is the fastest route to the real cause (e.g.
+            # a strict-config rejection names the offending field); keep it
+            # bounded and single-line so the capability failure stays readable.
+            $errText = [Text.Encoding]::UTF8.GetString($errMem.ToArray()).Trim()
+            $errText = ($errText -replace '\r?\n', ' | ')
+            if ($errText.Length -gt 500) { $errText = $errText.Substring(0, 500) + '...[truncated]' }
+            if ([string]::IsNullOrWhiteSpace($errText)) { throw "codex debug models failed (exit=$($process.ExitCode))." }
+            throw ("codex debug models failed (exit={0}): {1}" -f $process.ExitCode, $errText)
+        }
         $output = [Text.Encoding]::UTF8.GetString($outMem.ToArray())
     }
     finally {
