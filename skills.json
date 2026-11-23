@@ -79,9 +79,17 @@
         "antigravity": {
           "default_profile": "core-lean",
           "exclude": [
+            "ant-design",
             "docx",
             "pptx",
+            "python-performance-optimization",
+            "python-testing-patterns",
             "skill-creator",
+            "slidev",
+            "supabase-postgres-best-practices",
+            "tailwind-design-system",
+            "vercel-react-best-practices",
+            "vite",
             "web-artifacts-builder",
             "xlsx"
           ]
