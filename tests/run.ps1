@@ -204,18 +204,11 @@ function Invoke-RepositoryPester {
             $selectedFilePaths.Add([IO.Path]::GetFullPath([string]$candidate)) | Out-Null
         }
     }
-    # A file selected explicitly by the caller remains a file even if its
-    # directory contains other tests. Expanding it would silently broaden the
-    # requested proof. Directory arguments and the default suite discover all
-    # their test files here.
-    $perFilePaths = if ($directoryPaths.Count -gt 0) {
-        @($directoryPaths | ForEach-Object {
-                Get-ChildItem -LiteralPath $_ -Recurse -Filter '*.Tests.ps1' -File | ForEach-Object { [IO.Path]::GetFullPath($_.FullName) }
-            } | Sort-Object -Unique)
-    }
-    else {
-        @($selectedFilePaths | Sort-Object -Unique)
-    }
+    # $selectedFilePaths already holds the union: directory arguments expanded
+    # to their test files plus explicitly listed files kept per-file. Dropping
+    # the explicit files when a directory argument is present would silently
+    # narrow the requested proof; expanding them would silently broaden it.
+    $perFilePaths = @($selectedFilePaths | Sort-Object -Unique)
     $singleRun = $perFilePaths.Count -eq 0
     $configuration = New-PesterConfiguration
     $configuration.Run.PassThru = $true
@@ -543,9 +536,9 @@ if ($shardCandidates.Count -gt $MaxParallel) {
     while ($true) {
         $running = @($jobs | Where-Object { -not $_.process.HasExited })
         if ($running.Count -eq 0) { break }
-        foreach ($job in $running) {
-            if ($job.process.HasExited) { $null = $jobs.Remove($job) }
-        }
+        # Never remove exited jobs from $jobs: a shard that exits between the
+        # snapshot above and the old re-check was dropped from the list, its
+        # receipt was never aggregated, and a failed shard turned the run green.
         if ($suiteTimer.Elapsed.TotalSeconds -gt $ShardTimeoutSeconds) { $shardTimedOut = $true; break }
         Start-Sleep -Milliseconds 200
     }

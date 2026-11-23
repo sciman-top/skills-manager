@@ -85,6 +85,29 @@ function Get-GuardedRel([string]$Token) {
     return ''
 }
 
+# Repo-relative path for any patch token (guarded or not); '' when unresolvable.
+function Get-RepoRelFromToken([string]$Token) {
+    if ([string]::IsNullOrWhiteSpace($Token)) { return '' }
+    try {
+        $p = $Token.Trim('"', "'")
+        $full = if ([IO.Path]::IsPathRooted($p)) { [IO.Path]::GetFullPath($p) } else { [IO.Path]::GetFullPath((Join-Path $root $p)) }
+        return [IO.Path]::GetRelativePath($root, $full).Replace('\', '/')
+    }
+    catch { return '' }
+}
+
+# Directory markers (trailing `/`) match by prefix; file markers match exactly,
+# so `build.ps1.bak` cannot unlock the generated bundle.
+function Test-SourceMarkerRel([string]$Rel, [string[]]$Markers) {
+    foreach ($marker in $Markers) {
+        if ($marker.EndsWith('/')) {
+            if ($Rel.StartsWith($marker, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        elseif ($Rel -ieq $marker) { return $true }
+    }
+    return $false
+}
+
 function Block([string]$Rel, [string]$Via) {
     $reason = "blocked: $Rel 是生成物或物化目录（$Via）。请修改 src/、overrides/ 或 rules/global 源，再运行 build.ps1 重建。"
     if ($script:DenyJsonMode) {
@@ -136,15 +159,12 @@ if (-not [string]::IsNullOrWhiteSpace($patch)) {
     if (@($ops).Count -eq 0) { exit 0 }
     $guardedOps = @($ops | Where-Object { Get-GuardedRel $_.path })
     if (@($guardedOps).Count -eq 0) { exit 0 }
-    $normalizedTargets = @($ops | ForEach-Object { $_.path.Replace('\', '/') })
-    $hasBundleSource = [bool](@($normalizedTargets | Where-Object {
-                $candidate = $_
-                [bool](@($bundleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
-            }).Count -gt 0)
-    $hasRuleSource = [bool](@($normalizedTargets | Where-Object {
-                $candidate = $_
-                [bool](@($ruleSourceMarkers | Where-Object { $candidate.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }))
-            }).Count -gt 0)
+    # Patch tokens may arrive as absolute paths or `./`-prefixed relative paths;
+    # resolve every token to a repo-relative path before marker matching, the
+    # same normalization Get-GuardedRel applies to guarded targets.
+    $normalizedTargets = @($ops | ForEach-Object { Get-RepoRelFromToken $_.path })
+    $hasBundleSource = [bool](@($normalizedTargets | Where-Object { Test-SourceMarkerRel $_ $bundleSourceMarkers }).Count -gt 0)
+    $hasRuleSource = [bool](@($normalizedTargets | Where-Object { Test-SourceMarkerRel $_ $ruleSourceMarkers }).Count -gt 0)
     foreach ($op in $guardedOps) {
         # 删除生成文件不需要同批源改动；新增/修改/移入必须带上对应源，否则就是手工改生成物。
         if ($op.op -ieq 'Delete File') { continue }

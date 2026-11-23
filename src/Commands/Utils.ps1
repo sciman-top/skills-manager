@@ -254,7 +254,7 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
-  机器消费请用 --out（显式 UTF-8），不要依赖 stdout 重定向的编码。
+  doctor 机器消费请用 --json（非 ASCII 以 \u 转义输出，不依赖控制台代码页）；--out 仅审查目标扫描、迁移等命令提供。
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
 通用参数：
