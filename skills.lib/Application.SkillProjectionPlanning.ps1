@@ -69,9 +69,13 @@ function Get-CodexExternalSkillInventory($ProjectionConfig) {
     return $result
 }
 
-function Get-SkillProjectionFiles([string]$RootPath) {
+function Get-SkillProjectionFiles([string]$RootPath, [string[]]$IncludedNames = @(), [bool]$manageLinkedProfiles = $false) {
     $files = [Collections.Generic.List[object]]::new()
     if ([string]::IsNullOrWhiteSpace($RootPath) -or -not (Test-Path -LiteralPath $RootPath -PathType Container)) { return @() }
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($IncludedNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
     foreach ($directory in @(Get-ChildItem -LiteralPath $RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
         if ($directory.Name -eq '.system') {
             foreach ($systemDirectory in @(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
@@ -81,7 +85,10 @@ function Get-SkillProjectionFiles([string]$RootPath) {
             continue
         }
         $skillFile = Join-Path $directory.FullName 'SKILL.md'
-        if (Test-Path -LiteralPath $skillFile -PathType Leaf) { $files.Add([pscustomobject]@{ file = $skillFile; dir = $directory.FullName; is_system = $false }) | Out-Null }
+        if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+            $selected = (-not $manageLinkedProfiles) -or $included.Count -eq 0 -or $included.Contains($directory.Name)
+            if ($selected) { $files.Add([pscustomobject]@{ file = $skillFile; dir = $directory.FullName; is_system = $false }) | Out-Null }
+        }
     }
     return @($files.ToArray())
 }
@@ -103,7 +110,7 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
     return Get-OperationSha256 ($parts.ToArray() -join "`n")
 }
 
-function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {
+function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '', [string[]]$IncludedNames = @(), [bool]$manageLinkedProfiles = $false) {
     $id = [string](Get-SkillProjectionObjectProperty $Source 'id')
     $rootPath = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $Source 'path')) $RepoRoot
     Need (Test-Path -LiteralPath $rootPath -PathType Container) ('skill_projection source root not found: {0}' -f $rootPath)
@@ -112,7 +119,7 @@ function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$R
     $platformsRaw = Get-SkillProjectionObjectProperty $Source 'platforms'
     $platforms = if ($null -eq $platformsRaw) { @('codex') } else { @($platformsRaw | ForEach-Object { [string]$_ }) }
     $entries = [Collections.Generic.List[object]]::new()
-    foreach ($item in @(Get-SkillProjectionFiles $rootPath)) {
+    foreach ($item in @(Get-SkillProjectionFiles $rootPath $IncludedNames $manageLinkedProfiles)) {
         $metadata = Read-SkillMetadata ([string]$item.file) -Observation
         $declaredName = ([string]$metadata.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($declaredName)) { $declaredName = Split-Path ([string]$item.dir) -Leaf }
@@ -144,13 +151,16 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     }
     $sources = Get-SkillProjectionObjectProperty $ProjectionConfig 'sources'
     Need ($null -ne $sources) 'skill_projection 缺少 sources'
+    $profileSelection = Get-SkillProjectionObjectProperty $ProjectionConfig 'resolved_projection_selection'
+    $manageLinkedProfiles = $null -ne $profileSelection -and -not [bool](Get-SkillProjectionObjectProperty $profileSelection 'include_all')
+    $managementIncludes = @(Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes' | ForEach-Object { [string]$_ })
     $all = [Collections.Generic.List[object]]::new()
     $sourceOrder = 0
     foreach ($source in @($sources)) {
         Need ($null -ne $source) 'skill_projection.sources 不能包含空值'
         Need (-not [string]::IsNullOrWhiteSpace([string](Get-SkillProjectionObjectProperty $source 'id'))) 'skill_projection source 缺少 id'
         Need (-not [string]::IsNullOrWhiteSpace([string](Get-SkillProjectionObjectProperty $source 'path'))) ('skill_projection source 缺少 path：{0}' -f [string](Get-SkillProjectionObjectProperty $source 'id'))
-        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $RepoRoot)) { $all.Add($entry) | Out-Null }
+        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $RepoRoot $managementIncludes $manageLinkedProfiles)) { $all.Add($entry) | Out-Null }
         $sourceOrder++
     }
     $groups = @{}

@@ -84,6 +84,19 @@ Describe 'Skill projection profiles' {
             Should -Throw '*不存在的 profile*'
     }
 
+    It 'excludes unselected source skills from a lean manifest without treating them as disabled' {
+        $source = Join-Path $TestDrive 'lean-source'
+        $projection = New-ProfileFixtureProjection $source (Join-Path $TestDrive 'lean-target') (Join-Path $repoRoot 'reports\skill-projection\lean-fixture.json')
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
+        foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+
+        @($plan.active_names) | Should -Be @('alpha')
+        @($plan.disabled).Count | Should -Be 0
+        @($plan.conflicts).Count | Should -Be 0
+    }
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode -RequestedProfile 'full-compatible'
