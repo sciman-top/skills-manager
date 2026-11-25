@@ -76,7 +76,11 @@ function Get-SkillProjectionFiles([string]$RootPath, [string[]]$IncludedNames = 
     foreach ($name in @($IncludedNames)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
     }
-    foreach ($directory in @(Get-ChildItem -LiteralPath $RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
+    # @(...) around a pipeline only contains the last command. Without the
+    # assignment, every skill entry except its final fields is emitted as an
+    # independent return value and the first source entry is lost.
+    $directories = @(Get-ChildItem -LiteralPath $RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)
+    foreach ($directory in $directories) {
         if ($directory.Name -eq '.system') {
             foreach ($systemDirectory in @(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
                 $systemFile = Join-Path $systemDirectory.FullName 'SKILL.md'
@@ -157,7 +161,8 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     # shape, resolved_projection_selection is the authoritative include set;
     # reading the absent mirror would silently reduce the manifest to `.system`.
     $managementIncludes = if ($manageLinkedProfiles) {
-        @(Get-SkillProjectionObjectProperty $profileSelection 'included_names' | ForEach-Object { [string]$_ })
+        $profileIncludes = Get-SkillProjectionObjectProperty $profileSelection 'included_names'
+        @($profileIncludes | ForEach-Object { [string]$_ })
     }
     else {
         @(Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes' | ForEach-Object { [string]$_ })

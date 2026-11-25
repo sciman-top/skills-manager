@@ -720,7 +720,19 @@ function New-SkillProjectionHostConfig {
     }
     $copy['managed_link_includes'] = @((Get-OperationObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ })
     $copy['managed_link_excludes'] = @((Get-OperationObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ })
-    $copy['resolved_projection_selection'] = $Selection
+    # Store a fresh object so nested arrays keep their array type. Assigning
+    # an existing array-valued property to an ordered dictionary first turns it
+    # into a string (for example, "@(...)"), breaking callers that pass the
+    # Get-CfgObjectProperty result to a [string[]] parameter.
+    $copy['resolved_projection_selection'] = [pscustomobject][ordered]@{
+        host = [string](Get-OperationObjectProperty $Selection 'host')
+        profile = [string](Get-OperationObjectProperty $Selection 'profile')
+        include_all = [bool](Get-OperationObjectProperty $Selection 'include_all')
+        included_names = @((Get-OperationObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ })
+        excluded_names = @((Get-OperationObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ })
+        cold_membership_includes = @((Get-OperationObjectProperty $Selection 'cold_membership_includes') | ForEach-Object { [string]$_ })
+        uses_profiles = [bool](Get-OperationObjectProperty $Selection 'uses_profiles')
+    }
     return [pscustomobject]$copy
 }
 

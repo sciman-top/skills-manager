@@ -33,6 +33,7 @@ BeforeAll {
             }
         }
     }
+
 }
 
 Describe 'Skill projection profiles' {
@@ -75,6 +76,19 @@ Describe 'Skill projection profiles' {
         $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
 
         { Assert-Cfg $config } | Should -Not -Throw
+    }
+
+    It 'preserves an unresolved profile array through the CLI config helper' {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config.skill_projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $config.skill_projection -Selection $selection
+        $included = Get-CfgObjectProperty $effective.resolved_projection_selection 'included_names'
+
+        (Assert-IsArray $included) | Should -BeTrue
+        @($included) | Should -Be @($selection.included_names)
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+        $expected = @($selection.included_names) + @($plan.active_names | Where-Object { $_ -in @('imagegen', 'openai-docs') })
+        $expected | ForEach-Object { @($plan.active_names) | Should -Contain $_ }
     }
 
     It 'does not expose the retired core compatibility profile' {
