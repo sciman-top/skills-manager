@@ -2,6 +2,18 @@
 
 本记录用于新会话的 `host_loaded` 与 `controlled_live` 验收。以下结果已在本机写入并核对 `filesystem_projected`；不代表宿主已经加载，更不能代替自然使用中的稳定性结论。
 
+## 2026-11-26 实际结果
+
+- Antigravity `2.35.1` 的新任务在一次性工作区实际运行了 PowerShell 测试，退出码 `0`，`cases=11 failed=0 generated=true cleanup=true`；只修复该目录的 `Labels.ps1`，未修改真实仓、外部文件或宿主配置。
+- 独立读取 `.probe-receipt.json`：`receipt_status=passed`、`hashVerified=true`。这证明本次任务读取了临时目录、执行了命令并在 `Auto` 权限下完成，不证明 Windows 沙箱已完全隔离，也不证明长期稳定性或自然使用体验。
+- DSH Desktop `0.2.2-rc.5` 建立了与 `skills-manager` 分离的新会话，工作区为 `C:\Users\sciman\AppData\Local\Temp\dsh-acceptance-a35343a9a5584bfebeb034b5520dac63`。实际读取到 `~/.dsh/AGENTS.md`，列出共享根中的 7 个技能，读取 `probe.txt`，且 `pwd` 与声明工作区一致。
+- 首轮会话暴露 `smart-compaction` 组件重复插入：包默认补丁和 profile 都插入 `tool-compact-now`，插件页显示“已关闭”，`context_status` 不存在。移除 profile 的重复插入并重载后，同一会话实际调用 `context_status`，取得 `available=true`、`contextWindow=1048576`、`usedTokens=55297`、`percentUsed=5.3`；`compact_now` 与 `recall_output` 同时出现。这是已修复的配置冲突，不是凭据或权限切换。
+- 同一会话实际调用了 `web_search` 一次，返回 9 条结果，但查询只命中 DeepSeek 公司/产品页面，未命中官方仓库或 release，因此没有得到版本结论。这证明免费搜索本次确实有返回，不证明搜索结果质量、缓存命中或自然流量持续稳定。
+- DSH 实际警告 `File sandbox enforcement is partial on this host`。核验到当前模式为“工作区内修改”，不能将 UI 标签或配置存在当作完整 Windows 文件沙箱证明。需要更高隔离时，只在一次性目录和 `仅可查看` 模式下验证，不通过制造越界写入或执行恶意命令来试边界。
+- 两个 `@deepseek-ai/dsh-experimental-*` 仅列在 `bundles`，没有依赖、安装目录或可观测加载证据。插件页以原生名称显示相应实验功能；没有明确缺口时保持禁用。此前试探都未安装，不能称为“卸载成功”，只记录为从 bundle 声明中移除。
+- 启动 Antigravity 时出现已存在的“Antigravity-Proxy 加载状态”弹窗，文案为“API Hook 安装流程已执行”。`app.asar` 中未找到该文案，启动参数里的 `sidecar_sdk/register_loader.js` 只解析 `sidecar_sdk` 导入。因此仍无法将该弹窗归因给某个已识别模块，也不能据此断定它被本轮配置或技能加载触发。不要在来源未确认时改写或停用既有 Proxy；优先排查启动链、已安装扩展和本机注入项，必要时用独立用户目录做对照。
+- 安装目录的 `resources/app.asar` 与同目录 `.bak` 内容不同：当前包为 7,143,095 bytes，SHA-256 为 `807C153811F8DFF31901D363B9646A155FA0FF84BC731C62C0073FEA8E25BB15`；`.bak` 为 6,729,546 bytes，SHA-256 为 `9F0AAD7274795D7FBDE04931D96B348DCFC5F3D81D7373E6B70AEB09307442DF`。`dist/preload.js` 由 44,455 增至 248,303 bytes，`dist/ideInstall/wizardPreload.js` 由 879 增至 204,727 bytes；内容含“Antigravity 2.0 Chinese Localization Engine”和页面补丁逻辑，来源仍待确认。不能把当前包视为未修改的官方二进制，也不能用它推断官方权限或沙箱能力。`.bak` 未经来源与版本核对，不作为恢复候选。
+
 ## Antigravity
 
 - 配置：`~/.gemini/config/config.json`，原始备份位于同目录 `config.json.bak-20261125-225900-review`。
@@ -26,6 +38,7 @@
 - Desktop 实际版本：`0.2.2-rc.5`。CLI 对 `desktop` profile 返回 `profile "desktop" is managed exclusively by the Electron application`；不从 CLI 绕过该归属边界。
 - `~/.dsh/profiles/desktop/cordis.patch.yml` 已有限制瞬时重试，并在 `smart-compaction` 中关闭自动读取截断、旧工具结果遮蔽与自动安全点压缩；保留显式的 `context_status`、`compact_now` 与 `recall_output` 能力预算。
 - 配置回滚入口：`cordis.patch.yml.bak-20261125-224515-latency`（重试改动前）与 `cordis.patch.yml.bak-20261125-smartcompaction-safety`（插件安全配置前）。
+- 组件冲突修复后的文件回滚入口：`cordis.patch.yml.bak-20261126-duplicate-insert`。当前 profile 仅保留 `tool-compact-now` 的策略层，挂载由 `smart-compaction` bundle 自己提供。
 - `dsh-free-search` 的有效引擎与回退顺序收敛为 `bing`、`ddg`、`ddg-lite`；`fetchProviderTakeover=false`，没有新增 key 或扩大并发。
 - 插件保留与观察表：
 
@@ -46,7 +59,7 @@
 1. 先核对新会话 baseline 含 `Instructions from: ~/.dsh/AGENTS.md`。只有这一步实际出现，规则才算 `host_loaded`。
 2. 让宿主列出 `~/.agents/skills` 的 7 个常驻技能，并各执行一次只读核对；目录存在只算文件投影。
 3. 调用 `context_status` 并检查实际上下文信息。`compact_now` 只验证压缩服务可调用，不为验收清理无关会话历史。
-4. 在一次性文件上修改并检查 `dsh-diff-approval` 的 Keep/Revert 状态，以及 `dsh-ops` 是否成功发布工具。
+4. 在一次性文件上修改并检查 `dsh-diff-approval` 的 Keep/Revert 状态，以及 `dsh-ops` 是否成功发布工具。若直接点击编辑需要事先的 UI 删除确认，改用只读、可撤销的探针，并在验收记录中写明未观察到的部分。
 5. 发一个明确无 key 搜索请求，保留实际结果或错误；不通过制造限流来试重试，不切换账户、IP、UA 或扩大并发。
 
 ### DSH CLI 隔离探针
