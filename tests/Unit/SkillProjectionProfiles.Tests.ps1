@@ -34,6 +34,10 @@ BeforeAll {
         }
     }
 
+    function New-ProfileTestReceipt([string]$FileName) {
+        return 'reports/skill-projection/' + $FileName
+    }
+
     function New-RealConfigProfileFixture {
         $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
         $profile = $config.skill_projection.projection_profiles.profiles.'core-lean'
@@ -121,7 +125,7 @@ Describe 'Skill projection profiles' {
 
     It 'excludes unselected source skills from a lean manifest without treating them as disabled' {
         $source = Join-Path $TestDrive 'lean-source'
-        $projection = New-ProfileFixtureProjection $source (Join-Path $TestDrive 'lean-target') (Join-Path $repoRoot 'reports\skill-projection\lean-fixture.json')
+        $projection = New-ProfileFixtureProjection $source (Join-Path $TestDrive 'lean-target') (New-ProfileTestReceipt 'lean-fixture.json')
         $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
         foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex
@@ -160,13 +164,13 @@ Describe 'Skill projection profiles' {
                 excluded_names = @($selection.excluded_names)
             }
         }
-        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
         $validation.pass | Should -BeTrue
         $validation.freshness | Should -Be 'fresh'
 
         $manifestPath = Join-Path $TestDrive 'lean-readback.json'
         Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 12)
-        $readBack = Test-SkillProjectionManifestCurrent (Get-ContentUtf8 $manifestPath | ConvertFrom-Json) $projection $repoRoot
+        $readBack = Test-SkillProjectionManifestCurrent (Get-ContentUtf8 $manifestPath | ConvertFrom-Json) $projection $TestDrive
         $readBack.pass | Should -BeTrue
         $readBack.freshness | Should -Be 'fresh'
         @($readBack.plan.active_names) | Should -Contain 'alpha'
@@ -188,7 +192,7 @@ Describe 'Skill projection profiles' {
     It 'projects every fixture skill except the selected host exclusion in full-compatible mode' {
         $source = Join-Path $TestDrive 'profile-source'
         $target = Join-Path $TestDrive 'profile-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\profile-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'profile.json'
         foreach ($name in @('alpha', 'beta', 'zcode-only-incompatible')) { New-ProfileFixtureSkill $source $name }
         $projection = New-ProfileFixtureProjection $source $target $receipt
 
@@ -204,7 +208,7 @@ Describe 'Skill projection profiles' {
     It 'preserves the resolved host selection for downstream native projection' {
         $source = Join-Path $TestDrive 'effective-source'
         $target = Join-Path $TestDrive 'effective-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\effective-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'effective.json'
         $projection = New-ProfileFixtureProjection $source $target $receipt
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName zcode -RequestedProfile 'full-compatible'
         $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
@@ -300,7 +304,7 @@ Describe 'Skill projection profiles' {
     It 'validates a full-compatible manifest against its recorded profile instead of the default fixture profile' {
         $source = Join-Path $TestDrive 'manifest-source'
         $target = Join-Path $TestDrive 'manifest-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\manifest-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'manifest.json'
         foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
         $projection = New-ProfileFixtureProjection $source $target $receipt
         $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
@@ -333,7 +337,7 @@ Describe 'Skill projection profiles' {
             }
         }
 
-        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
 
         $validation.pass | Should -BeTrue
         $validation.freshness | Should -Be 'fresh'
@@ -342,7 +346,7 @@ Describe 'Skill projection profiles' {
     It 'keeps the manifest fresh after shrinking a native profile and removing owned links' {
         $source = Join-Path $TestDrive 'transition-source'
         $target = Join-Path $TestDrive 'transition-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\transition-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'transition.json'
         $configPath = Join-Path $TestDrive 'transition-config.toml'
         $manifestPath = Join-Path $TestDrive 'transition-manifest.json'
         foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
@@ -361,7 +365,7 @@ Describe 'Skill projection profiles' {
 
             Test-Path -LiteralPath (Join-Path $target 'beta') | Should -BeFalse
             $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
 
             $validation.pass | Should -BeTrue
             $validation.freshness | Should -Be 'fresh'
