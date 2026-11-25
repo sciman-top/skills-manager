@@ -148,6 +148,7 @@ Describe 'Skill projection profiles' {
         $readBack = Test-SkillProjectionManifestCurrent (Get-ContentUtf8 $manifestPath | ConvertFrom-Json) $projection $repoRoot
         $readBack.pass | Should -BeTrue
         $readBack.freshness | Should -Be 'fresh'
+        @($readBack.plan.active_names) | Should -Contain 'alpha'
     }
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
