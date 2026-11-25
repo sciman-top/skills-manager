@@ -76,6 +76,10 @@ Describe 'Skill projection profiles' {
         $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
 
         { Assert-Cfg $config } | Should -Not -Throw
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config.skill_projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $config.skill_projection -Selection $selection
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+        $selection.included_names | ForEach-Object { @($plan.active_names) | Should -Contain $_ }
     }
 
     It 'preserves an unresolved profile array through the CLI config helper' {
