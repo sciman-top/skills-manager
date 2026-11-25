@@ -1903,15 +1903,16 @@ command = "npx"
         }
 
         @($profiles.default.enabled) | Should -Be @()
-        @($profiles.coding.enabled) | Should -Be @('openaiDeveloperDocs')
+        @($profiles.coding.enabled) | Should -Be @('context7', 'openaiDeveloperDocs')
         @($profiles.dotnet.enabled) | Should -Be @('microsoft-learn')
+        @($profiles.coding.enabled_tools.context7) | Should -Be @('resolve-library-id', 'query-docs')
         @($profiles.coding.enabled_tools.openaiDeveloperDocs) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
         @($profiles.dotnet.enabled_tools.'microsoft-learn') | Should -Be @('microsoft_docs_search', 'microsoft_docs_fetch', 'microsoft_code_sample_search')
 
         $codingConfig = $config | ConvertTo-Json -Depth 30 | ConvertFrom-Json
         $codingConfig.mcp_profiles.active = 'coding'
         $codingServers = @(Resolve-McpProfileServers $codingConfig)
-        ($codingServers | Where-Object name -eq 'context7').enabled | Should -BeFalse
+        ($codingServers | Where-Object name -eq 'context7').enabled | Should -BeTrue
         ($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled | Should -BeTrue
         @((($codingServers | Where-Object name -eq 'openaiDeveloperDocs').enabled_tools)) | Should -Be @('search_openai_docs', 'fetch_openai_doc')
     }

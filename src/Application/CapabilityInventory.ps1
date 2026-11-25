@@ -75,10 +75,9 @@ function New-SkillMetadataBudgetRecord([string]$Surface, [object[]]$Items) {
     }
 }
 
-# Cold discovery reads the discovery catalog, not the host skill roots, so a
-# domain member that no root projects stays discoverable and hash-valid while
-# the host can never load it.  Report that gap instead of letting the two
-# surfaces both look complete.
+# Cold discovery validates candidates from the canonical package itself; it
+# does not require a routine profile to expose every optional skill in each
+# host's discovery menu. Report that distinction as informational metadata.
 function Get-CapabilityColdMembershipFindings {
     param(
         [Parameter(Mandatory = $true)]$ProjectionConfig,
@@ -114,10 +113,10 @@ function Get-CapabilityColdMembershipFindings {
         $source = Join-Path (Join-Path (Resolve-CapabilitySurfacePath ([string](Get-OperationObjectProperty $ProjectionConfig 'managed_source_path')) $RepoRoot) $name) 'SKILL.md'
         $findings.Add([pscustomobject]@{
                 code = 'cold_membership_not_projected'
-                severity = 'error'
+                severity = 'info'
                 surface = 'host_skill_roots'
                 path = [IO.Path]::GetFullPath($source)
-                message = ('Cold discovery can return {0}, which no configured host skill root projects; the host cannot load it.' -f $name)
+                message = ('Cold discovery can resolve {0} from the canonical package; the router reads that package, while the routine host profile intentionally does not expose it.' -f $name)
             }) | Out-Null
     }
     return @($findings.ToArray())

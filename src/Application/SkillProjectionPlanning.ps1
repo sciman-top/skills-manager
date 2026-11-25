@@ -69,10 +69,18 @@ function Get-CodexExternalSkillInventory($ProjectionConfig) {
     return $result
 }
 
-function Get-SkillProjectionFiles([string]$RootPath) {
+function Get-SkillProjectionFiles([string]$RootPath, [string[]]$IncludedNames = @(), [bool]$manageLinkedProfiles = $false) {
     $files = [Collections.Generic.List[object]]::new()
     if ([string]::IsNullOrWhiteSpace($RootPath) -or -not (Test-Path -LiteralPath $RootPath -PathType Container)) { return @() }
-    foreach ($directory in @(Get-ChildItem -LiteralPath $RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($IncludedNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
+    # @(...) around a pipeline only contains the last command. Without the
+    # assignment, every skill entry except its final fields is emitted as an
+    # independent return value and the first source entry is lost.
+    $directories = @(Get-ChildItem -LiteralPath $RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)
+    foreach ($directory in $directories) {
         if ($directory.Name -eq '.system') {
             foreach ($systemDirectory in @(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
                 $systemFile = Join-Path $systemDirectory.FullName 'SKILL.md'
@@ -81,7 +89,10 @@ function Get-SkillProjectionFiles([string]$RootPath) {
             continue
         }
         $skillFile = Join-Path $directory.FullName 'SKILL.md'
-        if (Test-Path -LiteralPath $skillFile -PathType Leaf) { $files.Add([pscustomobject]@{ file = $skillFile; dir = $directory.FullName; is_system = $false }) | Out-Null }
+        if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+            $selected = (-not $manageLinkedProfiles) -or $included.Count -eq 0 -or $included.Contains($directory.Name)
+            if ($selected) { $files.Add([pscustomobject]@{ file = $skillFile; dir = $directory.FullName; is_system = $false }) | Out-Null }
+        }
     }
     return @($files.ToArray())
 }
@@ -103,7 +114,7 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
     return Get-OperationSha256 ($parts.ToArray() -join "`n")
 }
 
-function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '') {
+function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$RepoRoot = '', [string[]]$IncludedNames = @(), [bool]$manageLinkedProfiles = $false) {
     $id = [string](Get-SkillProjectionObjectProperty $Source 'id')
     $rootPath = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $Source 'path')) $RepoRoot
     Need (Test-Path -LiteralPath $rootPath -PathType Container) ('skill_projection source root not found: {0}' -f $rootPath)
@@ -112,7 +123,7 @@ function Get-SkillProjectionSourceEntries($Source, [int]$SourceOrder, [string]$R
     $platformsRaw = Get-SkillProjectionObjectProperty $Source 'platforms'
     $platforms = if ($null -eq $platformsRaw) { @('codex') } else { @($platformsRaw | ForEach-Object { [string]$_ }) }
     $entries = [Collections.Generic.List[object]]::new()
-    foreach ($item in @(Get-SkillProjectionFiles $rootPath)) {
+    foreach ($item in @(Get-SkillProjectionFiles $rootPath $IncludedNames $manageLinkedProfiles)) {
         $metadata = Read-SkillMetadata ([string]$item.file) -Observation
         $declaredName = ([string]$metadata.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($declaredName)) { $declaredName = Split-Path ([string]$item.dir) -Leaf }
@@ -144,13 +155,27 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     }
     $sources = Get-SkillProjectionObjectProperty $ProjectionConfig 'sources'
     Need ($null -ne $sources) 'skill_projection 缺少 sources'
+    $profileSelection = Get-SkillProjectionObjectProperty $ProjectionConfig 'resolved_projection_selection'
+    $manageLinkedProfiles = $null -ne $profileSelection -and -not [bool](Get-SkillProjectionObjectProperty $profileSelection 'include_all')
+    # A profile-only config intentionally omits the legacy mirror. In that
+    # shape, resolved_projection_selection is the authoritative include set;
+    # reading the absent mirror would silently reduce the manifest to `.system`.
+    $managementIncludes = @()
+    if ($manageLinkedProfiles) {
+        $profileIncludes = Get-SkillProjectionObjectProperty $profileSelection 'included_names'
+        $managementIncludes = @($profileIncludes | ForEach-Object { [string]$_ })
+    }
+    else {
+        $legacyIncludes = Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes'
+        $managementIncludes = @($legacyIncludes | ForEach-Object { [string]$_ })
+    }
     $all = [Collections.Generic.List[object]]::new()
     $sourceOrder = 0
     foreach ($source in @($sources)) {
         Need ($null -ne $source) 'skill_projection.sources 不能包含空值'
         Need (-not [string]::IsNullOrWhiteSpace([string](Get-SkillProjectionObjectProperty $source 'id'))) 'skill_projection source 缺少 id'
         Need (-not [string]::IsNullOrWhiteSpace([string](Get-SkillProjectionObjectProperty $source 'path'))) ('skill_projection source 缺少 path：{0}' -f [string](Get-SkillProjectionObjectProperty $source 'id'))
-        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $RepoRoot)) { $all.Add($entry) | Out-Null }
+        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $RepoRoot $managementIncludes $manageLinkedProfiles)) { $all.Add($entry) | Out-Null }
         $sourceOrder++
     }
     $groups = @{}
@@ -290,8 +315,10 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
-    $skills = Get-SkillProjectionObjectProperty $Manifest 'skills'; $canonical = Get-SkillProjectionObjectProperty $Manifest 'canonical'
-    $active = Get-SkillProjectionObjectProperty $Manifest 'active'; $disabled = Get-SkillProjectionObjectProperty $Manifest 'disabled'; $conflicts = Get-SkillProjectionObjectProperty $Manifest 'conflicts'
+    # These readers return even one-element arrays by reference. Use the
+    # reference so ConvertFrom-Json manifests preserve nested code fields.
+    $skills = Get-OperationObjectProperty $Manifest 'skills'; $canonical = Get-OperationObjectProperty $Manifest 'canonical'
+    $active = Get-OperationObjectProperty $Manifest 'active'; $disabled = Get-OperationObjectProperty $Manifest 'disabled'; $conflicts = Get-OperationObjectProperty $Manifest 'conflicts'
     $manifestCounts = [ordered]@{ skill_entry_count = $skills.Count; unique_name_count = $canonical.Count; active_name_count = $active.Count; disabled_path_count = $disabled.Count; conflict_count = $conflicts.Count }
     foreach ($name in $manifestCounts.Keys) {
         if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$manifestCounts[$name]) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_count_invalid' ('$.{0}' -f $name) 'Projection manifest count does not match its array.' }
@@ -334,9 +361,12 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     if ($null -ne $nativeConfig -and [bool](Get-SkillProjectionObjectProperty $nativeConfig 'enabled') -and $null -ne (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue)) {
         try {
             $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_source_path')) $RepoRoot
-            $includedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_includes'
-            $excludedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_excludes'
-            $included = @($includedEntries | ForEach-Object { [string]$_ })
+            $included = @()
+            if (-not [bool](Get-SkillProjectionObjectProperty $selection 'include_all')) {
+                $includedEntries = Get-SkillProjectionObjectProperty $selection 'included_names'
+                $included = @($includedEntries | ForEach-Object { [string]$_ })
+            }
+            $excludedEntries = Get-SkillProjectionObjectProperty $selection 'excluded_names'
             $excluded = @($excludedEntries | ForEach-Object { [string]$_ })
             $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $effectiveProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
         }

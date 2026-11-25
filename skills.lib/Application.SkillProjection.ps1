@@ -675,10 +675,13 @@ function Resolve-SkillProjectionSelection {
     if ($profileConflicts.Count -gt 0) { throw ("skill_projection.projection_profiles.profiles.{0} include/exclude 冲突：{1}" -f $defaultProfile, ($profileConflicts -join ', ')) }
 
     $hostExcludes = if ($null -eq $hostConfig) { @() } else { @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $hostConfig 'exclude') ("skill_projection.projection_profiles.hosts.{0}.exclude" -f $HostName)) }
-    # Profile membership is not a security boundary: the host excludes above
-    # still subtract, and only cold-reachable names are added.  An include-all
-    # profile needs no backing list, so its included_names stays empty.
-    $coldIncludes = if ($includeAll) { @() } else { @((Get-SkillProjectionColdMembershipNames $ProjectionConfig) | Where-Object { $excluded -notcontains $_ -and $hostExcludes -notcontains $_ }) }
+    # An explicit profile is the host's resident set. Cold catalog membership
+    # describes what may be discovered, not what every host must expose. The
+    # router reads its catalog and target closure from the repository, so
+    # automatically adding every domain member here would defeat include.
+    # An include-all profile needs no backing list, so its included_names
+    # stays empty.
+    $coldIncludes = @()
     return [pscustomobject][ordered]@{
         host = $HostName
         profile = $defaultProfile
@@ -717,7 +720,19 @@ function New-SkillProjectionHostConfig {
     }
     $copy['managed_link_includes'] = @((Get-OperationObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ })
     $copy['managed_link_excludes'] = @((Get-OperationObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ })
-    $copy['resolved_projection_selection'] = $Selection
+    # Store a fresh object so nested arrays keep their array type. Assigning
+    # an existing array-valued property to an ordered dictionary first turns it
+    # into a string (for example, "@(...)"), breaking callers that pass the
+    # Get-CfgObjectProperty result to a [string[]] parameter.
+    $copy['resolved_projection_selection'] = [pscustomobject][ordered]@{
+        host = [string](Get-OperationObjectProperty $Selection 'host')
+        profile = [string](Get-OperationObjectProperty $Selection 'profile')
+        include_all = [bool](Get-OperationObjectProperty $Selection 'include_all')
+        included_names = @((Get-OperationObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ })
+        excluded_names = @((Get-OperationObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ })
+        cold_membership_includes = @((Get-OperationObjectProperty $Selection 'cold_membership_includes') | ForEach-Object { [string]$_ })
+        uses_profiles = [bool](Get-OperationObjectProperty $Selection 'uses_profiles')
+    }
     return [pscustomobject]$copy
 }
 
