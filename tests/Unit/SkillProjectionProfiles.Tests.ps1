@@ -34,6 +34,22 @@ BeforeAll {
         }
     }
 
+    function New-RealConfigProfileFixture {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $profile = $config.skill_projection.projection_profiles.profiles.'core-lean'
+        $sourceRoot = Join-Path $TestDrive 'core-lean-source'
+        foreach ($name in @($profile.include) + @('cold-only')) {
+            New-ProfileFixtureSkill $sourceRoot $name
+        }
+        $projection = New-ProfileFixtureProjection $sourceRoot (Join-Path $TestDrive 'core-lean-target') (Join-Path $TestDrive 'core-lean-receipt.json')
+        $projection.PSObject.Properties.Remove('sources')
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @(
+            [pscustomobject]@{ id = 'fixture'; path = $sourceRoot; priority = 1; platforms = @('codex') }
+        )
+        $projection.projection_profiles = $config.skill_projection.projection_profiles
+        return [pscustomobject]@{ config = $config; projection = $projection; source = $sourceRoot; profile = $profile }
+    }
+
 }
 
 Describe 'Skill projection profiles' {
@@ -73,26 +89,27 @@ Describe 'Skill projection profiles' {
     }
 
     It 'accepts the profile-only projection shape at the CLI config contract' {
-        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $fixture = New-RealConfigProfileFixture
+        $config = $fixture.config
 
         { Assert-Cfg $config } | Should -Not -Throw
-        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config.skill_projection -HostName codex
-        $effective = New-SkillProjectionHostConfig -ProjectionConfig $config.skill_projection -Selection $selection
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $fixture.projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $fixture.projection -Selection $selection
         $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
         $selection.included_names | ForEach-Object { @($plan.active_names) | Should -Contain $_ }
+        @($plan.active_names) | Should -Be @($fixture.profile.include)
     }
 
     It 'preserves an unresolved profile array through the CLI config helper' {
-        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
-        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config.skill_projection -HostName codex
-        $effective = New-SkillProjectionHostConfig -ProjectionConfig $config.skill_projection -Selection $selection
+        $fixture = New-RealConfigProfileFixture
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $fixture.projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $fixture.projection -Selection $selection
         $included = Get-CfgObjectProperty $effective.resolved_projection_selection 'included_names'
 
         (Assert-IsArray $included) | Should -BeTrue
         @($included) | Should -Be @($selection.included_names)
         $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
-        $expected = @($selection.included_names) + @($plan.active_names | Where-Object { $_ -in @('imagegen', 'openai-docs') })
-        $expected | ForEach-Object { @($plan.active_names) | Should -Contain $_ }
+        @($plan.active_names) | Should -Be @($selection.included_names)
     }
 
     It 'does not expose the retired core compatibility profile' {
