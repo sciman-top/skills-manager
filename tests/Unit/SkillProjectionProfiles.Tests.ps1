@@ -96,6 +96,38 @@ Describe 'Skill projection profiles' {
         @($plan.active_names) | Should -Be @('alpha')
         @($plan.disabled).Count | Should -Be 0
         @($plan.conflicts).Count | Should -Be 0
+        @($plan.skills | ForEach-Object name) | Should -Be @('alpha')
+        @($effective.managed_link_includes) | Should -Be @('alpha')
+        @($effective.resolved_projection_selection.included_names) | Should -Be @('alpha')
+
+        $native = New-NativeSkillProjectionRuntimePlan -ManagedRoot $source -Config ([pscustomobject]@{ skill_projection = $effective }) -IncludedNames @($selection.included_names) -ExcludedNames @($selection.excluded_names)
+        $manifest = [pscustomobject]@{
+            schema_version = 2
+            projection_fingerprint = Get-SkillProjectionPlanFingerprint $plan $native $selection
+            enabled = [bool]$plan.enabled
+            source_count = 1
+            skill_entry_count = @($plan.skills).Count
+            unique_name_count = @($plan.unique_names).Count
+            active_name_count = @($plan.active_names).Count
+            duplicate_name_groups = [int]$plan.duplicate_name_groups
+            disabled_path_count = @($plan.disabled).Count
+            conflict_count = @($plan.conflicts).Count
+            skills = @($plan.skills)
+            canonical = @($plan.canonical)
+            active = @($plan.active)
+            disabled = @($plan.disabled)
+            conflicts = @($plan.conflicts)
+            projection_selection = [pscustomobject]@{
+                host = $selection.host
+                profile = $selection.profile
+                include_all = $selection.include_all
+                included_names = @($selection.included_names)
+                excluded_names = @($selection.excluded_names)
+            }
+        }
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+        $validation.pass | Should -BeTrue
+        $validation.freshness | Should -Be 'fresh'
     }
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection

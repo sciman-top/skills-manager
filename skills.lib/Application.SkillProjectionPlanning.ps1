@@ -153,7 +153,15 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     Need ($null -ne $sources) 'skill_projection 缺少 sources'
     $profileSelection = Get-SkillProjectionObjectProperty $ProjectionConfig 'resolved_projection_selection'
     $manageLinkedProfiles = $null -ne $profileSelection -and -not [bool](Get-SkillProjectionObjectProperty $profileSelection 'include_all')
-    $managementIncludes = @(Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes' | ForEach-Object { [string]$_ })
+    # A profile-only config intentionally omits the legacy mirror. In that
+    # shape, resolved_projection_selection is the authoritative include set;
+    # reading the absent mirror would silently reduce the manifest to `.system`.
+    $managementIncludes = if ($manageLinkedProfiles) {
+        @(Get-SkillProjectionObjectProperty $profileSelection 'included_names' | ForEach-Object { [string]$_ })
+    }
+    else {
+        @(Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes' | ForEach-Object { [string]$_ })
+    }
     $all = [Collections.Generic.List[object]]::new()
     $sourceOrder = 0
     foreach ($source in @($sources)) {
@@ -344,8 +352,9 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     if ($null -ne $nativeConfig -and [bool](Get-SkillProjectionObjectProperty $nativeConfig 'enabled') -and $null -ne (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue)) {
         try {
             $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_source_path')) $RepoRoot
-            $includedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_includes'
-            $excludedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_excludes'
+            $includedEntries = if ([bool](Get-SkillProjectionObjectProperty $selection 'include_all')) { @() }
+            else { Get-SkillProjectionObjectProperty $selection 'included_names' }
+            $excludedEntries = Get-SkillProjectionObjectProperty $selection 'excluded_names'
             $included = @($includedEntries | ForEach-Object { [string]$_ })
             $excluded = @($excludedEntries | ForEach-Object { [string]$_ })
             $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $effectiveProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
