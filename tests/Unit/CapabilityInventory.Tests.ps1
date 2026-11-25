@@ -436,7 +436,7 @@ Describe 'Read-only skill surface inventory' {
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
 
-    It 'fails the view when a cold discovery domain member is not projected to any host root' {
+    It 'reports a cold-only domain member without forcing it into every host root' {
         $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
         $oldCodexHome = $env:CODEX_HOME
         try {
@@ -465,10 +465,10 @@ Describe 'Read-only skill surface inventory' {
             $finding = @($view.findings | Where-Object code -eq 'cold_membership_not_projected')
 
             $finding.Count | Should -Be 1
-            $finding[0].severity | Should -Be 'error'
+            $finding[0].severity | Should -Be 'info'
             $finding[0].surface | Should -Be 'host_skill_roots'
             $finding[0].path | Should -BeLike '*cold-only-skill*'
-            $view.pass | Should -BeFalse
+            $view.pass | Should -BeTrue
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
