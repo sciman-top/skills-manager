@@ -63,7 +63,13 @@
 - 同一会话未调用 `compact_now`、`recall_output` 或 `task`，未读写工作区、安装插件、下载或联网。`ops_discover_tools` 能实际执行，证明 native 工具执行链可用；这不等于 `dsh-ops` 发布了上述三个能力。
 - DSH 完整重启后，现有会话可恢复，界面仍显示 `标准模式`，输入区、侧边栏和发送控件正常，未再出现 `theme/layout/sidebar` 启动阻塞。重启只证明本轮配置能被宿主加载并完成受控启动，不证明 `context_status` 等能力长期存在。
 - 先前一次 PTC 会话也未提供这三个能力；PTC 结果不能外推为 standard 结果。此前短暂取得的上下文数字属于旧配置/旧会话的瞬态证据，已被本轮 standard 落盘结果取代。
-- 本轮重启后未再发起真实搜索请求，因此没有为搜索质量、缓存命中或自然流量建立 `live_accepted`；也未做长期稳定性或 Windows 完整沙箱验收。
+- 该次重启验收内未再发起真实搜索请求，因此当时没有为搜索质量、缓存命中或自然流量建立 `live_accepted`；也未做长期稳定性或 Windows 完整沙箱验收。
+
+### 2026-11-26 搜索 provider 受控验收补充
+
+- 随后在同一一次性工作区建立新的 DSH standard 只读会话，落盘会话为 `C:\Users\sciman\.dsh\sessions\--C-Users-sciman-AppData-Local-Temp-dsh-acceptance-a35343a9a5584bfebeb034b5520dac63--\session-be540f6f-ddc3-4c10-be61-42564bdc2e78\session.v4.jsonl.zstd`；首帧 `agentPreset` 为 `"standard"`。
+- 用户提示词要求搜索 `DeepSeek Harness 官方文档`。模型实际只调用了一次 `web_search`，查询变为 `Assistant Framework 官方文档`，返回 10 条结果，主要是通用 `assistant` 词典、百科和 Google Assistant 页面，没有命中目标官方文档。
+- 会话轨迹未发现文件修改、插件安装或其他工具调用；因此 `web_search` provider 可调用且有返回，达到 `controlled_live`。查询意图发生偏移，结果质量未通过，不能据此建立搜索质量、缓存命中、长期稳定性或自然流量的 `live_accepted`。
 
 ### 新会话探测
 
