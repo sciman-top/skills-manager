@@ -37,9 +37,10 @@
 ## DSH
 
 - Desktop 实际版本：`0.2.2-rc.5`。CLI 对 `desktop` profile 返回 `profile "desktop" is managed exclusively by the Electron application`；不从 CLI 绕过该归属边界。
-- `~/.dsh/profiles/desktop/cordis.patch.yml` 已有限制瞬时重试，并在 `smart-compaction` 中关闭自动读取截断、旧工具结果遮蔽与自动安全点压缩；保留显式的 `context_status`、`compact_now` 与 `recall_output` 能力预算。
-- 配置回滚入口：`cordis.patch.yml.bak-20261125-224515-latency`（重试改动前）与 `cordis.patch.yml.bak-20261125-smartcompaction-safety`（插件安全配置前）。
-- 组件冲突修复后的文件回滚入口：`cordis.patch.yml.bak-20261126-duplicate-insert`。当前 profile 仅保留 `tool-compact-now` 的策略层，挂载由 `smart-compaction` bundle 自己提供。
+- `~/.dsh/profiles/desktop/cordis.patch.yml` 保留有限重试、`smart-compaction` 的策略层和 `ui-chat`/`ui-theme` 的可观测设置；重启后由运行时接管写回的当前文件 SHA-256 为 `91324B70CC38AF9B5DD3F1F5D71DF36802D6C6BDC8E4B896732CE9056958133C`。
+- `ui-theme` 保留 `name: "@deepseek-ai/dsh-client-ui-theme"`，否则 `theme` 服务缺失会使 `layout/sidebar` 启动链阻塞；`tool-executor-native` 作为独立顶层 `insert` 存在，不能嵌入已有 `insert` 或 preset registry。
+- `agent-preset-registry` 的 `default` 与 `selectedDefault` 均为 `standard`。当前 `web` 行含 `searchProvider: ddg` 与 `fetchProvider: http`，这是 `dsh-free-search` 启用后通过 `settings.mutate` 持久化的运行时接管结果；`ddg` 是该插件注册的 provider id，不等于固定使用 DuckDuckGo 引擎。插件保持启用时不要手删这一行；停用或卸载前才运行该插件提供的 `restore` 清理，再重启 DSH。
+- 配置回滚入口：`cordis.patch.yml.bak-20261125-224515-latency`（重试改动前）、`cordis.patch.yml.bak-20261125-smartcompaction-safety`（插件安全配置前）、`cordis.patch.yml.bak-20261126-duplicate-insert`（重复插入修复前）与 `cordis.patch.yml.bak-20261126-pre-search-provider-cleanup`（本轮静态搜索覆盖清理前）。
 - `dsh-free-search` 的有效引擎与回退顺序收敛为 `bing`、`ddg`、`ddg-lite`；`fetchProviderTakeover=false`，没有新增 key 或扩大并发。
 - 插件保留与观察表：
 
@@ -55,11 +56,20 @@
 | `@deepseek-ai/dsh-experimental-tool-worktree` | 待实测 | 若与新会话冲突，单独审查，不凭标签删包 |
 | `@deepseek-ai/dsh-experimental-session-search` | 待实测 | 若与新会话冲突，单独审查，不凭标签删包 |
 
+### 2026-11-26 最终 standard 受控验收
+
+- 新建会话实际显示 `标准模式`，落盘会话为 `C:\Users\sciman\.dsh\sessions\--C-Users-sciman-AppData-Local-Temp-dsh-acceptance-a35343a9a5584bfebeb034b5520dac63--\session-ea9c5a68-2119-4b5b-9173-ecc8638bada7\session.v4.jsonl.zstd`；首行 `agentPreset` 为 `"standard"`。
+- standard 会话的 `request/header` 工具表没有 `context_status`、`compact_now`、`recall_output`。模型只读调用了三次 `ops_discover_tools`，分别查询相关名称、上下文用量和 `select:context_status`；三次均返回 `No allowed, implemented capability matched`，随后明确报告无法取得 `usedTokens`、`contextWindow` 与 `percentUsed`，没有编造数字。
+- 同一会话未调用 `compact_now`、`recall_output` 或 `task`，未读写工作区、安装插件、下载或联网。`ops_discover_tools` 能实际执行，证明 native 工具执行链可用；这不等于 `dsh-ops` 发布了上述三个能力。
+- DSH 完整重启后，现有会话可恢复，界面仍显示 `标准模式`，输入区、侧边栏和发送控件正常，未再出现 `theme/layout/sidebar` 启动阻塞。重启只证明本轮配置能被宿主加载并完成受控启动，不证明 `context_status` 等能力长期存在。
+- 先前一次 PTC 会话也未提供这三个能力；PTC 结果不能外推为 standard 结果。此前短暂取得的上下文数字属于旧配置/旧会话的瞬态证据，已被本轮 standard 落盘结果取代。
+- 本轮重启后未再发起真实搜索请求，因此没有为搜索质量、缓存命中或自然流量建立 `live_accepted`；也未做长期稳定性或 Windows 完整沙箱验收。
+
 ### 新会话探测
 
 1. 先核对新会话 baseline 含 `Instructions from: ~/.dsh/AGENTS.md`。只有这一步实际出现，规则才算 `host_loaded`。
 2. 让宿主列出 `~/.agents/skills` 的 7 个常驻技能，并各执行一次只读核对；目录存在只算文件投影。
-3. 调用 `context_status` 并检查实际上下文信息。`compact_now` 只验证压缩服务可调用，不为验收清理无关会话历史。
+3. 以当前 profile 的真实工具表为准检查上下文能力；若 `context_status`、`compact_now` 或 `recall_output` 不在工具表，不得通过静态配置名称推断其可用。只读落盘记录优先于 UI 标签。
 4. 在一次性文件上修改并检查 `dsh-diff-approval` 的 Keep/Revert 状态，以及 `dsh-ops` 是否成功发布工具。若直接点击编辑需要事先的 UI 删除确认，改用只读、可撤销的探针，并在验收记录中写明未观察到的部分。
 5. 发一个明确无 key 搜索请求，保留实际结果或错误；不通过制造限流来试重试，不切换账户、IP、UA 或扩大并发。
 
