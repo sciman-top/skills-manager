@@ -13,6 +13,7 @@
 - 两个 `@deepseek-ai/dsh-experimental-*` 仅列在 `bundles`，没有依赖、安装目录或可观测加载证据。插件页以原生名称显示相应实验功能；没有明确缺口时保持禁用。此前试探都未安装，不能称为“卸载成功”，只记录为从 bundle 声明中移除。
 - 启动 Antigravity 时出现已存在的“Antigravity-Proxy 加载状态”弹窗，文案为“API Hook 安装流程已执行”。`app.asar` 中未找到该文案，启动参数里的 `sidecar_sdk/register_loader.js` 只解析 `sidecar_sdk` 导入。因此仍无法将该弹窗归因给某个已识别模块，也不能据此断定它被本轮配置或技能加载触发。不要在来源未确认时改写或停用既有 Proxy；优先排查启动链、已安装扩展和本机注入项，必要时用独立用户目录做对照。
 - 安装目录的 `resources/app.asar` 与同目录 `.bak` 内容不同：当前包为 7,143,095 bytes，SHA-256 为 `807C153811F8DFF31901D363B9646A155FA0FF84BC731C62C0073FEA8E25BB15`；`.bak` 为 6,729,546 bytes，SHA-256 为 `9F0AAD7274795D7FBDE04931D96B348DCFC5F3D81D7373E6B70AEB09307442DF`。`dist/preload.js` 由 44,455 增至 248,303 bytes，`dist/ideInstall/wizardPreload.js` 由 879 增至 204,727 bytes；内容含“Antigravity 2.0 Chinese Localization Engine”和页面补丁逻辑，来源仍待确认。不能把当前包视为未修改的官方二进制，也不能用它推断官方权限或沙箱能力。`.bak` 未经来源与版本核对，不作为恢复候选。
+- 逐文件核对包内 SHA-256，共 12 项变化，而非仅限两个预加载文件：`wizardHtml.js`、`wizardPreload.js`、`ipcHandlers.js`、`main.js`、`menu.js`、`preload.js`、`provisionSplash.js`、`tray.js`、`updater.js`、`wsl.js`，以及新增的 `chrome-devtools-mcp/LICENSE` 与 `chrome-devtools-mcp/package.json`。这些变化的发布者与维护来源仍未知；保留调查结论为“已修改安装包”，不以 `预加载页面注入` 概括全部差异。
 
 ## Antigravity
 
