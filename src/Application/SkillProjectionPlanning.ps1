@@ -313,8 +313,10 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
-    $skills = Get-SkillProjectionObjectProperty $Manifest 'skills'; $canonical = Get-SkillProjectionObjectProperty $Manifest 'canonical'
-    $active = Get-SkillProjectionObjectProperty $Manifest 'active'; $disabled = Get-SkillProjectionObjectProperty $Manifest 'disabled'; $conflicts = Get-SkillProjectionObjectProperty $Manifest 'conflicts'
+    # These readers return even one-element arrays by reference. Use the
+    # reference so ConvertFrom-Json manifests preserve nested code fields.
+    $skills = Get-OperationObjectProperty $Manifest 'skills'; $canonical = Get-OperationObjectProperty $Manifest 'canonical'
+    $active = Get-OperationObjectProperty $Manifest 'active'; $disabled = Get-OperationObjectProperty $Manifest 'disabled'; $conflicts = Get-OperationObjectProperty $Manifest 'conflicts'
     $manifestCounts = [ordered]@{ skill_entry_count = $skills.Count; unique_name_count = $canonical.Count; active_name_count = $active.Count; disabled_path_count = $disabled.Count; conflict_count = $conflicts.Count }
     foreach ($name in $manifestCounts.Keys) {
         if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$manifestCounts[$name]) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_count_invalid' ('$.{0}' -f $name) 'Projection manifest count does not match its array.' }
