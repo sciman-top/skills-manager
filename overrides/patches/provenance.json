@@ -3,15 +3,6 @@
   "reviewed_at": "2026-11-21",
   "patches": [
     {
-      "name": "grill-me",
-      "upstream_repo": "https://github.com/mattpocock/skills.git",
-      "upstream_path": "skills/productivity/grill-me",
-      "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
-      "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
-      "license": "MIT",
-      "local_delta_reason": "Keep the explicit entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation; accept only provenance-bound human answers; AI-delegate answers are refused as interview answers and never treated as human acceptance."
-    },
-    {
       "name": "code-review-and-quality",
       "upstream_repo": "https://github.com/addyosmani/agent-skills.git",
       "upstream_path": "skills/code-review-and-quality",
@@ -21,15 +12,6 @@
       "local_delta_reason": "Replace the broader upstream package with a review-only, evidence-first workflow, Codex invocation metadata, inline-diff trigger guidance, and caller/guard/baseline finding validation without mutating files."
     },
     {
-      "name": "grill-with-docs",
-      "upstream_repo": "https://github.com/mattpocock/skills.git",
-      "upstream_path": "skills/engineering/grill-with-docs",
-      "base_revision": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
-      "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
-      "license": "MIT",
-      "local_delta_reason": "Narrow implicit activation to explicit design grilling, preserve local domain-document and Codex invocation boundaries, carry explicit human answer provenance; delegate answers are refused as interview answers, and replace upstream $to-spec/$to-tickets/$improve-codebase-architecture handoffs with a host-neutral explicit-workflow boundary because those skills are absent from this estate."
-    },
-    {
       "name": "grilling",
       "upstream_repo": "https://github.com/mattpocock/skills.git",
       "upstream_path": "skills/productivity/grilling",
@@ -37,15 +19,6 @@
       "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
       "license": "MIT",
       "local_delta_reason": "Use an explicit, one-question-at-a-time interview for Chinese-first design review; preserve agent-owned fact finding, user-owned decisions, provenance-bound human answers (AI-delegate answers are refused as interview answers), and the no-action confirmation gate."
-    },
-    {
-      "name": "find-skills",
-      "upstream_repo": "https://github.com/vercel-labs/skills.git",
-      "upstream_path": "skills/find-skills",
-      "base_revision": "c6f69c631292444cc541ac6d91e2226b0ff247da",
-      "reviewed_revision": "c6f69c631292444cc541ac6d91e2226b0ff247da",
-      "license": "MIT",
-      "local_delta_reason": "Preserve read-only discovery while adding a validated Windows npm-cache Node fallback for broken generated npx.cmd shims; installation remains a separate authorization boundary."
     },
     {
       "name": "test-driven-development",

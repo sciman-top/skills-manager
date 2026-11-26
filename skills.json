@@ -42,8 +42,6 @@
             "capability-router",
             "code-review-and-quality",
             "context-engineering",
-            "frontend-ui-engineering",
-            "playwright-best-practices",
             "systematic-debugging",
             "verification-before-completion"
           ],
@@ -55,8 +53,6 @@
             "capability-router",
             "code-review-and-quality",
             "context-engineering",
-            "modern-python",
-            "python-testing-patterns",
             "systematic-debugging",
             "verification-before-completion"
           ],
@@ -64,9 +60,7 @@
         },
         "design-interview": {
           "include": [
-            "grill-me",
             "grilling",
-            "grill-with-docs",
             "domain-modeling"
           ],
           "exclude": []
@@ -83,7 +77,6 @@
             "docx",
             "pptx",
             "skill-creator",
-            "web-artifacts-builder",
             "xlsx"
           ]
         },
@@ -98,25 +91,15 @@
             "docx",
             "pptx",
             "skill-creator",
-            "web-artifacts-builder",
             "xlsx"
           ]
         },
         "antigravity": {
           "default_profile": "core-lean",
           "exclude": [
-            "ant-design",
             "docx",
             "pptx",
-            "python-performance-optimization",
-            "python-testing-patterns",
             "skill-creator",
-            "slidev",
-            "supabase-postgres-best-practices",
-            "tailwind-design-system",
-            "vercel-react-best-practices",
-            "vite",
-            "web-artifacts-builder",
             "xlsx"
           ]
         },
@@ -130,7 +113,6 @@
             "docx",
             "pptx",
             "skill-creator",
-            "web-artifacts-builder",
             "xlsx"
           ]
         }
@@ -173,29 +155,15 @@
       "fallback_domain": "other",
       "fallback_purpose": "Unclassified cold skills. Do not rely on bounded implicit discovery until a narrower functional domain is assigned.",
       "side_effects": {
-        "grill-me": "read_only",
         "domain-modeling": "controlled_write",
-        "grill-with-docs": "controlled_write",
         "grilling": "read_only"
       },
       "execution_contracts": {
-        "grill-me": {
-          "mode": "multi_turn_user_decision",
-          "native_agent": "design-griller",
-          "conversation_owner": "parent",
-          "stop_condition": "one_question_then_wait"
-        },
         "domain-modeling": {
           "mode": "one_shot",
           "native_agent": "cold-capability-runner",
           "conversation_owner": "runner",
           "stop_condition": "parent_contract"
-        },
-        "grill-with-docs": {
-          "mode": "multi_turn_user_decision",
-          "native_agent": "design-griller",
-          "conversation_owner": "parent",
-          "stop_condition": "one_question_then_wait"
         },
         "grilling": {
           "mode": "multi_turn_user_decision",
@@ -207,7 +175,6 @@
       "domain_memberships": {
         "browser": [
           "agent-browser",
-          "playwright-best-practices",
           "webapp-testing",
           "research"
         ],
@@ -218,21 +185,11 @@
           "documentation-and-adrs",
           "domain-modeling",
           "draft-spec",
-          "draft-tickets",
-          "idea-refine",
-          "prompt-engineering-patterns"
+          "idea-refine"
         ],
         "content": [
-          "baoyu-article-illustrator",
-          "baoyu-compress-image",
-          "baoyu-cover-image",
-          "baoyu-infographic",
-          "baoyu-post-to-wechat",
-          "baoyu-url-to-markdown",
           "docx",
-          "markdown-converter",
           "pdf",
-          "social",
           "xlsx"
         ],
         "coding": [
@@ -254,16 +211,13 @@
           "test-driven-development"
         ],
         "general": [
-          "find-skills",
           "systematic-debugging",
           "verification-before-completion"
         ],
         "design": [
           "canvas-design",
           "data-visualization",
-          "frontend-design",
-          "vercel-react-best-practices",
-          "web-artifacts-builder"
+          "frontend-design"
         ],
         "dotnet": [
           "custom-windows-wpf-teacher-app",
@@ -275,39 +229,29 @@
         ],
         "ppt": [
           "custom-powerpoint-accessibility",
-          "pptx",
-          "slidev"
+          "pptx"
         ],
         "review": [
           "code-review-and-quality",
           "security-and-hardening"
         ],
         "python": [
-          "modern-python",
-          "python-performance-optimization",
-          "python-testing-patterns",
           "systematic-debugging"
         ],
         "database": [
-          "performance-optimization",
-          "security-and-hardening",
-          "supabase-postgres-best-practices"
+          "security-and-hardening"
         ],
         "physics": [
           "custom-junior-physics-animation"
         ],
         "animation": [
           "custom-junior-physics-animation",
-          "manim-composer",
-          "manimce-best-practices",
-          "ui-animation"
+          "manim-composer"
         ],
         "decision": [
           "documentation-and-adrs",
           "domain-modeling",
           "draft-spec",
-          "grill-me",
-          "grill-with-docs",
           "grilling",
           "idea-refine"
         ],
@@ -316,38 +260,20 @@
           "drawio-diagram-forge"
         ],
         "frontend": [
-          "ant-design",
-          "frontend-design",
-          "frontend-ui-engineering",
-          "tailwind-design-system",
-          "ui-animation",
-          "vercel-react-best-practices",
-          "web-artifacts-builder",
-          "vite"
+          "frontend-design"
         ],
         "mcp": [
           "mcp-builder",
           "mcp-cli"
         ],
         "presentation": [
-          "baoyu-slide-deck",
           "custom-powerpoint-accessibility",
           "custom-teacher-courseware-ppt",
-          "powerpoint-automation",
-          "pptx",
-          "slidev"
+          "pptx"
         ],
         "skill-management": [
           "capability-router",
-          "find-skills",
           "skill-creator"
-        ],
-        "writing": [
-          "baoyu-format-markdown",
-          "content-strategy",
-          "copy-editing",
-          "copywriting",
-          "custom-creator-publishing"
         ]
       }
     },
@@ -375,23 +301,8 @@
     },
     {
       "ref": "main",
-      "name": "agent-skills",
-      "repo": "https://github.com/vercel-labs/agent-skills.git"
-    },
-    {
-      "ref": "main",
-      "name": "baoyu-skills",
-      "repo": "https://github.com/jimliu/baoyu-skills.git"
-    },
-    {
-      "ref": "main",
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git"
-    },
-    {
-      "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "ref": "main",
-      "name": "marketingskills"
     }
   ],
   "mappings": [
@@ -426,11 +337,6 @@
       "vendor": "anthropics-skills"
     },
     {
-      "from": "skills\\web-artifacts-builder",
-      "to": "web-artifacts-builder",
-      "vendor": "anthropics-skills"
-    },
-    {
       "from": "skills\\verification-before-completion",
       "to": "verification-before-completion",
       "vendor": "superpowers"
@@ -444,26 +350,6 @@
       "from": "skills\\skill-creator",
       "to": "skill-creator",
       "vendor": "anthropics-skills"
-    },
-    {
-      "from": "skills\\baoyu-compress-image",
-      "to": "baoyu-compress-image",
-      "vendor": "baoyu-skills"
-    },
-    {
-      "from": "skills\\baoyu-cover-image",
-      "to": "baoyu-cover-image",
-      "vendor": "baoyu-skills"
-    },
-    {
-      "from": "skills\\baoyu-format-markdown",
-      "to": "baoyu-format-markdown",
-      "vendor": "baoyu-skills"
-    },
-    {
-      "from": "skills\\baoyu-post-to-wechat",
-      "to": "baoyu-post-to-wechat",
-      "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\frontend-design",
@@ -511,38 +397,8 @@
       "vendor": "agent-skills-2"
     },
     {
-      "to": "baoyu-slide-deck",
-      "vendor": "baoyu-skills",
-      "from": "skills\\baoyu-slide-deck"
-    },
-    {
-      "to": "baoyu-article-illustrator",
-      "vendor": "baoyu-skills",
-      "from": "skills\\baoyu-article-illustrator"
-    },
-    {
-      "to": "frontend-ui-engineering",
-      "vendor": "agent-skills-2",
-      "from": "skills\\frontend-ui-engineering"
-    },
-    {
-      "to": "performance-optimization",
-      "vendor": "agent-skills-2",
-      "from": "skills\\performance-optimization"
-    },
-    {
-      "from": "find-skills",
-      "to": "find-skills",
-      "vendor": "manual"
-    },
-    {
       "from": "agent-browser",
       "to": "agent-browser",
-      "vendor": "manual"
-    },
-    {
-      "from": "vite",
-      "to": "vite",
       "vendor": "manual"
     },
     {
@@ -556,26 +412,6 @@
       "vendor": "manual"
     },
     {
-      "from": "python-performance-optimization",
-      "to": "python-performance-optimization",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-testing-patterns",
-      "to": "python-testing-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "tailwind-design-system",
-      "to": "tailwind-design-system",
-      "vendor": "manual"
-    },
-    {
-      "from": "prompt-engineering-patterns",
-      "to": "prompt-engineering-patterns",
-      "vendor": "manual"
-    },
-    {
       "from": "dotnet-backend-patterns",
       "to": "dotnet-backend-patterns",
       "vendor": "manual"
@@ -586,38 +422,13 @@
       "vendor": "manual"
     },
     {
-      "from": "powerpoint-automation",
-      "to": "powerpoint-automation",
-      "vendor": "manual"
-    },
-    {
       "from": "drawio-diagram-forge",
       "to": "drawio-diagram-forge",
       "vendor": "manual"
     },
     {
-      "from": "modern-python",
-      "to": "modern-python",
-      "vendor": "manual"
-    },
-    {
-      "from": "manimce-best-practices",
-      "to": "manimce-best-practices",
-      "vendor": "manual"
-    },
-    {
       "from": "manim-composer",
       "to": "manim-composer",
-      "vendor": "manual"
-    },
-    {
-      "from": "ui-animation",
-      "to": "ui-animation",
-      "vendor": "manual"
-    },
-    {
-      "from": "playwright-best-practices",
-      "to": "playwright-best-practices",
       "vendor": "manual"
     },
     {
@@ -641,64 +452,9 @@
       "vendor": "anthropics-skills"
     },
     {
-      "from": "skills\\baoyu-infographic",
-      "to": "baoyu-infographic",
-      "vendor": "baoyu-skills"
-    },
-    {
-      "from": "skills\\baoyu-url-to-markdown",
-      "to": "baoyu-url-to-markdown",
-      "vendor": "baoyu-skills"
-    },
-    {
-      "to": "copy-editing",
-      "vendor": "marketingskills",
-      "from": "skills\\copy-editing"
-    },
-    {
-      "to": "content-strategy",
-      "vendor": "marketingskills",
-      "from": "skills\\content-strategy"
-    },
-    {
-      "from": "skills\\copywriting",
-      "vendor": "marketingskills",
-      "to": "copywriting"
-    },
-    {
-      "from": "skills\\react-best-practices",
-      "vendor": "agent-skills",
-      "to": "vercel-react-best-practices"
-    },
-    {
-      "to": "supabase-postgres-best-practices",
-      "vendor": "manual",
-      "from": "supabase-postgres-best-practices"
-    },
-    {
-      "from": "ant-design",
-      "vendor": "manual",
-      "to": "ant-design"
-    },
-    {
-      "vendor": "manual",
-      "to": "markdown-converter",
-      "from": "markdown-converter"
-    },
-    {
       "to": "mcp-cli",
       "from": "mcp-cli",
       "vendor": "manual"
-    },
-    {
-      "vendor": "marketingskills",
-      "from": "skills\\social",
-      "to": "social"
-    },
-    {
-      "vendor": "manual",
-      "from": "slidev",
-      "to": "slidev"
     },
     {
       "vendor": "manual",
@@ -708,16 +464,6 @@
     {
       "from": "research",
       "to": "research",
-      "vendor": "manual"
-    },
-    {
-      "to": "grill-with-docs",
-      "from": "grill-with-docs",
-      "vendor": "manual"
-    },
-    {
-      "to": "grill-me",
-      "from": "grill-me",
       "vendor": "manual"
     },
     {
@@ -743,26 +489,10 @@
   ],
   "imports": [
     {
-      "name": "find-skills",
-      "skill": "skills\\find-skills",
-      "sparse": true,
-      "repo": "https://github.com/vercel-labs/skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "name": "agent-browser",
       "skill": "skills\\agent-browser",
       "sparse": false,
       "repo": "https://github.com/vercel-labs/agent-browser.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "vite",
-      "skill": "skills\\vite",
-      "sparse": false,
-      "repo": "https://github.com/antfu/skills.git",
       "ref": "main",
       "mode": "manual"
     },
@@ -777,38 +507,6 @@
     {
       "name": "error-handling-patterns",
       "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "python-performance-optimization",
-      "skill": "plugins\\python-development\\skills\\python-performance-optimization",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "python-testing-patterns",
-      "skill": "plugins\\python-development\\skills\\python-testing-patterns",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "tailwind-design-system",
-      "skill": "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "prompt-engineering-patterns",
-      "skill": "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
       "sparse": false,
       "repo": "https://github.com/wshobson/agents.git",
       "ref": "main",
@@ -831,35 +529,11 @@
       "mode": "manual"
     },
     {
-      "name": "powerpoint-automation",
-      "skill": "powerpoint-automation",
-      "sparse": false,
-      "repo": "https://github.com/aktsmm/agent-skills.git",
-      "ref": "master",
-      "mode": "manual"
-    },
-    {
       "name": "drawio-diagram-forge",
       "skill": "drawio-diagram-forge",
       "sparse": false,
       "repo": "https://github.com/aktsmm/agent-skills.git",
       "ref": "master",
-      "mode": "manual"
-    },
-    {
-      "name": "modern-python",
-      "skill": "plugins\\modern-python\\skills\\modern-python",
-      "sparse": false,
-      "repo": "https://github.com/trailofbits/skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "manimce-best-practices",
-      "skill": "skills\\manimce-best-practices",
-      "sparse": false,
-      "repo": "https://github.com/adithya-s-k/manim_skill.git",
-      "ref": "main",
       "mode": "manual"
     },
     {
@@ -871,76 +545,12 @@
       "mode": "manual"
     },
     {
-      "name": "ui-animation",
-      "skill": "skills\\ui-animation",
-      "sparse": false,
-      "repo": "https://github.com/mblode/agent-skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "mode": "vendor",
-      "skill": "skills\\baoyu-article-illustrator",
-      "name": "baoyu-skills",
-      "repo": "https://github.com/jimliu/baoyu-skills.git",
-      "sparse": false,
-      "ref": "main"
-    },
-    {
-      "mode": "vendor",
-      "skill": "skills\\performance-optimization",
+      "skill": "skills\\api-and-interface-design",
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "sparse": false,
       "ref": "main"
-    },
-    {
-      "name": "playwright-best-practices",
-      "skill": "playwright-best-practices",
-      "sparse": false,
-      "repo": "https://github.com/currents-dev/playwright-best-practices-skill.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "skill": "skills\\social",
-      "sparse": false,
-      "mode": "vendor",
-      "ref": "main",
-      "name": "marketingskills"
-    },
-    {
-      "sparse": false,
-      "name": "agent-skills",
-      "mode": "vendor",
-      "skill": "skills\\react-best-practices",
-      "repo": "https://github.com/vercel-labs/agent-skills.git",
-      "ref": "main"
-    },
-    {
-      "ref": "main",
-      "name": "supabase-postgres-best-practices",
-      "skill": "skills\\supabase-postgres-best-practices",
-      "repo": "https://github.com/supabase/agent-skills.git",
-      "sparse": false,
-      "mode": "manual"
-    },
-    {
-      "ref": "main",
-      "name": "ant-design",
-      "sparse": false,
-      "skill": "skills\\ant-design",
-      "mode": "manual",
-      "repo": "https://github.com/ant-design/antd-skill.git"
-    },
-    {
-      "skill": "skills\\markdown-converter",
-      "name": "markdown-converter",
-      "repo": "https://github.com/intellectronica/agent-skills.git",
-      "ref": "main",
-      "mode": "manual",
-      "sparse": false
     },
     {
       "sparse": true,
@@ -949,14 +559,6 @@
       "name": "mcp-cli",
       "ref": "main",
       "skill": "skills\\mcp-cli"
-    },
-    {
-      "name": "slidev",
-      "ref": "main",
-      "sparse": false,
-      "skill": "skills\\slidev",
-      "mode": "manual",
-      "repo": "https://github.com/slidevjs/slidev.git"
     },
     {
       "name": "windows-desktop-e2e",
@@ -979,22 +581,6 @@
       "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
       "skill": "skills\\engineering\\codebase-design",
       "repo": "https://github.com/mattpocock/skills.git",
-      "mode": "manual",
-      "sparse": true
-    },
-    {
-      "name": "grill-me",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\productivity\\grill-me",
-      "mode": "manual",
-      "sparse": true
-    },
-    {
-      "ref": "main",
-      "name": "grill-with-docs",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "skill": "skills\\engineering\\grill-with-docs",
       "mode": "manual",
       "sparse": true
     },

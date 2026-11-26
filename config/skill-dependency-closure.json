@@ -1,12 +1,4 @@
 {
   "schema_version": 1,
-  "dependencies": [
-    {
-      "skill": "grill-with-docs",
-      "requires": [
-        "grilling",
-        "domain-modeling"
-      ]
-    }
-  ]
+  "dependencies": []
 }
