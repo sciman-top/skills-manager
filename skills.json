@@ -36,6 +36,28 @@
           ],
           "exclude": []
         },
+        "core-web": {
+          "include": [
+            "ai-coding-workflow",
+            "capability-router",
+            "code-review-and-quality",
+            "context-engineering",
+            "systematic-debugging",
+            "verification-before-completion"
+          ],
+          "exclude": []
+        },
+        "core-python": {
+          "include": [
+            "ai-coding-workflow",
+            "capability-router",
+            "code-review-and-quality",
+            "context-engineering",
+            "systematic-debugging",
+            "verification-before-completion"
+          ],
+          "exclude": []
+        },
         "design-interview": {
           "include": [
             "grilling",
@@ -524,7 +546,7 @@
     },
     {
       "mode": "vendor",
-      "skill": "skills\\performance-optimization",
+      "skill": "skills\\api-and-interface-design",
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "sparse": false,
@@ -693,9 +715,14 @@
       },
       "coding": {
         "enabled": [
+        "context7",
           "openaiDeveloperDocs"
         ],
         "enabled_tools": {
+        "context7": [
+          "resolve-library-id",
+          "query-docs"
+        ],
           "openaiDeveloperDocs": [
             "search_openai_docs",
             "fetch_openai_doc"

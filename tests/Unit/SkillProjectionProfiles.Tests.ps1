@@ -33,32 +33,49 @@ BeforeAll {
             }
         }
     }
+
+    function New-ProfileTestReceipt([string]$FileName) {
+        return 'reports/skill-projection/' + $FileName
+    }
+
+    function New-RealConfigProfileFixture {
+        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $profile = $config.skill_projection.projection_profiles.profiles.'core-lean'
+        $sourceRoot = Join-Path $TestDrive 'core-lean-source'
+        foreach ($name in @($profile.include) + @('cold-only')) {
+            New-ProfileFixtureSkill $sourceRoot $name
+        }
+        $projection = New-ProfileFixtureProjection $sourceRoot (Join-Path $TestDrive 'core-lean-target') (Join-Path $TestDrive 'core-lean-receipt.json')
+        $projection.PSObject.Properties.Remove('sources')
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @(
+            [pscustomobject]@{ id = 'fixture'; path = $sourceRoot; priority = 1; platforms = @('codex') }
+        )
+        $projection.projection_profiles = $config.skill_projection.projection_profiles
+        return [pscustomobject]@{ config = $config; projection = $projection; source = $sourceRoot; profile = $profile }
+    }
+
 }
 
 Describe 'Skill projection profiles' {
-    It 'keeps the checked-in default core-lean profile small and backs every cold-reachable skill' {
+    It 'keeps the checked-in default core-lean profile small without exposing cold-only skills' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
-        $coldMembers = @(Get-SkillProjectionColdMembershipNames $config)
+        $profileNames = @($config.projection_profiles.profiles.'core-lean'.include)
 
         foreach ($hostName in @('codex', 'claude', 'zcode')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.profile | Should -Be 'core-lean'
             $selection.include_all | Should -BeFalse
-            # The profile literal stays small; the effective include set also
-            # carries cold discovery members, otherwise the router can validate
-            # a candidate the host cannot load.
-            @($selection.cold_membership_includes).Count | Should -BeGreaterThan 0
-            @($selection.cold_membership_includes) | Should -Contain 'grilling'
-            @($selection.included_names) | Should -Contain 'ai-coding-workflow'
-            @($selection.included_names) | Should -Contain 'capability-router'
-            @($selection.included_names) | Should -Contain 'grilling'
+            # Lean resident semantics (#211): the effective include set is the
+            # profile literal only; cold discovery members stay router-validated
+            # candidates. 'domain-modeling' remains a catalog member but is not
+            # resident after the 2026-11-26 estate slimming.
+            @($selection.included_names) | Should -Be $profileNames
+            @($selection.cold_membership_includes).Count | Should -Be 0
+            @($selection.included_names) | Should -Not -Contain 'domain-modeling'
         }
-        # A host exclusion still subtracts from the cold backing list.
+        # Host exclusions still apply to include-all profiles.
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex).included_names | Should -Not -Contain 'xlsx'
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'xlsx')
-        $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex
-        @($coldMembers) | Where-Object { $codexSelection.excluded_names -notcontains $_ } |
-            ForEach-Object { @($codexSelection.included_names) | Should -Contain $_ }
     }
 
     It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
@@ -80,9 +97,27 @@ Describe 'Skill projection profiles' {
     }
 
     It 'accepts the profile-only projection shape at the CLI config contract' {
-        $config = Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json
+        $fixture = New-RealConfigProfileFixture
+        $config = $fixture.config
 
         { Assert-Cfg $config } | Should -Not -Throw
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $fixture.projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $fixture.projection -Selection $selection
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+        $selection.included_names | ForEach-Object { @($plan.active_names) | Should -Contain $_ }
+        @($plan.active_names) | Should -Be @($fixture.profile.include)
+    }
+
+    It 'preserves an unresolved profile array through the CLI config helper' {
+        $fixture = New-RealConfigProfileFixture
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $fixture.projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $fixture.projection -Selection $selection
+        $included = Get-CfgObjectProperty $effective.resolved_projection_selection 'included_names'
+
+        (Assert-IsArray $included) | Should -BeTrue
+        @($included) | Should -Be @($selection.included_names)
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+        @($plan.active_names) | Should -Be @($selection.included_names)
     }
 
     It 'does not expose the retired core compatibility profile' {
@@ -92,6 +127,58 @@ Describe 'Skill projection profiles' {
             Should -Throw '*不存在的 profile*'
     }
 
+    It 'excludes unselected source skills from a lean manifest without treating them as disabled' {
+        $source = Join-Path $TestDrive 'lean-source'
+        $projection = New-ProfileFixtureProjection $source (Join-Path $TestDrive 'lean-target') (New-ProfileTestReceipt 'lean-fixture.json')
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
+        foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+
+        @($plan.active_names) | Should -Be @('alpha')
+        @($plan.disabled).Count | Should -Be 0
+        @($plan.conflicts).Count | Should -Be 0
+        @($plan.skills | ForEach-Object name) | Should -Be @('alpha')
+        @($effective.managed_link_includes) | Should -Be @('alpha')
+        @($effective.resolved_projection_selection.included_names) | Should -Be @('alpha')
+
+        $native = New-NativeSkillProjectionRuntimePlan -ManagedRoot $source -Config ([pscustomobject]@{ skill_projection = $effective }) -IncludedNames @($selection.included_names) -ExcludedNames @($selection.excluded_names)
+        $manifest = [pscustomobject]@{
+            schema_version = 2
+            projection_fingerprint = Get-SkillProjectionPlanFingerprint $plan $native $selection
+            enabled = [bool]$plan.enabled
+            source_count = 1
+            skill_entry_count = @($plan.skills).Count
+            unique_name_count = @($plan.unique_names).Count
+            active_name_count = @($plan.active_names).Count
+            duplicate_name_groups = [int]$plan.duplicate_name_groups
+            disabled_path_count = @($plan.disabled).Count
+            conflict_count = @($plan.conflicts).Count
+            skills = @($plan.skills)
+            canonical = @($plan.canonical)
+            active = @($plan.active)
+            disabled = @($plan.disabled)
+            conflicts = @($plan.conflicts)
+            projection_selection = [pscustomobject]@{
+                host = $selection.host
+                profile = $selection.profile
+                include_all = $selection.include_all
+                included_names = @($selection.included_names)
+                excluded_names = @($selection.excluded_names)
+            }
+        }
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
+        $validation.pass | Should -BeTrue
+        $validation.freshness | Should -Be 'fresh'
+
+        $manifestPath = Join-Path $TestDrive 'lean-readback.json'
+        Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 12)
+        $readBack = Test-SkillProjectionManifestCurrent (Get-ContentUtf8 $manifestPath | ConvertFrom-Json) $projection $TestDrive
+        $readBack.pass | Should -BeTrue
+        $readBack.freshness | Should -Be 'fresh'
+        @($readBack.plan.active_names) | Should -Contain 'alpha'
+    }
     It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode -RequestedProfile 'full-compatible'
@@ -109,7 +196,7 @@ Describe 'Skill projection profiles' {
     It 'projects every fixture skill except the selected host exclusion in full-compatible mode' {
         $source = Join-Path $TestDrive 'profile-source'
         $target = Join-Path $TestDrive 'profile-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\profile-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'profile.json'
         foreach ($name in @('alpha', 'beta', 'zcode-only-incompatible')) { New-ProfileFixtureSkill $source $name }
         $projection = New-ProfileFixtureProjection $source $target $receipt
 
@@ -125,7 +212,7 @@ Describe 'Skill projection profiles' {
     It 'preserves the resolved host selection for downstream native projection' {
         $source = Join-Path $TestDrive 'effective-source'
         $target = Join-Path $TestDrive 'effective-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\effective-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'effective.json'
         $projection = New-ProfileFixtureProjection $source $target $receipt
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName zcode -RequestedProfile 'full-compatible'
         $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
@@ -221,7 +308,7 @@ Describe 'Skill projection profiles' {
     It 'validates a full-compatible manifest against its recorded profile instead of the default fixture profile' {
         $source = Join-Path $TestDrive 'manifest-source'
         $target = Join-Path $TestDrive 'manifest-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\manifest-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'manifest.json'
         foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
         $projection = New-ProfileFixtureProjection $source $target $receipt
         $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
@@ -254,7 +341,7 @@ Describe 'Skill projection profiles' {
             }
         }
 
-        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
 
         $validation.pass | Should -BeTrue
         $validation.freshness | Should -Be 'fresh'
@@ -263,7 +350,7 @@ Describe 'Skill projection profiles' {
     It 'keeps the manifest fresh after shrinking a native profile and removing owned links' {
         $source = Join-Path $TestDrive 'transition-source'
         $target = Join-Path $TestDrive 'transition-target'
-        $receipt = Join-Path $repoRoot ('reports\skill-projection\transition-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $receipt = New-ProfileTestReceipt 'transition.json'
         $configPath = Join-Path $TestDrive 'transition-config.toml'
         $manifestPath = Join-Path $TestDrive 'transition-manifest.json'
         foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
@@ -282,7 +369,7 @@ Describe 'Skill projection profiles' {
 
             Test-Path -LiteralPath (Join-Path $target 'beta') | Should -BeFalse
             $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $TestDrive
 
             $validation.pass | Should -BeTrue
             $validation.freshness | Should -Be 'fresh'

@@ -12,6 +12,8 @@
 - 文件一致只证明 `filesystem_projected`；dsh 新会话 baseline 出现 `Instructions from: ~/.dsh/AGENTS.md` 来源段才可称 `host_loaded`，真实任务验收另列。
 - 最小诊断：`/permission` 核对沙箱与审批预设、`/plan` 核对计划模式；文件级投影、dry-run 与 receipt 属于 `platform_na` 替代证据，不冒充 `host_loaded`。
 - `~/.dsh/profiles/desktop/cordis.patch.yml` 是受控配置面（id 定向覆盖/禁用/插入，支持 `!!js` 表达式）；调整指令链行为须走 patch 行并留备份回滚入口。
+- `llm-deepseek.config.retryPolicy` 用 `mode: normal` 的有限 `maxRetries` 与有上限的 `backoff`；只对瞬时错误重试。限流、连接、超时或空响应不引入换号、IP/UA 切换或提高并发。插件默认的读取截断、旧结果遮蔽或自动动作须按需逐项开启。修改前后做 YAML 解析与字段核对，保留原 patch 回滚副本。
+- 可选插件只在未满足的明确需求出现时启用，并核对宿主版本与 peer 契约。`dsh-free-search` 的 `allowedEngines` 与 `fallbackOrder` 保持同一有效集合，失败按有界顺序回退，不做引擎轮换或并发扩容。
 ### B.3 强制面与回退
 - dsh 无 hooks 机制；确定性强制面是沙箱模式（`read-only` / `workspace-write` / `danger-full-access`，部署默认 fail-closed `read-only`）与审批策略（`ask` / `never`；`ask` 缺应答器以拒绝方式关闭，仅一次性授权、无 `allow-always`）。`/permission` 预设捆绑两旋钮，`permission` 设置命名空间固定新会话默认。
 - `/plan` 计划模式与 `exit_plan_mode` 仅是引导（工具仍全可用）；强制限制必须落在沙箱与审批，不得依赖计划模式本身。
