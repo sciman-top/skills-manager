@@ -1810,7 +1810,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
                         $targetHost = Get-SkillProjectionTargetHost $t
                         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName $targetHost -RequestedProfile $SkillProfile
-                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}（host={1}, profile={2}, include_all={3}）" -f $t.path, $selection.host, $selection.profile, [bool]$selection.include_all)
+                        Log ("DRYRUN：计划受管技能链接：{0}（host={1}, profile={2}, include_all={3}）" -f $t.path, $selection.host, $selection.profile, [bool]$selection.include_all)
                     }
                     elseif ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
                         $targetHost = Get-SkillProjectionTargetHost $t
