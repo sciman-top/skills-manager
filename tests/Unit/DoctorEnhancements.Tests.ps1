@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     . $PSScriptRoot\..\..\skills.ps1
 
 }
@@ -508,9 +508,9 @@ Describe "Doctor Enhancements" {
             $cfg = LoadCfg -NoAutoFix
             $sources = Get-DoctorColdMaterializationSources -Cfg $cfg
 
-            # Anchored to the post-slimming estate (2026-11-26: 69 -> 36 mappings,
-            # 80 -> 45 managed skills); bump deliberately when the estate changes.
-            $sources.Keys.Count | Should -Be 46
+            # Anchored to the post-slimming estate (2026-11-26: 36 -> 32 mappings,
+            # 45 -> 41 managed skills); bump deliberately when the estate changes.
+            $sources.Keys.Count | Should -Be 42
             $sources['capability-router'] | Should -BeLike '*overrides\custom\capability-router'
         }
     }
