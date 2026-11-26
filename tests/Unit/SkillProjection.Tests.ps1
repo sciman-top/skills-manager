@@ -229,19 +229,16 @@ unified_exec = true
 
     It 'projects declared cold side effects and the transitive dependency contract' {
         $managed = Join-Path $TestDrive 'closure-catalog-managed'
-        New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null
         New-ProjectionSkill $managed 'grilling' 'grilling' | Out-Null
         New-ProjectionSkill $managed 'domain-modeling' 'domain-modeling' | Out-Null
         $projection = [pscustomobject]@{
             managed_source_path = $managed
             discovery_catalog = [pscustomobject]@{
                 side_effects = [pscustomobject]@{
-                    'grill-with-docs' = 'controlled_write'
                     grilling = 'read_only'
                     'domain-modeling' = 'controlled_write'
                 }
                 execution_contracts = [pscustomobject]@{
-                    'grill-with-docs' = [pscustomobject]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
                     grilling = [pscustomobject]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
                     'domain-modeling' = [pscustomobject]@{ mode = 'one_shot'; native_agent = 'cold-capability-runner'; conversation_owner = 'runner'; stop_condition = 'parent_contract' }
                 }
@@ -249,16 +246,17 @@ unified_exec = true
         }
 
         $catalog = New-SkillDiscoveryCatalogDocument $projection
-        $grill = @($catalog.skills | Where-Object { $_.name -eq 'grill-with-docs' })[0]
         $grilling = @($catalog.skills | Where-Object { $_.name -eq 'grilling' })[0]
 
-        $grill.side_effect | Should -Be 'controlled_write'
-        @($grill.dependencies) | Should -Be @('domain-modeling','grilling')
-        $grill.execution_contract.mode | Should -Be 'multi_turn_user_decision'
-        $grill.execution_contract.native_agent | Should -Be 'design-griller'
         $grilling.side_effect | Should -Be 'read_only'
+        $grilling.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+        $grilling.execution_contract.native_agent | Should -Be 'design-griller'
         $grilling.execution_contract.stop_condition | Should -Be 'one_question_then_wait'
+        # The dependency closure contract is empty after the 2026-11-26 estate
+        # slimming: catalog dependencies only come from
+        # config/skill-dependency-closure.json, so every entry resolves to none.
         $grilling.dependencies.Count | Should -Be 0
+        @($catalog.skills | Where-Object { @($_.dependencies).Count -gt 0 }) | Should -BeNullOrEmpty
     }
 
     It 'keeps the current cold directory fully classified into bounded functional domains' {
@@ -313,9 +311,11 @@ unified_exec = true
         }
         { New-SkillDiscoveryCatalogDocument $sideEffectProjection } | Should -Throw '*missing-skill*'
 
-        $closureProjection = [pscustomobject]@{ managed_source_path = $managed }
-        New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null
-        { New-SkillDiscoveryCatalogDocument $closureProjection } | Should -Throw '*grill-with-docs*domain-modeling*'
+        # Dangling dependency-closure entries are guarded independently of this
+        # unit scope: SkillProjection resolves the closure against the canonical
+        # inventory, and scripts/verify-skill-integrity.ps1 fail-closed the same
+        # contract at gate time. The closure file itself is empty since the
+        # 2026-11-26 estate slimming, so no fixture can exercise that path here.
     }
 
     It 'rejects a discovery domain membership that is absent from the canonical inventory' {
