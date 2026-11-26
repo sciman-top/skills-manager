@@ -7,12 +7,12 @@
 
 function Get-AgentHostFacts {
     return @(
-        [pscustomobject]@{ id = 'codex'; display = 'Codex'; label = 'OpenAI ChatGPT Work / Codex App / Codex CLI'; file = 'AGENTS.md'; discovery_files = @('AGENTS.override.md', 'AGENTS.md'); root_dir = '.codex'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
-        [pscustomobject]@{ id = 'claude'; display = 'Claude'; label = 'Claude Code'; file = 'CLAUDE.md'; discovery_files = @('CLAUDE.md'); root_dir = '.claude'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
-        [pscustomobject]@{ id = 'zcode'; display = 'ZCode'; label = 'ZCode / GLM'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.zcode'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
-        [pscustomobject]@{ id = 'antigravity'; display = 'Antigravity'; label = 'Antigravity / Gemini'; file = 'GEMINI.md'; discovery_files = @('GEMINI.md'); root_dir = '.gemini'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
-        [pscustomobject]@{ id = 'workbuddy'; display = 'WorkBuddy'; label = 'WorkBuddy / CodeBuddy'; file = 'CODEBUDDY.md'; discovery_files = @('CODEBUDDY.md', 'CODEBUDDY.mdc'); root_dir = '.workbuddy-ai'; contract_version = '2026-10'; verified_on = '2026-10-25'; verification_level = 'repo_verified' }
-        [pscustomobject]@{ id = 'dsh'; display = 'DeepSeek Harness'; label = 'DeepSeek Harness'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.dsh'; contract_version = '2026-11'; verified_on = '2026-11-05'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'codex'; display = 'Codex'; label = 'OpenAI ChatGPT Work / Codex App / Codex CLI'; file = 'AGENTS.md'; discovery_files = @('AGENTS.override.md', 'AGENTS.md'); root_dir = '.codex'; contract_version = '2026-10'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'claude'; display = 'Claude'; label = 'Claude Code'; file = 'CLAUDE.md'; discovery_files = @('CLAUDE.md'); root_dir = '.claude'; contract_version = '2026-10'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'zcode'; display = 'ZCode'; label = 'ZCode / GLM'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.zcode'; contract_version = '2026-10'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'antigravity'; display = 'Antigravity'; label = 'Antigravity / Gemini'; file = 'GEMINI.md'; discovery_files = @('GEMINI.md'); root_dir = '.gemini'; contract_version = '2026-10'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'workbuddy'; display = 'WorkBuddy'; label = 'WorkBuddy / CodeBuddy'; file = 'CODEBUDDY.md'; discovery_files = @('CODEBUDDY.md', 'CODEBUDDY.mdc'); root_dir = '.workbuddy-ai'; contract_version = '2026-10'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
+        [pscustomobject]@{ id = 'dsh'; display = 'DeepSeek Harness'; label = 'DeepSeek Harness'; file = 'AGENTS.md'; discovery_files = @('AGENTS.md'); root_dir = '.dsh'; contract_version = '2026-11'; verified_on = '2026-11-26'; verification_level = 'repo_verified' }
     )
 }
 
