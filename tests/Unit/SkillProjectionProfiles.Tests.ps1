@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
 
@@ -75,7 +75,7 @@ Describe 'Skill projection profiles' {
         }
         # Host exclusions still apply to include-all profiles.
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex).included_names | Should -Not -Contain 'xlsx'
-        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'xlsx')
+        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('docx', 'pptx', 'skill-creator', 'xlsx')
     }
 
     It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
@@ -187,7 +187,7 @@ Describe 'Skill projection profiles' {
         $selection.include_all | Should -BeTrue
         @($selection.included_names).Count | Should -Be 0
         @($selection.cold_membership_includes).Count | Should -Be 0
-        @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'xlsx')
+        @($selection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'xlsx')
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
         @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'xlsx')
@@ -228,7 +228,7 @@ Describe 'Skill projection profiles' {
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'does-not-exist' } | Should -Throw '*不存在的 profile*'
 
         $invalid = $config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-        $invalid.projection_profiles.profiles.'core-lean'.exclude = @('research')
+        $invalid.projection_profiles.profiles.'core-lean'.exclude = @('systematic-debugging')
         { Resolve-SkillProjectionSelection -ProjectionConfig $invalid -HostName codex } | Should -Throw '*include/exclude 冲突*'
     }
 
@@ -271,7 +271,7 @@ Describe 'Skill projection profiles' {
         foreach ($hostName in @('antigravity', 'workbuddy', 'dsh')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.host | Should -Be $hostName
-            $expectedProfile = if ($hostName -in @('antigravity', 'dsh')) { 'core-lean' } else { 'core-ops' }
+            $expectedProfile = 'core-lean'
             $selection.profile | Should -Be $expectedProfile
             @($selection.included_names).Count | Should -BeGreaterThan 0
         }

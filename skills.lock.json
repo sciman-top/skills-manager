@@ -1,36 +1,27 @@
 {
   "version": 1,
-  "generated_at": "2026-11-26T09:24:45.3218271Z",
+  "generated_at": "2026-11-26T13:57:51.1280588Z",
   "vendors": [
     {
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "9d0c60d406b454a78ccc0a175b19932047aa4dac"
+      "commit": "39b723ceebf81474d0557c1fecd01eddab585563"
     },
     {
       "name": "anthropics-skills",
       "repo": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4"
+      "commit": "1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064"
     },
     {
       "name": "superpowers",
       "repo": "https://github.com/obra/superpowers.git",
       "ref": "main",
-      "commit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d"
+      "commit": "22f0b463e7a5e579904dd6211a520321035526f7"
     }
   ],
   "imports": [
-    {
-      "name": "agent-browser",
-      "mode": "manual",
-      "repo": "https://github.com/vercel-labs/agent-browser.git",
-      "ref": "main",
-      "skill": "skills\\agent-browser",
-      "sparse": false,
-      "commit": "39a74c70d7759d5a6de7a22c04570bb626bbd081"
-    },
     {
       "name": "agent-skills-2",
       "mode": "vendor",
@@ -38,16 +29,7 @@
       "ref": "main",
       "skill": "skills\\api-and-interface-design",
       "sparse": false,
-      "commit": "9d0c60d406b454a78ccc0a175b19932047aa4dac"
-    },
-    {
-      "name": "architecture-patterns",
-      "mode": "manual",
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "skill": "plugins\\backend-development\\skills\\architecture-patterns",
-      "sparse": false,
-      "commit": "156b7a5e7a8b93642628a339ee4039c925b34c7f"
+      "commit": "39b723ceebf81474d0557c1fecd01eddab585563"
     },
     {
       "name": "codebase-design",
@@ -65,7 +47,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "8444efcd48f7012f09797778a36a33e73d0861f4"
+      "commit": "e91a134584eb798bac7fb0379358006a2b63b965"
     },
     {
       "name": "domain-modeling",
@@ -74,7 +56,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60"
+      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -83,7 +65,7 @@
       "ref": "main",
       "skill": "skills\\dotnet-backend-patterns",
       "sparse": false,
-      "commit": "e74905446c74f8689b58e172d6fc209ee45786b6"
+      "commit": "2ee2cf79b99035fbdabdfe0b1057034195e7571e"
     },
     {
       "name": "drawio-diagram-forge",
@@ -92,16 +74,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "6467aaff40ed90deec19fb7dd6ba3e5e092a92c2"
-    },
-    {
-      "name": "error-handling-patterns",
-      "mode": "manual",
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
-      "sparse": false,
-      "commit": "156b7a5e7a8b93642628a339ee4039c925b34c7f"
+      "commit": "82b4a32260e0b0ad5def912299378c881b8ca447"
     },
     {
       "name": "grilling",
@@ -110,7 +83,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60"
+      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
     },
     {
       "name": "manim-composer",
@@ -128,7 +101,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "143a3d976b3c1603cc8932984d5e1f28501cb5fc"
+      "commit": "dc0083dbe22133bfa7ce3500dee85e187e0cd47a"
     },
     {
       "name": "microsoft-code-reference",
@@ -155,7 +128,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60"
+      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
     },
     {
       "name": "windows-desktop-e2e",
@@ -164,7 +137,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "ef648e01899ba3e8dc6371642deaaf64b4477775"
+      "commit": "d2ef2680594f9a17526a6e1a2e18b3d242c5d17b"
     }
   ]
 }
