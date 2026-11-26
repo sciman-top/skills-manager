@@ -74,7 +74,9 @@ function Get-AuditTargetRepoLiveState($snapshotState) {
         $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
         # Get-AuditGitInfo 将每条 Git 命令绑定到目标路径；不依赖切换 cwd，
         # 这样目标仓在扫描后被移走时仍能返回 exists=false 并报告 stale。
-        $git = Get-AuditGitInfo $resolvedPath
+        $skipDirtyFingerprint = [bool](Get-CfgObjectProperty $snapshotTarget 'scan_skipped_dirty') -and
+            -not [bool](Get-CfgObjectProperty $snapshotTarget 'worktree_fingerprint_available')
+        $git = Get-AuditGitInfo $resolvedPath -SkipDirtyFingerprint:$skipDirtyFingerprint
         $targets += [pscustomobject]([ordered]@{
                 name = [string]$snapshotTarget.name
                 resolved_path = $resolvedPath
@@ -85,7 +87,7 @@ function Get-AuditTargetRepoLiveState($snapshotState) {
                 dirty = [bool]$git.dirty
                 status_count = [int]$git.status_count
                 status_fingerprint = [string]$git.status_fingerprint
-                worktree_fingerprint_available = $true
+                worktree_fingerprint_available = (-not [string]::IsNullOrWhiteSpace([string]$git.status_fingerprint))
             })
     }
     return [pscustomobject]([ordered]@{

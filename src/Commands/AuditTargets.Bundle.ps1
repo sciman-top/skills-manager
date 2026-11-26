@@ -174,7 +174,8 @@ function Get-AuditCarriedTargetScanMap([string]$ReportRoot, [string]$CurrentRunI
     # confidence_ceiling 保持 skipped_dirty——New-AuditTargetProfile 据此把
     # 结转仓排除在组合汇总之外，旧信号不会在需求排序里冒充新鲜扫描。
     $map = @{}
-    $base = Split-Path -Parent ([IO.Path]::GetFullPath($ReportRoot))
+    $outputPath = [IO.Path]::GetFullPath($ReportRoot).TrimEnd('\', '/')
+    $bases = @((Split-Path -Parent $outputPath), (Split-Path -Parent (Get-AuditReportRoot $CurrentRunId))) | Select-Object -Unique
     $pending = @(
         @($Targets) | ForEach-Object {
             [pscustomobject]@{
@@ -183,18 +184,23 @@ function Get-AuditCarriedTargetScanMap([string]$ReportRoot, [string]$CurrentRunI
             }
         }
     )
-    if ([string]::IsNullOrWhiteSpace($base) -or -not [IO.Directory]::Exists($base) -or @($pending).Count -eq 0) { return $map }
+    if ($pending.Count -eq 0) { return $map }
     $runDirs = @(
-        Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ne $CurrentRunId } |
-            Sort-Object Name -Descending
+        foreach ($base in $bases) {
+            if ([IO.Directory]::Exists($base)) {
+                Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -ne $outputPath }
+            }
+        }
     )
-    foreach ($dir in $runDirs) {
+    $snapshotFiles = @(foreach ($dir in $runDirs) {
+        Get-Item -LiteralPath (Join-Path $dir.FullName 'snapshot.json') -ErrorAction SilentlyContinue
+    })
+    foreach ($file in @($snapshotFiles | Sort-Object LastWriteTimeUtc, FullName -Descending)) {
         if (@($pending).Count -eq 0) { break }
-        $snapshotPath = Join-Path $dir.FullName "snapshot.json"
-        if (-not [IO.File]::Exists($snapshotPath)) { continue }
-        $prior = $null
-        try { $prior = Get-ContentUtf8 $snapshotPath | ConvertFrom-Json } catch { continue }
+        try { $prior = Get-ContentUtf8 $file.FullName | ConvertFrom-Json } catch { continue }
+        $priorRunId = [string](Get-CfgObjectProperty $prior 'run_id')
+        if ([string]::IsNullOrWhiteSpace($priorRunId)) { $priorRunId = $file.Directory.Name }
         # 两跳惯用法：Get-CfgObjectProperty 对数组属性走 Write-Output -NoEnumerate，
         # 直接 @(<调用>) 会把未枚举数组包成嵌套 [[entry]]；先赋变量再 @() 才是平铺。
         $priorScans = Get-CfgObjectProperty $prior "target_scans"
@@ -205,11 +211,14 @@ function Get-AuditCarriedTargetScanMap([string]$ReportRoot, [string]$CurrentRunI
             $match = @($priorScans | Where-Object {
                 $scanTarget = Get-CfgObjectProperty $_ "target"
                 $coverage = Get-CfgObjectProperty $_ "scan_coverage"
+                $scanPath = [string](Get-CfgObjectProperty $scanTarget "resolved_path")
                 (([string](Get-CfgObjectProperty $scanTarget "name")) -eq $item.name) -and
-                ((([IO.Path]::GetFullPath([string](Get-CfgObjectProperty $scanTarget "resolved_path")))).TrimEnd('\', '/').ToLowerInvariant() -eq $item.resolved) -and
+                ([bool](Get-CfgObjectProperty $scanTarget "exists")) -and
+                (-not [string]::IsNullOrWhiteSpace($scanPath)) -and
+                ((([IO.Path]::GetFullPath($scanPath))).TrimEnd('\', '/').ToLowerInvariant() -eq $item.resolved) -and
                 (([string](Get-CfgObjectProperty $coverage "confidence_ceiling")) -ne "skipped_dirty")
             } | Select-Object -First 1)
-            if (@($match).Count -gt 0) { $map[$item.name] = [pscustomobject]@{ scan = $match[0]; run_id = $dir.Name } }
+            if (@($match).Count -gt 0) { $map[$item.name] = [pscustomobject]@{ scan = $match[0]; run_id = $priorRunId } }
             else { $stillPending += $item }
         }
         $pending = @($stillPending)
@@ -228,7 +237,7 @@ function Invoke-AuditTargetsScan {
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
     $runId = Get-AuditRunId
     $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
-    $carriedScans = if ($SkipDirty) { Get-AuditCarriedTargetScanMap $reportRoot $runId $targets } else { @{} }
+    $carriedScans = $null
     # 2026-10-09 实测（8 逻辑核）：ForEach-Object -Parallel runspaces 下每仓
     # 耗时为串行的 2-4 倍（12-22s vs 2.5-6.5s），总墙钟不降反升——解释型 PS
     # 循环 + 正则在共享进程内争抢 GC/引擎锁，扫描是 CPU 串行型负载，保持
@@ -243,8 +252,11 @@ function Invoke-AuditTargetsScan {
         # dirty_skip 是人工声明的“whole repository deferred”范围；preflight 只忽略
         # 该仓的整个快照/工作树差异，仍要求 exists/is_repo 与当前目标匹配。
         # 仅在显式 -SkipDirty 时预检，不给常规扫描增加重复 git 取证。
-        $gitInfo = if ($SkipDirty) { Get-AuditGitInfo $resolved } else { $null }
+        $gitInfo = if ($SkipDirty) { Get-AuditGitInfo $resolved -SkipDirtyFingerprint } else { $null }
         if ($SkipDirty -and $gitInfo.dirty) {
+            if ($null -eq $carriedScans) {
+                $carriedScans = Get-AuditCarriedTargetScanMap $reportRoot $runId $targets
+            }
             $carried = if ($carriedScans.ContainsKey([string]$_.name)) { $carriedScans[[string]$_.name] } else { $null }
             if ($null -ne $carried) {
                 Write-Host ("Skipped {0}: dirty worktree (在途修改，结转最近快照 {1})" -f $_.name, [string]$carried.run_id)
@@ -345,7 +357,7 @@ function Invoke-AuditTargetsScan {
             Write-Host ("Skipped {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
             return
         }
-        New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
+        New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path) $gitInfo
         Write-Host ("Scanned {0}: {1:N2}s" -f $_.name, $timer.Elapsed.TotalSeconds)
     })
     return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" ([string]$Query) $cfg $scans
