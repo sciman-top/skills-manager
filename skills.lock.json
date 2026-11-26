@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "generated_at": "2026-11-26T13:57:51.1280588Z",
+  "generated_at": "2026-11-26T15:19:46.8752647Z",
   "vendors": [
     {
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "39b723ceebf81474d0557c1fecd01eddab585563"
+      "commit": "e997ac5b9a74eab332d5e9793bb38a38c8cfdd74"
     },
     {
       "name": "anthropics-skills",
       "repo": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064"
+      "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba"
     },
     {
       "name": "superpowers",
@@ -29,7 +29,7 @@
       "ref": "main",
       "skill": "skills\\api-and-interface-design",
       "sparse": false,
-      "commit": "39b723ceebf81474d0557c1fecd01eddab585563"
+      "commit": "e997ac5b9a74eab332d5e9793bb38a38c8cfdd74"
     },
     {
       "name": "codebase-design",
@@ -47,7 +47,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "e91a134584eb798bac7fb0379358006a2b63b965"
+      "commit": "5e504ae11498f2b8daa30d86b7dab97b2ecd8092"
     },
     {
       "name": "domain-modeling",
@@ -56,7 +56,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
+      "commit": "6f7f7831a625f040a8e06a0e7954826b87ce775a"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -74,7 +74,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "82b4a32260e0b0ad5def912299378c881b8ca447"
+      "commit": "838ef0826fa8515ce015330fc85e49fa0c6f4797"
     },
     {
       "name": "grilling",
@@ -83,7 +83,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
+      "commit": "6f7f7831a625f040a8e06a0e7954826b87ce775a"
     },
     {
       "name": "manim-composer",
@@ -101,7 +101,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "dc0083dbe22133bfa7ce3500dee85e187e0cd47a"
+      "commit": "93fc8b9ee3ef56b9b5e7261e6ce92d314cb2c1cf"
     },
     {
       "name": "microsoft-code-reference",
@@ -128,7 +128,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "5863806dd4e15c63174bee4e7515a4256792ecfa"
+      "commit": "6f7f7831a625f040a8e06a0e7954826b87ce775a"
     },
     {
       "name": "windows-desktop-e2e",
@@ -137,7 +137,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "d2ef2680594f9a17526a6e1a2e18b3d242c5d17b"
+      "commit": "4adeee6732a12d1540f49a4d50a38ce8c97f9a53"
     }
   ]
 }
