@@ -320,46 +320,17 @@ Describe 'Native agent bridge' {
         Test-Path -LiteralPath $goodLegacy -PathType Leaf | Should -BeTrue
     }
 
-    It 'keeps grill-me prompt-visible as an explicit core entry that delegates to the native griller' {
-        $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
-        $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
-
-        $metadata | Should -Match 'allow_implicit_invocation:\s*true'
-        $skill | Should -Match 'custom `design-griller`'
-        $skill | Should -Match '(?s)Do not perform\s+the interview in the parent task'
-        $skill | Should -Match 'do not change a shared skill profile'
-        $skill | Should -Match 'no repository edits'
-        $skill | Should -Match 'non-empty child\s+identifier'
-        $skill | Should -Match 'On Codex that is `spawn_agent`'
-        $skill | Should -Match '(?i)on Claude it is the\s+`Agent` tool'
-        $skill | Should -Match 'continue the same child with `SendMessage`'
-        $skill | Should -Match '(?s)Do not call `wait` until that\s+identifier\s+exists'
-        $skill | Should -Match 'bare `wait`'
-        $skill | Should -Match 'native_bridge_unavailable'
-        $skill | Should -Match 'simulate a child question'
-        $skill | Should -Match 'silently fall back'
-        $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
-        $skill | Should -Match 'parent-side soft guard'
-
-        $skill | Should -Match 'still an interview'
-        $skill | Should -Match 'one-shot analysis, report, or summary with trailing questions'
-        $skill | Should -Match 'that collapse\s+is forbidden'
-        $skill | Should -Match 'route through cold discovery to `grill-with-docs`'
-        $skill | Should -Match 'gather evidence per question, never instead of asking it'
-
+    It 'keeps grilling prompt-visible as an explicit core entry that delegates to the native griller' {
         $grillingSkill = Get-BridgeTemplateText 'overrides\patches\grilling\SKILL.md'
         $grillingMetadata = Get-BridgeTemplateText 'overrides\patches\grilling\agents\openai.yaml'
-        $grillWithDocsSkill = Get-BridgeTemplateText 'overrides\patches\grill-with-docs\SKILL.md'
         $grillingSkill | Should -Match 'disable-model-invocation:\s*true'
         $grillingMetadata | Should -Match 'allow_implicit_invocation:\s*true'
-        foreach ($member in @($grillWithDocsSkill, $grillingSkill)) {
-            $member | Should -Match 'Native-child dispatch invariant'
-            $member | Should -Match 'spawn_agent'
-            $member | Should -Match 'design-griller'
-            $member | Should -Match 'non-empty child task or\s+thread identifier'
-            $member | Should -Match 'native_bridge_unavailable'
-            $member | Should -Match 'bare `wait`'
-        }
+        $grillingSkill | Should -Match 'Native-child dispatch invariant'
+        $grillingSkill | Should -Match 'spawn_agent'
+        $grillingSkill | Should -Match 'design-griller'
+        $grillingSkill | Should -Match 'non-empty child task or\s+thread identifier'
+        $grillingSkill | Should -Match 'native_bridge_unavailable'
+        $grillingSkill | Should -Match 'bare `wait`'
     }
     It 'requires an explicit bounded admission before a cold controlled-write skill can execute' {
         $runner = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml'

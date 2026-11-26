@@ -1,6 +1,0 @@
-interface:
-  display_name: "Draft Tickets"
-  short_description: "Draft dependency-aware vertical-slice tickets"
-  default_prompt: "Use $draft-tickets to break the current plan into review-ready tracer-bullet tickets, saving a local draft only when I request a path."
-policy:
-  allow_implicit_invocation: true
