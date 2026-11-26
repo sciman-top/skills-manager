@@ -273,9 +273,8 @@ unified_exec = true
         foreach ($domain in @($catalog.domains)) {
             (@($domain.skill_names).Count -le 12) | Should -BeTrue
         }
-        @($decision.skill_names) | Should -Contain 'grill-with-docs'
         @($decision.skill_names) | Should -Contain 'grilling'
-        @($decision.skill_names) | Should -Contain 'grill-me'
+        @($decision.skill_names) | Should -Contain 'domain-modeling'
     }
 
     It 'fails closed when a declared cold workflow side effect lacks an execution contract' {

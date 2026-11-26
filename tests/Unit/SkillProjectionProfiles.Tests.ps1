@@ -48,14 +48,14 @@ Describe 'Skill projection profiles' {
             # carries cold discovery members, otherwise the router can validate
             # a candidate the host cannot load.
             @($selection.cold_membership_includes).Count | Should -BeGreaterThan 0
-            @($selection.cold_membership_includes) | Should -Contain 'grill-me'
+            @($selection.cold_membership_includes) | Should -Contain 'grilling'
             @($selection.included_names) | Should -Contain 'ai-coding-workflow'
             @($selection.included_names) | Should -Contain 'capability-router'
-            @($selection.included_names) | Should -Contain 'grill-me'
+            @($selection.included_names) | Should -Contain 'grilling'
         }
         # A host exclusion still subtracts from the cold backing list.
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex).included_names | Should -Not -Contain 'xlsx'
-        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'xlsx')
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex
         @($coldMembers) | Where-Object { $codexSelection.excluded_names -notcontains $_ } |
             ForEach-Object { @($codexSelection.included_names) | Should -Contain $_ }
@@ -100,10 +100,10 @@ Describe 'Skill projection profiles' {
         $selection.include_all | Should -BeTrue
         @($selection.included_names).Count | Should -Be 0
         @($selection.cold_membership_includes).Count | Should -Be 0
-        @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'xlsx')
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
-        @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'xlsx')
     }
 
     It 'projects every fixture skill except the selected host exclusion in full-compatible mode' {
