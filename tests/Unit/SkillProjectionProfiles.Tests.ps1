@@ -61,7 +61,7 @@ Describe 'Skill projection profiles' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $profileNames = @($config.projection_profiles.profiles.'core-lean'.include)
 
-        foreach ($hostName in @('codex', 'claude', 'zcode')) {
+        foreach ($hostName in @('codex', 'claude')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.profile | Should -Be 'core-lean'
             $selection.include_all | Should -BeFalse
@@ -71,7 +71,11 @@ Describe 'Skill projection profiles' {
         }
         # Host exclusions still apply to include-all profiles.
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex).included_names | Should -Not -Contain 'xlsx'
-        @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        # zcode retired from the per-host table on 2026-11-26; it consumes the
+        # shared user_skill_root and carries no host exclusions of its own.
+        $zcodeSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode
+        $zcodeSelection.profile | Should -Be 'core-lean'
+        @($zcodeSelection.excluded_names) | Should -Be @()
     }
 
     It 'keeps the resident coding entrypoint compact and free of legacy selection mirrors' {
@@ -175,7 +179,7 @@ Describe 'Skill projection profiles' {
         $readBack.freshness | Should -Be 'fresh'
         @($readBack.plan.active_names) | Should -Contain 'alpha'
     }
-    It 'represents the full-compatible ZCode projection as all managed skills minus host exclusions' {
+    It 'represents the full-compatible selection for the retired zcode host without host exclusions' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode -RequestedProfile 'full-compatible'
 
@@ -183,7 +187,9 @@ Describe 'Skill projection profiles' {
         $selection.include_all | Should -BeTrue
         @($selection.included_names).Count | Should -Be 0
         @($selection.cold_membership_includes).Count | Should -Be 0
-        @($selection.excluded_names) | Should -Be @('agent-browser', 'docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
+        # zcode host exclusions retired 2026-11-26 with the per-host target;
+        # the shared user_skill_root projection carries no per-host exclusions.
+        @($selection.excluded_names) | Should -Be @()
 
         $codexSelection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'full-compatible'
         @($codexSelection.excluded_names) | Should -Be @('docx', 'pptx', 'skill-creator', 'web-artifacts-builder', 'xlsx')
