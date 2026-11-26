@@ -34,24 +34,35 @@ Describe 'Agent host registry' {
     }
 
     It 'reports compatibility freshness without claiming host loading or live acceptance' {
-        $current = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-11-09') -MaxAgeDays 30)
+        # AsOf 相对注册表 verified_on 动态推导，不与操作者日期字面量耦合。
+        $dates = @(Get-AgentHostFacts | ForEach-Object { [datetime]::ParseExact([string]$_.verified_on, 'yyyy-MM-dd', $null) })
+        $latest = ($dates | Measure-Object -Maximum).Maximum
+
+        $current = @(Get-AgentHostCompatibilityStatus -AsOf $latest.AddDays(15) -MaxAgeDays 30)
         $current.Count | Should -Be 6
         @($current | Where-Object status -ne 'current').Count | Should -Be 0
         @($current | Where-Object host_loaded).Count | Should -Be 0
         @($current | Where-Object live_accepted).Count | Should -Be 0
 
-        $stale = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-12-15') -MaxAgeDays 30)
+        $stale = @(Get-AgentHostCompatibilityStatus -AsOf $latest.AddDays(40) -MaxAgeDays 30)
         @($stale | Where-Object status -eq 'stale').Count | Should -Be 6
     }
 
     It 'treats same-day verified_on as current at any hour, not future' {
         # 回归钉：verified_on 是本地日历日期。UTC+ 时区当天清晨曾因
         # AssumeUniversal+ToUniversalTime 折算被误判为 future。
-        $sameDay = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-11-05 06:30') -MaxAgeDays 30)
-        @($sameDay | Where-Object status -ne 'current').Count | Should -Be 0
-        @($sameDay | Where-Object { $_.host -eq 'dsh' }).age_days | Should -Be 0
+        # AsOf 取注册表最新 verified_on 当天清晨，随注册表日期演进保持鲁棒。
+        $dates = @(Get-AgentHostFacts | ForEach-Object { [datetime]::ParseExact([string]$_.verified_on, 'yyyy-MM-dd', $null) })
+        $latest = ($dates | Measure-Object -Maximum).Maximum
+        $earliest = ($dates | Measure-Object -Minimum).Minimum
 
-        $future = @(Get-AgentHostCompatibilityStatus -AsOf ([datetime]'2026-10-20') -MaxAgeDays 30)
+        $sameDay = @(Get-AgentHostCompatibilityStatus -AsOf $latest.AddHours(6.5) -MaxAgeDays 30)
+        @($sameDay | Where-Object status -ne 'current').Count | Should -Be 0
+        $sameDayEntries = @($sameDay | Where-Object { $_.verified_on -eq $latest.ToString('yyyy-MM-dd') })
+        $sameDayEntries.Count | Should -BeGreaterThan 0
+        ($sameDayEntries | Measure-Object -Property age_days -Maximum).Maximum | Should -Be 0
+
+        $future = @(Get-AgentHostCompatibilityStatus -AsOf $earliest.AddDays(-1) -MaxAgeDays 30)
         @($future | Where-Object status -eq 'future').Count | Should -Be 6
     }
 
