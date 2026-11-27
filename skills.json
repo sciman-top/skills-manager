@@ -17,7 +17,6 @@
             "capability-router",
             "code-review-and-quality",
             "custom-powershell-windows-automation",
-            "research",
             "systematic-debugging",
             "verification-before-completion"
           ],
@@ -94,7 +93,7 @@
           ]
         },
         "workbuddy": {
-          "default_profile": "core-ops",
+          "default_profile": "core-lean",
           "exclude": []
         },
         "dsh": {
@@ -164,12 +163,10 @@
       },
       "domain_memberships": {
         "browser": [
-          "agent-browser",
           "webapp-testing",
           "research"
         ],
         "engineering": [
-          "architecture-patterns",
           "codebase-design",
           "context-engineering",
           "documentation-and-adrs",
@@ -185,11 +182,9 @@
         "coding": [
           "ai-coding-workflow",
           "api-and-interface-design",
-          "code-simplification",
           "code-review-and-quality",
           "custom-powershell-windows-automation",
           "deprecation-and-migration",
-          "error-handling-patterns",
           "sandbox-slow-test-diagnosis",
           "security-and-hardening",
           "shipping-and-launch",
@@ -362,11 +357,6 @@
       "vendor": "agent-skills-2"
     },
     {
-      "from": "skills\\code-simplification",
-      "to": "code-simplification",
-      "vendor": "agent-skills-2"
-    },
-    {
       "from": "skills\\context-engineering",
       "to": "context-engineering",
       "vendor": "agent-skills-2"
@@ -385,21 +375,6 @@
       "from": "skills\\security-and-hardening",
       "to": "security-and-hardening",
       "vendor": "agent-skills-2"
-    },
-    {
-      "from": "agent-browser",
-      "to": "agent-browser",
-      "vendor": "manual"
-    },
-    {
-      "from": "architecture-patterns",
-      "to": "architecture-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "error-handling-patterns",
-      "to": "error-handling-patterns",
-      "vendor": "manual"
     },
     {
       "from": "dotnet-backend-patterns",
@@ -478,30 +453,6 @@
     }
   ],
   "imports": [
-    {
-      "name": "agent-browser",
-      "skill": "skills\\agent-browser",
-      "sparse": false,
-      "repo": "https://github.com/vercel-labs/agent-browser.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "architecture-patterns",
-      "skill": "plugins\\backend-development\\skills\\architecture-patterns",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "error-handling-patterns",
-      "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
     {
       "name": "dotnet-backend-patterns",
       "skill": "skills\\dotnet-backend-patterns",
@@ -619,12 +570,6 @@
       "host": "antigravity",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/antigravity-native-receipt.json"
-    },
-    {
-      "path": "~/.workbuddy-ai/skills",
-      "host": "workbuddy",
-      "managed_link_only": true,
-      "receipt_path": "reports/skill-projection/workbuddy-native-receipt.json"
     },
     {
       "path": "~/.workbuddy/skills",
