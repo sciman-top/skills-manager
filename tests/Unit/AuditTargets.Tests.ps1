@@ -907,7 +907,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $script:Root = Join-Path $TestDrive ("carry-scan-root-{0}" -f $fixtureId)
                 New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
                 $outBase = Join-Path $TestDrive ("carry-bundle-base-{0}" -f $fixtureId)
-                $outDir = Join-Path $outBase "20261104-000000-000"
+                $outDir = Get-AuditReportRoot "20261104-000000-000"
                 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
                 $dirtyRepo = Join-Path $TestDrive ("carry-dirty-target-{0}" -f $fixtureId)
                 New-Item -ItemType Directory -Path $dirtyRepo -Force | Out-Null
@@ -981,6 +981,7 @@ $scan.detected.artifact_capabilities | Out-Null
                 $dirtyScan = @($result.scans)[0]
 
                 $dirtyScan.git.dirty | Should -Be $true
+                $dirtyScan.git.status_fingerprint | Should -BeNullOrEmpty
                 $dirtyScan.scan_coverage.status | Should -Be "carried_forward"
                 # 新鲜度契约：结转画像仍按 skipped_dirty 处理，组合汇总不视为新鲜扫描。
                 $dirtyScan.scan_coverage.confidence_ceiling | Should -Be "skipped_dirty"

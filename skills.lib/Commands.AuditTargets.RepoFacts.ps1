@@ -519,6 +519,7 @@ function Get-AuditSourceFileIndex([string]$resolvedPath) {
 function Get-AuditSourceEvidenceKind([string]$RelativePath) {
     $normalized = ([string]$RelativePath).Replace('/', '\')
     if ($normalized -match '(?i)(^|\\)(tests?|spec|__tests__|testdata)(\\|$)|(test|spec)\.[a-z0-9]+$|(^|\\)test_[^\\]+\.py$|_test\.py$') { return "test" }
+    if ($normalized -match '(?i)^src\\model-orchestration\\Test-ModelPreset\.ps1$') { return "test" }
     if ($normalized -match '(?i)(^|\\)(examples?|samples?|fixtures?|mocks?|stubs?|benchmarks?|demos?)(\\|$)') { return "non_product_code" }
     if ($normalized -match '(?i)(^|\\)(tools|scripts|build|migrations?)(\\|$)') { return "supporting_code" }
     return "source_code"
@@ -1069,15 +1070,15 @@ function Add-AuditArtifactFactsFromText {
         # 数组；判定结果与逐 (artifact×action) 重复 IsMatch 逐布尔一致，命中
         # 行的内层正则调用从 O(|artifact|×|action|×2) 降为 O(|artifact|+|action|)。
         $artifactCount = @($candidateArtifacts).Count
-        $artifactCur = New-Object bool[] $artifactCount
-        $artifactNext = New-Object bool[] $artifactCount
+        $artifactCur = [bool[]]::new($artifactCount)
+        $artifactNext = [bool[]]::new($artifactCount)
         for ($artifactIndex = 0; $artifactIndex -lt $artifactCount; $artifactIndex++) {
             $artifactCur[$artifactIndex] = $candidateArtifacts[$artifactIndex].regex.IsMatch($text)
             $artifactNext[$artifactIndex] = $nextAdmissible -and $candidateArtifacts[$artifactIndex].regex.IsMatch($nextText)
         }
         $actionCount = @($actions).Count
-        $actionCur = New-Object bool[] $actionCount
-        $actionNext = New-Object bool[] $actionCount
+        $actionCur = [bool[]]::new($actionCount)
+        $actionNext = [bool[]]::new($actionCount)
         for ($actionIndex = 0; $actionIndex -lt $actionCount; $actionIndex++) {
             $actionCur[$actionIndex] = $actions[$actionIndex].regex.IsMatch($text)
             $actionNext[$actionIndex] = $nextAdmissible -and $actions[$actionIndex].regex.IsMatch($nextText)
@@ -1515,7 +1516,7 @@ function Get-AuditGitPathStatePairs($paths, [string]$resolvedPath = "") {
     return @($pairs)
 }
 
-function Get-AuditGitInfo([string]$resolvedPath) {
+function Get-AuditGitInfo([string]$resolvedPath, [switch]$SkipDirtyFingerprint) {
     # Git 状态是漂移检测的 live 证据；每次调用都必须重新取证，
     # 不能跨调用复用快照，否则会把真实的 HEAD/工作树变化隐藏掉。
     $info = [ordered]@{
@@ -1542,16 +1543,18 @@ function Get-AuditGitInfo([string]$resolvedPath) {
         $info.commit = ([string]$commitLines[0]).Trim()
         # A clean `git status` proves there are no changed paths to fingerprint.
         # Skip three redundant Git child processes on every clean target.
-        $changedPaths = if ($statusLines.Count -gt 0) { @(Get-AuditGitChangedPaths $resolvedPath) } else { @() }
-        $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
-        # Passing an empty array variable unrolls to $null, which the path probe would
-        # read as the repository root and hash the whole worktree into the fingerprint.
-        if (@($changedPaths).Count -gt 0) {
-            $statePairs += @(Get-AuditGitPathStatePairs $changedPaths $resolvedPath)
-        }
         $info.dirty = ($statusLines.Count -gt 0)
         $info.status_count = $statusLines.Count
-        $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+        if (-not ($info.dirty -and $SkipDirtyFingerprint)) {
+            $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
+            if ($info.dirty) {
+                $changedPaths = @(Get-AuditGitChangedPaths $resolvedPath)
+                if ($changedPaths.Count -gt 0) {
+                    $statePairs += @(Get-AuditGitPathStatePairs $changedPaths $resolvedPath)
+                }
+            }
+            $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
+        }
         # Re-read HEAD after status to detect a commit/checkout occurring during
         # the fingerprint window; keep every probe bound to the same target.
         $info.branch = ([string](@(Invoke-AuditGitLines ($targetArgs + @("rev-parse", "--abbrev-ref", "HEAD")) "branch after status")[0])).Trim()
@@ -1560,7 +1563,7 @@ function Get-AuditGitInfo([string]$resolvedPath) {
     return [pscustomobject]$info
 }
 
-function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
+function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath, $gitInfo = $null) {
     # A scan is a single consistency window.  Do not reuse a source index from a
     # prior scan invocation where the target may have changed.  The recursive-file
     # cache added for the per-scan speedup is process-scoped, so it has to be reset
@@ -1598,7 +1601,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditUniqueValue $risks "target_missing"
     }
 
-    $gitInfo = Get-AuditGitInfo $resolvedPath
+    if ($null -eq $gitInfo) { $gitInfo = Get-AuditGitInfo $resolvedPath }
     if ($exists -and -not $gitInfo.is_repo) {
         Add-AuditUniqueValue $risks "not_a_git_repo"
     }
