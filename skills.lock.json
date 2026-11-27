@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-26T15:19:46.8752647Z",
+  "generated_at": "2026-11-27T10:56:46.6462069Z",
   "vendors": [
     {
       "name": "agent-skills-2",
@@ -75,6 +75,15 @@
       "skill": "drawio-diagram-forge",
       "sparse": false,
       "commit": "838ef0826fa8515ce015330fc85e49fa0c6f4797"
+    },
+    {
+      "name": "gh-fix-ci",
+      "mode": "manual",
+      "repo": "https://github.com/openai/skills.git",
+      "ref": "main",
+      "skill": "skills\\.curated\\gh-fix-ci",
+      "sparse": true,
+      "commit": "49f948faa9258a0c61caceaf225e179651397431"
     },
     {
       "name": "grilling",

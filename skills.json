@@ -185,6 +185,7 @@
           "code-review-and-quality",
           "custom-powershell-windows-automation",
           "deprecation-and-migration",
+          "gh-fix-ci",
           "sandbox-slow-test-diagnosis",
           "security-and-hardening",
           "shipping-and-launch",
@@ -218,6 +219,7 @@
         ],
         "review": [
           "code-review-and-quality",
+          "gh-fix-ci",
           "security-and-hardening"
         ],
         "python": [
@@ -450,6 +452,11 @@
       "from": "domain-modeling",
       "vendor": "manual",
       "to": "domain-modeling"
+    },
+    {
+      "from": "gh-fix-ci",
+      "vendor": "manual",
+      "to": "gh-fix-ci"
     }
   ],
   "imports": [
@@ -556,6 +563,14 @@
       "ref": "main",
       "name": "domain-modeling",
       "skill": "skills\\engineering\\domain-modeling"
+    },
+    {
+      "name": "gh-fix-ci",
+      "repo": "https://github.com/openai/skills.git",
+      "ref": "main",
+      "skill": "skills\\.curated\\gh-fix-ci",
+      "sparse": true,
+      "mode": "manual"
     }
   ],
   "targets": [

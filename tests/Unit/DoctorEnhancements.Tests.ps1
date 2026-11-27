@@ -508,9 +508,9 @@ Describe "Doctor Enhancements" {
             $cfg = LoadCfg -NoAutoFix
             $sources = Get-DoctorColdMaterializationSources -Cfg $cfg
 
-            # Anchored to the post-slimming estate (2026-11-26: 36 -> 32 mappings,
-            # 45 -> 41 managed skills); bump deliberately when the estate changes.
-            $sources.Keys.Count | Should -Be 42
+            # Anchored to the managed estate (2026-11-27: 32 -> 33 mappings,
+            # 41 -> 42 managed skills after adding gh-fix-ci); bump deliberately when the estate changes.
+            $sources.Keys.Count | Should -Be 43
             $sources['capability-router'] | Should -BeLike '*overrides\custom\capability-router'
         }
     }
