@@ -83,15 +83,6 @@
           "default_profile": "core-lean",
           "exclude": []
         },
-        "zcode": {
-          "default_profile": "core-lean",
-          "exclude": [
-            "docx",
-            "pptx",
-            "skill-creator",
-            "xlsx"
-          ]
-        },
         "antigravity": {
           "default_profile": "core-lean",
           "exclude": [
@@ -588,12 +579,6 @@
       "host": "claude",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/claude-native-receipt.json"
-    },
-    {
-      "path": "~/.zcode/skills",
-      "host": "zcode",
-      "managed_link_only": true,
-      "receipt_path": "reports/skill-projection/zcode-native-receipt.json"
     },
     {
       "path": "~/.gemini/config/skills",
