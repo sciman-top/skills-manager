@@ -234,7 +234,7 @@ Describe 'Skill projection profiles' {
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'does-not-exist' } | Should -Throw '*不存在的 profile*'
 
         $invalid = $config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-        $invalid.projection_profiles.profiles.'core-lean'.exclude = @('research')
+        $invalid.projection_profiles.profiles.'core-lean'.exclude = @('systematic-debugging')
         { Resolve-SkillProjectionSelection -ProjectionConfig $invalid -HostName codex } | Should -Throw '*include/exclude 冲突*'
     }
 
@@ -277,7 +277,9 @@ Describe 'Skill projection profiles' {
         foreach ($hostName in @('antigravity', 'workbuddy', 'dsh')) {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.host | Should -Be $hostName
-            $expectedProfile = if ($hostName -in @('antigravity', 'dsh')) { 'core-lean' } else { 'core-ops' }
+            # 2026-11-26 estate slimming: workbuddy also moved onto core-lean
+            # (PR#223), so every one of these three hosts now resolves core-lean.
+            $expectedProfile = 'core-lean'
             $selection.profile | Should -Be $expectedProfile
             @($selection.included_names).Count | Should -BeGreaterThan 0
         }
