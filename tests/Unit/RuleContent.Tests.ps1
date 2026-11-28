@@ -51,12 +51,15 @@ Describe 'Checked-in rule content' {
     }
 
     It 'retains the cold-routing execution and observation boundaries' {
-        # The three-branch contract and the no-bypass rule live once in the
+        # The host-owned execution boundary and the no-bypass rule live once in the
         # shared A section; each host file only declares its own carrier
         # surface, so the wording is asserted on the source of truth.
         $common = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules/global/common.md'))
-        foreach ($contract in @('one_shot', 'multi_turn_user_decision', 'parent_user_input', 'host_admission_required', '禁止通过搜索 vendor/import/agent', 'transport_ok', 'router_not_run')) {
+        foreach ($contract in @('只授权读取闭包，不授权执行', '宿主按当前请求与规则选择', 'AI 子代理不代替人工决定', '禁止通过搜索 vendor/import/agent', 'transport_ok', 'router_not_run')) {
             $common | Should -Match ([regex]::Escape($contract))
+        }
+        foreach ($retired in @('execution_contract', 'one_shot', 'multi_turn_user_decision', 'parent_user_input', 'host_admission_required', '等待同一 child')) {
+            $common | Should -Not -Match ([regex]::Escape($retired))
         }
         foreach ($path in @('rules/global/codex/AGENTS.md', 'rules/global/claude/CLAUDE.md', 'rules/global/zcode/AGENTS.md', 'rules/global/dsh/AGENTS.md')) {
             $text = [IO.File]::ReadAllText((Join-Path $repoRoot $path))
@@ -64,6 +67,10 @@ Describe 'Checked-in rule content' {
             # restating it, and must not drift back into a private restatement.
             $text | Should -Match 'A\.3'
             $text | Should -Match '承载面'
+            $text | Should -Match '本仓不写[^\n]*agents|本仓不写代理配置|本仓不指定代理'
+            foreach ($retired in @('execution_contract', 'one_shot', 'multi_turn_user_decision', 'parent_user_input', 'host_admission_required', '等待同一 child')) {
+                $text | Should -Not -Match ([regex]::Escape($retired))
+            }
             # User-global 规则不得写死仓库私有的技能实现名；它只描述宿主中立的语义。
             foreach ($privateName in @('capability-router', 'cold-capability-runner', 'design-griller')) {
                 $text | Should -Not -Match ([regex]::Escape($privateName))

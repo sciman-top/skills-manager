@@ -7,7 +7,7 @@
 - 子智能体的规则注入依版本与配置决定；Explore 默认不注入，不依赖自动继承，委派时显式传递必要约束。子智能体不能再派子智能体。
 ### B.2 诊断与强制
 - 最小诊断用当前 ZCode help 与规则面板；加载核验以新建 Workspace 任务的实际加载为准，无法观察时按 `platform_na` 记录替代证据与复测条件。
-- 冷技能路由承载面（A.3）：`one_shot` 可按当前可见 Agent 工具委派并显式传入请求、scope/write set/proof/stop，`multi_turn_user_decision` 一题一轮并等待用户，`parent_user_input` 停父任务；ZCode 提供 general-purpose/Explore 子智能体，以本次工具返回的身份与终态为准，无可用 child 时仅在契约允许下 parent-mediated 并标 `not_observable`，不得据投影或 receipt 断定子代理已启动。
+- 冷技能路由承载面（A.3）：父任务或当前可见的 ZCode Agent 负责执行；是否委派、直接执行或先问用户按 A.3 由宿主选择。模型、effort 与代理继承当前宿主配置，本仓不写代理配置或指定代理名；不得据投影或 receipt 断定子代理已启动。
 - 文件一致只证明 `filesystem_projected`；新建 Workspace 任务核对加载才可称 `host_loaded`，真实任务验收另列。执行模式、安全确认与权限属于宿主控制面，本规则不绕过它们。
 - 未经当前任务授权，不重启、停止、杀掉或启动宿主，不修改账号、provider、模型、权限、会话、插件或 MCP；能力不可观察时记录原因、替代验证与复测条件。
 ### B.3 回退

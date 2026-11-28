@@ -21,6 +21,8 @@ WorkBuddy 国内版与国际版必须视为两个独立投影实例：分别使�
 
 预算分两类：16 KiB/130 行及 Antigravity 12,000 字符是本仓采用的保守预算，后者继续兼容未核验的旧版宿主；现有 JSON `host_char_limit` 字段保留兼容此口径，不表示当前产品硬限。Antigravity 当前官方限制为展开内联后单文件 24,000 bytes、全局与 `always_on` 合计 20,000 tokens；静态预算检查不证明展开后的加载总量或未降级。依据：[Antigravity Rules](https://antigravity.google/docs/rules)（2026-10-25 读取）。
 
+执行面沿用宿主原生选择：规则只声明冷发现、读取授权与依赖闭包，不固定子代理、模型、effort 或执行合同，也不写宿主的 `agents` 目录。项目侧代理桥接与执行许可已退休；文件投影、新会话加载和自然流量验收仍须分别记录。
+
 项目根 `AGENTS.md` 继续由每个仓库独立维护。Claude 用 `CLAUDE.md` 的 `@AGENTS.md` 引用承接；Antigravity 原生读取 `AGENTS.md`，仓根已有 `AGENTS.md` 时**禁止**保留 `.agents/rules/00-project.md` 内联副本（否则会双倍注入）。仅在确需独立条件规则目录时使用 `.agents/rules/*.md`，必须包含合法 `trigger: always_on/model_decision/glob/manual` 前言，内联语法为 `@[Project contract](../../AGENTS.md)`；裸 `@文件` 只表示路径引用。依据：[Antigravity Rules](https://antigravity.google/docs/rules)（2026-10-08 读取）与本机 Antigravity 实测。WorkBuddy 静态报告列出候选文件、遮蔽和独立目录组，明确未检查的仓外祖先、imports、解析及条件激活，不宣称完整加载。已退役的旧 `~/.codebuddy` 目录（无活跃 `CODEBUDDY.md/.mdc` 且存在 `CODEBUDDY.md.retired*` 标记）不再作为活跃 peer 触发误报。
 
 Claude Desktop 的 Code tab 使用 Claude Code 本机规则；普通 Chat 与 Cowork 的 Customize instructions 是独立 profile 配置，不属于本文件投影。依据：[Claude Code memory](https://code.claude.com/docs/en/memory)、[Claude Desktop](https://code.claude.com/docs/en/desktop)（2026-10-17 读取）。
