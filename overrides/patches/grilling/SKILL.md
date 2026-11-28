@@ -13,11 +13,9 @@ evidence, and unresolved questions visible.
 ## Parent-conversation invariant
 
 Keep this interview in the current parent conversation. Do not require a
-repository-defined agent, model, effort, or tool name. If the user explicitly
-requests an independent reviewer and applicable instructions authorize
-delegation, the host may select one of its available native agents with its own
-defaults; relay every question and answer through this conversation. A child
-cannot substitute for attributable human input.
+repository-defined agent, model, effort, or tool name. Each question is
+answered by the user in this conversation; a child cannot substitute for that
+attributable human input.
 
 Ask exactly one high-leverage question at a time. State the question, the
 smallest useful set of choices or decision boundary, and a recommended answer.
