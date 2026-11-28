@@ -1,11 +1,11 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.93
-**最后更新**: 2026-11-05
+**最后更新**: 2026-11-28
 
 ## 1. 产品边界与入口
 - `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。
-- 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。独立的 `src/model-orchestration/` preset 工具遵循其局部 `AGENTS.md`，不进入主 CLI 构建链。
+- 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。
 - 项目根 `AGENTS.md` 是各宿主共同的项目规则源；`CLAUDE.md`、`GEMINI.md` 与 `.agents/rules/00-project.md` 只做引用。
 - 冻结面（仅真实故障修复，解冻须用户明确授权）见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。新增能力前先读该节。
 - 真值层级 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`，低层证据不得外推。
@@ -43,4 +43,4 @@
 - 收口报告写明：验证命令与结果、未验证项，以及 `Removed:` 行（常规修复写 `N/A`）。
 - 两台电脑同步见 [双机开发与规则同步 Runbook](docs/runbooks/dual-machine-rule-sync.md)。`fetch` 不会把远端提交整合进工作树。
 - 失败沿原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
-- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）与模型编排宿主投影及加载探针（受 [局部契约](src/model-orchestration/AGENTS.md) 边界与实测纪律约束）均已获常驻授权（2026-10-18 裁决，模型编排为同日扩展），各按自带 plan/token/receipt 或 receipt/回滚机制执行，无需逐次请示。
+- 外置参考仓、宿主投影与 live acceptance 均为显式工作流，不属于普通编码完成条件；全局规则投影（`global-rules-*`，含隔离临时目录模拟与模拟验收）已获常驻授权（2026-10-18 裁决），按自带 plan/token/receipt 机制执行，无需逐次请示。

@@ -1,8 +1,7 @@
 # 跨宿主模型编排控制面 PRD
 
-**状态**：完整 MOR 控制面仍为 design-only；用户已授权独立的原生 preset 投影工具，落点 `skills-manager/src/model-orchestration`，不进入 skills-manager runtime。
-**目标实现归属**：用户已选择本仓功能目录 `skills-manager/src/model-orchestration`；不能进入 `skills.json`、`skills.ps1` 或本仓 host projection 主链。
-**关联**：[架构](cross-host-model-orchestration-architecture.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
+**状态**：已归档。MOR 线（含曾落点 `skills-manager/src/model-orchestration` 的独立 preset 工具）已于 2026-11-28 按用户裁决整体退休移除，权限交回各宿主原生默认；本文为历史设计输入。
+**关联**：[架构](cross-host-model-orchestration-architecture.md) · [归档索引](../archive/README.md)
 
 ## 1. 产品决策
 

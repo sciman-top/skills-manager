@@ -228,7 +228,7 @@ cd skills-manager
 1. **零框架劫持**：本工具只负责同步与投影文件配置，**绝不接管你的 API Key、账号登录态、推理网络请求或上下文路由**。
 2. **真值分层与证据闭环**：内部严格遵守 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted` 四层边界，未经验证的绝不虚假断言生效。
 3. **Fail-Closed 安全机制**：所有 MCP 与规则的同步均支持 `--plan` 预览；修改外部目录前强制经过校验，防止配置污染。
-4. **受控的独立扩展**：独立的模型配置工具详见 [模型编排工具](src/model-orchestration/README.md)；产品冻结面与解冻条件详见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+4. **受控的独立扩展**：跨宿主模型编排已于 2026-11 退休移除，模型与子代理选择交回各宿主原生默认；产品冻结面与解冻条件详见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
 
 ---
 

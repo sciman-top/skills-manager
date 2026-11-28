@@ -1,9 +1,9 @@
 # 跨宿主模型编排控制面架构
 
-**状态**：design-only；目标为独立的 host-local runtime，不修改 skills-manager runtime
-**关联**：[PRD](cross-host-model-orchestration-prd.md) · [MOR-000 暂缓决议](../decision/MOR-000-brief.md) · [MOR-001 自动故障切换模拟准入规格](../decision/MOR-001-automatic-failover-simulation.md) · [MOR-090 静态证据](../decision/MOR-090-static-adapter-evidence.md)
+**状态**：已归档。MOR 线已于 2026-11-28 按用户裁决整体退休移除，权限交回各宿主原生默认；本文为历史设计输入。
+**关联**：[PRD](cross-host-model-orchestration-prd.md) · [归档索引](../archive/README.md)
 
-**原生投影切片**：独立工具位于 `skills-manager/src/model-orchestration`，默认 Astra-only，按明确可用集合中的 Astra → Sol → Terra → Luna 顺序选整套 preset。仅覆盖 model/effort、五槽位和可回滚文件投影，不实现本设计的完整 state/receipt/identity 控制面，也不选择网关。严格单族约束通过 `Start-ModelSlot.ps1` 受控入口实现：冻结整套 preset 路由并禁用原生 delegation；已证实可绕过的 hook 不再作为强制边界。
+**原生投影切片**（已随 2026-11-28 退休移除）：独立工具曾位于 `skills-manager/src/model-orchestration`，默认 Astra-only，按明确可用集合中的 Astra → Sol → Terra → Luna 顺序选整套 preset。仅覆盖 model/effort、五槽位和可回滚文件投影，不实现本设计的完整 state/receipt/identity 控制面，也不选择网关。严格单族约束通过 `Start-ModelSlot.ps1` 受控入口实现：冻结整套 preset 路由并禁用原生 delegation；已证实可绕过的 hook 不再作为强制边界。
 
 ## 1. 架构结论
 

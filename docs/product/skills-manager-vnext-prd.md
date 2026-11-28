@@ -49,7 +49,8 @@
 下列能力仍在仓库中，但不属于 §2 的核心任务，也不是日常主链。修复真实故障可以做；新增功能、扩大范围或接入日常主链，须先由用户明确解冻：
 
 - 冷技能路由（`capability-router`、CSR 系列）：工程冻结。治理层（场景矩阵、receipt verifier、验收 runbook 与路线图）已移除，仅保留功能层（router、冷发现 catalog、native-agent bridge）。
-- 独立模型 preset 工具（`src/model-orchestration/`）：独立于主 CLI 构建链，不参与技能/MCP 构建。
+
+已退休：跨宿主模型编排与独立 preset 工具（原 `src/model-orchestration/`）于 2026-11-28 按用户裁决整体移除，模型/子代理选择权限交回各宿主原生默认；历史设计见 [docs/archive/README.md](../archive/README.md)。
 
 ## 4. 产品原则
 

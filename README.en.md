@@ -206,7 +206,7 @@ Scan your other projects to identify needed AI agent capabilities:
 - **No Hijacking**: Does not manage models, intercept tokens, or hijack inference routes.
 - **Verification Hierarchy**: Strictly enforces `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`.
 - **Fail-Closed Safety**: Supports `--plan` preview for rule and MCP mutations, preventing configuration contamination.
-- For model orchestration presets, see [Model Orchestration](src/model-orchestration/README.md).
+- Cross-host model orchestration was retired in 2026-11; model and sub-agent selection is left to each host's native defaults.
 
 ---
 
