@@ -12,8 +12,7 @@
 ### B.2 诊断与强制
 - 最小诊断：`claude --version`、`claude --help`；交互场景用 `/context`、`/memory` 核对加载，用 `/status`、`/permissions`、`/hooks` 核对强制来源；终端 `claude doctor` 只读诊断，交互 `/doctor` 可能在确认后修复，不能混用。
 - 扩展命令/hook/matcher 以当前 help/schema 为准；`InstructionsLoaded` 可补加载证据。
-- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 Claude 的承载面：`one_shot` 与 `multi_turn_user_decision` 用当前可用 Agent（`subagent_type` 取合同 `native_agent`），后者一题一轮等同一 child，`parent_user_input` 停父任务。无 child 仅可 parent-mediated/`not_observable`，禁摘要或伪造 child。
-- `host_admission_required` 的父代理代替执行边界见 A.3；不得据投影或 receipt 断定 child 已启动。
+- 冷技能路由承载面（A.3）：`one_shot` 与 `multi_turn_user_decision` 用当前可用 Agent（`subagent_type` 取合同 `native_agent`），后者一题一轮等同一 child，`parent_user_input` 停父任务；无 child 仅可 parent-mediated/`not_observable`，不得据投影或 receipt 断定 child 已启动。
 - `CLAUDE.md` 不是权限配置；敏感文件阻断、工具限制、sandbox、环境变量与强制动作放入用户/项目 `.claude/settings.json`、managed settings、permissions、hooks、MCP、仓库脚本或 CI。
 - path rules 与 permissions 的 matcher 语义不同，不能互相替代；deny/allow 必须用正反例实测。
 - Claude 内建 Bash sandbox 不支持 native Windows，只支持 macOS、Linux 与 WSL2；native Windows 按 `platform_na` 留痕，并以 permissions、`PreToolUse`、外部隔离和 CI 补位。

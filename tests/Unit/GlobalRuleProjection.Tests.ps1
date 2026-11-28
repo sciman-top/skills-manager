@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $repoRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
     $script:Root=$repoRoot
     . (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1')
@@ -582,6 +582,31 @@ Describe 'Global rule CLI boundaries' {
         }finally{
             $env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork
             if(-not $hadLegacy -and (Test-Path -LiteralPath $legacy)){Remove-Item -LiteralPath $legacy -Recurse -Force}
+            if(-not $hadCn -and (Test-Path -LiteralPath $cn)){Remove-Item -LiteralPath $cn -Recurse -Force}
+        }
+    }
+
+    It 'ignores a retired legacy .codebuddy directory when discovering WorkBuddy peers' {
+        $old=$env:CODEBUDDY_CONFIG_DIR;$oldWork=$env:WORKBUDDY_CONFIG_DIR
+        $profileRoot=[Environment]::GetFolderPath('UserProfile')
+        $cn=Join-Path $profileRoot '.workbuddy';$legacyCodebuddy=Join-Path $profileRoot '.codebuddy'
+        $hadCn=Test-Path -LiteralPath $cn;$hadCodebuddy=Test-Path -LiteralPath $legacyCodebuddy
+        $hadActiveMd=Test-Path -LiteralPath (Join-Path $legacyCodebuddy 'CODEBUDDY.md')
+        $hadActiveMdc=Test-Path -LiteralPath (Join-Path $legacyCodebuddy 'CODEBUDDY.mdc')
+        if($hadActiveMd -or $hadActiveMdc){Set-ItResult -Skipped -Because 'a real active .codebuddy rule exists on this host';return}
+        $retiredMarker=Join-Path $legacyCodebuddy 'CODEBUDDY.md.retired-test-peer'
+        $hadRetired=@(Get-ChildItem -LiteralPath $legacyCodebuddy -Filter 'CODEBUDDY.md.retired*' -File -ErrorAction SilentlyContinue).Count -gt 0
+        try{
+            $env:CODEBUDDY_CONFIG_DIR=$null;$env:WORKBUDDY_CONFIG_DIR=$null
+            if(-not $hadCn){New-Item -ItemType Directory -Path $cn -Force|Out-Null}
+            if(-not $hadCodebuddy){New-Item -ItemType Directory -Path $legacyCodebuddy -Force|Out-Null}
+            if(-not $hadRetired){Set-Content -LiteralPath $retiredMarker -Value 'retired'}
+            $parsed=Parse-GlobalRuleOptions @() check
+            $parsed.workbuddy_peer_user_root | Should -Not -Be ([IO.Path]::GetFullPath($legacyCodebuddy))
+        }finally{
+            $env:CODEBUDDY_CONFIG_DIR=$old;$env:WORKBUDDY_CONFIG_DIR=$oldWork
+            if(-not $hadRetired -and (Test-Path -LiteralPath $retiredMarker)){Remove-Item -LiteralPath $retiredMarker -Force}
+            if(-not $hadCodebuddy -and (Test-Path -LiteralPath $legacyCodebuddy)){Remove-Item -LiteralPath $legacyCodebuddy -Recurse -Force}
             if(-not $hadCn -and (Test-Path -LiteralPath $cn)){Remove-Item -LiteralPath $cn -Recurse -Force}
         }
     }

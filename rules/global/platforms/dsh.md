@@ -5,15 +5,13 @@
 - 项目链自 `.git` 项目根向会话工作目录逐层加载 `AGENTS.md`、`CLAUDE.md` 并叠加 `AGENTS.local.md`、`CLAUDE.local.md`，广度到具体排序；权限或 I/O 失败即中止上溯，不回退祖先根。
 - 同组候选 trim 后内容相同的文件只渲染一次；更具体文件优先，预算不足先省略广度文件（user-global 链 harness-home 先于 shared-root 被省略）。
 - 用户级技能走 `~/.agents/skills`（既有投影目标，五宿主技能天然流入；不另建 `~/.dsh/skills` 投影以免双载）。技能 frontmatter 支持 `disable-model-invocation` 与 `user-invocable`，非法布尔值整技能丢弃并告警。
-- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 DSH 的承载面：用户级技能走 `~/.agents/skills` 共享根，且当前无 verifier 证明 DSH 具备 native custom-agent spawn 面，故 `one_shot`/`multi_turn_user_decision` 默认 parent-mediated 并在汇报中注明实际承载，不冒充 native runner。`disable-model-invocation` 的技能不会进入可见目录，正是需要本条冷路径的对象。
+- 冷技能路由承载面（A.3）：用户级技能走 `~/.agents/skills` 共享根；当前无 verifier 证明 DSH 具备 native custom-agent spawn 面，`one_shot`/`multi_turn_user_decision` 默认 parent-mediated 并注明实际承载，不冒充 native runner。`disable-model-invocation` 技能不进可见目录，走冷路径。
 ### B.2 预算与诊断
 - 指令预算默认 64 KiB/链（user-global 与 project 独立计，单消息至多两倍）；本仓 130 行/16 KiB 保守预算继续生效，不因宿主余量放宽。
 - 指令为 durable sourced user/message，可从 `~/.dsh/sessions` 会话日志取证；第一方 read/write/edit 触达更深层目录后注入新适用文件，变更替换、消失出移除通知。
 - 文件一致只证明 `filesystem_projected`；dsh 新会话 baseline 出现 `Instructions from: ~/.dsh/AGENTS.md` 来源段才可称 `host_loaded`，真实任务验收另列。
 - 最小诊断：`/permission` 核对沙箱与审批预设、`/plan` 核对计划模式；文件级投影、dry-run 与 receipt 属于 `platform_na` 替代证据，不冒充 `host_loaded`。
-- `~/.dsh/profiles/desktop/cordis.patch.yml` 是受控配置面（id 定向覆盖/禁用/插入，支持 `!!js` 表达式）；调整指令链行为须走 patch 行并留备份回滚入口。
-- `llm-deepseek.config.retryPolicy` 用 `mode: normal` 的有限 `maxRetries` 与有上限的 `backoff`；只对瞬时错误重试。限流、连接、超时或空响应不引入换号、IP/UA 切换或提高并发。插件默认的读取截断、旧结果遮蔽或自动动作须按需逐项开启。修改前后做 YAML 解析与字段核对，保留原 patch 回滚副本。
-- 可选插件只在未满足的明确需求出现时启用，并核对宿主版本与 peer 契约。`dsh-free-search` 的 `allowedEngines` 与 `fallbackOrder` 保持同一有效集合，失败按有界顺序回退，不做引擎轮换或并发扩容。
+- `~/.dsh/profiles/desktop/cordis.patch.yml` 是受控配置面（id 定向覆盖/禁用/插入）；修改前留备份回滚副本并做 YAML 解析与字段核对，可选插件仅在明确缺口时按宿主版本与 peer 契约启用，具体插件与重试/搜索调参边界以验收 runbook 为准。
 ### B.3 强制面与回退
 - dsh 无 hooks 机制；确定性强制面是沙箱模式（`read-only` / `workspace-write` / `danger-full-access`，部署默认 fail-closed `read-only`）与审批策略（`ask` / `never`；`ask` 缺应答器以拒绝方式关闭，仅一次性授权、无 `allow-always`）。`/permission` 预设捆绑两旋钮，`permission` 设置命名空间固定新会话默认。
 - `/plan` 计划模式与 `exit_plan_mode` 仅是引导（工具仍全可用）；强制限制必须落在沙箱与审批，不得依赖计划模式本身。
