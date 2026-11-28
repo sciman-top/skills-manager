@@ -197,6 +197,22 @@ Describe 'MCP configuration and host transactions' {
             $map.PSObject.Properties.Name.Count | Should -Be 1
             $map.context7.command | Should -Be "npx"
             $map.context7.args.Count | Should -Be 2
+            $map.context7.type | Should -Be "stdio"
+            $map.context7.PSObject.Properties.Name -contains "transport" | Should -Be $false
+        }
+
+        It "Emits ZCode-canonical type field for http servers instead of transport" {
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "t3"
+                    transport = "http"
+                    url       = "http://127.0.0.1:3773/mcp"
+                }
+            )
+            $map = Convert-McpServersToConfigMap $servers
+            $map.t3.type | Should -Be "http"
+            $map.t3.url | Should -Be "http://127.0.0.1:3773/mcp"
+            $map.t3.PSObject.Properties.Name -contains "transport" | Should -Be $false
         }
 
         It "Rejects remote MCP header values that contain newlines" {
