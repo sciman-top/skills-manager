@@ -459,7 +459,7 @@ function Test-DoctorColdSourceParity {
     # overrides/ unmaterialized with an all-green doctor).  Compares each
     # agent/<skill> tree against its effective source, excluding exactly the
     # files the build itself generates after mirroring: the router's catalog
-    # mirror and the generated admission runtime.
+    # mirror.
     param(
         [Parameter(Mandatory = $true)]$ResolvedSources,
         [Parameter(Mandatory = $true)][string]$ManagedSourceRoot
@@ -476,9 +476,6 @@ function Test-DoctorColdSourceParity {
             continue
         }
         $generated = @('catalog.json')
-        if ([string]::Equals($name, 'capability-router', [StringComparison]::OrdinalIgnoreCase)) {
-            $generated += 'scripts/execution-admission.ps1'
-        }
         $drift = Test-DoctorSkillTreeParity -SourceRoot $sourceDir -MaterializedRoot $agentDir -AgentGeneratedRelativePaths $generated
         if (@($drift).Count -gt 0) {
             $result.warnings += ("cold_discovery: {0}: 源与物化漂移，需重新构建生效: {1}" -f $name, (@($drift) -join '; '))

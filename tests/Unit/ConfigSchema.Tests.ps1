@@ -107,6 +107,19 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $serialized | Should -Not -Match '\.\./escape'
     }
 
+    It 'fails closed when a retired custom-agent bridge block remains configured' {
+        $config = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $config.skill_projection | Add-Member -NotePropertyName native_agent_bridge -NotePropertyValue ([pscustomobject]@{ enabled = $false })
+        $configPath = Join-Path $TestDrive 'retired-agent-bridge.json'
+        $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+        $run = Invoke-ConfigVerifier $configPath
+
+        $run.exit_code | Should -Be 1
+        $run.result.valid | Should -Be $false
+        @($run.result.findings | Where-Object code -eq 'runtime_contract_error').Count | Should -BeGreaterThan 0
+    }
+
     It 'fails closed when a discovery domain references a non-canonical skill' {
         $config = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $config.skill_projection.discovery_catalog.domain_memberships.engineering += 'missing-canonical-skill'
@@ -130,9 +143,8 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         @($schema.'$defs'.target.properties.host.enum) | Should -Be @('codex', 'claude', 'zcode')
         $schema.'$defs'.skillProjection.properties.projection_profiles.'$ref' | Should -Be '#/$defs/projectionProfiles'
         $schema.'$defs'.projectionProfiles.properties.schema_version.const | Should -Be 1
-        $schema.'$defs'.skillProjection.properties.native_agent_bridge.'$ref' | Should -Be '#/$defs/nativeAgentBridge'
-        $schema.'$defs'.nativeAgentBridge.properties.target_root.const | Should -Be '~/.codex/agents'
-        @($schema.'$defs'.nativeAgentBridge.required) | Should -Contain 'definitions'
+        @($schema.'$defs'.skillProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'native_agent_bridge'
+        @($schema.'$defs'.PSObject.Properties.Name) | Should -Not -Contain 'nativeAgentBridge'
         @($schema.'$defs'.skillProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'aliases'
         @($schema.'$defs'.nativeProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'apply_requires_token'
         $schema.'x-compatibility-policy'.missing_schema_version | Should -Be 'legacy-v1-observation'

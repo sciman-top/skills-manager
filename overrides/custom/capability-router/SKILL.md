@@ -134,187 +134,30 @@ Receipt schema 2 separates "the router ran" from "what it found", because the hi
 
 Catalog staleness is scoped, not a global outage: when `catalog.status=stale`, the drifted or missing skill is named in `excluded[]` (`catalog_stale`, `package_stale`, or `entrypoint_unavailable`), and any other candidate whose own entrypoint/package hashes validate still discovers and validates normally. Only drift of the selected candidate or inside its dependency closure blocks that candidate. A structurally invalid catalog (`catalog.status=invalid`, e.g. fingerprint mismatch or unsupported schema) blocks all discovery and validation until the catalog is regenerated. If no catalog entrypoint validates beside the running router — the copied-package shape, where the router itself is the only surviving entry, counts here — the response adds `catalog.diagnostics[].code=catalog_projection_incomplete`, sets the routing receipt to `status=blocked` and `truth_boundary=candidate_discovery_blocked`, and points recovery to rebuilding the managed projection or pinning the managed catalog with `SKILLS_MANAGER_CAPABILITY_CATALOG`/`-CatalogPath`. This is the expected result for a copied router package without its catalog-referenced sibling skills.
 
-## Native cold-capability handoff
+## Host selection and execution
 
-Before constructing admission/plan or handoff files, compare the selected
-execution contract with this session's actual delegation permissions and
-available agent types. An explicit no-delegation mode or pinned-slot policy
-that excludes the required specialist is a concrete incompatibility: report
-it without preparing artifacts, spawning a substitute, changing models, or
-weakening an interactive contract. This is distinct from a host lacking a
-native spawn tool. A configured role or old projection receipt does not prove
-its model is currently available; after an explicit model-unavailable error,
-do not retry the same role. Use parent execution only when the selected
-contract and current instructions permit it; otherwise report the blocker.
+Loading and execution are separate decisions. A passing `load_validation`
+authorizes reading only the exact `validated_closure`; it never authorizes
+editing, external writes, or spawning a child. The router does not name,
+configure, rank, or select a model, effort, or agent.
 
-For `host_admission_required`, loading and execution are separate decisions.
-Read only the validated closure first. The catalog's `unknown` describes an
-unclassified workflow, not missing user permission. Inspect the actual skill
-instructions, identify the concrete operation, and apply the current user's
-scope, permissions, exact write set, proof and stop. If those already authorize
-the operation, continue in the parent; do not ask again merely because the
-catalog lacks a specialist bridge contract. If the operation remains unknown,
-the target is missing, or a needed external action is unauthorized, stop for
-that specific missing input. Do not relabel the catalog or fabricate a runner
-admission. Report this path as `parent_mediated`; it is not native runner
-execution. A skill requiring a multi-turn decision must preserve its questions
-and wait points; never replace it with a one-shot summary.
+The current host owns execution. Continue in the parent, or delegate under the
+user's current request and applicable instructions, using only an agent and
+model that the host already offers. Do not depend on a repository-defined
+agent name or old projection receipt. If a host-native child is used, pass the
+complete request and exact validated closure without unrelated parent history,
+and verify its actual tool events rather than assuming that a receipt proves
+loading. Model and effort inherit the host's current defaults unless the user
+explicitly chooses another supported value.
 
-For a multi-turn decision, the parent persists the admission and plan objects
-(for example with `ConvertTo-Json -Depth 60`) into a run directory such as
-`artifacts/work/cold-routing/<run-id>/` before the first child spawn. That path
-is git-ignored; never use `%TEMP%` or a tracked path, because a run file outside
-the repository cannot be named in an admission read set. Persist each successor
-the same way. `New-ExecutionAdmissionSuccessor` reuses the predecessor's
-allowed_read_set, and a successor file cannot be hashed into the admission it
-produces, so the child cannot check a successor's content by reading the file.
-Send the child the complete successor bridge payload inline (the canonical
-`New-ExecutionAdmissionBridgePayload` output, with the successor admission and
-plan), not identifiers alone: a live child rejected an ID-only continuation
-because it could not check the constraints that still bind the successor. The
-child checks those constraints in the payload it was given and cannot recompute
-hashes without a shell; the parent's revalidation remains the content check
-for the file. Each later answer needs
-`New-ExecutionAdmissionSuccessor` built from the exact persisted predecessor,
-with a new attempt identity and a later `issued_at`. Pass `-AnswerProvenance`
-as `human_verbatim_answer`. `authorized_ai_delegate_answer` is not accepted for a
-multi-turn interview: a delegate answer may only test the continuation mechanism
-and never counts as a user answer. The successor records the provenance and the
-evidence hash; a child refuses an answer whose provenance is absent. A predecessor that existed
-only in a finished PowerShell process cannot be rebuilt, so do not forward an
-answer to the same child without a successor; restart with a new root admission
-and say so in the report, rather than forging a continuation.
+For an interactive or evidence-grounded workflow, preserve every user question
+and wait point. A child answer is never an attributable human decision. Apply
+the user's exact scope, write set, proof, and stop condition directly; do not
+invent an admission engine or delegate missing authority.
 
-For independently bounded work, prefer an available host-native subagent when
-the user or applicable instructions authorize delegation. Pass the exact
-validated closure and task scope. Do not assume a named custom agent exists
-on another host: use that host's available native agent under the same task
-contract, or execute in the parent and report the actual surface. Model and
-effort choices use only the current host's supported tool/schema values;
-inherit defaults when no task-specific choice is justified.
-
-When a matching native skill/tool is already visible, use it directly and do
-not involve this router or a bridge. Otherwise, the host may hand one exact
-candidate to the native `cold-capability-runner` subagent only when this
-router has returned all of the following for the same request:
-
-- `load_validation.pass=true`;
-- `routing_receipt.truth_boundary=candidate_load_validated`;
-- one selected candidate plus its `validated_closure`, with validated paths and
-  declared side effects for every member.
-
-Start the named specialist without inherited parent history. On Codex, set
-`fork_turns="none"` (or a positive number only when that specific history is
-necessary); never omit `fork_turns` or use `"all"` with a nondefault
-`agent_type`, because full-history forks inherit the parent model and context.
-On Claude, dispatch through the Agent tool with `subagent_type` set to the
-contract's `native_agent`; a fresh Agent call carries no parent history. A child
-that reports no `spawn_agent` tool on Claude is looking for the Codex name:
-use the Agent tool instead. In both hosts, put the complete admission and
-validated closure in the child message so isolation does not discard required
-inputs. Verify the actual spawn arguments and child events; a receipt alone
-cannot prove isolation or the model and effort that executed the task.
-
-For a supported specialist bridge contract, pass the complete validation result, original request, exact selected name, and
-an admission contract to the child. Once those conditions hold, dispatching to
-the contract's `native_agent` is the execution path, not an option: construct
-the admission (original request, complete validation result, the single
-selected name, `requested_operation`, an empty or exact write set, minimum
-proof, and stop condition) and hand it to the child. The router's `not_granted`
-is permanent by design and is upgraded only by this parent-side admission,
-never by the router. When the host has no compatible native spawn tool, fall back to
-parent-mediated execution and record it as parent-mediated - never as a runner
-execution. The child must not treat validation as execution authorization. The
-result and receipt carry the effective `execution_contract` of the **selected
-root**. A dependency entry is a supporting read-only input in that admission;
-its own contract is not priority-merged into the root and cannot silently
-select a second adapter. To execute a dependency independently, select it as
-a new root and create a separate admission. The host must preserve the root
-contract: `one_shot` may use `cold-capability-runner`;
-`parent_user_input` must stop for parent-mediated user input; and
-`multi_turn_user_decision` must use `design-griller`, relay exactly one
-question to the user, and wait for that answer before resuming the same child.
-Never send an interactive contract to `cold-capability-runner` with a request
-for a summary or final conclusion. A read-only admission may execute a bounded
-read-only subset even when a skill's maximum declared side effect is
-`controlled_write`; it must never write. A `controlled_write` admission
-additionally records the user's implementation request, exact write set,
-minimum proof, and stop condition. For `external_read`, `unknown`, ambiguity,
-a missing execution contract, or any request to alter host/session/profile state, return an admission request to the parent instead. Never use the bridge as automatic middleware or make every natural-language request cold-discover skills.
-
-Structured admission is bridge-only. `New-ExecutionAdmission` accepts exactly the
-three bridge contracts (`one_shot`, `parent_user_input`, `multi_turn_user_decision`)
-with classified workflow side effects (`read_only`, `controlled_write`). A
-`host_admission_required` contract — the catalog default for skills without an
-explicit contract — or an `unknown`/`external_read` side effect fails construction
-with `execution_contract_mode_unsupported` or `validated_closure_side_effect_invalid`.
-That throw is the documented parent-mediated boundary, not a broken chain and not an
-unavailable skill: apply the `host_admission_required` guidance above, execute
-parent-mediated under the current authorization or stop for the missing input, and
-report the path as `parent_mediated`.
-
-Configure a bridge contract only for a skill whose workflow a fresh subagent
-can finish as a closed, independently verifiable task (`one_shot`), an
-interview that needs one-question-per-turn user decisions
-(`multi_turn_user_decision`), or a flow that must stop for user input
-(`parent_user_input`). Methodology skills that the parent absorbs and applies
-itself keep the catalog default by design.
-
-The specialist bridge uses the generated `scripts/execution-admission.ps1`
-beside this router script. Dot-source that file after router package validation;
-it contains the deterministic helpers and needs no repository source import.
-Keep `RepoRoot` set to the current
-task repository and `SkillRoot` set to the reviewed physical skill supply root
-for creation, revalidation and continuation. `AllowedReadSet` lists exact task
-inputs under `RepoRoot`; the validated closure separately carries the skill
-files under `SkillRoot`. A consumer project does not need `skills.json`.
-
-```powershell
-. <skill-dir>/scripts/execution-admission.ps1
-$admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal $goal -Validation $result -AllowedReadSet $taskFiles -AuthorityBasis 'current_user_request' -IssuedAt ([datetimeoffset]::UtcNow.ToString('o')) -RepoRoot $taskRoot -SkillRoot $supplyRoot
-$plan = New-ExecutionPlan -Admission $admission
-$check = Test-ExecutionAdmissionRevalidation -Admission $admission -Plan $plan -Validation $result -RepoRoot $taskRoot -SkillRoot $supplyRoot
-```
-
-For an authorized one-shot implementation, creation additionally takes
-`-RequestedOperation controlled_write -ExactWriteSet $files -MinimumProof $proof`.
-Revalidation checks existing-file hashes and absence of new files before spawn.
-For controlled writes, include this generated helper's exact physical path and
-SHA-256 in the child handoff as an additional read-only input. The child must
-verify that helper hash and execute `Test-ExecutionAdmissionRevalidation` with
-the original admission, plan, validation and roots immediately before writing.
-The parent check does not replace this child check. Record its actual tool
-result bound to the admission id; never infer it from the child's final prose.
-Create one canonical bridge payload with
-`New-ExecutionAdmissionBridgePayload -OriginalRequest $request -Admission $admission -Plan $plan -Validation $result -RepoRoot $taskRoot -SkillRoot $supplyRoot`.
-This helper revalidates the admission and returns the original request,
-`validated_skill_name`, validated path, complete validation and dependency
-closure, effective root execution contract, admission, plan and both roots.
-Do not hand-build parallel child fields or rename `validated_skill_name`.
-
-For file transport, deliver that payload with `Export-ExecutionAdmissionHandoff`
-into a unique file in the authorized run directory (create that directory
-before admission), passing the same `-OriginalRequest`, `-RepoRoot` and
-`-SkillRoot` used above. The handoff path must be a new file inside `RepoRoot`
-that is outside the task's read and write sets; a path outside `RepoRoot` fails
-closed as a write-set violation. This parent-owned transport file is separate
-from the child's task write set. Pass the returned path, SHA-256 and admission
-id, plus helper path/hash and both roots, explicitly in the child message, with
-no inherited history (Codex `fork_turns="none"`; on Claude, a fresh Agent call).
-If inline transport is required, serialize the returned
-object with `ConvertTo-Json -Depth 60 -Compress` and place the complete JSON
-under one `bridge_payload` field in the child message; never abbreviate, omit,
-or hand-reconstruct fields. Do not rely on history inheritance or truncated
-terminal output. With file transport, the child verifies the helper hash,
-dot-sources it and calls `Import-ExecutionAdmissionHandoff -Path $path -Sha256
-$hash -AdmissionId $id -RepoRoot $root`; Import verifies exact bytes, identity
-and current snapshots. With inline transport, the child binds the fields from
-`bridge_payload` directly. Both paths bind every execution field, including
-`$validatedSkillName = $bridgePayload.validated_skill_name`; an absent or
-mismatched field stops before reading or invoking the skill. The child must
-still execute the explicit write-time revalidation immediately before mutation.
-Never dispatch when `$check.pass` is false. These are parent-side checks, not
-an OS sandbox; actual tools must still enforce the task's write boundary.
+When a matching native skill/tool is already visible, use it directly. Never
+use the router as automatic middleware or make every natural-language request
+cold-discover skills.
 
 ## Boundaries
 

@@ -315,7 +315,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
             $allowExistingVendor = ($cfg.vendors | Where-Object { $_.name -eq $vendorName -and (Is-SameRepository ([string]$_.repo) $repo) } | Select-Object -First 1) -ne $null
             $vendorName = Resolve-UniqueVendorName $cfg $vendorName $repo $allowExistingVendor
             $vendorPath = VendorPath $vendorName
-      
+
             Ensure-Repo $vendorPath $repo $ref $null $cfg.update_force $true
             if (-not $registerVendorOnly) {
                 foreach ($skillPath in $resolvedSkillPaths) {
@@ -332,7 +332,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild, [switch]$NoCros
                 $import = @{ name = $vendorName; repo = $repo; ref = $ref; skill = $primarySkillPath; mode = "vendor"; sparse = $sparse }
                 Upsert-Import $cfg $import
             }
-      
+
             $vendor = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
             if (-not $vendor) {
                 $cfg.vendors += @{ name = $vendorName; repo = $repo; ref = $ref }
@@ -526,7 +526,7 @@ function 新增技能库 {
         $vendorPathCreated = $true
 
         Write-Host "新增完成。"
-        
+
         # Auto-migrate orphan manual skills
         $migrated = Migrate-ManualToVendor $cfg $name $repo
         if ($migrated -gt 0) {
@@ -664,12 +664,12 @@ function Get-SkillsUnder([string]$base, [string]$vendorName) {
         # Search for all supported markers
         $found = Get-ChildItem -LiteralPath $resolvedBase -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object { -not $_.PSIsContainer -and $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
-      
+
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         foreach ($f in $found) {
             $dir = $f.Directory.FullName
             if (-not $seenDirs.Add($dir)) { continue }
-      
+
             $rel = $dir.Substring($resolvedBase.Length).TrimStart("\\")
             if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
             $items += [pscustomobject]@{ vendor = $vendorName; from = $rel; full = $dir }
@@ -1693,7 +1693,7 @@ function Resolve-TargetDir([string]$path) {
     }
     # Normalize slashes for Windows CMD compatibility
     $path = $path.Replace("/", "\")
-  
+
     if ([System.IO.Path]::IsPathRooted($path)) {
         return $path
     }
@@ -2004,35 +2004,6 @@ function 构建生效(
                     $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile -ProjectionHosts $ProjectionHosts
                     if ($syncFailures) { $failures += $syncFailures }
                 }
-            }
-            $projectCodex = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'codex', [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals([string]$_, 'dsh', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
-            if (-not $SkipHostProjection -and $projectCodex -and @($failures).Count -eq 0) {
-                try {
-                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
-                    if ([bool]$bridgeProjection.enabled) {
-                        Log ("原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f ((@($bridgeProjection.changed_names) -join ','), [bool]$bridgeProjection.persisted, [string]$bridgeProjection.truth_boundary))
-                    }
-                }
-                catch {
-                    Write-Host ("❌ 同步原生子代理 bridge 失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
-                    $failures += ("native-agent-bridge => {0}" -f $_.Exception.Message)
-                }
-            }
-            $projectClaudeAgents = @($ProjectionHosts).Count -eq 0 -or @($ProjectionHosts | Where-Object { [string]::Equals([string]$_, 'claude', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
-            if (-not $SkipHostProjection -and $projectClaudeAgents -and @($failures).Count -eq 0) {
-                try {
-                    $claudeBridgeProjection = Sync-ClaudeNativeAgentBridge $cfg -PromotionContext $promotionContext -SkipLock
-                    if ([bool]$claudeBridgeProjection.enabled) {
-                        Log ("Claude 原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f ((@($claudeBridgeProjection.changed_names) -join ','), [bool]$claudeBridgeProjection.persisted, [string]$claudeBridgeProjection.truth_boundary))
-                    }
-                }
-                catch {
-                    Write-Host ("❌ 同步 Claude 原生子代理 bridge 失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
-                    $failures += ("claude-native-agent-bridge => {0}" -f $_.Exception.Message)
-                }
-            }
-            elseif (-not $SkipHostProjection -and $projectClaudeAgents) {
-                Log ("Claude 原生子代理 bridge 已跳过：前序失败 {0} 项，未写入 ~/.claude/agents" -f @($failures).Count)
             }
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }

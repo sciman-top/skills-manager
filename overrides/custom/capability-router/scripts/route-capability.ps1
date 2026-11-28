@@ -84,7 +84,6 @@ function New-RouterNotRunDocument([string]$Reason, [string]$Detail) {
         retrieval = [ordered]@{ strategy = 'not_run'; candidates = @(); candidate_count = 0; max_candidates = $MaxCandidates; truncated = $false; scope_required = $false }
         selected = @()
         validated_closure = @()
-        execution_contract = $null
         excluded = @()
         load_validation = [ordered]@{ requested = @(); pass = $false; scope = 'not_run'; checks = @() }
         validation = [ordered]@{ requested = @(); pass = $false; scope = 'not_run'; checks = @() }
@@ -101,7 +100,6 @@ function New-RouterNotRunDocument([string]$Reason, [string]$Detail) {
             requested_candidates = @()
             validated_candidates = @()
             validated_closure = @()
-            execution_contract = $null
             status = 'router_not_run'
             truth_boundary = 'router_not_run'
             not_run_reason = $Reason
@@ -110,7 +108,7 @@ function New-RouterNotRunDocument([string]$Reason, [string]$Detail) {
             provider_calls = 0
             native_mutations = 0
         }
-        execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $true; reason = 'router_not_run'; execution_contract = $null }
+        execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $true; reason = 'router_not_run' }
         writes_performed = $false
         provider_calls = 0
         native_mutations = 0
@@ -246,62 +244,6 @@ function Get-CatalogPayload($Catalog) {
     return $payload
 }
 
-function New-HostAdmissionExecutionContract([string]$StopCondition = 'admission_required') {
-    return [pscustomobject][ordered]@{
-        mode = 'host_admission_required'
-        native_agent = ''
-        conversation_owner = 'parent'
-        stop_condition = $StopCondition
-    }
-}
-
-function Resolve-ExecutionContract($Contract) {
-    $default = New-HostAdmissionExecutionContract
-    if ($null -eq $Contract) { return [pscustomobject]@{ valid = $true; contract = $default; finding = $null } }
-    if ($Contract -isnot [pscustomobject] -and $Contract -isnot [System.Collections.IDictionary]) {
-        return [pscustomobject]@{ valid = $false; contract = $default; finding = 'Execution contract must be an object.' }
-    }
-    $mode = ([string]$Contract.mode).Trim().ToLowerInvariant()
-    $nativeAgent = ([string]$Contract.native_agent).Trim()
-    $conversationOwner = ([string]$Contract.conversation_owner).Trim().ToLowerInvariant()
-    $stopCondition = ([string]$Contract.stop_condition).Trim().ToLowerInvariant()
-    $valid = switch ($mode) {
-        'one_shot' { $nativeAgent -eq 'cold-capability-runner' -and $conversationOwner -eq 'runner' -and $stopCondition -eq 'parent_contract' }
-        'parent_user_input' { [string]::IsNullOrWhiteSpace($nativeAgent) -and $conversationOwner -eq 'parent' -and $stopCondition -eq 'user_input_required' }
-        'multi_turn_user_decision' { $nativeAgent -eq 'design-griller' -and $conversationOwner -eq 'parent' -and $stopCondition -eq 'one_question_then_wait' }
-        'host_admission_required' { [string]::IsNullOrWhiteSpace($nativeAgent) -and $conversationOwner -eq 'parent' -and $stopCondition -in @('admission_required', 'contract_conflict') }
-        default { $false }
-    }
-    if (-not $valid) {
-        return [pscustomobject]@{ valid = $false; contract = $default; finding = 'Execution contract mode, native agent, conversation owner, or stop condition is invalid.' }
-    }
-    return [pscustomobject]@{
-        valid = $true
-        contract = [pscustomobject][ordered]@{
-            mode = $mode
-            native_agent = $nativeAgent
-            conversation_owner = $conversationOwner
-            stop_condition = $stopCondition
-        }
-        finding = $null
-    }
-}
-
-function Get-EffectiveExecutionContract([object[]]$Rows, [string]$RootName) {
-    if (@($Rows).Count -eq 0 -or [string]::IsNullOrWhiteSpace($RootName)) { return New-HostAdmissionExecutionContract 'contract_conflict' }
-
-    # The selected root owns the top-level dispatch contract.  Dependency
-    # entries are read-only supporting inputs in this admission; their own
-    # contracts must never be priority-merged into (or silently replace) the
-    # root adapter.  A dependency that needs independent execution must be
-    # selected as a new root and admitted separately.
-    $rootRows = @($Rows | Where-Object { [string]$_.name -eq $RootName })
-    if ($rootRows.Count -ne 1 -or $null -eq $rootRows[0].execution_contract) {
-        return New-HostAdmissionExecutionContract 'contract_conflict'
-    }
-    return $rootRows[0].execution_contract
-}
-
 function Resolve-Catalog([string]$Explicit, [bool]$AllowAutoDiscovery) {
     if (-not [string]::IsNullOrWhiteSpace($Explicit)) {
         $resolvedExplicit = Resolve-RunningRouterCatalogPath $Explicit
@@ -353,7 +295,6 @@ $catalogFile = ''
 $catalogRoot = ''
 $managedRoot = ''
 $catalogDependencies = @{}
-$catalogExecutionContracts = @{}
 $allAvailableRows = @()
 $catalogDiagnostics = [Collections.Generic.List[object]]::new()
 $catalogProjectionIncomplete = $false
@@ -469,14 +410,8 @@ if ($null -ne $catalog) {
             if ([string]$skill.side_effect -notin @('read_only', 'external_read', 'controlled_write', 'unknown')) {
                 $catalogFindings.Add((New-RouterFinding 'workflow_side_effect_invalid' ($pathPrefix + '.side_effect') 'Workflow side effect must be read_only, external_read, controlled_write, or unknown.')) | Out-Null
             }
-            $rawExecutionContract = $null
-            if (Test-ObjectProperty $skill 'execution_contract') { $rawExecutionContract = $skill.execution_contract }
-            $executionContractResult = Resolve-ExecutionContract $rawExecutionContract
-            if (-not $executionContractResult.valid) {
-                $catalogFindings.Add((New-RouterFinding 'execution_contract_invalid' ($pathPrefix + '.execution_contract') [string]$executionContractResult.finding)) | Out-Null
-            }
-            elseif ($uniqueName) {
-                $catalogExecutionContracts[$name] = $executionContractResult.contract
+            if (Test-ObjectProperty $skill 'execution_contract') {
+                $catalogFindings.Add((New-RouterFinding 'execution_contract_retired' ($pathPrefix + '.execution_contract') 'Repository-defined execution contracts were retired; host-native agent selection is not a catalog concern.')) | Out-Null
             }
             $dependencies = [System.Collections.Generic.List[string]]::new()
             if (Test-ObjectProperty $skill 'dependencies') {
@@ -606,7 +541,6 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                     availability = 'available'
                     load_side_effect = 'read_only'
                     side_effect = [string]$skill.side_effect
-                    execution_contract = if ($catalogExecutionContracts.ContainsKey($name)) { $catalogExecutionContracts[$name] } else { New-HostAdmissionExecutionContract }
                     dependencies = @($catalogDependencies[$name])
                     package_sha256 = $expectedPackage
                     entrypoint_hash_validated = $true
@@ -749,23 +683,19 @@ if ($rootSelectionPass) {
 if (-not $closurePass) { $validatedClosure.Clear() }
 $validatedClosureRows = @($validatedClosure.ToArray())
 $loadPass = $rootSelectionPass -and $closurePass
-$effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows ([string]$selectedRows[0].name) } else { New-HostAdmissionExecutionContract }
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
 $authorizationReason = if ($catalogProjectionIncomplete) { 'catalog_projection_incomplete' }
 elseif ($discoveryScopeRequired) { 'domain_hint_required' }
 elseif ($multipleRootCandidates) { 'multiple_candidates_not_admissible' }
 elseif ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
-elseif ($effectiveExecutionContract.mode -eq 'host_admission_required') { 'execution_contract_requires_host_admission' }
-elseif ($effectiveExecutionContract.mode -eq 'parent_user_input') { 'execution_contract_requires_parent_user_input' }
-elseif ($effectiveExecutionContract.mode -eq 'multi_turn_user_decision') { 'execution_contract_requires_interactive_bridge' }
 elseif ($requiresReview) { 'workflow_side_effect_requires_host_review' }
 else { 'host_authorization_required' }
 $loadValidation = [ordered]@{
     requested = $requestedNames
     pass = $loadPass
     scope = 'skill_dependency_closure_load_only'
-    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'single_root_candidate', 'dependency_closure', 'execution_contract')
+    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'single_root_candidate', 'dependency_closure')
 }
 # An explicitly named candidate that the catalog cannot validate is a blocked
 # discovery, not a successful one.  Reporting candidate_discovery_only here would
@@ -797,7 +727,6 @@ $routingReceipt = [ordered]@{
     requested_candidates = $requestedNames
     validated_candidates = @(if ($loadPass) { $selectedRows | ForEach-Object { [string]$_.name } })
     validated_closure = @(if ($loadPass) { $validatedClosureRows | ForEach-Object { [string]$_.name } })
-    execution_contract = $effectiveExecutionContract
     status = if ($loadPass) { 'validated' } elseif ($requestedUnavailable -or $catalogProjectionIncomplete) { 'blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -ne 'invalid' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
     truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($requestedUnavailable -or $catalogProjectionIncomplete) { 'candidate_discovery_blocked' } elseif ($catalogStatus -ne 'invalid' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
@@ -817,12 +746,11 @@ $document = [pscustomobject][ordered]@{
     retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; candidate_count = $allRows.Count; max_candidates = $MaxCandidates; truncated = $truncated; scope_required = $discoveryScopeRequired }
     selected = $selectedRows
     validated_closure = $validatedClosureRows
-    execution_contract = $effectiveExecutionContract
     excluded = @($excluded.ToArray())
     load_validation = $loadValidation
     validation = $loadValidation
     routing_receipt = $routingReceipt
-    execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $requiresReview; reason = $authorizationReason; execution_contract = $effectiveExecutionContract }
+    execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $requiresReview; reason = $authorizationReason }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0

@@ -48,9 +48,9 @@
 
 下列能力仍在仓库中，但不属于 §2 的核心任务，也不是日常主链。修复真实故障可以做；新增功能、扩大范围或接入日常主链，须先由用户明确解冻：
 
-- 冷技能路由（`capability-router`、CSR 系列）：工程冻结。治理层（场景矩阵、receipt verifier、验收 runbook 与路线图）已移除，仅保留功能层（router、冷发现 catalog、native-agent bridge）。
+- 冷技能路由（`capability-router`、CSR 系列）：工程冻结。治理层（场景矩阵、receipt verifier、验收 runbook 与路线图）已移除，仅保留 router 与冷发现 catalog。
 
-已退休：跨宿主模型编排与独立 preset 工具（原 `src/model-orchestration/`）于 2026-11-28 按用户裁决整体移除，模型/子代理选择权限交回各宿主原生默认；历史设计见 [docs/archive/README.md](../archive/README.md)。
+已退休：跨宿主模型编排、独立 preset 工具、自定义子代理投影（原 `src/Application/NativeAgentBridge.ps1` 与 `overrides/resources/native-agent-bridge/`）及冷路由专用 ExecutionAdmission 均在 2026-11-28 按用户裁决移除；模型、effort、子代理、权限和 sandbox 归各宿主原生管理。历史设计见 [docs/archive/README.md](../archive/README.md)。
 
 ## 4. 产品原则
 
@@ -102,8 +102,8 @@
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。
 - `FR-PRJ-006`：只读 inventory 使用公开 plugin CLI JSON 识别 plugin/system/standalone 同名能力，优先建议 native plugin source；finding 仅报告，不安装、卸载、启用 plugin 或读写 cache。
-- `FR-PRJ-007`：可选 native-agent bridge 只把仓库受控模板投影到固定 Codex `~/.codex/agents` 或 Claude Code `~/.claude/agents`；写入必须经过既有 host promotion（clean commit 或明确 unverified override）、模板 ownership/reparse 校验、receipt 与回滚。bridge 不负责 provider/auth、agent runtime、队列、会话、动态模型路由或跨宿主编排；但受管 Codex custom-agent template 可以声明静态 `model` / `model_reasoning_effort`，以避免无意继承全局 subagent 默认值。每个静态钉选必须有 source-template 测试、投影 hash receipt 与 fresh Codex child 验收。Claude 模板不钉选模型或 effort，沿用宿主当前选择；本机投影不覆盖普通 Desktop 聊天。
-- `FR-PRJ-008`：cold routing 的真值必须拆为 `host_visible`、`candidate_load_validated`、`skill_md_loading`、`native_child` 与 `host_specific_live_accepted`。router receipt 只能证明发现或精确闭包校验；ZCode 父任务代行、模板存在、投影成功、模型可列举或 AI 自述均不得证明 Codex native child 已启动或 `SKILL.md` 已加载。
+- `FR-PRJ-007`：本仓不得写入 Codex `~/.codex/agents` 或 Claude `~/.claude/agents`，也不得配置模型、effort、子代理选择、provider、auth 或权限。冷发现只提供候选和精确闭包校验；执行由当前宿主或父任务按用户现有授权完成。
+- `FR-PRJ-008`：cold routing 的 `candidate_load_validated` 只证明 catalog 与文件闭包；不得外推宿主的 child、模型、effort 或自然流量验收。任何宿主执行都沿用其原生 agent 默认值并在需要时另行记录 `host_specific_live_accepted`。
 
 ### 5.6 外置参考仓
 

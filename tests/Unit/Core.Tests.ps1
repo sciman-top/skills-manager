@@ -1875,7 +1875,6 @@ Describe "构建生效 rollback compensation" {
             Mock Rollback-BuildTransaction { $true }
             Mock Complete-BuildTransaction {}
             Mock Sync-SkillDiscoveryCatalog {}
-            Mock Sync-NativeAgentBridge {}
 
             { 构建生效 } | Should -Throw '*构建生效失败*'
 
@@ -1917,7 +1916,6 @@ Describe "构建生效 rollback compensation" {
             Mock Rollback-BuildTransaction { $false }
             Mock Complete-BuildTransaction {}
             Mock Sync-SkillDiscoveryCatalog {}
-            Mock Sync-NativeAgentBridge {}
 
             # 回滚未恢复时：不得补偿投影，最终失败集必须如实含 rollback_failed。
             { 构建生效 } | Should -Throw '*rollback_failed*'
@@ -2029,7 +2027,7 @@ Describe "构建生效 rollback compensation" {
                 [pscustomobject]@{ enabled = $true; changed = $true; persisted = $true; skill_count = 81; domain_count = 22 }
             }
             Mock Get-HostProjectionPromotionContext { throw "clean commit required" }
-            Mock Sync-NativeAgentBridge { throw "must not reach native bridge after promotion block" }
+            Mock 应用到ClaudeCodex { throw "host projection must not run after promotion was blocked" }
             Mock Complete-BuildTransaction {}
 
             { 构建生效 } | Should -Throw '*构建生效失败*'
@@ -2037,7 +2035,7 @@ Describe "构建生效 rollback compensation" {
             Should -Invoke New-SkillDiscoveryCatalogTransaction -Times 1 -Exactly
             Should -Invoke Sync-SkillDiscoveryCatalog -Times 1 -Exactly -ParameterFilter { $null -ne $Transaction -and [bool]$SkipLock }
             Should -Invoke Get-HostProjectionPromotionContext -Times 1 -Exactly
-            Should -Invoke Sync-NativeAgentBridge -Times 0 -Exactly
+            Should -Invoke 应用到ClaudeCodex -Times 0 -Exactly
             Should -Invoke Complete-BuildTransaction -Times 1 -Exactly
         }
         finally {

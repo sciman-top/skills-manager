@@ -157,7 +157,7 @@ Skills 管理器（中文菜单）
 按需维护（不是每次编码任务的必经步骤）：
   - MCP 配置与同步
   - 目标仓审查、规则审查与规则投影
-  - 迁移、发行更新、能力清单和 native-agent bridge
+  - 迁移、发行更新与能力清单
   - ai-coding 模板用于生成任务、审查、失败反馈、交接或收口材料
 
 菜单地图：
@@ -217,7 +217,7 @@ Skills 管理器（中文菜单）
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
-  .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
+  .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>]
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP
   .\skills.ps1 MCP配置 列表

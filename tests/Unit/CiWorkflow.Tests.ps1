@@ -60,7 +60,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $riskMatch = [regex]::Match($resolver, '\$riskPath = ''([^'']+)''')
         $riskMatch.Success | Should -Be $true
         $riskPath = [regex]::new($riskMatch.Groups[1].Value)
-        foreach ($path in @('tests/E2E/Workflow.Tests.ps1', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.lock.json', 'overrides/resources/native-agent-bridge/design-griller.toml', 'overrides/patches/provenance.json', 'audit-targets.json')) {
+        foreach ($path in @('tests/E2E/Workflow.Tests.ps1', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.lock.json', 'overrides/custom/capability-router/scripts/route-capability.ps1', 'overrides/patches/provenance.json', 'audit-targets.json')) {
             $riskPath.IsMatch($path) | Should -Be $true
         }
         foreach ($path in @('src/Core.ps1', 'tests/Unit/Core.Tests.ps1', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'docs/product/README.md')) {

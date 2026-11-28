@@ -58,8 +58,8 @@ When using OpenAI Codex, Claude Code, ZCode, Antigravity (Gemini), or WorkBuddy 
 
 | AI Host | Skill Projection | Default Profile | MCP Target Format |
 | :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | Shared `~/.agents/skills`; optional Agent Bridge writes `~/.codex/agents` | `core-lean` (7 curated) | Native Codex MCP config |
-| **Claude Code** | User-level `~/.claude/skills` junctions; Agent Bridge separately writes `~/.claude/agents` subagent definitions | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
+| **OpenAI Codex** | Shared `~/.agents/skills`; does not write `~/.codex/agents`; the host owns subagents | `core-lean` (7 curated) | Native Codex MCP config |
+| **Claude Code** | User-level `~/.claude/skills` junctions; does not write `~/.claude/agents`; the host owns subagents | `core-lean` (7 curated) | `~/.claude.json` / Desktop config |
 | **ZCode** | `~/.zcode/skills` junction | `core-lean` (7 curated) | `~/.zcode/cli/config.json` |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` junction | `core-ops` (8 enhanced) | `mcp_config.json` |
 | **WorkBuddy** | Managed local targets | `core-ops` (8 enhanced) | Standard workspace config |
@@ -114,7 +114,7 @@ Double-click or run `skills.cmd` to open the interactive TUI menu:
 
 ## Common Commands
 
-Keep the daily path short: `discover → install/lock → check updates → build and project → doctor`. Target audits, rule projection, migration, the native-agent bridge, and model presets are advanced maintenance capabilities rather than mandatory steps for every coding task.
+Keep the daily path short: `discover → install/lock → check updates → build and project → doctor`. Target audits, rule projection, and migration are advanced maintenance capabilities rather than mandatory steps for every coding task.
 
 ### 1. Skills Management
 
@@ -206,7 +206,7 @@ Scan your other projects to identify needed AI agent capabilities:
 - **No Hijacking**: Does not manage models, intercept tokens, or hijack inference routes.
 - **Verification Hierarchy**: Strictly enforces `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`.
 - **Fail-Closed Safety**: Supports `--plan` preview for rule and MCP mutations, preventing configuration contamination.
-- Cross-host model orchestration was retired in 2026-11; model and sub-agent selection is left to each host's native defaults.
+- Cross-host model orchestration, custom subagent projection, and cold-router execution contracts were retired in 2026-11; each host owns its models, effort, subagents, and permissions.
 
 ---
 
