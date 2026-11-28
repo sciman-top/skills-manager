@@ -10,7 +10,9 @@ function Convert-McpServersToConfigMap($servers) {
         if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
         $entry = [ordered]@{}
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
-        $entry.transport = $transport
+        # ZCode 宿主的 MCP server schema 是严格校验：未知键（如 transport）会导致整条
+        # server 被静默丢弃，因此这里输出宿主规范字段 type（http/sse 也可省略由 url 推断）。
+        $entry.type = $transport
         if ($transport -eq "stdio") {
             Assert-McpKeyValueMapSafe $s.env "env"
             Assert-McpProcessArgsSafe @($s.args) 'args'
