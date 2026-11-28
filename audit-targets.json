@@ -80,6 +80,13 @@
       "notes": "本机目录不存在；保留登记供其他机器通过 audit-targets.local.json 显式启用。"
     },
     {
+      "name": "physicsvizlab",
+      "path": "D:\\CODE\\PhysicsVizLab",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
       "name": "claude-antiban",
       "path": "D:\\CODE\\claude-antiban",
       "enabled": false,
