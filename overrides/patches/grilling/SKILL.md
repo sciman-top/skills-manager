@@ -12,10 +12,11 @@ evidence, and unresolved questions visible.
 
 ## Parent-conversation invariant
 
-Keep this interview in the current parent conversation, and do not require a
+Keep this interview in the current parent conversation. Do not require a
 repository-defined agent, model, effort, or tool name. Each question is
 answered by the user in this conversation; a child cannot substitute for that
-attributable human input.
+attributable human input. A child's factual answer must not be treated as the
+user's decision.
 
 Ask exactly one high-leverage question at a time. State the question, the
 smallest useful set of choices or decision boundary, and a recommended answer.
