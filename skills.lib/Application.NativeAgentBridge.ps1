@@ -272,22 +272,15 @@ function Assert-ClaudeNativeAgentTemplateContent([string]$Content, [string]$Sour
     # Shipped templates use only flat, unquoted scalar fields; reject other YAML syntax rather than partially interpreting it.
     foreach ($line in ($header -split '\r?\n')) {
         if ($line -match '^\s*(#.*)?$') { continue }
-        if ($line -cnotmatch '^(name|description|tools|maxTurns|model|effort):[ \t]+[^\r\n]+$') {
+        if ($line -cnotmatch '^(name|description|tools|maxTurns):[ \t]+[^\r\n]+$') {
             throw ("claude agent template has unsupported frontmatter syntax or field: {0}" -f $SourcePath)
         }
     }
-    # Provider and credential fields stay forbidden. model/effort may pin only the strict subagent
-    # allowlist (user requirement 2026-10-18): claude-haiku-5-5 at medium, high or xhigh.
+    # Provider and credential fields stay forbidden. model/effort pins are rejected outright:
+    # first-party model families are retired (user decision 2026-10-30) and model selection
+    # belongs to the host native default face, not to bridge templates.
     if ($header -match '(?m)^(provider|model_provider|base_url|api_key|auth|secret|profile|session|fallback)\s*:') {
         throw ("claude agent template pins a route or credential field: {0}" -f $SourcePath)
-    }
-    foreach ($pin in [regex]::Matches($header, '(?m)^(?<key>model|effort):[ \t]+(?<value>\S+)[ \t]*$')) {
-        if ($pin.Groups['key'].Value -ceq 'model' -and $pin.Groups['value'].Value -cne 'claude-haiku-5-5') {
-            throw ("claude agent template pins a model outside the subagent allowlist: {0}" -f $SourcePath)
-        }
-        if ($pin.Groups['key'].Value -ceq 'effort' -and $pin.Groups['value'].Value -cnotin @('medium','high','xhigh')) {
-            throw ("claude agent template pins an effort outside the subagent allowlist: {0}" -f $SourcePath)
-        }
     }
 }
 
