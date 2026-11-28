@@ -229,46 +229,6 @@ function Get-CfgTopLevelFieldContractFindings($cfg, [int]$EffectiveVersion) {
     return [pscustomobject]@{ errors = @($errors.ToArray()); observations = @($observations.ToArray()) }
 }
 
-function Get-NativeAgentBridgeConfigErrors($Bridge, [string]$ExpectedTarget = '~/.codex/agents', [string]$Label = 'native_agent_bridge') {
-    $errors = New-Object System.Collections.Generic.List[string]
-    if ($null -eq $Bridge) { return @() }
-    if ($Bridge -isnot [pscustomobject] -and $Bridge -isnot [System.Collections.IDictionary]) {
-        $errors.Add('skill_projection.native_agent_bridge 必须是对象') | Out-Null
-        return @($errors.ToArray())
-    }
-    if ((Get-CfgObjectProperty $Bridge 'enabled') -isnot [bool]) { $errors.Add('skill_projection.native_agent_bridge.enabled 必须是布尔值') | Out-Null }
-    foreach ($fieldName in @('owner', 'source_root', 'target_root', 'receipt_path')) {
-        if ([string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $Bridge $fieldName))) {
-            $errors.Add(("skill_projection.native_agent_bridge.{0} 不能为空" -f $fieldName)) | Out-Null
-        }
-    }
-    $sourceRoot = [string](Get-CfgObjectProperty $Bridge 'source_root')
-    if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and (-not (Test-SafeRelativePath $sourceRoot -AllowDot) -or $sourceRoot -notmatch '^agent[\\/]')) {
-        $errors.Add('skill_projection.native_agent_bridge.source_root 必须位于 generated agent/ 下') | Out-Null
-    }
-    $targetRoot = (([string](Get-CfgObjectProperty $Bridge 'target_root')).Replace('\', '/')).TrimEnd('/')
-    if (-not [string]::IsNullOrWhiteSpace($targetRoot) -and -not [string]::Equals($targetRoot, $ExpectedTarget, [StringComparison]::OrdinalIgnoreCase)) {
-        $errors.Add(('skill_projection.native_agent_bridge.target_root 必须等于 {0}' -f $ExpectedTarget)) | Out-Null
-    }
-    if ([string](Get-CfgObjectProperty $Bridge 'receipt_path') -notmatch '^reports[\\/]native-agent-bridge[\\/][^\\/]+\.json$') {
-        $errors.Add('skill_projection.native_agent_bridge.receipt_path 必须位于 reports/native-agent-bridge 且为直接子级 JSON 文件') | Out-Null
-    }
-    $definitions = Get-CfgObjectProperty $Bridge 'definitions'
-    if (-not (Assert-IsArray $definitions) -or @($definitions).Count -eq 0) {
-        $errors.Add('skill_projection.native_agent_bridge.definitions 必须是非空数组') | Out-Null
-    }
-    else {
-        $names = @($definitions | ForEach-Object { ([string]$_).Trim() })
-        if (@($names | Where-Object { $_ -notmatch '^[a-z0-9][a-z0-9-]*$' }).Count -gt 0) {
-            $errors.Add('skill_projection.native_agent_bridge.definitions 必须是 canonical agent names') | Out-Null
-        }
-        if (@(Get-DuplicateValues $names).Count -gt 0) {
-            $errors.Add('skill_projection.native_agent_bridge.definitions 不能重复') | Out-Null
-        }
-    }
-    return @($errors.ToArray() | ForEach-Object { $_ -replace '^skill_projection\.native_agent_bridge', ('skill_projection.' + $Label) })
-}
-
 function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
     $errors = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) {
@@ -293,13 +253,13 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
     $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
+    if ($null -ne $skillProjection) {
+        $retiredBridges = @($skillProjection.PSObject.Properties.Name | Where-Object { $_ -in @('native_agent_bridge', 'claude_native_agent_bridge') })
+        foreach ($retiredField in $retiredBridges) {
+            $errors.Add(('skill_projection.{0} 已退休：执行与代理选择归宿主', $retiredField)) | Out-Null
+        }
+    }
     $usesProjectionProfiles = ($null -ne (Get-CfgObjectProperty $skillProjection 'projection_profiles'))
-    foreach ($bridgeError in @(Get-NativeAgentBridgeConfigErrors (Get-CfgObjectProperty $skillProjection 'native_agent_bridge'))) {
-        $errors.Add([string]$bridgeError) | Out-Null
-    }
-    foreach ($bridgeError in @(Get-NativeAgentBridgeConfigErrors (Get-CfgObjectProperty $skillProjection 'claude_native_agent_bridge') '~/.claude/agents' 'claude_native_agent_bridge')) {
-        $errors.Add([string]$bridgeError) | Out-Null
-    }
 
     foreach ($target in @($targets)) {
         $managedLinkOnly = Get-CfgObjectProperty $target 'managed_link_only'
@@ -633,12 +593,6 @@ function Assert-Cfg($cfg) {
             $nativeTargetFull = [IO.Path]::GetFullPath($nativeTargetResolved).TrimEnd('\', '/')
             Need (-not [string]::Equals($nativeTargetFull, [IO.Path]::GetPathRoot($nativeTargetFull).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) 'skill_projection.native_projection.target_root 不能是文件系统根目录'
             Need ([string]$nativeProjection.receipt_path -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'skill_projection.native_projection.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
-        }
-        foreach ($bridgeError in @(Get-NativeAgentBridgeConfigErrors (Get-CfgObjectProperty $projection 'native_agent_bridge'))) {
-            Need ($false) ([string]$bridgeError)
-        }
-        foreach ($bridgeError in @(Get-NativeAgentBridgeConfigErrors (Get-CfgObjectProperty $projection 'claude_native_agent_bridge') '~/.claude/agents' 'claude_native_agent_bridge')) {
-            Need ($false) ([string]$bridgeError)
         }
         Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
         foreach ($source in @($projection.sources)) {

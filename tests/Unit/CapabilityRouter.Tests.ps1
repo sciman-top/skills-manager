@@ -1,9 +1,9 @@
 Describe 'Capability router fallback' {
     BeforeAll {
 . (Join-Path $PSScriptRoot '..\Shared\TestHelpers.ps1')
-        
 
-        
+
+
 
         function Set-TestCatalogPackageHashes($Document, [string]$CatalogPath) {
             $catalogRoot = Split-Path -Parent $CatalogPath
@@ -207,9 +207,9 @@ Describe 'Capability router fallback' {
         ($result.routing_receipt.validated_closure -is [array]) | Should -BeTrue
         @($result.routing_receipt.validated_candidates) | Should -Be @('codebase-design')
         @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design')
-        $result.execution_contract.mode | Should -Be 'host_admission_required'
-        $result.routing_receipt.execution_contract.stop_condition | Should -Be 'admission_required'
-        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_host_admission'
+        $result.PSObject.Properties.Name | Should -Not -Contain 'execution_contract'
+        $result.routing_receipt.PSObject.Properties.Name | Should -Not -Contain 'execution_contract'
+        $result.execution_authorization.reason | Should -Be 'host_authorization_required'
     }
 
     It 'reports a blocked discovery when an explicitly named candidate is absent' {
@@ -228,7 +228,7 @@ Describe 'Capability router fallback' {
         $result.writes_performed | Should -Be $false
     }
 
-    It 'preserves an interactive closure contract and refuses to reduce it to one-shot runner execution' {
+    It 'rejects catalog execution contracts after host-native selection replaced repository routing' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
         $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
                 mode = 'multi_turn_user_decision'
@@ -240,97 +240,13 @@ Describe 'Capability router fallback' {
 
         $result = & $router -Query 'grill this proposal' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
 
-        $result.load_validation.pass | Should -Be $true
-        $result.load_validation.checks | Should -Contain 'execution_contract'
-        $result.execution_contract.mode | Should -Be 'multi_turn_user_decision'
-        $result.execution_contract.native_agent | Should -Be 'design-griller'
-        $result.execution_contract.conversation_owner | Should -Be 'parent'
-        $result.execution_contract.stop_condition | Should -Be 'one_question_then_wait'
-        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_interactive_bridge'
-        $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
-    }
-
-    It 'preserves parent-user-input contracts without granting execution' {
-        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
-        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
-                mode = 'parent_user_input'
-                native_agent = ''
-                conversation_owner = 'parent'
-                stop_condition = 'user_input_required'
-            })
-        Write-TestCatalog $document $catalog
-
-        $result = & $router -Query 'Please inspect this request using the named workflow.' -CatalogPath $catalog -AutoDiscover -Candidate 'skill|codebase-design' | ConvertFrom-Json
-
-        $result.load_validation.pass | Should -Be $true
-        $result.execution_contract.mode | Should -Be 'parent_user_input'
-        $result.execution_contract.native_agent | Should -Be ''
-        $result.execution_contract.conversation_owner | Should -Be 'parent'
-        $result.execution_contract.stop_condition | Should -Be 'user_input_required'
-        $result.execution_authorization.status | Should -Be 'not_granted'
-        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_parent_user_input'
-        $result.routing_receipt.execution_contract.mode | Should -Be 'parent_user_input'
-    }
-
-    It 'binds the effective dispatch contract to the selected root, not a supporting dependency' {
-        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
-        $rootContract = [pscustomobject]@{
-            mode = 'multi_turn_user_decision'
-            native_agent = 'design-griller'
-            conversation_owner = 'parent'
-            stop_condition = 'one_question_then_wait'
-        }
-        $dependencyRoot = Join-Path $root 'one-shot-dependency'
-        New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
-        $dependencyPath = Join-Path $dependencyRoot 'SKILL.md'
-        Set-Content -LiteralPath $dependencyPath -Encoding UTF8 -Value "---`nname: one-shot-dependency`ndescription: Supporting read-only input.`n---"
-        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue $rootContract
-        $document.skills[0].dependencies = @('one-shot-dependency')
-        $document.skills += [pscustomobject][ordered]@{
-            name = 'one-shot-dependency'
-            description = 'Supporting read-only input.'
-            relative_path = '..\one-shot-dependency\SKILL.md'
-            entrypoint_sha256 = (Get-FileHash $dependencyPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            domains = @('engineering')
-            load_side_effect = 'read_only'
-            side_effect = 'read_only'
-            dependencies = @()
-            routing_rules = @()
-            execution_contract = [pscustomobject]@{
-                mode = 'one_shot'
-                native_agent = 'cold-capability-runner'
-                conversation_owner = 'runner'
-                stop_condition = 'parent_contract'
-            }
-        }
-        $document.domains[0].skill_names += 'one-shot-dependency'
-        Write-TestCatalog $document $catalog
-
-        $result = & $router -Query 'grill this proposal' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
-
-        $result.load_validation.pass | Should -Be $true
-        @($result.validated_closure.name) | Should -Be @('codebase-design', 'one-shot-dependency')
-        $result.execution_contract.mode | Should -Be 'multi_turn_user_decision'
-        $result.execution_contract.native_agent | Should -Be 'design-griller'
-        $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
-        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_interactive_bridge'
-    }
-
-    It 'fails closed when a catalog execution contract is malformed' {
-        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
-        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
-                mode = 'multi_turn_user_decision'
-                native_agent = 'cold-capability-runner'
-                conversation_owner = 'runner'
-                stop_condition = 'parent_contract'
-            })
-        Write-TestCatalog $document $catalog
-
-        $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
-
         $result.catalog.status | Should -Be 'invalid'
         $result.load_validation.pass | Should -Be $false
-        @($result.catalog.findings.code) | Should -Contain 'execution_contract_invalid'
+        @($result.catalog.findings.code) | Should -Contain 'execution_contract_retired'
+        $result.routing_receipt.status | Should -Be 'blocked'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        $result.execution_authorization.status | Should -Be 'not_granted'
+        $result.writes_performed | Should -Be $false
     }
 
     It 'validates the selected candidate dependency closure, including declared side effects' {
@@ -733,31 +649,15 @@ Describe 'Capability router fallback' {
         $skill | Should -Match '-DomainHint decision,engineering'
     }
 
-    It 'documents Claude Agent-tool dispatch beside the Codex fork rule, not as Codex-only' {
+    It 'leaves agent and model selection to the host rather than a repository custom-role handoff' {
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
 
-        # A Claude child looked for a Codex-only `spawn_agent` tool because the
-        # handoff rule was written for Codex alone; both hosts must be named.
-        $skill | Should -Match 'Agent tool with `subagent_type`'
-        $skill | Should -Match 'Codex `fork_turns="none"`'
-        $skill | Should -Not -Match 'On Codex, a named specialist handoff must'
-    }
-
-    It 'requires the parent to persist the predecessor admission before a multi-turn successor' {
-        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
-
-        # A live probe lost its admission inside a finished pwsh process, so the
-        # successor could not be built and the interview stalled on question one.
-        $skill | Should -Match 'persist'
-        $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
-        # Run files must sit in the git-ignored work area, never %TEMP% or a tracked path.
-        $skill | Should -Match 'artifacts/work/cold-routing/<run-id>/'
-        $skill | Should -Match 'cannot\s+recompute\s+hashes'
-        # A live child rejected identifiers alone; the full successor payload must travel inline.
-        $skill | Should -Match 'complete successor bridge payload inline'
-        # Live children refuse an answer without its provenance. A delegate answer is not accepted for an interview.
-        $skill | Should -Match '-AnswerProvenance'
-        $skill | Should -Match 'is not accepted for a\s+multi-turn interview'
+        # The repository skill no longer ships custom child templates. Its own
+        # effective host-neutral guidance must remain independent of either host's
+        # dispatch vocabulary; user-global protocol sources are outside this check.
+        $skill | Should -Match 'host owns execution'
+        $skill | Should -Match 'does not name,\s+configure, rank, or select a model, effort, or agent'
+        $skill | Should -Not -Match 'spawn_agent|subagent_type|fork_turns|design-griller|cold-capability-runner|execution-admission\.ps1'
     }
 
     It 'is implicit-eligible only as a narrow cold-discovery fallback' {
@@ -771,13 +671,12 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'do not use as a normal preflight'
         $skill | Should -Match 'routing_receipt'
         $skill | Should -Match 'candidate_load_validated'
-        $skill | Should -Match 'Native cold-capability handoff'
-        $skill | Should -Match 'execution_contract'
-        $skill | Should -Match 'multi_turn_user_decision'
-        $skill | Should -Match 'design-griller'
-        $skill | Should -Match 'not treat validation as execution authorization'
-        $skill | Should -Match 'Never use the bridge as automatic middleware'
-        $skill | Should -Match 'exact write set,\s+minimum proof, and stop condition'
+        $skill | Should -Match 'Host selection and execution'
+        $skill | Should -Match 'Loading and execution are separate decisions'
+        $skill | Should -Match 'without unrelated parent history'
+        $skill | Should -Match 'A child answer is never an attributable human decision'
+        $skill | Should -Not -Match 'Never use the bridge'
+        $skill | Should -Match 'exact scope, write set, proof, and stop condition'
         $skill | Should -Match 'reliable binary “skill request”'
         $skill | Should -Match 'high-confidence conclusion'
         $skill | Should -Match 'Treat metadata as insufficient when a request combines an interactive workflow verb'

@@ -58,9 +58,9 @@
 
 | AI 宿主 | 技能投影机制 | 默认 Profile 技能数 | MCP 目标格式 | 兼容性证据 |
 | :--- | :--- | :--- | :--- | :--- |
-| **OpenAI Codex** | 共享 `~/.agents/skills`；可选 Agent Bridge 写入 `~/.codex/agents` | `core-lean` (6 个精选) | `skills.json` `mcp_targets` 指向 `~/.codex` | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **OpenAI Codex** | 共享 `~/.agents/skills`；不写 `~/.codex/agents`，子代理由宿主管理 | `core-lean` (6 个精选) | `skills.json` `mcp_targets` 指向 `~/.codex` | 仓库适配；fresh host probe 与真实任务另行验收 |
 | **DeepSeek Harness** | 复用 `~/.agents/skills`；规则投影到 `~/.dsh/AGENTS.md` | `core-lean` (6 个精选) | 未验证独立 MCP 适配器，保持不投影 | 仓库适配；fresh host probe 与真实任务另行验收 |
-| **Claude Code** | 用户级 `~/.claude/skills` 链接；Agent Bridge 另写 `~/.claude/agents` 子代理定义 | `core-lean` (6 个精选) | `~/.claude.json` / Desktop 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
+| **Claude Code** | 用户级 `~/.claude/skills` 链接；不写 `~/.claude/agents`，子代理由宿主管理 | `core-lean` (6 个精选) | `~/.claude.json` / Desktop 配置 | 仓库适配；fresh host probe 与真实任务另行验收 |
 | **ZCode** | `~/.zcode/skills` 链接 | `core-lean` (6 个精选) | `~/.zcode/cli/config.json` | 仓库适配；宿主能力限制单独记录 |
 | **Antigravity (Gemini)** | `~/.gemini/config/skills` 链接 | `core-lean` (6 个精选) | `mcp_config.json` | 配置适配；不由投影推断宿主已加载 |
 | **WorkBuddy** | `~/.workbuddy/skills` 国内版受管链接 | `core-lean` (6 个精选) | 当前 CLI 未提供独立 MCP 文件投影 | 受管目标适配；需独立宿主/任务验收 |
@@ -121,7 +121,7 @@ cd skills-manager
 
 ## 核心工作流与常用命令
 
-日常主链保持最短：`发现 → 安装/锁定 → 检查更新 → 构建生效 → doctor`。目标仓审查、规则投影、迁移、native-agent bridge 和模型 preset 属于高级维护能力，不是每次编码任务的必经步骤。
+日常主链保持最短：`发现 → 安装/锁定 → 检查更新 → 构建生效 → doctor`。目标仓审查、规则投影和迁移属于高级维护能力，不是每次编码任务的必经步骤。
 
 ### 1. 技能管理（Skills）
 
@@ -228,7 +228,7 @@ cd skills-manager
 1. **零框架劫持**：本工具只负责同步与投影文件配置，**绝不接管你的 API Key、账号登录态、推理网络请求或上下文路由**。
 2. **真值分层与证据闭环**：内部严格遵守 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted` 四层边界，未经验证的绝不虚假断言生效。
 3. **Fail-Closed 安全机制**：所有 MCP 与规则的同步均支持 `--plan` 预览；修改外部目录前强制经过校验，防止配置污染。
-4. **受控的独立扩展**：跨宿主模型编排已于 2026-11 退休移除，模型与子代理选择交回各宿主原生默认；产品冻结面与解冻条件详见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
+4. **边界清晰**：跨宿主模型编排、自定义子代理投影及冷路由专用执行合同已于 2026-11 退休；模型、effort、子代理与权限由各宿主原生管理。产品冻结面与解冻条件详见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。
 
 ---
 

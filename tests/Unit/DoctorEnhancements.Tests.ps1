@@ -458,7 +458,7 @@ Describe "Doctor Enhancements" {
             ($drift -join "`n") | Should -Match '物化多出文件 stale\.md'
         }
 
-        It "ignores only the generated router runtime and catalog mirror" {
+        It "does not exempt a retired router admission helper from source parity" {
             $source = Join-Path $TestDrive 'parity-router-src\capability-router'
             $agentRoot = Join-Path $TestDrive 'parity-router-agent'
             $agent = Join-Path $agentRoot 'capability-router'
@@ -469,10 +469,10 @@ Describe "Doctor Enhancements" {
             Set-Content -LiteralPath (Join-Path $agent 'scripts\execution-admission.ps1') -Value 'generated'
             Set-Content -LiteralPath (Join-Path $agent 'scripts\unexpected-extra.ps1') -Value 'oops'
 
-            $drift = Test-DoctorSkillTreeParity -SourceRoot $source -MaterializedRoot $agent -AgentGeneratedRelativePaths @('catalog.json', 'scripts/execution-admission.ps1')
+            $drift = Test-DoctorSkillTreeParity -SourceRoot $source -MaterializedRoot $agent -AgentGeneratedRelativePaths @('catalog.json')
 
             ($drift -join "`n") | Should -Match '物化多出文件 scripts/unexpected-extra\.ps1'
-            ($drift -join "`n") | Should -Not -Match 'execution-admission'
+            ($drift -join "`n") | Should -Match '物化多出文件 scripts/execution-admission\.ps1'
             ($drift -join "`n") | Should -Not -Match 'catalog\.json'
         }
 
@@ -505,13 +505,43 @@ Describe "Doctor Enhancements" {
         }
 
         It "resolves effective sources through the build resolver" {
-            $cfg = LoadCfg -NoAutoFix
-            $sources = Get-DoctorColdMaterializationSources -Cfg $cfg
+            $fixtureRoot = Join-Path $TestDrive 'source-resolver'
+            $vendorRoot = Join-Path $fixtureRoot 'vendor'
+            $canonicalRoot = Join-Path $fixtureRoot 'canonical'
+            $configPath = Join-Path $fixtureRoot 'skills.json'
+            $cfg = [pscustomobject]@{
+                schema_version = 3
+                vendors = @([pscustomobject]@{ name = 'fixture-vendor' })
+                imports = @()
+                mappings = @(
+                    [pscustomobject]@{ vendor = 'fixture-vendor'; from = 'skills\alpha'; to = 'alpha' }
+                    [pscustomobject]@{ vendor = 'manual'; from = 'beta'; to = 'beta' }
+                )
+            }
+            foreach ($path in @($vendorRoot, $canonicalRoot, (Join-Path $vendorRoot 'fixture-vendor\skills\alpha'), (Join-Path $canonicalRoot 'beta'), (Join-Path $canonicalRoot 'capability-router'))) {
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+            }
+            Set-Content -LiteralPath (Join-Path $vendorRoot 'fixture-vendor\skills\alpha\SKILL.md') -Value "---`nname: alpha`ndescription: Alpha.`n---"
+            Set-Content -LiteralPath (Join-Path $canonicalRoot 'beta\SKILL.md') -Value "---`nname: beta`ndescription: Beta.`n---"
+            $cfg | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding utf8
+            $prior = Get-Variable CfgPath, VendorDir, ManualDir, OverridesDir -ValueOnly -ErrorAction SilentlyContinue
+            try {
+                $CfgPath = $configPath
+                $VendorDir = $vendorRoot
+                $ManualDir = $canonicalRoot
+                $OverridesDir = Join-Path $fixtureRoot 'overrides'
+                $sources = Get-DoctorColdMaterializationSources -Cfg $cfg
+            }
+            finally {
+                $CfgPath = $prior[0]
+                $VendorDir = $prior[1]
+                $ManualDir = $prior[2]
+                $OverridesDir = $prior[3]
+            }
 
-            # Anchored to the managed estate (2026-11-27: 32 -> 33 mappings,
-            # 41 -> 42 managed skills after adding gh-fix-ci); bump deliberately when the estate changes.
-            $sources.Keys.Count | Should -Be 43
-            $sources['capability-router'] | Should -BeLike '*overrides\custom\capability-router'
+            @($sources.Keys | Sort-Object) | Should -Be @('alpha', 'beta')
+            $sources['alpha'] | Should -Be (Join-Path $vendorRoot 'fixture-vendor\skills\alpha')
+            $sources['beta'] | Should -Be (Join-Path $canonicalRoot 'beta')
         }
     }
 

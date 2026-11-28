@@ -61,7 +61,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
 
         $r.profile | Should -Be 'focused'
         @($r.focused_test_paths | Sort-Object) | Should -Be @(
-            'tests/Unit/NativeAgentBridge.Tests.ps1',
             'tests/Unit/NativeSkillProjection.Tests.ps1',
             'tests/Unit/SkillProjection.Tests.ps1',
             'tests/Unit/SkillProjectionProfiles.Tests.ps1'
@@ -451,7 +450,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
          @{ Source = 'src/Application/SkillCatalogCompiler.ps1'; Expected = @('SkillCatalogCompiler'); ExpectedLocked = $true }
          @{ Source = 'src/Application/SkillEligibilityPolicy.ps1'; Expected = @('SkillEligibilityPolicy'); ExpectedLocked = $true }
          @{ Source = 'src/Commands/Doctor.ps1'; Expected = @('DoctorCli', 'DoctorEnhancements'); ExpectedLocked = $true }
-         @{ Source = 'src/Domain/ExecutionAdmission.ps1'; Expected = @('ExecutionAdmission'); ExpectedLocked = $true }
          @{ Source = 'src/Main.ps1'; Expected = @('MainDispatch', 'MenuStructure'); ExpectedLocked = $true }
      ) {
         param($Source, $Expected, $ExpectedLocked)
@@ -493,7 +491,6 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             'src/Application/AgentBuild.ps1'
             'src/Application/SkillProbe.ps1'
             'src/Application/GlobalRuleProjection.ps1'
-            'src/Application/NativeAgentBridge.ps1'
             'src/Application/NativeSkillProjection.ps1'
             'src/Application/NativeSkillProjectionCoordinator.ps1'
             'src/Application/RulePatchExecutor.ps1'

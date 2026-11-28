@@ -425,7 +425,7 @@ Describe 'Scoped single-skill projection' {
         }
     }
 
-    It 'regenerates the admission helper when only updating capability-router' {
+    It 'updates capability-router without injecting an uncatalogued admission helper' {
         $oldRoot = $Root; $oldAgent = $AgentDir; $oldOverrides = $OverridesDir; $oldDryRun = $DryRun; $oldLogPath = $LogPath
         try {
             $Root = Join-Path $TestDrive 'single-capability-router'
@@ -446,9 +446,7 @@ Describe 'Scoped single-skill projection' {
             $result.updated | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $source 'scripts\execution-admission.ps1') | Should -BeFalse
             Test-Path -LiteralPath (Join-Path $target 'scripts\route-capability.ps1') | Should -BeTrue
-            $helper = Get-ContentUtf8 (Join-Path $target 'scripts\execution-admission.ps1')
-            $helper | Should -Match 'function New-ExecutionAdmissionBridgePayload'
-            $helper | Should -Not -Be 'stale helper'
+            Test-Path -LiteralPath (Join-Path $target 'scripts\execution-admission.ps1') | Should -BeFalse
             @(Get-ChildItem -LiteralPath (Join-Path $Root '.txn') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
         }
         finally {

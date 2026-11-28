@@ -319,7 +319,6 @@ function New-ReleasePackage([string]$Kind) {
         }
         $releaseConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding utf8 | ConvertFrom-Json
         $supportPaths = @(
-            [string]$releaseConfig.skill_projection.native_agent_bridge.source_root,
             [IO.Path]::GetDirectoryName(([string]$releaseConfig.skill_projection.discovery_catalog.catalog_path).Replace('/', '\'))
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
         $supportRoots = @($supportPaths | ForEach-Object {
