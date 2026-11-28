@@ -21,7 +21,16 @@
         $peerCandidates = @((Join-Path $userProfile '.workbuddy-ai'), (Join-Path $userProfile '.workbuddy'), (Join-Path $userProfile '.codebuddy')) |
             Where-Object { -not (Test-GlobalRulePathEqual ([IO.Path]::GetFullPath($_)) ([IO.Path]::GetFullPath([string]$workbuddyDefaultRoot))) }
         foreach($peer in $peerCandidates){
-            if(Test-Path -LiteralPath $peer -PathType Container){ $workbuddyPeerRoot = [IO.Path]::GetFullPath($peer); break }
+            if(-not (Test-Path -LiteralPath $peer -PathType Container)){ continue }
+            # Skip a retired legacy ~/.codebuddy directory that no longer has an
+            # active CODEBUDDY.md/.mdc file and carries an explicit retired marker.
+            if(([IO.Path]::GetFileName($peer) -ieq '.codebuddy') -and
+               -not (Test-Path -LiteralPath (Join-Path $peer 'CODEBUDDY.md') -PathType Leaf) -and
+               -not (Test-Path -LiteralPath (Join-Path $peer 'CODEBUDDY.mdc') -PathType Leaf) -and
+               @(Get-ChildItem -LiteralPath $peer -Filter 'CODEBUDDY.md.retired*' -File -ErrorAction SilentlyContinue).Count -gt 0){
+                continue
+            }
+            $workbuddyPeerRoot = [IO.Path]::GetFullPath($peer); break
         }
     }
     # DeepSeek Harness keeps a single user home. An explicit DSH_HOME wins like

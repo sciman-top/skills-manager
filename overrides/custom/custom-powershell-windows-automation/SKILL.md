@@ -56,6 +56,20 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 - Log environment-variable scope and name rather than values; redact credentials,
   cookies, tokens, and other secret-bearing arguments before recording output.
 
+## Verified Windows Pitfalls
+
+Apply these verified fixes directly instead of re-debugging them:
+
+- **`[ordered]@{}` has no `ContainsKey()`**: Use `.Contains($key)` or `.GetEnumerator()`; calling `.ContainsKey($k)` throws MethodNotFound.
+- **`@($null).Count` is `1`**: Wrapping `$null` in `@()` creates a single-element array. Test emptiness with `$null -ne $x` or `@($x).Where({ $_ }).Count`.
+- **`AutomationNull` vs empty array**: Empty pipeline output yields `AutomationNull` whose direct `.Count` can be `$null`; materialize with `@(...)` before counting.
+- **Unary comma `,$x` transport**: Passing `,$x` preserves a single-element collection across parameters/pipelines; pair with `@()` on the receiving end. Never remove a seemingly thin wrapper without checking whether it carries unwrap semantics.
+- **`if ($x | Where-Object { ... })`**: Multi-element pipeline results behave differently from single-element ones in conditions; materialize into a variable first.
+- **`ConvertFrom-Json` ISO 8601 dates**: Automatically converts ISO 8601 strings into `DateTime`; compare or serialize intentionally, or read raw text when exact string format matters.
+- **Junction deletion**: Delete directory junctions only with `cmd /c rmdir "<junction>"` or `[IO.Directory]::Delete($path, $false)`. **Never** run `rm -rf` or `Remove-Item -Recurse` on a junction (it traverses and deletes the target directory's contents); verify `(Get-Item -LiteralPath $p).LinkType` first.
+- **Quoted paths & Git Bash inline `pwsh`**: Always quote paths that may contain spaces; when calling `pwsh` from Git Bash, wrap `-Command` in single quotes or use `pwsh -NoProfile -File <script>` so bash does not eat `$_` or backticks.
+- **Single-instance/tray process checks**: Verify the process `StartTime` against config edits; restarting a tray/single-instance app requires terminating the existing PID first (only with explicit task authorization).
+
 ## Verification
 
 - Run a dry-run path first when available.

@@ -1,12 +1,13 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.93
+**全局规则复核**: 9.94
 **最后更新**: 2026-11-28
 
 ## 1. 产品边界与入口
-- `skills.ps1` 是唯一 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源。
+- source of truth：`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 的运行真源；`rules/global/common.md` 与 `rules/global/platforms/*.md` 是全局规则真源。
+- entrypoint：`skills.ps1` 是唯一 CLI 入口；`build.ps1` 负责从 `src/` 与 `rules/global/` 生成受管产物。
 - 本仓只同步技能、MCP 与规则，不接管模型、provider、auth、会话、权限或插件缓存。
-- 项目根 `AGENTS.md` 是各宿主共同的项目规则源；`CLAUDE.md`、`GEMINI.md` 与 `.agents/rules/00-project.md` 只做引用。
+- 项目根 `AGENTS.md` 是各宿主共同的项目规则源；`CLAUDE.md` 与 `GEMINI.md` 只做引用，不保留会触发双加载的 `.agents/rules/00-project.md`。
 - 冻结面（仅真实故障修复，解冻须用户明确授权）见 [PRD §3.1](docs/product/skills-manager-vnext-prd.md)。新增能力前先读该节。
 - 真值层级 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`，低层证据不得外推。
 
@@ -17,8 +18,7 @@
 - runtime 为 PowerShell 7-only，Windows 优先。
 
 ## 3. 执行边界
-- 默认由一个主执行者串行完成。子代理委派已获用户常驻授权，但每次委派须限定独立切片、互斥写集、最低证明与停止条件，不并行写同一文件。
-- 日常合同为 `Goal / Exact write set / Minimum proof / Stop`。覆盖当前明确需求或真实失败，验收满足即停止。
+- domain_invariants：禁止手改生成物，子代理并行不写同一文件，外置参考仓只读不改。
 - 先用 `git diff` 分界用户或并发改动；不回退、不重排、不混入本次提交，不批量改写第三方 import。
 - 新增文件、模块、门禁或文档前，须说明当前调用方、替代或删除了什么、最小证明。任一答不上即不做。
 - 宿主配置、用户目录、MCP、远端等外部写入须有当前授权、预演和回滚入口。

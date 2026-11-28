@@ -7,9 +7,8 @@
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version`、`codex --help`；当前 help 支持时，用新 run 的 `codex debug prompt-input` 核对注入来源与内容，否则用官方建议的指令摘要探针补证。版本号答复仅证明版本标识可见，不证明全文、项目链或条件规则均已加载；不可观察项按 `platform_na` 留痕。
-- 冷技能路由与 `execution_contract` 分三支见 A.3；本节只声明 Codex 的承载面：`one_shot` 走 native subagent，`multi_turn_user_decision` 走交互式 specialist，`parent_user_input` 停在父任务；桥接 agent 定义由 `~/.codex/agents` 投影，具体 agent 名以投影 receipt 为准。已有共同协议要求的明确委派授权后，至少两个切片可独立验证、write set 互斥且并行净收益为正时才并行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
-- `host_admission_required` 的父代理代替执行边界见 A.3；不得据投影或 receipt 断定子代理已启动。
-- 子代理参数与继承方式以当前工具 schema 为准，不固定 `fork_turns` 类型或生命周期字段名；委派须有可归属的代理身份、启动与完成证据，并核对切片产物后才报告成功。spawn 失败可串行接管，记 `fallback=serial`；不可观察项明确留痕，不伪造终态。
+- 冷技能路由承载面（A.3）：`one_shot` 走 native subagent，`multi_turn_user_decision` 走交互式 specialist，`parent_user_input` 停父任务；桥接 agent 定义由 `~/.codex/agents` 投影，具体名以 receipt 为准。不得据投影或 receipt 断定子代理已启动。
+- 子代理并行需满足 A.2 边界且至少两切片可独立验证、并行净收益为正，不建固定模型矩阵或代理层级；参数以当前工具 schema 为准，须有代理身份、启动与完成证据，spawn 失败可串行接管并记 `fallback=serial`。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
 - Work Web 不继承本机 sandbox/approval；分别核对当前执行环境的文件系统、sandbox 与 approval 边界。never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
