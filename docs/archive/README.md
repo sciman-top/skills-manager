@@ -5,7 +5,7 @@
 | 文档 | 归档原因（2026-09-15） |
 | --- | --- |
 | skills-manager-hermes-{integration-strategy,roadmap,implementation-plan}.md | Hermes 集成线 R0–R4 已收口；阶段执行状态以 POC 仓 brief/receipt 为准 |
-| cross-host-model-orchestration-{prd,architecture}.md | MOR 为 design-only（MOR-000 决议暂缓实现）；现行事实以 `docs/decision/MOR-090` 为准 |
+| cross-host-model-orchestration-{prd,architecture}.md | MOR 线（含已实现的独立 preset 工具 `src/model-orchestration/`）已于 2026-11-28 按用户裁决整体退休移除，权限交回各宿主原生默认；MOR-000/001/090 决议与证据见 git 历史 |
 | skills-manager-hardening-implementation-plan.md | 2026-08 加固任务卡全部执行完后冻结；选档矩阵已被 vnext-architecture §5 + resolve-gate-profile.ps1 取代 |
 | cold-skill-routing-implementation-plan.md | CSR-100–170 任务卡已闭卷；验收 runbook 与场景矩阵已随治理层移除，历史见 git |
 
