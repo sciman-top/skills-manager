@@ -5,14 +5,14 @@
 - Claude 会把适用规则加入上下文；多个文件通常是拼接关系，不应依赖确定性 override 来隐藏上层内容。settings 的优先级与 memory 加载语义是不同机制。
 - 项目 `CLAUDE.md` 用首行 `@AGENTS.md` 承接共用项目契约；import 相对包含它的文件解析，最多递归四跳，组织拆分不节省 context。
 - `.claude/rules/` 无 `paths` 的规则常驻；带 `paths` 的规则通常由相关文件 Read 触发。关键安全规则不得只放在延迟触发规则中。
-- 内置 Explore/Plan 子代理不自动继承完整 `CLAUDE.md` 上下文；委派时显式传递任务所需约束，或使用已验证的自定义 agent 配置。
+- 内置 Explore/Plan 子代理不自动继承完整 `CLAUDE.md` 上下文；委派时显式传递任务所需约束，或采用当前宿主的自定义 agent，本仓不管理该配置。
 - `--bare` 会跳过 hooks、plugin sync、auto memory 和 `CLAUDE.md` 自动发现等普通 customization，但仍可显式 `/skill-name`；`--safe-mode` 禁用普通 customization，但 managed policy 仍适用。两者都不能充当正常规则已加载的证据。
 - Claude Desktop 的 Code tab 与 Claude Code CLI 共用本机 Claude Code 配置，包括用户级 `~/.claude/CLAUDE.md`；普通 Chat 与 Cowork 的 Customize instructions 属于独立 profile surface，不读取或由本机文件投影更新。
 - Claude Code cloud/Web 使用仓内项目规则与 server-managed settings，但不加载本机 `~/.claude/CLAUDE.md`；普通 Claude Web profile/preferences 同样独立于本机用户文件。
 ### B.2 诊断与强制
 - 最小诊断：`claude --version`、`claude --help`；交互场景用 `/context`、`/memory` 核对加载，用 `/status`、`/permissions`、`/hooks` 核对强制来源；终端 `claude doctor` 只读诊断，交互 `/doctor` 可能在确认后修复，不能混用。
 - 扩展命令/hook/matcher 以当前 help/schema 为准；`InstructionsLoaded` 可补加载证据。
-- 冷技能路由承载面（A.3）：`one_shot` 与 `multi_turn_user_decision` 用当前可用 Agent（`subagent_type` 取合同 `native_agent`），后者一题一轮等同一 child，`parent_user_input` 停父任务；无 child 仅可 parent-mediated/`not_observable`，不得据投影或 receipt 断定 child 已启动。
+- 冷技能路由承载面（A.3）：父任务或 Claude 当前可用的原生 Agent 负责执行；委派、直接执行或先问用户均按 A.3 由宿主选择。模型、effort 与代理继承当前宿主配置，本仓不写 `~/.claude/agents`，也不指定代理名。
 - `CLAUDE.md` 不是权限配置；敏感文件阻断、工具限制、sandbox、环境变量与强制动作放入用户/项目 `.claude/settings.json`、managed settings、permissions、hooks、MCP、仓库脚本或 CI。
 - path rules 与 permissions 的 matcher 语义不同，不能互相替代；deny/allow 必须用正反例实测。
 - Claude 内建 Bash sandbox 不支持 native Windows，只支持 macOS、Linux 与 WSL2；native Windows 按 `platform_na` 留痕，并以 permissions、`PreToolUse`、外部隔离和 CI 补位。

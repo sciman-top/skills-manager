@@ -1,4 +1,4 @@
-﻿BeforeAll {
+BeforeAll {
     $repoRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
     $script:Root=$repoRoot
     . (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1')
@@ -93,6 +93,27 @@ Describe 'Global rule source contract' {
         $platform = Join-Path $fixture 'rules/global/platforms/antigravity.md'
         [IO.File]::AppendAllText($platform, ('x' * $padding))
         { Get-GlobalRuleRenderedEntries $fixture } | Should -Throw '*legacy compatibility ceiling*'
+    }
+
+    It 'rolls back the receipt document written by the command surface' {
+        $plan=New-GlobalRuleProjectionPlan $fixture $codex $claude
+        $internal=Invoke-TestApply $plan $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/internal-receipt.json')
+        $commandReceiptPath=Join-Path $fixture 'reports/global-rule-projection/command-receipt.json'
+        [pscustomobject][ordered]@{
+            schema_version=2
+            command='global-rules-apply'
+            pass=$true
+            exit_code=0
+            receipt=$internal
+            provider_calls=0
+            native_mutations=0
+        } | ConvertTo-Json -Depth 30 -Compress | Set-Content -LiteralPath $commandReceiptPath -Encoding utf8NoBOM -NoNewline
+
+        $result=Invoke-GlobalRuleProjectionRollback $commandReceiptPath $internal.rollback.required_token $fixture $codex $claude (Join-Path $fixture 'reports/global-rule-projection/backups')
+
+        $result.pass | Should -BeTrue
+        $result.status | Should -Be 'rolled_back'
+        (Get-GlobalRuleFileFacts (Join-Path $codex 'AGENTS.md')).hash | Should -Be $plan.actions[0].before_hash
     }
 
     It 'rejects common source drift before target writes' {

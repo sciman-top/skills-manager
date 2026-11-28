@@ -7,7 +7,7 @@
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version`、`codex --help`；当前 help 支持时，用新 run 的 `codex debug prompt-input` 核对注入来源与内容，否则用官方建议的指令摘要探针补证。版本号答复仅证明版本标识可见，不证明全文、项目链或条件规则均已加载；不可观察项按 `platform_na` 留痕。
-- 冷技能路由承载面（A.3）：`one_shot` 走 native subagent，`multi_turn_user_decision` 走交互式 specialist，`parent_user_input` 停父任务；桥接 agent 定义由 `~/.codex/agents` 投影，具体名以 receipt 为准。不得据投影或 receipt 断定子代理已启动。
+- 冷技能路由承载面（A.3）：父任务或该宿主选择的原生 agent 负责执行；单轮委派、直接执行或先问用户均按 A.3 由宿主选择。模型、effort 与代理继承当前宿主配置，本仓不写 `~/.codex/agents`，也不指定代理名。
 - 子代理并行需满足 A.2 边界且至少两切片可独立验证、并行净收益为正，不建固定模型矩阵或代理层级；参数以当前工具 schema 为准，须有代理身份、启动与完成证据，spawn 失败可串行接管并记 `fallback=serial`。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
